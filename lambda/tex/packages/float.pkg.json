@@ -1,0 +1,77 @@
+{
+  "name": "float",
+  "version": "1.3d",
+  "description": "Improved interface for floating objects",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "floatstyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set style for subsequent float definitions",
+      "pattern": ""
+    },
+    "newfloat": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define new float type: {type}{placement}{ext}",
+      "pattern": ""
+    },
+    "floatname": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set name for float type",
+      "pattern": ""
+    },
+    "floatplacement": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set default placement for float",
+      "pattern": ""
+    },
+    "restylefloat": {
+      "type": "primitive",
+      "params": "*{}",
+      "description": "Apply current style to existing float",
+      "pattern": ""
+    },
+    "listof": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Generate list of floats",
+      "pattern": "<listof type=\"#1\" title=\"#2\"/>"
+    }
+  },
+  
+  "float_styles": {
+    "plain": {
+      "description": "Default LaTeX style",
+      "caption_position": "below",
+      "rule": "none"
+    },
+    "plaintop": {
+      "description": "Like plain, caption above",
+      "caption_position": "above",
+      "rule": "none"
+    },
+    "boxed": {
+      "description": "Content in frame",
+      "caption_position": "below",
+      "rule": "frame"
+    },
+    "ruled": {
+      "description": "Horizontal rules with caption above",
+      "caption_position": "above",
+      "rule": "horizontal"
+    }
+  },
+  
+  "placement_specifiers": {
+    "h": "here (approximately)",
+    "t": "top of page",
+    "b": "bottom of page",
+    "p": "special float page",
+    "H": "exactly here (requires float package)",
+    "!": "override restrictions"
+  }
+}

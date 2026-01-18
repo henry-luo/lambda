@@ -1,0 +1,127 @@
+{
+  "name": "array",
+  "version": "2.5",
+  "description": "Extended array and tabular environments",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Extends array and tabular environments with new column types and formatting options",
+    "compatibility": "Base for many other packages (tabularx, longtable, etc.)"
+  },
+  
+  "commands": {
+    "newcolumntype": {
+      "type": "primitive",
+      "params": "{}[]{}",
+      "description": "Define a new column type",
+      "pattern": ""
+    },
+    "showcols": {
+      "type": "primitive",
+      "params": "",
+      "description": "Show all defined column types (debug)",
+      "pattern": ""
+    },
+    "firsthline": {
+      "type": "constructor",
+      "params": "",
+      "description": "First horizontal line (adjusts spacing)",
+      "pattern": "<hline first=\"true\"/>"
+    },
+    "lasthline": {
+      "type": "constructor",
+      "params": "",
+      "description": "Last horizontal line (adjusts spacing)",
+      "pattern": "<hline last=\"true\"/>"
+    },
+    "extrarowheight": {
+      "type": "primitive",
+      "params": "",
+      "description": "Extra height added to rows (length)",
+      "pattern": ""
+    }
+  },
+  
+  "column_types": {
+    "standard": {
+      "l": "left aligned",
+      "c": "centered",
+      "r": "right aligned",
+      "p{width}": "paragraph box, top aligned",
+      "|": "vertical rule",
+      "@{decl}": "replace inter-column space with decl",
+      "*{n}{cols}": "repeat cols n times"
+    },
+    "extended": {
+      "m{width}": "paragraph box, middle aligned (requires array)",
+      "b{width}": "paragraph box, bottom aligned (requires array)",
+      "w{align}{width}": "fixed width, specified alignment",
+      "W{align}{width}": "like w, but issues overfull warning",
+      ">{decl}": "insert decl before column content",
+      "<{decl}": "insert decl after column content",
+      "!{decl}": "like @ but keeps inter-column space"
+    }
+  },
+  
+  "formatting_hooks": {
+    "description": "Commands inserted via >{} and <{} specifiers",
+    "examples": {
+      ">{\\bfseries}": "make column bold",
+      ">{\\raggedright\\arraybackslash}": "ragged right paragraph",
+      ">{\\centering\\arraybackslash}": "centered paragraph",
+      ">{\\raggedleft\\arraybackslash}": "ragged left paragraph",
+      ">{$}c<{$}": "math mode column",
+      ">{\\itshape}": "italic column"
+    },
+    "arraybackslash": {
+      "description": "Restores \\\\ after \\raggedright etc.",
+      "definition": "\\let\\\\\\@arraycr"
+    }
+  },
+  
+  "lengths": {
+    "extrarowheight": {
+      "default": "0pt",
+      "description": "Extra space added above each row"
+    },
+    "arraycolsep": {
+      "default": "5pt",
+      "description": "Half the space between columns in array"
+    },
+    "tabcolsep": {
+      "default": "6pt",
+      "description": "Half the space between columns in tabular"
+    },
+    "arrayrulewidth": {
+      "default": "0.4pt",
+      "description": "Width of rules in tables"
+    },
+    "doublerulesep": {
+      "default": "2pt",
+      "description": "Space between double rules"
+    }
+  },
+  
+  "environments": {
+    "array": {
+      "description": "Math mode array (enhanced)",
+      "begin": "<array>",
+      "end": "</array>"
+    },
+    "tabular": {
+      "description": "Text mode table (enhanced)",
+      "begin": "<tabular>",
+      "end": "</tabular>"
+    }
+  },
+  
+  "common_patterns": {
+    "centered_paragraph": ">{\\centering\\arraybackslash}p{width}",
+    "ragged_right_paragraph": ">{\\raggedright\\arraybackslash}p{width}",
+    "ragged_left_paragraph": ">{\\raggedleft\\arraybackslash}p{width}",
+    "bold_column": ">{\\bfseries}c",
+    "italic_column": ">{\\itshape}l",
+    "math_column": ">{$}c<{$}",
+    "colored_column": ">{\\color{blue}}l"
+  }
+}

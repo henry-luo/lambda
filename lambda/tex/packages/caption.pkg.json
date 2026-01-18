@@ -1,0 +1,175 @@
+{
+  "name": "caption",
+  "version": "3.6",
+  "description": "Customizing captions in floating environments",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "captionsetup": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Configure caption options",
+      "pattern": ""
+    },
+    "caption": {
+      "type": "constructor",
+      "params": "*[]{}",
+      "description": "Caption command (enhanced)",
+      "pattern": "<caption starred=\"#1\" short=\"#2\">#3</caption>"
+    },
+    "caption*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Caption without number",
+      "pattern": "<caption numbered=\"false\">#1</caption>"
+    },
+    "captionof": {
+      "type": "constructor",
+      "params": "*{}[]{}",
+      "description": "Caption outside float",
+      "pattern": "<caption type=\"#2\" short=\"#3\">#4</caption>"
+    },
+    "captionof*": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Unnumbered caption outside float",
+      "pattern": "<caption type=\"#1\" numbered=\"false\">#2</caption>"
+    },
+    "captionlistentry": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Add entry to list of figures/tables",
+      "pattern": ""
+    },
+    "ContinuedFloat": {
+      "type": "primitive",
+      "params": "",
+      "description": "Continue previous float numbering",
+      "pattern": ""
+    },
+    "DeclareCaptionStyle": {
+      "type": "primitive",
+      "params": "{}[]{}",
+      "description": "Define named caption style",
+      "pattern": ""
+    },
+    "DeclareCaptionFormat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define caption format",
+      "pattern": ""
+    },
+    "DeclareCaptionLabelFormat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define label format",
+      "pattern": ""
+    },
+    "DeclareCaptionLabelSeparator": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define label separator",
+      "pattern": ""
+    },
+    "DeclareCaptionFont": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define font option",
+      "pattern": ""
+    },
+    "DeclareCaptionJustification": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define justification style",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "captionbeside": {
+      "description": "Caption beside figure",
+      "begin": "<captionbeside caption=\"#1\">",
+      "end": "</captionbeside>",
+      "params": "{}"
+    }
+  },
+  
+  "options": {
+    "format": {
+      "plain": "default format",
+      "hang": "hanging indent after first line"
+    },
+    "labelformat": {
+      "default": "number only",
+      "simple": "name and number",
+      "brace": "closing brace after number",
+      "parens": "number in parentheses"
+    },
+    "labelsep": {
+      "none": "no separator",
+      "colon": "colon and space",
+      "period": "period and space",
+      "space": "space only",
+      "quad": "quad space",
+      "newline": "new line",
+      "endash": "en-dash"
+    },
+    "textformat": {
+      "empty": "no text",
+      "simple": "text as-is",
+      "period": "add period at end"
+    },
+    "justification": {
+      "justified": "full justification",
+      "centering": "centered",
+      "centerlast": "last line centered",
+      "centerfirst": "first line centered",
+      "raggedright": "ragged right",
+      "raggedleft": "ragged left"
+    },
+    "font": {
+      "description": "Font options for entire caption",
+      "values": ["normalfont", "bf", "it", "sl", "sf", "tt", 
+                 "footnotesize", "scriptsize", "small", "normalsize", "large",
+                 "color=<color>", "normalcolor"]
+    },
+    "labelfont": {
+      "description": "Font options for label only"
+    },
+    "textfont": {
+      "description": "Font options for text only"
+    },
+    "position": {
+      "top": "caption above figure (adjusts spacing)",
+      "bottom": "caption below figure",
+      "auto": "detect from position"
+    },
+    "skip": {
+      "description": "Vertical skip between caption and content"
+    },
+    "width": {
+      "description": "Width of caption text"
+    },
+    "margin": {
+      "description": "Horizontal margins for caption"
+    },
+    "parskip": {
+      "description": "Skip between paragraphs in caption"
+    },
+    "hangindent": {
+      "description": "Hanging indent amount"
+    },
+    "style": {
+      "description": "Use predefined style"
+    },
+    "singlelinecheck": {
+      "true": "center single-line captions",
+      "false": "don't center single-line"
+    }
+  },
+  
+  "subcaption_support": {
+    "description": "Use subcaption package for subfigures",
+    "related_packages": ["subcaption", "subfig"]
+  }
+}

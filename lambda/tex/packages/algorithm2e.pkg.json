@@ -1,0 +1,305 @@
+{
+  "name": "algorithm2e",
+  "version": "5.2",
+  "description": "Floating algorithm environment with algorithmic keywords",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "SetKwInput": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define input keyword",
+      "pattern": ""
+    },
+    "SetKwInOut": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define input/output keyword",
+      "pattern": ""
+    },
+    "SetKwData": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define data keyword",
+      "pattern": ""
+    },
+    "SetKwFunction": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define function keyword",
+      "pattern": ""
+    },
+    "SetKwComment": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define comment style",
+      "pattern": ""
+    },
+    "SetKwBlock": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define block construct",
+      "pattern": ""
+    },
+    "SetKwFor": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define for-loop construct",
+      "pattern": ""
+    },
+    "SetKwSwitch": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}{}{}{}",
+      "description": "Define switch construct",
+      "pattern": ""
+    },
+    "SetKwIF": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}{}{}{}{}",
+      "description": "Define if construct",
+      "pattern": ""
+    },
+    "KwIn": {
+      "type": "constructor",
+      "params": "",
+      "description": "Input keyword",
+      "pattern": "<kw>in</kw>"
+    },
+    "KwOut": {
+      "type": "constructor",
+      "params": "",
+      "description": "Output keyword",
+      "pattern": "<kw>out</kw>"
+    },
+    "KwData": {
+      "type": "constructor",
+      "params": "",
+      "description": "Data keyword",
+      "pattern": "<kw>Data</kw>"
+    },
+    "KwResult": {
+      "type": "constructor",
+      "params": "",
+      "description": "Result keyword",
+      "pattern": "<kw>Result</kw>"
+    },
+    "KwTo": {
+      "type": "constructor",
+      "params": "",
+      "description": "To keyword",
+      "pattern": "<kw>to</kw>"
+    },
+    "KwRet": {
+      "type": "constructor",
+      "params": "",
+      "description": "Return keyword",
+      "pattern": "<kw>return</kw>"
+    },
+    "Return": {
+      "type": "constructor",
+      "params": "",
+      "description": "Return statement",
+      "pattern": "<stmt>return</stmt>"
+    },
+    "If": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "If statement",
+      "pattern": "<if cond=\"#1\">#2</if>"
+    },
+    "uIf": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Unnumbered if",
+      "pattern": "<if unnumbered=\"true\" cond=\"#1\">#2</if>"
+    },
+    "ElseIf": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Else if",
+      "pattern": "<elseif cond=\"#1\">#2</elseif>"
+    },
+    "uElseIf": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Unnumbered else if",
+      "pattern": "<elseif unnumbered=\"true\" cond=\"#1\">#2</elseif>"
+    },
+    "Else": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Else block",
+      "pattern": "<else>#1</else>"
+    },
+    "uElse": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Unnumbered else",
+      "pattern": "<else unnumbered=\"true\">#1</else>"
+    },
+    "eIf": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "If-else",
+      "pattern": "<if cond=\"#1\">#2</if><else>#3</else>"
+    },
+    "For": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "For loop",
+      "pattern": "<for cond=\"#1\">#2</for>"
+    },
+    "While": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "While loop",
+      "pattern": "<while cond=\"#1\">#2</while>"
+    },
+    "Repeat": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Repeat-until",
+      "pattern": "<repeat until=\"#2\">#1</repeat>"
+    },
+    "ForEach": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "For each loop",
+      "pattern": "<foreach cond=\"#1\">#2</foreach>"
+    },
+    "ForAll": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "For all loop",
+      "pattern": "<forall cond=\"#1\">#2</forall>"
+    },
+    "Switch": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Switch statement",
+      "pattern": "<switch cond=\"#1\">#2</switch>"
+    },
+    "Case": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Case in switch",
+      "pattern": "<case cond=\"#1\">#2</case>"
+    },
+    "Other": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Default case",
+      "pattern": "<default>#1</default>"
+    },
+    "tcp": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Comment in paragraph",
+      "pattern": "<comment inline=\"true\">#2</comment>"
+    },
+    "tcc": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Comment to end of line",
+      "pattern": "<comment>#2</comment>"
+    },
+    "BlankLine": {
+      "type": "constructor",
+      "params": "",
+      "description": "Blank line",
+      "pattern": "<blankline/>"
+    },
+    "Indp": {
+      "type": "primitive",
+      "params": "",
+      "description": "Increase indentation",
+      "pattern": ""
+    },
+    "Indm": {
+      "type": "primitive",
+      "params": "",
+      "description": "Decrease indentation",
+      "pattern": ""
+    },
+    "caption": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Algorithm caption",
+      "pattern": "<caption short=\"#1\">#2</caption>"
+    },
+    "listofalgorithms": {
+      "type": "constructor",
+      "params": "",
+      "description": "List of algorithms",
+      "pattern": "<listofalgorithms/>"
+    }
+  },
+  
+  "environments": {
+    "algorithm": {
+      "description": "Floating algorithm",
+      "begin": "<algorithm>",
+      "end": "</algorithm>"
+    },
+    "algorithm*": {
+      "description": "Two-column spanning algorithm",
+      "begin": "<algorithm span=\"columns\">",
+      "end": "</algorithm>"
+    },
+    "procedure": {
+      "description": "Procedure block",
+      "begin": "<procedure name=\"#1\">",
+      "end": "</procedure>",
+      "params": "[]"
+    },
+    "function": {
+      "description": "Function block",
+      "begin": "<function name=\"#1\">",
+      "end": "</function>",
+      "params": "[]"
+    }
+  },
+  
+  "options": {
+    "display": {
+      "ruled": "rules above and below",
+      "boxed": "box around algorithm",
+      "plain": "no decoration",
+      "algoruled": "ruled with algorithm keyword",
+      "tworuled": "two horizontal rules"
+    },
+    "lines": {
+      "lined": "vertical line for blocks",
+      "vlined": "vertical line, no end markers",
+      "noline": "no vertical lines"
+    },
+    "numbering": {
+      "linesnumbered": "number all lines",
+      "linesnumberedhidden": "prepare numbering, don't show",
+      "commentsnumbered": "comments have line numbers",
+      "inoutnumbered": "input/output numbered",
+      "titlenumbered": "include number in title"
+    },
+    "endings": {
+      "longend": "end keywords include name",
+      "shortend": "just 'end'",
+      "noend": "no end keywords"
+    },
+    "misc": {
+      "english": "English keywords",
+      "french": "French keywords",
+      "german": "German keywords",
+      "portuguese": "Portuguese keywords",
+      "czech": "Czech keywords",
+      "onelanguage": "don't reset keywords",
+      "figure": "use figure counter",
+      "algochapter": "number by chapter",
+      "algosection": "number by section",
+      "algopart": "number by part",
+      "procnumbered": "number procedures",
+      "funcnumbered": "number functions",
+      "resetcount": "reset counter",
+      "noresetcount": "don't reset counter"
+    }
+  }
+}

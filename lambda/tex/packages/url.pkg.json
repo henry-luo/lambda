@@ -1,0 +1,54 @@
+{
+  "name": "url",
+  "version": "3.4",
+  "description": "Verbatim with URL-sensitive line breaks",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "url": {
+      "type": "constructor",
+      "params": "!{}!",
+      "description": "Typeset URL with line breaks",
+      "pattern": "<url>#1</url>"
+    },
+    "urldef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define URL command",
+      "pattern": ""
+    },
+    "urlstyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set URL style (tt, rm, sf, same)",
+      "pattern": ""
+    },
+    "Url": {
+      "type": "constructor",
+      "params": "!{}!",
+      "description": "URL with custom delimiters",
+      "pattern": "<url>#1</url>"
+    },
+    "path": {
+      "type": "constructor",
+      "params": "!{}!",
+      "description": "File path (similar to url)",
+      "pattern": "<path>#1</path>"
+    }
+  },
+  
+  "options": {
+    "hyphens": "allow breaks at explicit hyphens",
+    "spaces": "allow breaks at spaces",
+    "obeyspaces": "preserve spaces in URLs",
+    "T1": "use T1 encoding for special chars"
+  },
+  
+  "break_characters": {
+    "default": "/ . : @ - _ ~ # ? & = %",
+    "after": "break after these characters",
+    "before": "break before these characters"
+  },
+  
+  "note": "hyperref provides \\url with hyperlinks; this package is for non-linked URLs"
+}

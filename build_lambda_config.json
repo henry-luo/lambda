@@ -2830,7 +2830,9 @@
                     {
                         "source": "test/test_tex_digester_gtest.cpp",
                         "name": "TeX Digester Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
                         "libraries": [
                             "gtest",
                             "rpmalloc"
@@ -2842,6 +2844,7 @@
                             "lambda/tex/tex_tokenizer.cpp",
                             "lambda/tex/tex_expander.cpp",
                             "lambda/tex/tex_digester.cpp",
+                            "lambda/tex/tex_package_json.cpp",
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/log.c",
@@ -2902,6 +2905,36 @@
                             "DOC_MODEL_MINIMAL"
                         ],
                         "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_tex_integration_gtest.cpp",
+                        "name": "TeX Integration Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_integration_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_catcode.cpp",
+                            "lambda/tex/tex_token.cpp",
+                            "lambda/tex/tex_tokenizer.cpp",
+                            "lambda/tex/tex_expander.cpp",
+                            "lambda/tex/tex_digester.cpp",
+                            "lambda/tex/tex_package_json.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔗"
                     }
                 ],
                 "type": "tex",

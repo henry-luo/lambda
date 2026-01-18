@@ -1,0 +1,168 @@
+{
+  "name": "fancyhdr",
+  "version": "4.1",
+  "description": "Extensive control of page headers and footers",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "pagestyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set the page style",
+      "pattern": ""
+    },
+    "thispagestyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set page style for current page only",
+      "pattern": ""
+    },
+    "fancyhead": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Define header content",
+      "pattern": ""
+    },
+    "fancyfoot": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Define footer content",
+      "pattern": ""
+    },
+    "fancyhf": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Define header and footer content",
+      "pattern": ""
+    },
+    "lhead": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Left header",
+      "pattern": ""
+    },
+    "chead": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Center header",
+      "pattern": ""
+    },
+    "rhead": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Right header",
+      "pattern": ""
+    },
+    "lfoot": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Left footer",
+      "pattern": ""
+    },
+    "cfoot": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Center footer",
+      "pattern": ""
+    },
+    "rfoot": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Right footer",
+      "pattern": ""
+    },
+    "fancypagestyle": {
+      "type": "primitive",
+      "params": "{}[]{}",
+      "description": "Define a new page style",
+      "pattern": ""
+    },
+    "fancyheadoffset": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Extend header beyond text width",
+      "pattern": ""
+    },
+    "fancyfootoffset": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Extend footer beyond text width",
+      "pattern": ""
+    },
+    "fancyhfoffset": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Extend header and footer",
+      "pattern": ""
+    },
+    "headrulewidth": {
+      "type": "macro",
+      "params": "",
+      "replacement": "0.4pt",
+      "description": "Width of header rule"
+    },
+    "footrulewidth": {
+      "type": "macro",
+      "params": "",
+      "replacement": "0pt",
+      "description": "Width of footer rule"
+    },
+    "headrule": {
+      "type": "constructor",
+      "params": "",
+      "pattern": "<rule class=\"headrule\"/>",
+      "description": "The header rule"
+    },
+    "footrule": {
+      "type": "constructor",
+      "params": "",
+      "pattern": "<rule class=\"footrule\"/>",
+      "description": "The footer rule"
+    },
+    "iffloatpage": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Conditional for float pages",
+      "pattern": ""
+    },
+    "iftopfloat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Conditional for top floats",
+      "pattern": ""
+    },
+    "ifbotfloat": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Conditional for bottom floats",
+      "pattern": ""
+    },
+    "nouppercase": {
+      "type": "constructor",
+      "params": "{}",
+      "pattern": "#1",
+      "description": "Suppress uppercase in marks"
+    }
+  },
+  
+  "page_styles": {
+    "fancy": "Custom header/footer style",
+    "fancyplain": "Fancy style with plain page handling",
+    "plain": "Just page number",
+    "empty": "Empty header and footer",
+    "headings": "Chapter/section info in header"
+  },
+  
+  "field_selectors": {
+    "positions": ["L", "C", "R"],
+    "page_types": ["O", "E"],
+    "header_footer": ["H", "F"],
+    "description": "Combine like [LO,RE] for left-odd/right-even"
+  },
+  
+  "lengths": {
+    "headheight": "Height of header (recommend ≥ 14.5pt)",
+    "headsep": "Space between header and text",
+    "footskip": "Space from text to footer baseline"
+  }
+}

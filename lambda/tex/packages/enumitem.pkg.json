@@ -1,0 +1,139 @@
+{
+  "name": "enumitem",
+  "version": "3.9",
+  "description": "Control layout of itemize, enumerate, description",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "setlist": {
+      "type": "primitive",
+      "params": "[][]{}",
+      "description": "Set default list parameters",
+      "pattern": ""
+    },
+    "setlist*": {
+      "type": "primitive", 
+      "params": "[][]{}",
+      "description": "Append to default list parameters",
+      "pattern": ""
+    },
+    "newlist": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define a new list environment",
+      "pattern": ""
+    },
+    "renewlist": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Redefine an existing list",
+      "pattern": ""
+    },
+    "setlistdepth": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set maximum nesting depth",
+      "pattern": ""
+    },
+    "AddEnumerateCounter": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Add a new counter format",
+      "pattern": ""
+    },
+    "AddEnumerateCounter*": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Add counter format (starred)",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "itemize": {
+      "begin": "<ul>",
+      "end": "</ul>",
+      "description": "Enhanced itemize with options"
+    },
+    "enumerate": {
+      "begin": "<ol>",
+      "end": "</ol>",
+      "description": "Enhanced enumerate with options"
+    },
+    "description": {
+      "begin": "<dl>",
+      "end": "</dl>",
+      "description": "Enhanced description with options"
+    },
+    "itemize*": {
+      "begin": "<ul class=\"inline\">",
+      "end": "</ul>",
+      "description": "Inline itemize"
+    },
+    "enumerate*": {
+      "begin": "<ol class=\"inline\">",
+      "end": "</ol>",
+      "description": "Inline enumerate"
+    },
+    "description*": {
+      "begin": "<dl class=\"inline\">",
+      "end": "</dl>",
+      "description": "Inline description"
+    }
+  },
+  
+  "list_options": {
+    "horizontal_spacing": {
+      "leftmargin": "dimension - left margin",
+      "rightmargin": "dimension - right margin", 
+      "itemindent": "dimension - item indentation",
+      "labelindent": "dimension - label indentation",
+      "labelsep": "dimension - space between label and item",
+      "labelwidth": "dimension - width allocated for label",
+      "widest": "text - use this item as widest for label width"
+    },
+    "vertical_spacing": {
+      "topsep": "dimension - space above and below list",
+      "partopsep": "dimension - extra space if list starts paragraph",
+      "parsep": "dimension - space between paragraphs within item",
+      "itemsep": "dimension - space between items",
+      "before": "code - executed before the list",
+      "before*": "code - appended to before",
+      "after": "code - executed after the list",
+      "after*": "code - appended to after",
+      "first": "code - executed at beginning of first item",
+      "first*": "code - appended to first"
+    },
+    "labels": {
+      "label": "format - label format (e.g., \\arabic*, \\alph*)",
+      "label*": "format - appended to label",
+      "ref": "format - reference format",
+      "font": "font commands for label",
+      "format": "full format including font",
+      "align": "left|right|parleft - label alignment"
+    },
+    "enumerate_labels": {
+      "description": "Use *, \\arabic*, \\alph*, \\Alph*, \\roman*, \\Roman* in label"
+    },
+    "resume": {
+      "resume": "continue numbering from previous list",
+      "resume*": "continue and use same settings",
+      "start": "number - starting value",
+      "series": "name - named series for resuming"
+    },
+    "other": {
+      "style": "standard|sameline|multiline|nextline|unboxed",
+      "nolistsep": "remove all vertical spacing",
+      "nosep": "shorthand for nolistsep",
+      "wide": "zero left margin, proper indentation",
+      "noitemsep": "remove item separation only"
+    }
+  },
+  
+  "global_options": {
+    "shortlabels": "allow short labels like a), i), etc.",
+    "inline": "allow inline list variants",
+    "ignoredisplayed": "don't add parsep around displayed math",
+    "sizes": "configure size-dependent settings"
+  }
+}

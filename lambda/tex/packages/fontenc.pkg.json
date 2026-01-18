@@ -1,0 +1,78 @@
+{
+  "name": "fontenc",
+  "version": "2021",
+  "description": "Standard package for selecting font encodings",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "modern_latex": "Use fontspec with LuaLaTeX/XeLaTeX instead",
+    "purpose": "Select output font encoding for proper hyphenation and accents"
+  },
+  
+  "commands": {
+    "fontencoding": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Switch font encoding",
+      "pattern": ""
+    },
+    "DeclareTextAccent": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Declare text accent command",
+      "pattern": ""
+    },
+    "DeclareTextSymbol": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Declare text symbol",
+      "pattern": ""
+    },
+    "DeclareTextComposite": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Declare composite character",
+      "pattern": ""
+    },
+    "DeclareTextCommand": {
+      "type": "primitive",
+      "params": "{}{}[]{}",
+      "description": "Declare encoding-specific command",
+      "pattern": ""
+    },
+    "UseTextSymbol": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Use symbol from specific encoding",
+      "pattern": "<textsymbol encoding=\"#1\">#2</textsymbol>"
+    },
+    "UseTextAccent": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "Use accent from specific encoding",
+      "pattern": "<textaccent encoding=\"#1\" accent=\"#2\">#3</textaccent>"
+    }
+  },
+  
+  "options": {
+    "OT1": "Original TeX encoding (7-bit, no accented chars)",
+    "T1": "Cork encoding (8-bit, Western European, recommended)",
+    "T2A": "Cyrillic encoding",
+    "T2B": "Cyrillic encoding variant",
+    "T2C": "Cyrillic encoding variant",
+    "T3": "IPA phonetic encoding",
+    "T4": "African Latin encoding",
+    "T5": "Vietnamese encoding",
+    "LY1": "Y&Y/Textures encoding",
+    "OT2": "Cyrillic encoding (legacy)",
+    "OT4": "Polish encoding (legacy)",
+    "QX": "Polish extended encoding",
+    "EU1": "Unicode (XeTeX)",
+    "EU2": "Unicode (LuaTeX)"
+  },
+  
+  "common_usage": {
+    "recommended": "\\usepackage[T1]{fontenc}",
+    "with_inputenc": "\\usepackage[utf8]{inputenc}\\usepackage[T1]{fontenc}"
+  }
+}

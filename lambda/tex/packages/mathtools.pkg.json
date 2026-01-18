@@ -1,0 +1,419 @@
+{
+  "name": "mathtools",
+  "version": "1.29",
+  "description": "Mathematical tools to use with amsmath",
+  "requires": ["latex_base", "amsmath"],
+  
+  "notes": {
+    "purpose": "Fixes amsmath bugs and adds useful tools for mathematical typesetting",
+    "loads": "Automatically loads amsmath with fixes"
+  },
+  
+  "commands": {
+    "DeclarePairedDelimiter": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define paired delimiter command",
+      "pattern": ""
+    },
+    "DeclarePairedDelimiterX": {
+      "type": "primitive",
+      "params": "{}[]{}{}{}",
+      "description": "Define paired delimiter with content processing",
+      "pattern": ""
+    },
+    "DeclarePairedDelimiterXPP": {
+      "type": "primitive",
+      "params": "{}[]{}{}{}{}{}",
+      "description": "Extended paired delimiter with pre/post",
+      "pattern": ""
+    },
+    "coloneqq": {
+      "type": "macro",
+      "params": "",
+      "replacement": ":=",
+      "description": "Colon equals"
+    },
+    "Coloneqq": {
+      "type": "macro",
+      "params": "",
+      "replacement": "::=",
+      "description": "Double colon equals"
+    },
+    "eqqcolon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "=:",
+      "description": "Equals colon"
+    },
+    "Eqqcolon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "=::",
+      "description": "Equals double colon"
+    },
+    "coloneq": {
+      "type": "macro",
+      "params": "",
+      "replacement": ":-",
+      "description": "Colon minus"
+    },
+    "eqcolon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "-:",
+      "description": "Minus colon"
+    },
+    "colonapprox": {
+      "type": "macro",
+      "params": "",
+      "replacement": ":≈",
+      "description": "Colon approximately"
+    },
+    "colonsim": {
+      "type": "macro",
+      "params": "",
+      "replacement": ":∼",
+      "description": "Colon similar"
+    },
+    "dblcolon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "::",
+      "description": "Double colon"
+    },
+    "abs": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Absolute value (if defined via DeclarePairedDelimiter)",
+      "pattern": "<delimited left=\"|\" right=\"|\" starred=\"#1\">#2</delimited>"
+    },
+    "norm": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Norm (if defined via DeclarePairedDelimiter)",
+      "pattern": "<delimited left=\"‖\" right=\"‖\" starred=\"#1\">#2</delimited>"
+    },
+    "prescript": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "Prescripts (left super/subscript)",
+      "pattern": "<prescript sup=\"#1\" sub=\"#2\">#3</prescript>"
+    },
+    "cramped": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Force cramped math style",
+      "pattern": "<cramped style=\"#1\">#2</cramped>"
+    },
+    "crampedllap": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Cramped left overlap",
+      "pattern": "<cramped llap=\"true\" style=\"#1\">#2</cramped>"
+    },
+    "crampedrlap": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Cramped right overlap",
+      "pattern": "<cramped rlap=\"true\" style=\"#1\">#2</cramped>"
+    },
+    "crampedclap": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Cramped center overlap",
+      "pattern": "<cramped clap=\"true\" style=\"#1\">#2</cramped>"
+    },
+    "mathmbox": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "mbox that works in math mode",
+      "pattern": "<mbox>#1</mbox>"
+    },
+    "mathmakebox": {
+      "type": "constructor",
+      "params": "[][]{}",
+      "description": "makebox in math mode",
+      "pattern": "<makebox width=\"#1\" align=\"#2\">#3</makebox>"
+    },
+    "mathllap": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Math left overlap",
+      "pattern": "<mathllap style=\"#1\">#2</mathllap>"
+    },
+    "mathrlap": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Math right overlap",
+      "pattern": "<mathrlap style=\"#1\">#2</mathrlap>"
+    },
+    "mathclap": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Math center overlap",
+      "pattern": "<mathclap style=\"#1\">#2</mathclap>"
+    },
+    "clap": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Center lap (smash horizontally)",
+      "pattern": "<clap>#1</clap>"
+    },
+    "mathllapinternal": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Internal left overlap",
+      "pattern": "<llap>#1</llap>"
+    },
+    "smashoperator": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Smash width of big operator limits",
+      "pattern": "<smashop position=\"#1\">#2</smashop>"
+    },
+    "adjustlimits": {
+      "type": "constructor",
+      "params": "",
+      "description": "Adjust limits of adjacent operators",
+      "pattern": "<adjustlimits/>"
+    },
+    "SwapAboveDisplaySkip": {
+      "type": "primitive",
+      "params": "",
+      "description": "Use short skip above display",
+      "pattern": ""
+    },
+    "shortintertext": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Intertext with less space",
+      "pattern": "<shortintertext>#1</shortintertext>"
+    },
+    "MoveEqLeft": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Move equation left in align",
+      "pattern": "<moveeqleft by=\"#1\"/>"
+    },
+    "Aboxed": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Box around aligned equation",
+      "pattern": "<aboxed>#1</aboxed>"
+    },
+    "ArrowBetweenLines": {
+      "type": "constructor",
+      "params": "*[]",
+      "description": "Arrow between align lines",
+      "pattern": "<arrowbetweenlines starred=\"#1\">#2</arrowbetweenlines>"
+    },
+    "vdotswithin": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Vertical dots centered on symbol",
+      "pattern": "<vdotswithin>#1</vdotswithin>"
+    },
+    "shortvdotswithin": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Short vertical dots",
+      "pattern": "<shortvdotswithin starred=\"#1\">#2</shortvdotswithin>"
+    },
+    "splitfrac": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Split fraction over two lines",
+      "pattern": "<splitfrac><num>#1</num><denom>#2</denom></splitfrac>"
+    },
+    "splitdfrac": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Display style split fraction",
+      "pattern": "<splitdfrac><num>#1</num><denom>#2</denom></splitdfrac>"
+    },
+    "xmapsto": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible mapsto arrow",
+      "pattern": "<xmapsto below=\"#1\">#2</xmapsto>"
+    },
+    "xleftrightarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible left-right arrow",
+      "pattern": "<xleftrightarrow below=\"#1\">#2</xleftrightarrow>"
+    },
+    "xLeftarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible Left double arrow",
+      "pattern": "<xLeftarrow below=\"#1\">#2</xLeftarrow>"
+    },
+    "xRightarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible Right double arrow",
+      "pattern": "<xRightarrow below=\"#1\">#2</xRightarrow>"
+    },
+    "xLeftrightarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible Left-Right double arrow",
+      "pattern": "<xLeftrightarrow below=\"#1\">#2</xLeftrightarrow>"
+    },
+    "xhookleftarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible hook left arrow",
+      "pattern": "<xhookleftarrow below=\"#1\">#2</xhookleftarrow>"
+    },
+    "xhookrightarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Extensible hook right arrow",
+      "pattern": "<xhookrightarrow below=\"#1\">#2</xhookrightarrow>"
+    },
+    "xmathstrut": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Math strut with optional scale",
+      "pattern": "<xmathstrut scale=\"#1\">#2</xmathstrut>"
+    },
+    "overbracket": {
+      "type": "constructor",
+      "params": "[][]{}",
+      "description": "Overbracket with optional dimensions",
+      "pattern": "<overbracket rule=\"#1\" bracket=\"#2\">#3</overbracket>"
+    },
+    "underbracket": {
+      "type": "constructor",
+      "params": "[][]{}",
+      "description": "Underbracket with optional dimensions",
+      "pattern": "<underbracket rule=\"#1\" bracket=\"#2\">#3</underbracket>"
+    },
+    "LaTeXoverbrace": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Original LaTeX overbrace",
+      "pattern": "<overbrace>#1</overbrace>"
+    },
+    "LaTeXunderbrace": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Original LaTeX underbrace",
+      "pattern": "<underbrace>#1</underbrace>"
+    },
+    "noeqref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Reference without equation number",
+      "pattern": "<noeqref>#1</noeqref>"
+    },
+    "remark": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Right equation marker",
+      "pattern": "<remark width=\"#1\" mark=\"#2\">#3</remark>"
+    }
+  },
+  
+  "environments": {
+    "dcases": {
+      "description": "Display style cases",
+      "begin": "<dcases>",
+      "end": "</dcases>"
+    },
+    "dcases*": {
+      "description": "Display style cases, text mode right column",
+      "begin": "<dcases text=\"true\">",
+      "end": "</dcases>"
+    },
+    "rcases": {
+      "description": "Right brace cases",
+      "begin": "<rcases>",
+      "end": "</rcases>"
+    },
+    "rcases*": {
+      "description": "Right brace cases, text mode",
+      "begin": "<rcases text=\"true\">",
+      "end": "</rcases>"
+    },
+    "drcases": {
+      "description": "Display style right cases",
+      "begin": "<drcases>",
+      "end": "</drcases>"
+    },
+    "drcases*": {
+      "description": "Display style right cases, text",
+      "begin": "<drcases text=\"true\">",
+      "end": "</drcases>"
+    },
+    "cases*": {
+      "description": "Cases with text mode right column",
+      "begin": "<cases text=\"true\">",
+      "end": "</cases>"
+    },
+    "matrix*": {
+      "description": "Matrix with optional alignment",
+      "begin": "<matrix align=\"#1\">",
+      "end": "</matrix>"
+    },
+    "pmatrix*": {
+      "description": "Parenthesis matrix with alignment",
+      "begin": "<pmatrix align=\"#1\">",
+      "end": "</pmatrix>"
+    },
+    "bmatrix*": {
+      "description": "Bracket matrix with alignment",
+      "begin": "<bmatrix align=\"#1\">",
+      "end": "</bmatrix>"
+    },
+    "Bmatrix*": {
+      "description": "Brace matrix with alignment",
+      "begin": "<Bmatrix align=\"#1\">",
+      "end": "</Bmatrix>"
+    },
+    "vmatrix*": {
+      "description": "Vertical bar matrix with alignment",
+      "begin": "<vmatrix align=\"#1\">",
+      "end": "</vmatrix>"
+    },
+    "Vmatrix*": {
+      "description": "Double bar matrix with alignment",
+      "begin": "<Vmatrix align=\"#1\">",
+      "end": "</Vmatrix>"
+    },
+    "lgathered": {
+      "description": "Left-aligned gathered",
+      "begin": "<lgathered>",
+      "end": "</lgathered>"
+    },
+    "rgathered": {
+      "description": "Right-aligned gathered",
+      "begin": "<rgathered>",
+      "end": "</rgathered>"
+    },
+    "multlined": {
+      "description": "Multi-line formula in gather/align",
+      "begin": "<multlined>",
+      "end": "</multlined>"
+    },
+    "spreadlines": {
+      "description": "Increase line spread in math",
+      "begin": "<spreadlines spread=\"#1\">",
+      "end": "</spreadlines>"
+    }
+  },
+  
+  "options": {
+    "amsmath_options": "All amsmath options are passed through",
+    "fixamsmath": "Fix amsmath bugs (default: true)",
+    "allowspaces": "Allow spaces in certain constructs",
+    "disallowspaces": "Disallow spaces (default)",
+    "centercolon": "Center colons vertically (default)",
+    "nocenterecolon": "Don't center colons",
+    "mathic": "Math italic correction",
+    "nomathic": "No math italic correction (default)"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "parskip",
+  "version": "2.0h",
+  "description": "Layout with zero \\parindent, non-zero \\parskip",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Use vertical space between paragraphs instead of indentation",
+    "behavior": "Sets \\parindent to 0 and \\parskip to appropriate value"
+  },
+  
+  "commands": {
+    "parskip": {
+      "type": "primitive",
+      "params": "",
+      "description": "Paragraph skip length",
+      "pattern": ""
+    },
+    "parindent": {
+      "type": "primitive",
+      "params": "",
+      "description": "Paragraph indent length",
+      "pattern": ""
+    }
+  },
+  
+  "options": {
+    "skip": {
+      "description": "Amount of skip between paragraphs",
+      "values": ["\\baselineskip", "full", "half", "<length>"],
+      "default": ".5\\baselineskip plus 2pt"
+    },
+    "tocskip": {
+      "description": "Skip in table of contents",
+      "values": ["<length>"]
+    },
+    "indent": {
+      "description": "Paragraph indentation",
+      "default": "0pt"
+    },
+    "parfill": {
+      "description": "Minimum empty space at paragraph end",
+      "default": "30pt"
+    }
+  },
+  
+  "affected_elements": [
+    "toc", "lof", "lot",
+    "itemize", "enumerate", "description",
+    "quote", "quotation",
+    "abstract"
+  ]
+}

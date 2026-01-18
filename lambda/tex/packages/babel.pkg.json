@@ -1,0 +1,144 @@
+{
+  "name": "babel",
+  "version": "3.75",
+  "description": "Multilingual support for LaTeX",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Language-specific typographic rules, hyphenation, and translations",
+    "alternative": "polyglossia for XeLaTeX/LuaLaTeX"
+  },
+  
+  "commands": {
+    "selectlanguage": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Switch to specified language",
+      "pattern": ""
+    },
+    "foreignlanguage": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Typeset text in foreign language",
+      "pattern": "<foreign lang=\"#1\">#2</foreign>"
+    },
+    "babeltags": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Define short commands for languages",
+      "pattern": ""
+    },
+    "shorthandoff": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Disable shorthand characters",
+      "pattern": ""
+    },
+    "shorthandon": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Enable shorthand characters",
+      "pattern": ""
+    },
+    "useshorthands": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Activate shorthands with character",
+      "pattern": ""
+    },
+    "defineshorthand": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Define a shorthand",
+      "pattern": ""
+    },
+    "languagename": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Current language name"
+    },
+    "iflanguage": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test current language",
+      "pattern": ""
+    },
+    "addto": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add to language macros",
+      "pattern": ""
+    },
+    "setlocalecaption": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Set caption for locale",
+      "pattern": ""
+    },
+    "babelprovide": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Load language with options (babel 3.9+)",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "otherlanguage": {
+      "description": "Environment for different language",
+      "begin": "<otherlanguage lang=\"#1\">",
+      "end": "</otherlanguage>",
+      "params": "{}"
+    },
+    "otherlanguage*": {
+      "description": "Other language without hyphenation changes",
+      "begin": "<otherlanguage lang=\"#1\" hyphenation=\"false\">",
+      "end": "</otherlanguage>",
+      "params": "{}"
+    },
+    "hyphenrules": {
+      "description": "Use hyphenation of specified language",
+      "begin": "<hyphenrules lang=\"#1\">",
+      "end": "</hyphenrules>",
+      "params": "{}"
+    }
+  },
+  
+  "languages": {
+    "european": [
+      "english", "british", "american", "UKenglish", "USenglish",
+      "german", "ngerman", "austrian", "naustrian", "swissgerman",
+      "french", "francais", "acadian", "canadian", "frenchb",
+      "spanish", "italian", "portuguese", "brazilian",
+      "dutch", "swedish", "norwegian", "danish", "finnish",
+      "polish", "czech", "slovak", "hungarian", "romanian",
+      "greek", "polutonikogreek", "russian", "ukrainian", "serbian", "croatian",
+      "slovenian", "bulgarian", "turkish", "basque", "catalan", "galician",
+      "irish", "welsh", "scottish", "icelandic", "estonian", "latvian", "lithuanian"
+    ],
+    "asian": [
+      "japanese", "chinese", "korean", "vietnamese", "thai", "hindi"
+    ],
+    "other": [
+      "arabic", "hebrew", "farsi", "indonesian", "malay"
+    ]
+  },
+  
+  "captions": {
+    "description": "Translated strings set per language",
+    "names": [
+      "abstractname", "appendixname", "bibname", "chaptername",
+      "contentsname", "figurename", "indexname", "listfigurename",
+      "listtablename", "partname", "prefacename", "refname",
+      "tablename", "seename", "alsoname", "proofname", "glossaryname"
+    ]
+  },
+  
+  "options": {
+    "main": "main=<language> - set main language",
+    "other": "<language> - load additional language",
+    "shorthands": "shorthands=off - disable all shorthands",
+    "provide": "provide=<lang> - provide language if not loaded"
+  }
+}

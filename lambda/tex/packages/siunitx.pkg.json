@@ -1,0 +1,249 @@
+{
+  "name": "siunitx",
+  "version": "3.0",
+  "description": "A comprehensive (SI) units package",
+  "requires": ["latex_base", "amsmath"],
+  
+  "commands": {
+    "SI": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Number with unit (v2 interface)",
+      "pattern": "<quantity options=\"#1\"><number>#2</number><unit>#3</unit></quantity>"
+    },
+    "si": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Unit only (v2 interface)",
+      "pattern": "<unit options=\"#1\">#2</unit>"
+    },
+    "num": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Format a number",
+      "pattern": "<number options=\"#1\">#2</number>"
+    },
+    "numlist": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Format a list of numbers",
+      "pattern": "<numlist options=\"#1\">#2</numlist>"
+    },
+    "numproduct": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Format a product of numbers",
+      "pattern": "<numproduct options=\"#1\">#2</numproduct>"
+    },
+    "numrange": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Format a range of numbers",
+      "pattern": "<numrange options=\"#1\"><from>#2</from><to>#3</to></numrange>"
+    },
+    "qty": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Number with unit (v3 interface)",
+      "pattern": "<quantity options=\"#1\"><number>#2</number><unit>#3</unit></quantity>"
+    },
+    "qtylist": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "List of quantities",
+      "pattern": "<qtylist options=\"#1\"><numbers>#2</numbers><unit>#3</unit></qtylist>"
+    },
+    "qtyproduct": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Product of quantities",
+      "pattern": "<qtyproduct options=\"#1\"><numbers>#2</numbers><unit>#3</unit></qtyproduct>"
+    },
+    "qtyrange": {
+      "type": "constructor",
+      "params": "[]{}{}{}",
+      "description": "Range of quantities",
+      "pattern": "<qtyrange options=\"#1\"><from>#2</from><to>#3</to><unit>#4</unit></qtyrange>"
+    },
+    "unit": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Format a unit",
+      "pattern": "<unit options=\"#1\">#2</unit>"
+    },
+    "ang": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Format an angle",
+      "pattern": "<angle options=\"#1\">#2</angle>"
+    },
+    "complexnum": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Format a complex number",
+      "pattern": "<complex options=\"#1\">#2</complex>"
+    },
+    "complexqty": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Complex number with unit",
+      "pattern": "<complexqty options=\"#1\"><number>#2</number><unit>#3</unit></complexqty>"
+    },
+    "sisetup": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set siunitx options",
+      "pattern": ""
+    },
+    "DeclareSIUnit": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Declare a new unit",
+      "pattern": ""
+    },
+    "DeclareSIPrefix": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Declare a new prefix",
+      "pattern": ""
+    },
+    "DeclareSIPower": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Declare a power",
+      "pattern": ""
+    },
+    "DeclareSIQualifier": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Declare a qualifier",
+      "pattern": ""
+    }
+  },
+  
+  "unit_macros": {
+    "prefixes": {
+      "yocto": "y (10^-24)",
+      "zepto": "z (10^-21)",
+      "atto": "a (10^-18)",
+      "femto": "f (10^-15)",
+      "pico": "p (10^-12)",
+      "nano": "n (10^-9)",
+      "micro": "μ (10^-6)",
+      "milli": "m (10^-3)",
+      "centi": "c (10^-2)",
+      "deci": "d (10^-1)",
+      "deca": "da (10^1)",
+      "hecto": "h (10^2)",
+      "kilo": "k (10^3)",
+      "mega": "M (10^6)",
+      "giga": "G (10^9)",
+      "tera": "T (10^12)",
+      "peta": "P (10^15)",
+      "exa": "E (10^18)",
+      "zetta": "Z (10^21)",
+      "yotta": "Y (10^24)"
+    },
+    "base_units": {
+      "ampere": "A (electric current)",
+      "candela": "cd (luminous intensity)",
+      "kelvin": "K (temperature)",
+      "kilogram": "kg (mass)",
+      "metre": "m (length)",
+      "meter": "m (length, US spelling)",
+      "mole": "mol (amount of substance)",
+      "second": "s (time)"
+    },
+    "derived_units": {
+      "becquerel": "Bq",
+      "celsius": "°C",
+      "coulomb": "C",
+      "farad": "F",
+      "gray": "Gy",
+      "henry": "H",
+      "hertz": "Hz",
+      "joule": "J",
+      "katal": "kat",
+      "lumen": "lm",
+      "lux": "lx",
+      "newton": "N",
+      "ohm": "Ω",
+      "pascal": "Pa",
+      "radian": "rad",
+      "siemens": "S",
+      "sievert": "Sv",
+      "steradian": "sr",
+      "tesla": "T",
+      "volt": "V",
+      "watt": "W",
+      "weber": "Wb"
+    },
+    "accepted_units": {
+      "day": "d",
+      "degree": "°",
+      "hectare": "ha",
+      "hour": "h",
+      "litre": "l/L",
+      "liter": "l/L",
+      "minute": "min",
+      "arcminute": "'",
+      "arcsecond": "\"",
+      "tonne": "t"
+    },
+    "powers": {
+      "square": "^2",
+      "squared": "^2",
+      "cubic": "^3",
+      "cubed": "^3",
+      "tothe": "^n"
+    },
+    "operations": {
+      "per": "/ (reciprocal)",
+      "of": "(qualifier separator)"
+    }
+  },
+  
+  "options": {
+    "number_formatting": {
+      "group-separator": "thousand separator character",
+      "group-digits": "integer|decimal|both|none",
+      "group-minimum-digits": "minimum digits before grouping",
+      "output-decimal-marker": "decimal point character",
+      "input-decimal-markers": "valid input decimal characters",
+      "input-ignore": "characters to ignore in input",
+      "input-signs": "valid sign characters",
+      "input-exponent-markers": "exponent marker characters",
+      "input-uncertainty-divider": "uncertainty separator",
+      "parse-numbers": "true|false"
+    },
+    "unit_formatting": {
+      "inter-unit-product": "product between units",
+      "per-mode": "power|fraction|symbol|power-positive-first|symbol-or-fraction",
+      "per-symbol": "symbol for per",
+      "bracket-unit-denominator": "true|false",
+      "qualifier-mode": "subscript|brackets|phrase|space|text",
+      "sticky-per": "true|false",
+      "unit-mode": "parse|text|match"
+    },
+    "quantity_formatting": {
+      "quantity-product": "separator between number and unit",
+      "separate-uncertainty-units": "true|false"
+    },
+    "table_formatting": {
+      "table-format": "format specification",
+      "table-align-comparator": "true|false",
+      "table-align-exponent": "true|false",
+      "table-align-text-before": "true|false",
+      "table-align-text-after": "true|false",
+      "table-align-uncertainty": "true|false",
+      "table-auto-round": "true|false",
+      "table-column-width": "column width",
+      "table-number-alignment": "left|center|right"
+    }
+  },
+  
+  "column_types": {
+    "S": "numeric column with alignment",
+    "s": "unit column"
+  }
+}
