@@ -114,7 +114,7 @@ const char* TexDocumentModel::resolve_ref(const char* label) const {
     return "??";  // Unresolved reference marker
 }
 
-void TexDocumentModel::add_macro(const char* name, int num_args, const char* replacement) {
+void TexDocumentModel::add_macro(const char* name, int num_args, const char* replacement, const char* params) {
     if (macro_count >= macro_capacity) {
         int new_capacity = macro_capacity == 0 ? 16 : macro_capacity * 2;
         MacroDef* new_macros = (MacroDef*)arena_alloc(arena, new_capacity * sizeof(MacroDef));
@@ -128,6 +128,7 @@ void TexDocumentModel::add_macro(const char* name, int num_args, const char* rep
     macros[macro_count].name = name;
     macros[macro_count].num_args = num_args;
     macros[macro_count].replacement = replacement;
+    macros[macro_count].params = params;
     macro_count++;
 }
 
@@ -139,6 +140,123 @@ const TexDocumentModel::MacroDef* TexDocumentModel::find_macro(const char* name)
     }
     return nullptr;
 }
+
+// Helper to parse params string and count mandatory args
+// params format: [] = optional, {} = mandatory
+// Example: "[]{}[]" = 3 args (opt, mand, opt)
+static int count_params(const char* params) {
+    if (!params) return 0;
+    int count = 0;
+    for (const char* p = params; *p; p++) {
+        if (*p == '[' || *p == '{') count++;
+    }
+    return count;
+}
+
+#ifndef DOC_MODEL_MINIMAL
+// Forward declaration for JSON parsing (in global namespace)
+}  // namespace tex (temporary close)
+void parse_json(Input* input, const char* json_string);
+namespace tex {
+
+// Load macros from a package JSON file
+static bool load_package_macros(TexDocumentModel* doc, const char* pkg_name) {
+    if (!doc || !pkg_name) return false;
+    
+    // Build path to package file
+    char path[512];
+    snprintf(path, sizeof(path), "lambda/tex/packages/%s.pkg.json", pkg_name);
+    
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        log_debug("doc_model: package '%s' not found at %s", pkg_name, path);
+        return false;
+    }
+    
+    // read file content
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char* content = (char*)arena_alloc(doc->arena, size + 1);
+    size_t read_size = fread(content, 1, size, f);
+    content[read_size] = '\0';
+    fclose(f);
+    
+    log_debug("doc_model: loading package '%s' from %s", pkg_name, path);
+    
+    // parse JSON - create an Input for parsing
+    Input* input = InputManager::create_input(nullptr);
+    if (!input) {
+        log_error("doc_model: failed to create input for package '%s'", pkg_name);
+        return false;
+    }
+    parse_json(input, content);
+    
+    if (get_type_id(input->root) != LMD_TYPE_MAP) {
+        log_error("doc_model: package '%s' root is not an object", pkg_name);
+        return false;
+    }
+    
+    ItemReader root(input->root.to_const());
+    MapReader pkg = root.asMap();
+    ItemReader commands_item = pkg.get("commands");
+    if (!commands_item.isMap()) {
+        log_debug("doc_model: package '%s' has no commands", pkg_name);
+        return true;  // not an error - package just has no commands
+    }
+    
+    MapReader commands = commands_item.asMap();
+    MapReader::EntryIterator iter = commands.entries();
+    const char* cmd_name;
+    ItemReader cmd_def;
+    
+    while (iter.next(&cmd_name, &cmd_def)) {
+        if (!cmd_def.isMap()) continue;
+        
+        MapReader def = cmd_def.asMap();
+        ItemReader type_item = def.get("type");
+        if (!type_item.isString()) continue;
+        
+        const char* type = type_item.cstring();
+        // only handle macro/constructor types for now
+        if (strcmp(type, "macro") != 0 && strcmp(type, "constructor") != 0) {
+            continue;
+        }
+        
+        ItemReader pattern_item = def.get("pattern");
+        if (!pattern_item.isString()) continue;
+        
+        ItemReader params_item = def.get("params");
+        const char* params = params_item.isString() ? params_item.cstring() : "";
+        const char* pattern = pattern_item.cstring();
+        
+        int num_args = count_params(params);
+        
+        // intern strings in arena
+        size_t name_len = strlen(cmd_name);
+        char* name_copy = (char*)arena_alloc(doc->arena, name_len + 2);
+        name_copy[0] = '\\';
+        memcpy(name_copy + 1, cmd_name, name_len + 1);
+        
+        size_t pattern_len = strlen(pattern);
+        char* pattern_copy = (char*)arena_alloc(doc->arena, pattern_len + 1);
+        memcpy(pattern_copy, pattern, pattern_len + 1);
+        
+        size_t params_len = strlen(params);
+        char* params_copy = (char*)arena_alloc(doc->arena, params_len + 1);
+        memcpy(params_copy, params, params_len + 1);
+        
+        doc->add_macro(name_copy, num_args, pattern_copy, params_copy);
+        log_debug("doc_model: registered package macro %s with %d args, params='%s', pattern='%s'", name_copy, num_args, params_copy, pattern_copy);
+    }
+    
+    return true;
+}
+#else
+// Stub for minimal builds
+static bool load_package_macros(TexDocumentModel*, const char*) { return false; }
+#endif
 
 void TexDocumentModel::add_bib_entry(const char* key, const char* formatted) {
     if (bib_count >= bib_capacity) {
@@ -2166,6 +2284,18 @@ static const char* extract_text_content(const ItemReader& item, Arena* arena) {
         return nullptr;
     }
     
+    // Handle symbols (like #1 in macro definitions)
+    if (item.isSymbol()) {
+        const char* sym = item.cstring();
+        if (sym) {
+            size_t len = strlen(sym);
+            char* copy = (char*)arena_alloc(arena, len + 1);
+            memcpy(copy, sym, len + 1);
+            return copy;
+        }
+        return nullptr;
+    }
+    
     if (item.isElement()) {
         ElementReader elem = item.asElement();
         StrBuf* buf = strbuf_new_cap(256);
@@ -2252,6 +2382,229 @@ static const char* extract_math_source(const ElementReader& elem, Arena* arena) 
 
 // Forward declaration for render_brack_group_to_html
 static DocElement* build_doc_element(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
+
+// ============================================================================
+// Macro Registration and Expansion
+// ============================================================================
+
+// Parse and register a \newcommand or \renewcommand definition
+// AST format: <newcommand "\cmdname" <brack_group "1"> <curly_group "+#1+">>
+// Returns true if successfully parsed and registered
+static bool register_newcommand(const ElementReader& elem, Arena* arena, TexDocumentModel* doc) {
+    int64_t child_count = elem.childCount();
+    if (child_count < 2) return false;
+    
+    const char* cmd_name = nullptr;
+    int num_args = 0;
+    const char* replacement = nullptr;
+    
+    int arg_index = 0;
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child = elem.childAt(i);
+        
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (!text) continue;
+            
+            // Skip whitespace-only strings
+            bool is_whitespace = true;
+            for (const char* p = text; *p; p++) {
+                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                    is_whitespace = false;
+                    break;
+                }
+            }
+            if (is_whitespace) continue;
+            
+            // First non-whitespace string should be command name (like "\echoOGO")
+            if (!cmd_name) {
+                // Skip leading backslash if present
+                cmd_name = (text[0] == '\\') ? text + 1 : text;
+                arg_index++;
+            }
+        } else if (child.isElement()) {
+            ElementReader ch_elem = child.asElement();
+            const char* ch_tag = ch_elem.tagName();
+            
+            if (!ch_tag) continue;
+            
+            if (tag_eq(ch_tag, "brack_group")) {
+                // Optional argument count: [1]
+                const char* arg_text = extract_text_content(child, arena);
+                if (arg_text && strlen(arg_text) > 0) {
+                    num_args = atoi(arg_text);
+                }
+            } else if (tag_eq(ch_tag, "curly_group")) {
+                if (!cmd_name) {
+                    // Command name in curly braces: {\echoOGO}
+                    const char* text = extract_text_content(child, arena);
+                    if (text && strlen(text) > 0) {
+                        cmd_name = (text[0] == '\\') ? text + 1 : text;
+                    }
+                } else if (!replacement) {
+                    // Replacement text: {+#1+}
+                    replacement = extract_text_content(child, arena);
+                }
+            }
+        }
+    }
+    
+    if (!cmd_name || !replacement) {
+        log_debug("doc_model: newcommand parse failed - name=%s, replacement=%s", 
+                  cmd_name ? cmd_name : "(null)", replacement ? replacement : "(null)");
+        return false;
+    }
+    
+    // Register the macro
+    log_debug("doc_model: registering macro \\%s with %d args, replacement='%s'", 
+              cmd_name, num_args, replacement);
+    doc->add_macro(cmd_name, num_args, replacement);
+    return true;
+}
+
+// Expand a user-defined macro and return the result as a DocElement
+// Returns nullptr if the tag is not a registered macro
+static DocElement* try_expand_macro(const char* tag, const ElementReader& elem, 
+                                     Arena* arena, TexDocumentModel* doc) {
+    // Look up macro - macros are registered with backslash prefix
+    char macro_name[256];
+    snprintf(macro_name, sizeof(macro_name), "\\%s", tag);
+    const TexDocumentModel::MacroDef* macro = doc->find_macro(macro_name);
+    if (!macro) return nullptr;
+    
+    log_debug("doc_model: expanding macro %s, params='%s'", macro_name, macro->params ? macro->params : "");
+    
+    // Parse params string to understand argument positions
+    // [] = optional (brack_group), {} = mandatory (curly_group or direct text)
+    bool is_optional[9] = {false};
+    int param_count = 0;
+    int first_mandatory_pos = -1;
+    if (macro->params) {
+        for (const char* pp = macro->params; *pp && param_count < 9; pp++) {
+            if (*pp == '[') {
+                is_optional[param_count++] = true;
+            } else if (*pp == '{') {
+                if (first_mandatory_pos < 0) first_mandatory_pos = param_count;
+                is_optional[param_count++] = false;
+            }
+        }
+    }
+    
+    // Collect arguments from the element's children
+    const char* args[9] = {nullptr};  // LaTeX supports up to 9 arguments
+    int64_t child_count = elem.childCount();
+    log_debug("doc_model: macro has %d params, %d children", param_count, (int)child_count);
+    
+    // Build list of actual arguments from children
+    const char* provided_args[9] = {nullptr};
+    int provided_count = 0;
+    
+    for (int64_t i = 0; i < child_count && provided_count < 9; i++) {
+        ItemReader child = elem.childAt(i);
+        
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (!text) continue;
+            
+            // Skip pure whitespace
+            bool is_whitespace = true;
+            for (const char* p = text; *p; p++) {
+                if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                    is_whitespace = false;
+                    break;
+                }
+            }
+            if (is_whitespace) continue;
+            
+            provided_args[provided_count++] = text;
+        } else if (child.isElement()) {
+            ElementReader ch_elem = child.asElement();
+            const char* arg_text = extract_text_content(child, arena);
+            if (arg_text && strlen(arg_text) > 0) {
+                provided_args[provided_count++] = arg_text;
+            }
+        }
+    }
+    
+    log_debug("doc_model: collected %d provided args", provided_count);
+    
+    // Now map provided_args to args based on param positions
+    // Strategy: Optional args at the start that aren't provided are skipped
+    // If params is "[]{}[]" and we get 1 arg, it goes to position 1 (first mandatory)
+    // If params is "[]{}[]" and we get 2 args, first goes to pos 0, second to pos 1
+    // If params is "[]{}[]" and we get 3 args, they go to pos 0, 1, 2 in order
+    
+    if (param_count > 0 && first_mandatory_pos >= 0) {
+        // Count how many optional args are before the first mandatory
+        int leading_optionals = first_mandatory_pos;
+        
+        // If we have fewer provided args than param_count, 
+        // we assume leading optional args are empty
+        int args_to_skip = 0;
+        if (provided_count < param_count) {
+            args_to_skip = param_count - provided_count;
+            // But don't skip more than leading optionals
+            if (args_to_skip > leading_optionals) {
+                args_to_skip = leading_optionals;
+            }
+        }
+        
+        // Map provided args to positions
+        int provided_idx = 0;
+        for (int pos = 0; pos < param_count && provided_idx < provided_count; pos++) {
+            if (pos < args_to_skip && is_optional[pos]) {
+                // Skip this optional arg position
+                args[pos] = "";
+            } else {
+                args[pos] = provided_args[provided_idx++];
+                log_debug("doc_model: mapping arg[%d] = '%s'", pos, args[pos] ? args[pos] : "null");
+            }
+        }
+    } else {
+        // No params info or no mandatory - just use provided args directly
+        for (int i = 0; i < provided_count && i < 9; i++) {
+            args[i] = provided_args[i];
+        }
+    }
+    
+    // Perform substitution: replace #1, #2, etc. with actual arguments
+    StrBuf* result = strbuf_new();
+    const char* p = macro->replacement;
+    while (*p) {
+        if (*p == '#' && p[1] >= '1' && p[1] <= '9') {
+            int arg_num = p[1] - '1';  // 0-indexed
+            if (args[arg_num] && strlen(args[arg_num]) > 0) {
+                strbuf_append_str(result, args[arg_num]);
+            }
+            p += 2;
+        } else {
+            strbuf_append_char(result, *p);
+            p++;
+        }
+    }
+    
+    // Create a TEXT_RUN element with the expanded text
+    const char* expanded_text = result->str;
+    size_t expanded_len = result->length;
+    
+    if (expanded_len == 0) {
+        strbuf_free(result);
+        return nullptr;
+    }
+    
+    // Copy to arena and create text element
+    char* text_copy = (char*)arena_alloc(arena, expanded_len + 1);
+    memcpy(text_copy, expanded_text, expanded_len + 1);
+    strbuf_free(result);
+    
+    DocElement* text_elem = doc_alloc_element(arena, DocElemType::TEXT_RUN);
+    text_elem->text.text = text_copy;
+    text_elem->text.text_len = expanded_len;
+    text_elem->text.style = DocTextStyle::plain();
+    
+    log_debug("doc_model: macro expanded to '%s'", text_copy);
+    return text_elem;
+}
 
 // Check if a tag is a font declaration (changes style for following content)
 static bool is_font_declaration_tag(const char* tag) {
@@ -3415,6 +3768,12 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     // This handles cases like \begin{itemize}...\end{itemize} inside a paragraph
     if (is_block_element_tag(tag)) {
         return build_doc_element(item, arena, doc);
+    }
+    
+    // Try to expand as user-defined macro
+    DocElement* macro_result = try_expand_macro(tag, elem, arena, doc);
+    if (macro_result) {
+        return macro_result;
     }
     
     // Default: process children
@@ -6613,12 +6972,54 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return nullptr;  // No output
     }
     
-    // Package imports and other preamble commands - ignored in output
-    if (tag_eq(tag, "usepackage") || tag_eq(tag, "RequirePackage") ||
-        tag_eq(tag, "input") || tag_eq(tag, "include") ||
+    // Macro definitions - register with document model, no visible output
+    if (tag_eq(tag, "newcommand") || tag_eq(tag, "renewcommand") || tag_eq(tag, "providecommand")) {
+        register_newcommand(elem, arena, doc);
+        return nullptr;  // No visible output
+    }
+    
+    // Package imports - load package macros
+    if (tag_eq(tag, "usepackage") || tag_eq(tag, "RequirePackage")) {
+        // extract package name - could be direct string child or in curly_group
+        auto iter = elem.children();
+        ItemReader child;
+        const char* pkg_name = nullptr;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                // skip whitespace-only strings
+                if (text && text[0] != '\0') {
+                    bool all_space = true;
+                    for (const char* p = text; *p; p++) {
+                        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                            all_space = false;
+                            break;
+                        }
+                    }
+                    if (!all_space) {
+                        pkg_name = text;
+                        break;
+                    }
+                }
+            } else if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
+                    pkg_name = extract_text_content(child, arena);
+                    break;
+                }
+            }
+        }
+        if (pkg_name && strlen(pkg_name) > 0) {
+            load_package_macros(doc, pkg_name);
+        }
+        return nullptr;  // No visible output
+    }
+    
+    // Other preamble commands - ignored in output
+    if (tag_eq(tag, "input") || tag_eq(tag, "include") ||
         tag_eq(tag, "author") || tag_eq(tag, "title") || tag_eq(tag, "date") ||
-        tag_eq(tag, "newcommand") || tag_eq(tag, "renewcommand") ||
-        tag_eq(tag, "providecommand") || tag_eq(tag, "newenvironment") ||
+        tag_eq(tag, "newenvironment") ||
         tag_eq(tag, "renewenvironment") || tag_eq(tag, "newtheorem") ||
         tag_eq(tag, "DeclareMathOperator") || tag_eq(tag, "setlength") ||
         tag_eq(tag, "setcounter") || tag_eq(tag, "pagestyle") ||
@@ -7162,6 +7563,13 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         }
         
         return span->first_child ? span : nullptr;
+    }
+    
+    // Try to expand as user-defined macro before falling back to generic handling
+    log_debug("doc_model: checking for macro expansion, tag='%s'", tag);
+    DocElement* macro_result = try_expand_macro(tag, elem, arena, doc);
+    if (macro_result) {
+        return macro_result;
     }
     
     // Generic element - recurse to children with paragraph grouping
