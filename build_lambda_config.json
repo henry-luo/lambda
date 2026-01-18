@@ -2154,33 +2154,6 @@
                             "lambda/format/html_encoder.cpp"
                         ],
                         "icon": "🔒"
-                    },
-                    {
-                        "source": "test/latex_js/test_latex_unified_pipeline.cpp",
-                        "name": "Unified LaTeX Pipeline Tests",
-                        "category": "extended",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_latex_unified_pipeline.exe",
-                        "additional_sources": [
-                            "test/latex_js/fixture_loader.cpp",
-                            "test/latex_js/html_comparison.cpp",
-                            "lambda/tex/tex_document_model.cpp"
-                        ],
-                        "includes": [
-                            "test/latex_js"
-                        ],
-                        "defines": [
-                            "DOC_MODEL_NO_SVG"
-                        ],
-                        "special_flags": "-std=c++17 -I/opt/homebrew/include",
-                        "icon": "🔄"
                     }
                 ],
                 "type": "input",

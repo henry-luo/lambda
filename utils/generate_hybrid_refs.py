@@ -37,6 +37,50 @@ import argparse
 from pathlib import Path
 
 
+def replace_span_with_tag(html: str, span_class: str, tag_name: str) -> str:
+    """Replace <span class="X">...</span> with <tag>...</tag>, handling nesting correctly."""
+    pattern = f'<span class="{span_class}">'
+    result = html
+    iterations = 0
+    max_iterations = 100  # prevent infinite loops
+    
+    while pattern in result and iterations < max_iterations:
+        iterations += 1
+        start = result.find(pattern)
+        if start == -1:
+            break
+        
+        after_tag = start + len(pattern)
+        depth = 1
+        pos = after_tag
+        
+        while depth > 0 and pos < len(result):
+            # Look for span tags (both opening and closing)
+            if result[pos:pos+6] == '<span ':
+                depth += 1
+                pos += 6
+            elif result[pos:pos+5] == '<span':
+                depth += 1
+                pos += 5
+            elif result[pos:pos+7] == '</span>':
+                depth -= 1
+                if depth == 0:
+                    # Replace opening tag and closing tag
+                    opening_tag = f'<{tag_name}>'
+                    closing_tag = f'</{tag_name}>'
+                    result = result[:start] + opening_tag + result[after_tag:pos] + closing_tag + result[pos+7:]
+                    break
+                pos += 7
+            else:
+                pos += 1
+        
+        if depth > 0:
+            # Couldn't find matching closing tag - skip to avoid infinite loop
+            break
+    
+    return result
+
+
 def transform_latexjs_to_hybrid(html: str) -> str:
     """Transform latex.js HTML to Lambda hybrid format."""
     result = html
@@ -53,12 +97,12 @@ def transform_latexjs_to_hybrid(html: str) -> str:
         result.rstrip()
     )
     
-    # Text formatting: semantic HTML5 tags
-    result = re.sub(r'<span class="bf">(.*?)</span>', r'<strong>\1</strong>', result)
-    result = re.sub(r'<span class="it">(.*?)</span>', r'<em>\1</em>', result)
-    result = re.sub(r'<span class="tt">(.*?)</span>', r'<code>\1</code>', result)
-    result = re.sub(r'<span class="underline">(.*?)</span>', r'<u>\1</u>', result)
-    result = re.sub(r'<span class="sout">(.*?)</span>', r'<s>\1</s>', result)
+    # Text formatting: semantic HTML5 tags (using proper nesting-aware replacement)
+    result = replace_span_with_tag(result, 'bf', 'strong')
+    result = replace_span_with_tag(result, 'it', 'em')
+    result = replace_span_with_tag(result, 'tt', 'code')
+    result = replace_span_with_tag(result, 'underline', 'u')
+    result = replace_span_with_tag(result, 'sout', 's')
     
     # Quote environments: div -> blockquote
     def replace_quote_env(html: str, env_class: str) -> str:
@@ -99,26 +143,49 @@ def transform_latexjs_to_hybrid(html: str) -> str:
     result = replace_quote_env(result, 'quotation')
     result = replace_quote_env(result, 'verse')
     
-    # Lists: update class names
+    # Lists: update class names (handle additional classes like "list centering")
     result = re.sub(r'<ul class="list">', '<ul class="itemize">', result)
+    result = re.sub(r'<ul class="list (\w+)">', r'<ul class="itemize \1">', result)
     result = re.sub(r'<ol class="list">', '<ol class="enumerate">', result)
+    result = re.sub(r'<ol class="list (\w+)">', r'<ol class="enumerate \1">', result)
     result = re.sub(r'<dl class="list">', '<dl class="description">', result)
+    result = re.sub(r'<dl class="list (\w+)">', r'<dl class="description \1">', result)
     
-    # Simplify item labels - remove span.itemlabel wrapper
-    result = re.sub(
-        r'<span class="itemlabel"><span class="hbox llap">[^<]*</span></span>',
-        '',
-        result
-    )
-    result = re.sub(
-        r'<span class="itemlabel"><span class="hbox">[^<]*</span></span>',
-        '',
-        result
-    )
+    # Simplify item labels - remove span.itemlabel wrapper (handles nested spans)
+    # Pattern matches: <span class="itemlabel">...any content including nested spans...</span>
+    def remove_itemlabels(html: str) -> str:
+        pattern = '<span class="itemlabel">'
+        result = html
+        while pattern in result:
+            start = result.find(pattern)
+            if start == -1:
+                break
+            after_tag = start + len(pattern)
+            depth = 1
+            pos = after_tag
+            while depth > 0 and pos < len(result):
+                if result[pos:pos+5] == '<span':
+                    depth += 1
+                    pos += 5
+                elif result[pos:pos+7] == '</span>':
+                    depth -= 1
+                    if depth == 0:
+                        # Remove the entire itemlabel span
+                        result = result[:start] + result[pos+7:]
+                        break
+                    pos += 7
+                else:
+                    pos += 1
+            if depth > 0:
+                # Couldn't find closing tag - skip
+                break
+        return result
     
-    # Logos: update class names
-    result = re.sub(r'<span class="tex">', '<span class="tex-logo">', result)
-    result = re.sub(r'<span class="latex">', '<span class="latex-logo">', result)
+    result = remove_itemlabels(result)
+    
+    # Logos: keep original class names (Lambda outputs class="tex" and class="latex")
+    # result = re.sub(r'<span class="tex">', '<span class="tex-logo">', result)
+    # result = re.sub(r'<span class="latex">', '<span class="latex-logo">', result)
     
     # Verbatim: code class="tt" -> code (no class needed)
     result = re.sub(r'<code class="tt">', '<code>', result)

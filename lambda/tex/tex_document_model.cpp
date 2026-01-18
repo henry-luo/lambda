@@ -1051,14 +1051,15 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
     bool has_raggedright = (elem->flags & DocElement::FLAG_FLUSH_LEFT) != 0;
     bool has_raggedleft = (elem->flags & DocElement::FLAG_FLUSH_RIGHT) != 0;
     
+    bool has_any_class = has_continue || has_noindent || has_centered || has_raggedright || has_raggedleft;
+    
     if (opts.legacy_mode) {
         // In legacy mode, add class attributes for flags
         // Build class string dynamically
-        if (has_continue || has_noindent || has_centered || has_raggedright || has_raggedleft) {
+        if (has_any_class) {
             strbuf_append_str(out, "<p class=\"");
             bool first = true;
             if (has_raggedright) {
-                // \raggedright comes first as it's the primary alignment
                 strbuf_append_str(out, "raggedright");
                 first = false;
             }
@@ -1086,7 +1087,8 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
         } else {
             strbuf_append_str(out, "<p>");
         }
-    } else {
+    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Modern mode with prefix: always add class="latex-paragraph"
         if (has_continue && has_noindent) {
             strbuf_append_format(out, "<p class=\"%sparagraph continue noindent\">", opts.css_class_prefix);
         } else if (has_continue) {
@@ -1095,6 +1097,39 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
             strbuf_append_format(out, "<p class=\"%sparagraph noindent\">", opts.css_class_prefix);
         } else {
             strbuf_append_format(out, "<p class=\"%sparagraph\">", opts.css_class_prefix);
+        }
+    } else {
+        // Hybrid mode (no prefix): only add class when needed
+        if (has_any_class) {
+            strbuf_append_str(out, "<p class=\"");
+            bool first = true;
+            if (has_raggedright) {
+                strbuf_append_str(out, "raggedright");
+                first = false;
+            }
+            if (has_raggedleft) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "raggedleft");
+                first = false;
+            }
+            if (has_centered) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "centering");
+                first = false;
+            }
+            if (has_continue) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "continue");
+                first = false;
+            }
+            if (has_noindent) {
+                if (!first) strbuf_append_str(out, " ");
+                strbuf_append_str(out, "noindent");
+                first = false;
+            }
+            strbuf_append_str(out, "\">");
+        } else {
+            strbuf_append_str(out, "<p>");
         }
     }
     
@@ -1107,11 +1142,12 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
 static void render_list_html(DocElement* elem, StrBuf* out,
                               const HtmlOutputOptions& opts, int depth) {
     const char* tag;
+    const char* list_class;
     switch (elem->list.list_type) {
-    case ListType::ITEMIZE:     tag = "ul"; break;
-    case ListType::ENUMERATE:   tag = "ol"; break;
-    case ListType::DESCRIPTION: tag = "dl"; break;
-    default:                    tag = "ul"; break;
+    case ListType::ITEMIZE:     tag = "ul"; list_class = "itemize"; break;
+    case ListType::ENUMERATE:   tag = "ol"; list_class = "enumerate"; break;
+    case ListType::DESCRIPTION: tag = "dl"; list_class = "description"; break;
+    default:                    tag = "ul"; list_class = "itemize"; break;
     }
     
     if (opts.pretty_print) html_indent(out, depth);
@@ -1120,9 +1156,14 @@ static void render_list_html(DocElement* elem, StrBuf* out,
     const char* centering = (elem->flags & DocElement::FLAG_CENTERED) ? " centering" : "";
     
     if (opts.legacy_mode) {
+        // Legacy mode: class="list"
         strbuf_append_format(out, "<%s class=\"list%s\">", tag, centering);
-    } else {
+    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Modern mode with prefix: class="latex-list"
         strbuf_append_format(out, "<%s class=\"%slist%s\">", tag, opts.css_class_prefix, centering);
+    } else {
+        // Hybrid mode (no prefix): class="itemize" / "enumerate" / "description"
+        strbuf_append_format(out, "<%s class=\"%s%s\">", tag, list_class, centering);
     }
     if (opts.pretty_print) strbuf_append_str(out, "\n");
     
@@ -1701,22 +1742,40 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
     case DocElemType::ALIGNMENT: {
         // Determine alignment class from env_name or flags
         const char* align_class = "list";
+        bool use_list_prefix = opts.legacy_mode || (opts.css_class_prefix && opts.css_class_prefix[0]);
+        bool is_quote_env = false;
         if (elem->alignment.env_name) {
+            // Check if this is a quote-like environment
+            is_quote_env = (strcmp(elem->alignment.env_name, "quote") == 0 ||
+                           strcmp(elem->alignment.env_name, "quotation") == 0 ||
+                           strcmp(elem->alignment.env_name, "verse") == 0);
             // Use stored environment name: "list quote", "list quotation", "list verse", etc.
             static char class_buf[64];
-            snprintf(class_buf, sizeof(class_buf), "list %s", elem->alignment.env_name);
+            if (use_list_prefix) {
+                snprintf(class_buf, sizeof(class_buf), "list %s", elem->alignment.env_name);
+            } else {
+                snprintf(class_buf, sizeof(class_buf), "%s", elem->alignment.env_name);
+            }
             align_class = class_buf;
         } else if (elem->flags & DocElement::FLAG_CENTERED) {
-            align_class = "list center";
+            align_class = use_list_prefix ? "list center" : "center";
         } else if (elem->flags & DocElement::FLAG_FLUSH_LEFT) {
-            align_class = "list flushleft";
+            align_class = use_list_prefix ? "list flushleft" : "flushleft";
         } else if (elem->flags & DocElement::FLAG_FLUSH_RIGHT) {
-            align_class = "list flushright";
+            align_class = use_list_prefix ? "list flushright" : "flushright";
         }
-        strbuf_append_format(out, "<div class=\"%s\">", align_class);
-        if (opts.pretty_print) strbuf_append_str(out, "\n");
-        render_children_html(elem, out, opts, depth + 1);
-        strbuf_append_str(out, "</div>");
+        // In hybrid mode, use <blockquote> for quote environments
+        if (!opts.legacy_mode && is_quote_env) {
+            strbuf_append_format(out, "<blockquote class=\"%s\">", align_class);
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+            render_children_html(elem, out, opts, depth + 1);
+            strbuf_append_str(out, "</blockquote>");
+        } else {
+            strbuf_append_format(out, "<div class=\"%s\">", align_class);
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+            render_children_html(elem, out, opts, depth + 1);
+            strbuf_append_str(out, "</div>");
+        }
         if (opts.pretty_print) strbuf_append_str(out, "\n");
         break;
     }
@@ -1822,10 +1881,13 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     if (opts.legacy_mode) {
         // Legacy mode: <div class="body">
         strbuf_append_str(output, "<div class=\"body\">\n");
-    } else {
-        // Modern mode: <article class="latex-document ...">
+    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Modern mode with prefix: <article class="latex-document latex-article">
         strbuf_append_format(output, "<article class=\"%sdocument %s%s\">\n", 
             opts.css_class_prefix, opts.css_class_prefix, doc->document_class);
+    } else {
+        // Hybrid mode: <article class="latex-document">
+        strbuf_append_str(output, "<article class=\"latex-document\">");
     }
     
     // Title block (only in non-legacy mode)
@@ -1857,8 +1919,11 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     // Close document container
     if (opts.legacy_mode) {
         strbuf_append_str(output, "</div>\n");
-    } else {
+    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
         strbuf_append_str(output, "</article>\n");
+    } else {
+        // Hybrid mode: no trailing newline for compact output
+        strbuf_append_str(output, "</article>");
     }
     
     // HTML footer
