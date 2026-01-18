@@ -1,0 +1,17 @@
+% alignment of lists
+% SCREENSHOT: marked as screenshot test in latex.js
+\begin{center}
+    Center environment should not center the list.
+    \begin{itemize}
+        \item first item
+        \item second item
+    \end{itemize}
+\end{center}
+But centering command should:
+\begin{itemize}
+    \centering
+    \item[\textendash] first item
+    \item[] second item
+    \item third item
+\end{itemize}
+Afterwards, we continue as usual.

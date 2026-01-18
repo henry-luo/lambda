@@ -1,0 +1,1404 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>1 Sums and Limits</title>
+<!--Generated on Sun Jan 18 10:54:04 2026 by LaTeXML (version 0.8.8) http://dlmf.nist.gov/LaTeXML/.-->
+
+<link rel="stylesheet" href="LaTeXML.css" type="text/css">
+<link rel="stylesheet" href="ltx-article.css" type="text/css">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+</head>
+<body>
+<div class="ltx_page_main">
+<div class="ltx_page_content">
+<article class="ltx_document">
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">1 </span>Sums and Limits</h2>
+
+<section  class="ltx_paragraph">
+<h3 class="ltx_title ltx_title_paragraph">mathclap &amp; friends</h3>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="X=\sum_{1\leq i\leq j\leq n}X_{ij}" display="block"><mrow><mi>X</mi><mo rspace="0.111em">=</mo><mrow><munder><mo movablelimits="false">∑</mo><mrow><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mrow></munder><msub><mi>X</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="X=\sum_{\mathclap{1\leq i\leq j\leq n}}X_{ij}" display="block"><mrow><mi>X</mi><mo rspace="0.111em">=</mo><mrow><munder><mo movablelimits="false">∑</mo><mpadded lspace="-14.9pt" width="0pt"><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mpadded></munder><msub><mi>X</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="X=\sum_{\mathrlap{1\leq i\leq j\leq n}}X_{ij}" display="block"><mrow><mi>X</mi><mo rspace="0.111em">=</mo><mrow><munder><mo movablelimits="false">∑</mo><mpadded width="0pt"><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mpadded></munder><msub><mi>X</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="X=\sum_{\mathllap{1\leq i\leq j\leq n}}X_{ij}" display="block"><mrow><mi>X</mi><mo rspace="0.111em">=</mo><mrow><munder><mo movablelimits="false">∑</mo><mpadded lspace="-29.7pt" width="0pt"><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mpadded></munder><msub><mi>X</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_paragraph">
+<h3 class="ltx_title ltx_title_paragraph">Cramped</h3>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\cramped{x^{2}}\leftrightarrow x^{2}\quad\cramped[\scriptstyle]{x^{2}}%
+\leftrightarrow{\scriptstyle x^{2}}" display="block"><mrow><msup><mi>x</mi><mn>2</mn></msup><mo stretchy="false">↔</mo><mrow><msup><mi>x</mi><mn>2</mn></msup><mspace width="1em"></mspace><msup><mi mathsize="70%">x</mi><mn mathsize="71%">2</mn></msup></mrow><mo mathsize="70%" stretchy="false">↔</mo><msup><mi mathsize="70%">x</mi><mn mathsize="71%">2</mn></msup></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_paragraph">
+<h3 class="ltx_title ltx_title_paragraph">Smashoperator</h3>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="V=\sum_{1\leq i\leq j\leq n}^{\infty}V_{ij}\quad X=\sum_{1\leq i\leq j\leq n}^%
+{3456}X_{ij}\quad Y=\sum\limits_{1\leq i\leq j\leq n}Y_{ij}\quad Z=\mathop{T}_%
+{1\leq i\leq j\leq n}Z_{ij}" display="block"><mrow><mrow><mi>V</mi><mo rspace="0.111em">=</mo><mrow><munderover><mo movablelimits="false">∑</mo><mrow><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mrow><mi mathvariant="normal">∞</mi></munderover><msub><mi>V</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow><mspace width="1em"></mspace><mrow><mrow><mi>X</mi><mo rspace="0.111em">=</mo><mrow><munderover><mo movablelimits="false">∑</mo><mrow><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mrow><mn>3456</mn></munderover><msub><mi>X</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow><mspace width="1em"></mspace><mrow><mrow><mi>Y</mi><mo rspace="0.111em">=</mo><mrow><munder><mo movablelimits="false">∑</mo><mrow><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mrow></munder><msub><mi>Y</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow><mspace width="1em"></mspace><mrow><mi>Z</mi><mo rspace="0.1389em">=</mo><mrow><munder><mo lspace="0.1389em" movablelimits="false" rspace="0.167em">𝑇</mo><mrow><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mrow></munder><msub><mi>Z</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="V=\sum_{1\leq i\leq j\leq n}^{\infty}V_{ij}\quad X=\smashoperator[]{\sum_{1%
+\leq i\leq j\leq n}^{3456}}X_{ij}\quad Y=\smashoperator[r]{\sum_{1\leq i\leq j%
+\leq n}^{}}Y_{ij}\quad Z=\smashoperator[l]{\mathop{T}_{1\leq i\leq j\leq n}^{}%
+}Z_{ij}" display="block"><mrow><mrow><mi>V</mi><mo rspace="0.111em">=</mo><mrow><munderover><mo movablelimits="false">∑</mo><mrow><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mrow><mi mathvariant="normal">∞</mi></munderover><msub><mi>V</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow><mspace width="1em"></mspace><mrow><mrow><mi>X</mi><mo rspace="0.111em">=</mo><mrow><munderover><mo movablelimits="false">∑</mo><mpadded lspace="-14.9pt" width="0.0pt"><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mpadded><mpadded lspace="-7.0pt" width="0.0pt"><mn>3456</mn></mpadded></munderover><msub><mi>X</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow><mspace width="1em"></mspace><mrow><mrow><mi>Y</mi><mo rspace="0.111em">=</mo><mrow><munder><mo movablelimits="false">∑</mo><mpadded lspace="-14.9pt" width="0.0pt"><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mpadded></munder><msub><mi>Y</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow><mspace width="1em"></mspace><mrow><mi>Z</mi><mo rspace="0.1389em">=</mo><mrow><munder><mo lspace="0.1389em" movablelimits="false" rspace="0.167em">𝑇</mo><mpadded lspace="-14.9pt" width="0.0pt"><mn>1</mn><mo>≤</mo><mi>i</mi><mo>≤</mo><mi>j</mi><mo>≤</mo><mi>n</mi></mpadded></munder><msub><mi>Z</mi><mrow><mi>i</mi><mo>⁢</mo><mi>j</mi></mrow></msub></mrow></mrow></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_paragraph">
+<h3 class="ltx_title ltx_title_paragraph">Adjustlimits</h3>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\text{a)}\lim_{n\to\infty}\max_{p\geq n}\quad\text{b)}\lim_{n\to\infty}\max_{p%
+^{2}\geq n}\quad\text{c)}\lim_{n\to\infty}\sup_{p^{2}\geq nK}\quad\text{d)}%
+\limsup_{n\to\infty}\max_{p\geq n}" display="block"><mrow><mrow><mtext>a)</mtext><mo lspace="0.167em">⁢</mo><mrow><munder><mo movablelimits="false" rspace="0.167em">lim</mo><mrow><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mrow></munder><munder><mi>max</mi><mrow><mi>p</mi><mo>≥</mo><mi>n</mi></mrow></munder></mrow></mrow><mspace width="1.167em"></mspace><mrow><mtext>b)</mtext><mo lspace="0.167em">⁢</mo><mrow><munder><mo movablelimits="false" rspace="0.167em">lim</mo><mrow><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mrow></munder><munder><mi>max</mi><mrow><msup><mi>p</mi><mn>2</mn></msup><mo>≥</mo><mi>n</mi></mrow></munder></mrow></mrow><mspace width="1.167em"></mspace><mrow><mtext>c)</mtext><mo lspace="0.167em">⁢</mo><mrow><munder><mo movablelimits="false" rspace="0.0835em">lim</mo><mrow><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mrow></munder><munder><mo lspace="0.0835em" movablelimits="false">sup</mo><mrow><msup><mi>p</mi><mn>2</mn></msup><mo>≥</mo><mrow><mi>n</mi><mo>⁢</mo><mi>K</mi></mrow></mrow></munder></mrow></mrow><mspace width="1.167em"></mspace><mrow><mtext>d)</mtext><mo lspace="0.167em">⁢</mo><mrow><munder><mo movablelimits="false" rspace="0.167em">lim sup</mo><mrow><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mrow></munder><munder><mi>max</mi><mrow><mi>p</mi><mo>≥</mo><mi>n</mi></mrow></munder></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\text{a)}\adjustlimits{\lim}_{n\to\infty}{\max}_{p\geq n}\quad\text{b)}%
+\adjustlimits{\lim}_{n\to\infty}{\max}_{p^{2}\geq n}\quad\text{c)}%
+\adjustlimits{\lim}_{n\to\infty}{\sup}_{p^{2}\geq nK}\quad\text{d)}%
+\adjustlimits{\limsup}_{n\to\infty}{\max}_{p\geq n}" display="block"><mrow><mrow><mtext>a)</mtext><mo lspace="0.167em">⁢</mo><munder><mpadded depth="0.0pt"><mo movablelimits="false">lim</mo></mpadded><mpadded height="5.0pt"><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mpadded></munder><mo lspace="0.167em">⁢</mo><munder><mpadded depth="0.0pt"><mi>max</mi></mpadded><mpadded height="5.0pt"><mi>p</mi><mo>≥</mo><mi>n</mi></mpadded></munder></mrow><mspace width="1.167em"></mspace><mrow><mtext>b)</mtext><mo lspace="0.167em">⁢</mo><munder><mpadded depth="0.0pt"><mo movablelimits="false">lim</mo></mpadded><mpadded height="5.0pt"><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mpadded></munder><mo lspace="0.167em">⁢</mo><munder><mpadded depth="0.0pt"><mi>max</mi></mpadded><mpadded height="5.0pt"><msup><mi>p</mi><mn>2</mn></msup><mo>≥</mo><mi>n</mi></mpadded></munder></mrow><mspace width="1.167em"></mspace><mrow><mtext>c)</mtext><mo lspace="0.167em">⁢</mo><munder><mpadded depth="1.9pt"><mo movablelimits="false">lim</mo></mpadded><mpadded height="5.0pt"><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mpadded></munder><mo lspace="0.167em">⁢</mo><munder><mpadded depth="1.9pt"><mo movablelimits="false">sup</mo></mpadded><mpadded height="5.0pt"><msup><mi>p</mi><mn>2</mn></msup><mo>≥</mo><mrow><mi>n</mi><mo>⁢</mo><mi>K</mi></mrow></mpadded></munder></mrow><mspace width="1.167em"></mspace><mrow><mtext>d)</mtext><mo lspace="0.167em">⁢</mo><munder><mpadded depth="1.9pt"><mo movablelimits="false">lim sup</mo></mpadded><mpadded height="5.0pt"><mi>n</mi><mo stretchy="false">→</mo><mi mathvariant="normal">∞</mi></mpadded></munder><mo lspace="0.167em">⁢</mo><munder><mpadded depth="1.9pt"><mi>max</mi></mpadded><mpadded height="5.0pt"><mi>p</mi><mo>≥</mo><mi>n</mi></mpadded></munder></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">2 </span>Tags</h2>
+
+<div  class="ltx_para">
+<blockquote class="ltx_quote">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=b" display="block"><mrow><mi>a</mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">Q&amp;A</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">See <a href="#S2.Ex10" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">Q&amp;A</span></a> or is it better with <a href="#S2.Ex10" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">Q&amp;A</span></a>?
+In the star form <code class="ltx_verbatim ltx_font_typewriter ltx_font_upright">\ref*</code> becomes <span class="ltx_ref ltx_nolink ltx_ref_self"><span class="ltx_text ltx_ref_tag">Q&amp;A</span></span> (<code class="ltx_verbatim ltx_font_typewriter ltx_font_upright">\refeq*</code> is not defined).</span></p>
+</blockquote>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=b" display="block"><mrow><mi>a</mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">Q&amp;A</span></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=b" display="block"><mrow><mi>a</mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">[<span class="ltx_text ltx_font_bold">Q&amp;A</span>]</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Normal tags.</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=a" display="block"><mrow><mi>a</mi><mo>=</mo><mi>a</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(1)</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">That was equation (<a href="#S2.E1" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>).</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">OK tags.</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=a" display="block"><mrow><mi>a</mi><mo>=</mo><mi>a</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">[<span class="ltx_text ltx_font_bold">2</span>]</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">That was equation [<a href="#S2.E2" title="In 2 Tags" class="ltx_ref ltx_font_bold"><span class="ltx_text ltx_ref_tag">2</span></a>], but recall [<a href="#S2.E1" title="In 2 Tags" class="ltx_ref ltx_font_bold"><span class="ltx_text ltx_ref_tag">1</span></a>]</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">odd tag.</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=a" display="block"><mrow><mi>a</mi><mo>=</mo><mi>a</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">{3}</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">That was equation {<a href="#S2.E3" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">3</span></a>}, but recall {<a href="#S2.E1" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>} and {<a href="#S2.E2" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a>}.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">weird tag.</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="b=b" display="block"><mrow><mi>b</mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">((4))</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">That was equation ((<a href="#S2.E4" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">4</span></a>)), but recall ((<a href="#S2.E1" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>)), ((<a href="#S2.E2" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a>)) and ((<a href="#S2.E3" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">3</span></a>)).</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Normal tags again.</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="c=c" display="block"><mrow><mi>c</mi><mo>=</mo><mi>c</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(5)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Non-textual</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="d=d" display="block"><mrow><mi>d</mi><mo>=</mo><mi>d</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(n<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">th</span></sup>)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">That was equation (<a href="#S2.E5" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">5</span></a>), but recall (<a href="#S2.E1" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>), (<a href="#S2.E2" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a>), (<a href="#S2.E3" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">3</span></a>),
+(<a href="#S2.E4" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">4</span></a>) and (<a href="#S2.Ex13" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">n<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">th</span></sup></span></a>).</p>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_gather ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\displaystyle a=a" display="block"><mrow><mi>a</mi><mo>=</mo><mi>a</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(6)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\displaystyle b=b" display="block"><mrow><mi>b</mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(**)</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">This should refer to the equation containing <math  class="ltx_Math" alttext="a=a" display="inline"><mrow><mi>a</mi><mo>=</mo><mi>a</mi></mrow></math>: (<a href="#S2.E6" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">6</span></a>).
+Then a switch of tag forms.</p>
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle c" display="inline"><mi>c</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=c" display="inline"><mrow><mi></mi><mo>=</mo><mi>c</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(7)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle d" display="inline"><mi>d</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=d" display="inline"><mrow><mi></mi><mo>=</mo><mi>d</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(8)</span></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">This should refer to the equation containing <math  class="ltx_Math" alttext="d=d" display="inline"><mrow><mi>d</mi><mo>=</mo><mi>d</mi></mrow></math>: (<a href="#S2.E8" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">8</span></a>)
+(but recall (<a href="#S2.E6" title="In 2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">6</span></a>)).</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="e=e" display="block"><mrow><mi>e</mi><mo>=</mo><mi>e</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(9)</span></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="f=f" display="block"><mrow><mi>f</mi><mo>=</mo><mi>f</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(10)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="1+1=2" display="block"><mrow><mrow><mn>1</mn><mo>+</mo><mn>1</mn></mrow><mo>=</mo><mn>2</mn></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="2+2=4" display="block"><mrow><mrow><mn>2</mn><mo>+</mo><mn>2</mn></mrow><mo>=</mo><mn>4</mn></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Blabla (<a href="#S2.Ex16" title="2 Tags" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a>).</p>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">3 </span>Arrows</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A\xLeftarrow[under]{over}B\xRightarrow[under]{over}C" display="block"><mrow><mi>A</mi><munderover accent="true" accentunder="true"><mo>⇐</mo><mrow><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">n</mi><mo>⁢</mo><mi mathsize="142%">d</mi><mo>⁢</mo><mi mathsize="142%">e</mi><mo>⁢</mo><mi mathsize="142%">r</mi></mrow><mrow><mi>o</mi><mo>⁢</mo><mi>v</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi></mrow></munderover><mi>B</mi><munderover accent="true" accentunder="true"><mo>⇒</mo><mrow><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">n</mi><mo>⁢</mo><mi mathsize="142%">d</mi><mo>⁢</mo><mi mathsize="142%">e</mi><mo>⁢</mo><mi mathsize="142%">r</mi></mrow><mrow><mi>o</mi><mo>⁢</mo><mi>v</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi></mrow></munderover><mi>C</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="x\xleftrightarrow[under]{overlooooooong}y\xLeftrightarrow[underloooooooong]{%
+over}z" display="block"><mrow><mi>x</mi><munderover accent="true" accentunder="true"><mo>↔</mo><mrow><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">n</mi><mo>⁢</mo><mi mathsize="142%">d</mi><mo>⁢</mo><mi mathsize="142%">e</mi><mo>⁢</mo><mi mathsize="142%">r</mi></mrow><mrow><mi>o</mi><mo>⁢</mo><mi>v</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mi>g</mi></mrow></munderover><mrow><mi>y</mi><munderover accent="true" accentunder="true"><mo>⇔</mo><mrow><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">n</mi><mo>⁢</mo><mi mathsize="142%">d</mi><mo>⁢</mo><mi mathsize="142%">e</mi><mo>⁢</mo><mi mathsize="142%">r</mi><mo>⁢</mo><mi mathsize="142%">l</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">o</mi><mo>⁢</mo><mi mathsize="142%">n</mi><mo>⁢</mo><mi mathsize="142%">g</mi></mrow><mrow><mi>o</mi><mo>⁢</mo><mi>v</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi></mrow></munderover><mi>z</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="x\xhookleftarrow[bar]{foo}y\xhookrightarrow[bluuuuuuuuub]{baz}t\xmapsto{%
+heeereee}k" display="block"><mrow><mi>x</mi><munderover accent="true" accentunder="true"><mo>↩</mo><mrow><mi mathsize="142%">b</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">r</mi></mrow><mrow><mi>f</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi></mrow></munderover><mi>y</mi><munderover accent="true" accentunder="true"><mo>↪</mo><mrow><mi mathsize="142%">b</mi><mo>⁢</mo><mi mathsize="142%">l</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">u</mi><mo>⁢</mo><mi mathsize="142%">b</mi></mrow><mrow><mi>b</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>z</mi></mrow></munderover><mi>t</mi><mover accent="true"><mo stretchy="false">↦</mo><mrow><mi>h</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>e</mi></mrow></mover><mi>k</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_math_unparsed" alttext="k\xleftharpoonup[.]{}l\xleftharpoondown{..}m\xrightharpoondown[...]{}n%
+\xrightharpoonup{....}o" display="block"><mrow><mi>k</mi><munderover accent="true" accentunder="true"><mo>↼</mo><mo mathsize="142%">.</mo><mi></mi></munderover><mi>l</mi><mover accent="true"><mo stretchy="false">↽</mo><mrow><mo rspace="0.0835em">.</mo><mo lspace="0.0835em">.</mo></mrow></mover><mi>m</mi><munderover accent="true" accentunder="true"><mo>⇁</mo><mo mathsize="142%">…</mo><mi></mi></munderover><mi>n</mi><mover accent="true"><mo stretchy="false">⇀</mo><mrow><mi mathvariant="normal">…</mi><mo lspace="0em">.</mo></mrow></mover><mi>o</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="x\xrightleftharpoons{bluuuuub}y\xleftrightharpoons[blaaaaaab]{}z" display="block"><mrow><mi>x</mi><mover accent="true"><mo stretchy="false">⇌</mo><mrow><mi>b</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>b</mi></mrow></mover><mi>y</mi><munderover accent="true" accentunder="true"><mo>⇋</mo><mrow><mi mathsize="142%">b</mi><mo>⁢</mo><mi mathsize="142%">l</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">a</mi><mo>⁢</mo><mi mathsize="142%">b</mi></mrow><mi></mi></munderover><mi>z</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="z=\overbrace{\underbracket{x}_{\text{real}}+i\underbracket{y}_{\text{imaginary%
+}}}^{\text{complex number}}\quad\underbrace{1+1}_{=2}" display="block"><mrow><mi>z</mi><mo>=</mo><mrow><mover><mover accent="true"><mrow><munder><munder accentunder="true"><mi>x</mi><mo>﹈</mo></munder><mtext>real</mtext></munder><mo>+</mo><mrow><mi>i</mi><mo>⁢</mo><munder><munder accentunder="true"><mi>y</mi><mo>﹈</mo></munder><mtext>imaginary</mtext></munder></mrow></mrow><mo>⏞</mo></mover><mtext>complex number</mtext></mover><mspace width="1em"></mspace><munder><munder accentunder="true"><mrow><mn>1</mn><mo>+</mo><mn>1</mn></mrow><mo>⏟</mo></munder><mrow><mi></mi><mo>=</mo><mn>2</mn></mrow></munder></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">4 </span>Matrices</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{matrix}c&amp;cocococococo\\
+c&amp;c\end{matrix}" display="block"><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi>c</mi></mtd><mtd><mrow><mi>c</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>o</mi></mrow></mtd></mtr><mtr><mtd><mi>c</mi></mtd><mtd><mi>c</mi></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{matrix}[l]lalalalalala&amp;l\\
+l&amp;l\end{matrix}" display="block"><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>a</mi></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mi>l</mi></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mi>l</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mi>l</mi></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{matrix}[r]rererererere&amp;r\\
+r&amp;r\end{matrix}" display="block"><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mi>r</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>e</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi>r</mi></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mi>r</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mi>r</mi></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{pmatrix}[l]ppppppp&amp;foo\\
+l&amp;ppppppppppppppp\end{pmatrix}" display="block"><mrow><mo>(</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi>f</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mi>l</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>p</mi></mrow></mtd></mtr></mtable><mo>)</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{bmatrix}b&amp;b\\
+b&amp;b\end{bmatrix}" display="block"><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi>b</mi></mtd><mtd><mi>b</mi></mtd></mtr><mtr><mtd><mi>b</mi></mtd><mtd><mi>b</mi></mtd></mtr></mtable><mo>]</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{Bmatrix}[r]B&amp;B\\
+B&amp;BBBBBBBrBBBBBB\end{Bmatrix}" display="block"><mrow><mo>{</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi>B</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mi>B</mi></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mi>B</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi><mo>⁢</mo><mi>B</mi></mrow></mtd></mtr></mtable><mo>}</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{vmatrix}v&amp;v\\
+v&amp;v\end{vmatrix}" display="block"><mrow><mo>|</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi>v</mi></mtd><mtd><mi>v</mi></mtd></mtr><mtr><mtd><mi>v</mi></mtd><mtd><mi>v</mi></mtd></mtr></mtable><mo>|</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{Vmatrix}[c]V&amp;V\\
+VVVVVVcVVVVVV&amp;bar\end{Vmatrix}" display="block"><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi>V</mi></mtd><mtd><mi>V</mi></mtd></mtr><mtr><mtd><mrow><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi><mo>⁢</mo><mi>V</mi></mrow></mtd><mtd><mrow><mi>b</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>r</mi></mrow></mtd></mtr></mtable><mo>‖</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{vmatrix}[l]a&amp;blblblbllbblblblblblblbl\\
+c&amp;d\end{vmatrix}" display="block"><mrow><mo>|</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">a</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">l</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">c</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>|</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{bmatrix}a&amp;-b\\
+-c&amp;d\end{bmatrix}\begin{bmatrix}[r]a&amp;-b\\
+-c&amp;d\end{bmatrix}" display="block"><mrow><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi mathsize="70%">a</mi></mtd><mtd><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">b</mi></mrow></mtd></mtr><mtr><mtd><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">c</mi></mrow></mtd><mtd><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>]</mo></mrow><mo>⁢</mo><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">a</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">b</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">c</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>]</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{Vmatrix}e&amp;-f\\
+-g&amp;h\end{Vmatrix}\begin{Vmatrix}[r]e&amp;-f\\
+-g&amp;h\end{Vmatrix}" display="block"><mrow><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi mathsize="70%">e</mi></mtd><mtd><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">f</mi></mrow></mtd></mtr><mtr><mtd><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">g</mi></mrow></mtd><mtd><mi mathsize="70%">h</mi></mtd></mtr></mtable><mo>‖</mo></mrow><mo>⁢</mo><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">e</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">f</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">g</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">h</mi></mtd></mtr></mtable><mo>‖</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{bmatrix}a&amp;-bbbbb\\
+-c&amp;d\end{bmatrix}\begin{bmatrix}[r]a&amp;-bbbbb\\
+-c&amp;d\end{bmatrix}" display="block"><mrow><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi mathsize="70%">a</mi></mtd><mtd><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi></mrow></mrow></mtd></mtr><mtr><mtd><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">c</mi></mrow></mtd><mtd><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>]</mo></mrow><mo>⁢</mo><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">a</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">c</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>]</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{Vmatrix}e&amp;-fffff\\
+-g&amp;h\end{Vmatrix}\begin{Vmatrix}[r]e&amp;-fffff\\
+-g&amp;h\end{Vmatrix}" display="block"><mrow><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi mathsize="70%">e</mi></mtd><mtd><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi></mrow></mrow></mtd></mtr><mtr><mtd><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">g</mi></mrow></mtd><mtd><mi mathsize="70%">h</mi></mtd></mtr></mtable><mo>‖</mo></mrow><mo>⁢</mo><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">e</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">g</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">h</mi></mtd></mtr></mtable><mo>‖</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{bmatrix}[l]a&amp;-bbbbb\\
+-c&amp;d\end{bmatrix}\begin{bmatrix}[r]a&amp;-bbbbb\\
+-c&amp;d\end{bmatrix}" display="block"><mrow><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">a</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">c</mi></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>]</mo></mrow><mo>⁢</mo><mrow><mo>[</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">a</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi><mo>⁢</mo><mi mathsize="70%">b</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">c</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo>]</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{Vmatrix}[l]e&amp;-fffff\\
+-g&amp;h\end{Vmatrix}\begin{Vmatrix}[r]e&amp;-fffff\\
+-g&amp;h\end{Vmatrix}" display="block"><mrow><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">e</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">g</mi></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">h</mi></mtd></mtr></mtable><mo>‖</mo></mrow><mo>⁢</mo><mrow><mo>‖</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">e</mi></mtd><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mrow><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi><mo>⁢</mo><mi mathsize="70%">f</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mo mathsize="70%">−</mo><mi mathsize="70%">g</mi></mrow></mtd><mtd class="ltx_align_right" columnalign="right"><mi mathsize="70%">h</mi></mtd></mtr></mtable><mo>‖</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">5 </span>Cases</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{cases}E=mc^{2}&amp;\text{Nothing to see here}\\
+\int x-3\,dx&amp;\text{Integral is text style}\end{cases}" display="block"><mrow><mo>{</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>E</mi><mo>=</mo><mrow><mi>m</mi><mo>⁢</mo><msup><mi>c</mi><mn>2</mn></msup></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>Nothing to see here</mtext></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mstyle displaystyle="false"><mrow><mo>∫</mo><mi>x</mi></mrow></mstyle><mo>−</mo><mrow><mn>3</mn><mo lspace="0.170em">⁢</mo><mi>d</mi><mo>⁢</mo><mi>x</mi></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>Integral is text style</mtext></mtd></mtr></mtable></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{dcases}E=mc^{2}&amp;c\approx 3.00\times 10^{8}\,\mathrm{m}/\mathrm{s}\\
+\int x-3\,dx&amp;\text{Integral is display style}\end{dcases}" display="block"><mrow><mo>{</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>E</mi><mo>=</mo><mrow><mi>m</mi><mo>⁢</mo><msup><mi>c</mi><mn>2</mn></msup></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi>c</mi><mo>≈</mo><mrow><mrow><mrow><mn>3.00</mn><mo lspace="0.222em" rspace="0.222em">×</mo><msup><mn>10</mn><mn>8</mn></msup></mrow><mo>⁢</mo><mi mathvariant="normal">m</mi></mrow><mo>/</mo><mi mathvariant="normal">s</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mo>∫</mo><mi>x</mi></mrow><mo>−</mo><mrow><mn>3</mn><mo lspace="0.170em">⁢</mo><mi>d</mi><mo>⁢</mo><mi>x</mi></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>Integral is display style</mtext></mtd></mtr></mtable></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=\begin{dcases*}E=mc^{2}&amp;Nothing to see here (text in math)\\
+\int x-3\,dx&amp;Integral is display style (text in math)\end{dcases*}" display="block"><mrow><mi>a</mi><mo>=</mo><mrow><mo>{</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>E</mi><mo>=</mo><mrow><mi>m</mi><mo>⁢</mo><msup><mi>c</mi><mn>2</mn></msup></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>Nothing to see here (text in math)</mtext></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mo>∫</mo><mi>x</mi></mrow><mo>−</mo><mrow><mn>3</mn><mo lspace="0.170em">⁢</mo><mi>d</mi><mo>⁢</mo><mi>x</mi></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>Integral is display style (text in math)</mtext></mtd></mtr></mtable></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{rcases}E=mc^{2}&amp;5^{6}\quad\text{and so on}\\
+\int x-3\,dx&amp;\int x\,dx\end{rcases}=b" display="block"><mrow><mrow><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>E</mi><mo>=</mo><mrow><mi>m</mi><mo>⁢</mo><msup><mi>c</mi><mn>2</mn></msup></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><msup><mn>5</mn><mn>6</mn></msup><mspace width="1em"></mspace><mtext>and so on</mtext></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mstyle displaystyle="false"><mrow><mo>∫</mo><mi>x</mi></mrow></mstyle><mo>−</mo><mrow><mn>3</mn><mo lspace="0.170em">⁢</mo><mi>d</mi><mo>⁢</mo><mi>x</mi></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mstyle displaystyle="false"><mrow><mo>∫</mo><mrow><mi>x</mi><mo lspace="0.170em">⁢</mo><mrow><mo rspace="0em">𝑑</mo><mi>x</mi></mrow></mrow></mrow></mstyle></mtd></mtr></mtable><mo>}</mo></mrow><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{rcases*}x^{2}&amp;for $\int x\,dx&gt;0$\\
+x^{3}&amp;else\end{rcases*}\Rightarrow\cdots" display="block"><mrow><mrow><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><msup><mi>x</mi><mn>2</mn></msup></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mtext>for </mtext><mrow><mstyle displaystyle="false"><mrow><mo>∫</mo><mrow><mi>x</mi><mo lspace="0.170em">⁢</mo><mrow><mo rspace="0em">𝑑</mo><mi>x</mi></mrow></mrow></mrow></mstyle><mo>&gt;</mo><mn>0</mn></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><msup><mi>x</mi><mn>3</mn></msup></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>else</mtext></mtd></mtr></mtable><mo>}</mo></mrow><mo stretchy="false">⇒</mo><mi mathvariant="normal">⋯</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{drcases}E=mc^{2}&amp;5^{6}\quad\text{and so on}\\
+\int x-3\,dx&amp;\int x\,dx\end{drcases}=b" display="block"><mrow><mrow><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>E</mi><mo>=</mo><mrow><mi>m</mi><mo>⁢</mo><msup><mi>c</mi><mn>2</mn></msup></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><msup><mn>5</mn><mn>6</mn></msup><mspace width="1em"></mspace><mtext>and so on</mtext></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mo>∫</mo><mi>x</mi></mrow><mo>−</mo><mrow><mn>3</mn><mo lspace="0.170em">⁢</mo><mi>d</mi><mo>⁢</mo><mi>x</mi></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mo>∫</mo><mrow><mi>x</mi><mo lspace="0.170em">⁢</mo><mrow><mo rspace="0em">𝑑</mo><mi>x</mi></mrow></mrow></mrow></mtd></mtr></mtable><mo>}</mo></mrow><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{drcases*}x^{2}&amp;for $\int x\,dx&gt;0$\\
+\int x^{3}\,x&amp;else\end{drcases*}\Rightarrow\cdots" display="block"><mrow><mrow><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><msup><mi>x</mi><mn>2</mn></msup></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mtext>for </mtext><mrow><mstyle displaystyle="false"><mrow><mo>∫</mo><mrow><mi>x</mi><mo lspace="0.170em">⁢</mo><mrow><mo rspace="0em">𝑑</mo><mi>x</mi></mrow></mrow></mrow></mstyle><mo>&gt;</mo><mn>0</mn></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mo>∫</mo><mrow><msup><mi>x</mi><mn>3</mn></msup><mo>⁢</mo><mi>x</mi></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>else</mtext></mtd></mtr></mtable><mo>}</mo></mrow><mo stretchy="false">⇒</mo><mi mathvariant="normal">⋯</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\text{foo}=\begin{cases*}\pi&amp;if something\\
+\int\Omega^{\Xi}\,\Omega&amp;otherwise\end{cases*}" display="block"><mrow><mtext>foo</mtext><mo>=</mo><mrow><mo>{</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mi>π</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>if something</mtext></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mstyle displaystyle="false"><mrow><mo>∫</mo><mrow><msup><mi mathvariant="normal">Ω</mi><mi mathvariant="normal">Ξ</mi></msup><mo>⁢</mo><mi mathvariant="normal">Ω</mi></mrow></mrow></mstyle></mtd><mtd class="ltx_align_left" columnalign="left"><mtext>otherwise</mtext></mtd></mtr></mtable></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">6 </span>Gathered</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{gathered}\framebox[113.81102pt]{first}\\
+\framebox[113.81102pt]{last}\end{gathered}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable align="bottom1" displaystyle="true" rowspacing="0pt"><mtr><mtd><mpadded class="ltx_framed_rectangle" style="border-color: #000000" width="113.8pt"><mtext>first</mtext></mpadded></mtd></mtr><mtr><mtd><mpadded class="ltx_framed_rectangle" style="border-color: #000000" width="113.8pt"><mtext>last</mtext></mpadded></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{gathered}a=b+c\\
+b=c+d\\
+...\end{gathered}" display="block"><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd><mrow><mi>a</mi><mo>=</mo><mrow><mi>b</mi><mo>+</mo><mi>c</mi></mrow></mrow></mtd></mtr><mtr><mtd><mrow><mi>b</mi><mo>=</mo><mrow><mi>c</mi><mo>+</mo><mi>d</mi></mrow></mrow></mtd></mtr><mtr><mtd><mi mathvariant="normal">…</mi></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\boxed{hello}" display="block"><menclose notation="box"><mrow><mi>h</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>o</mi></mrow></menclose></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle f(x)" display="inline"><mrow><mi>f</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow></mrow></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=\int h(x)\,dx" display="inline"><mrow><mi></mi><mo>=</mo><mstyle displaystyle="true"><mrow><mo>∫</mo><mrow><mi>h</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow><mo lspace="0.170em">⁢</mo><mrow><mo rspace="0em">𝑑</mo><mi>x</mi></mrow></mrow></mrow></mstyle></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=g(x)" display="inline"><mrow><mi></mi><mo>=</mo><mrow><mi>g</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle a" display="inline"><mi>a</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=b" display="inline"><mrow><mi></mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(11)</span></td>
+</tr></tbody>
+<tbody><tr class="ltx_eqn_row ltx_align_baseline"><td class="ltx_eqn_cell ltx_align_left" style="white-space:normal;" colspan="5">Some text</td></tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle c" display="inline"><mi>c</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=d" display="inline"><mrow><mi></mi><mo>=</mo><mi>d</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(12)</span></td>
+</tr></tbody>
+<tbody><tr class="ltx_eqn_row ltx_align_baseline"><td class="ltx_eqn_cell ltx_align_left" style="white-space:normal;" colspan="5">Some short text</td></tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle e" display="inline"><mi>e</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=f" display="inline"><mrow><mi></mi><mo>=</mo><mi>f</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(13)</span></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">7 </span>Delimiters</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\lvert\frac{a}{c}\rvert\quad\left\lvert\frac{a}{c}\right\rvert\quad\Bigg{%
+\lvert}\frac{a}{b}\Bigg{\rvert}" display="block"><mrow><mrow><mo stretchy="false">|</mo><mfrac><mi>a</mi><mi>c</mi></mfrac><mo stretchy="false">|</mo></mrow><mspace width="1em"></mspace><mrow><mo>|</mo><mfrac><mi>a</mi><mi>c</mi></mfrac><mo>|</mo></mrow><mspace width="1em"></mspace><mrow><mo maxsize="260%" minsize="260%">|</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo maxsize="260%" minsize="260%">|</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\lvert\frac{a}{b}\rvert\quad\left\lvert\frac{a}{b}\right\rvert\quad\big{\lvert%
+}\frac{a}{b}\big{\rvert}\quad\Bigg{\lvert}\frac{a}{b}\Bigg{\rvert}" display="block"><mrow><mrow><mo stretchy="false">|</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo stretchy="false">|</mo></mrow><mspace width="1em"></mspace><mrow><mo>|</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>|</mo></mrow><mspace width="1em"></mspace><mrow><mo maxsize="120%" minsize="120%">|</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo maxsize="120%" minsize="120%">|</mo></mrow><mspace width="1em"></mspace><mrow><mo maxsize="260%" minsize="260%">|</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo maxsize="260%" minsize="260%">|</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\lvert@\pi@\rvert\quad\left\lvert\_\phi\_\right\rvert" display="block"><mrow><mrow><mo stretchy="false">|</mo><mrow><mi mathvariant="normal">@</mi><mo>⁢</mo><mi>π</mi><mo>⁢</mo><mi mathvariant="normal">@</mi></mrow><mo stretchy="false">|</mo></mrow><mspace width="1em"></mspace><mrow><mo>|</mo><mrow><mi mathvariant="normal">_</mi><mo>⁢</mo><mi>ϕ</mi><mo>⁢</mo><mi mathvariant="normal">_</mi></mrow><mo>|</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\left\langle A,\frac{1}{2}\right\rangle\quad\Big{\langle}B\,\Big{|}\,\sum_{k}f%
+_{k}\,\Big{|}\,C\Big{\rangle}" display="block"><mrow><mrow><mo>⟨</mo><mi>A</mi><mo>,</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><mo>⟩</mo></mrow><mspace width="1em"></mspace><mrow><mo maxsize="160%" minsize="160%">⟨</mo><mi>B</mi><mo lspace="0.170em" maxsize="160%" minsize="160%" rspace="0.170em">|</mo><mrow><munder><mo movablelimits="false">∑</mo><mi>k</mi></munder><msub><mi>f</mi><mi>k</mi></msub></mrow><mo maxsize="160%" minsize="160%" rspace="0.170em">|</mo><mi>C</mi><mo maxsize="160%" minsize="160%">⟩</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\left\{x\in X\middle|\allowbreak\frac{\sqrt{x}}{x^{2}+1}&gt;1\right\}" display="block"><mrow><mo>{</mo><mrow><mi>x</mi><mo>∈</mo><mi>X</mi></mrow><mo lspace="0em" rspace="0em" stretchy="true">|</mo><mrow><mfrac><msqrt><mi>x</mi></msqrt><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mn>1</mn></mrow></mfrac><mo>&gt;</mo><mn>1</mn></mrow><mo>}</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p"><math  class="ltx_Math" alttext="\langle 1\,|\,\frac{8}{\frac{4}{1}}\,|\,3\rangle" display="inline"><mrow><mo stretchy="false">⟨</mo><mn>1</mn><mo lspace="0.170em" rspace="0.170em" stretchy="false">|</mo><mfrac><mn>8</mn><mfrac><mn>4</mn><mn>1</mn></mfrac></mfrac><mo lspace="0.170em" stretchy="false">|</mo><mn> 3</mn><mo stretchy="false">⟩</mo></mrow></math>
+<math  class="ltx_Math" alttext="\left\langle 1\,\middle|\,\frac{8}{\frac{4}{1}}\,\middle|\,3\right\rangle" display="inline"><mrow><mo>⟨</mo><mn>1</mn><mo lspace="0.170em" rspace="0.170em">|</mo><mfrac><mn>8</mn><mfrac><mn>4</mn><mn>1</mn></mfrac></mfrac><mo lspace="0.170em">|</mo><mn> 3</mn><mo>⟩</mo></mrow></math>
+<math  class="ltx_Math" alttext="\big{\langle}1\,\big{|}\,\frac{8}{\frac{4}{1}}\,\big{|}\,3\big{\rangle}" display="inline"><mrow><mo maxsize="120%" minsize="120%">⟨</mo><mn>1</mn><mo lspace="0.170em" maxsize="120%" minsize="120%" rspace="0.170em">|</mo><mfrac><mn>8</mn><mfrac><mn>4</mn><mn>1</mn></mfrac></mfrac><mo lspace="0.170em" maxsize="120%" minsize="120%">|</mo><mn> 3</mn><mo maxsize="120%" minsize="120%">⟩</mo></mrow></math></p>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\left(\frac{\pi}{\omega}\right)\cdot\left[\int xdx\right]\ldots[\sqrt{\frac{%
+\sin x}{\cos z}}]\cdots\lparen\frac{\frac{foo}{bar}}{\frac{baz}{qux}}\rparen" display="block"><mrow><mrow><mrow><mo>(</mo><mfrac><mi>π</mi><mi>ω</mi></mfrac><mo rspace="0.055em">)</mo></mrow><mo rspace="0.222em">⋅</mo><mrow><mo>[</mo><mrow><mo lspace="0em">∫</mo><mrow><mi>x</mi><mo lspace="0em">⁢</mo><mrow><mo rspace="0em">𝑑</mo><mi>x</mi></mrow></mrow></mrow><mo>]</mo></mrow></mrow><mo>⁢</mo><mi mathvariant="normal">…</mi><mo>⁢</mo><mrow><mo stretchy="false">[</mo><msqrt><mfrac><mrow><mi>sin</mi><mo lspace="0.167em">⁡</mo><mi>x</mi></mrow><mrow><mi>cos</mi><mo lspace="0.167em">⁡</mo><mi>z</mi></mrow></mfrac></msqrt><mo stretchy="false">]</mo></mrow><mo>⁢</mo><mi mathvariant="normal">⋯</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mfrac><mfrac><mrow><mi>f</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi></mrow><mrow><mi>b</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>r</mi></mrow></mfrac><mfrac><mrow><mi>b</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>z</mi></mrow><mrow><mi>q</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>x</mi></mrow></mfrac></mfrac><mo stretchy="false">)</mo></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<section  class="ltx_paragraph">
+<h3 class="ltx_title ltx_title_paragraph">Operators</h3>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a:=b\quad a\vcentcolon=b\quad a\ordinarycolon=b" display="block"><mrow><mrow><mi>a</mi><mo lspace="0.278em" rspace="0.278em">:=</mo><mi>b</mi></mrow><mspace width="1em"></mspace><mrow><mrow><mi>a</mi><mo lspace="0.278em" rspace="0.278em">:=</mo><mi>b</mi></mrow><mspace width="1em"></mspace><mrow><mi>a</mi><mo lspace="0.278em" rspace="0.278em">:=</mo><mi>b</mi></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a\coloneqq b\quad c\Colonapprox d\quad e\dblcolon f" display="block"><mrow><mrow><mi>a</mi><mo>≔</mo><mi>b</mi></mrow><mspace width="1em"></mspace><mrow><mrow><mi>c</mi><mo>::≈</mo><mi>d</mi></mrow><mspace width="1em"></mspace><mrow><mi>e</mi><mo lspace="0.278em" rspace="0.278em">::</mo><mi>f</mi></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\bigtimes\times\nuparrow\ndownarrow\otimes\bigotimes" display="block"><mrow><mo mathsize="160%">×</mo><mo lspace="0em">⁣</mo><mo>×</mo><mo lspace="0em">⁣</mo><mo stretchy="false">⤉</mo><mo lspace="0em">⁣</mo><mo stretchy="false">⤈</mo><mo lspace="0em">⁣</mo><mo>⊗</mo><mo lspace="0.222em">⁣</mo><mo movablelimits="false">⨂</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">8 </span>Prescripts</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="{}^{4}_{12}\mathbf{C}^{5+}_{2}\quad\prescript{14}{2}{\mathbf{C}}^{5+}_{2}\quad%
+\prescript{4}{12}{\mathbf{C}}^{5+}_{2}\quad\prescript{14}{}{\mathbf{C}}^{5+}_{%
+2}\quad\prescript{}{2}{\mathbf{C}}^{5+}_{2}" display="block"><mrow><mmultiscripts><mi>𝐂</mi><mn>2</mn><mrow><mn>5</mn><mo>+</mo></mrow><mprescripts></mprescripts><mn>12</mn><mn>4</mn></mmultiscripts><mspace width="1em"></mspace><mmultiscripts><mi>𝐂</mi><mn>2</mn><mrow><mn>5</mn><mo>+</mo></mrow><mprescripts></mprescripts><mn>2</mn><mn>14</mn></mmultiscripts><mspace width="1em"></mspace><mmultiscripts><mi>𝐂</mi><mn>2</mn><mrow><mn>5</mn><mo>+</mo></mrow><mprescripts></mprescripts><mn>12</mn><mn>4</mn></mmultiscripts><mspace width="1em"></mspace><mmultiscripts><mi>𝐂</mi><mn>2</mn><mrow><mn>5</mn><mo>+</mo></mrow><mprescripts></mprescripts><mrow></mrow><mn>14</mn></mmultiscripts><mspace width="1em"></mspace><mmultiscripts><mi>𝐂</mi><mn>2</mn><mrow><mn>5</mn><mo>+</mo></mrow><mprescripts></mprescripts><mn>2</mn><mrow></mrow></mmultiscripts></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\prescript{A}{Z}{X}\to\prescript{A-4}{Z-2}{Y}+\prescript{4}{2}{\alpha}" display="block"><mrow><mmultiscripts><mi mathvariant="normal">X</mi><mprescripts></mprescripts><mi>𝐙</mi><mi>A</mi></mmultiscripts><mo stretchy="false">→</mo><mrow><mmultiscripts><mi mathvariant="normal">Y</mi><mprescripts></mprescripts><mrow><mi>𝐙</mi><mo>−</mo><mn>𝟐</mn></mrow><mrow><mi>A</mi><mo>−</mo><mn class="ltx_mathvariant_italic" mathvariant="italic">4</mn></mrow></mmultiscripts><mo>+</mo><mmultiscripts><mi>α</mi><mprescripts></mprescripts><mn>𝟐</mn><mn class="ltx_mathvariant_italic" mathvariant="italic">4</mn></mmultiscripts></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a=\frac{\begin{multlined}xy+xy+\int xy\,\text{dx}+xy+xy\\
++xy+xy+xy+xy\end{multlined}xy+xy+\int xy\,\text{dx}+xy+xy\\
++xy+xy+xy+xy}{z}=\frac{\displaystyle\begin{multlined}xy+xy+\int xy\,\text{dx}+%
+xy+xy\\
++xy+xy+xy+xy\end{multlined}xy+xy+\int xy\,\text{dx}+xy+xy\\
++xy+xy+xy+xy}{z}" display="block"><mrow><mi>a</mi><mo>=</mo><mfrac><mtable rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mstyle displaystyle="true"><mrow><mo>∫</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi><mo lspace="0.170em">⁢</mo><mtext>dx</mtext></mrow></mrow></mstyle><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow></mrow></mtd></mtr></mtable><mi>z</mi></mfrac><mo>=</mo><mfrac><mtable rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mstyle displaystyle="true"><mrow><mo>∫</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi><mo lspace="0.170em">⁢</mo><mtext>dx</mtext></mrow></mrow></mstyle><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow></mrow></mtd></mtr></mtable><mi>z</mi></mfrac></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">9 </span>Multlines</h2>
+
+<div  class="ltx_para">
+<table class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="p(x)=3x^{6}+14x^{5}y+590x^{4}y^{2}+19x^{3}y^{3}\\
+-12x^{2}y^{4}-12xy^{5}+2y^{6}-a^{3}b^{3}" display="block"><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mi>p</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow></mrow><mo>=</mo><mrow><mrow><mn>3</mn><mo>⁢</mo><msup><mi>x</mi><mn>6</mn></msup></mrow><mo>+</mo><mrow><mn>14</mn><mo>⁢</mo><msup><mi>x</mi><mn>5</mn></msup><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><mrow><mn>590</mn><mo>⁢</mo><msup><mi>x</mi><mn>4</mn></msup><mo>⁢</mo><msup><mi>y</mi><mn>2</mn></msup></mrow><mo>+</mo><mrow><mn>19</mn><mo>⁢</mo><msup><mi>x</mi><mn>3</mn></msup><mo>⁢</mo><msup><mi>y</mi><mn>3</mn></msup></mrow></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mrow><mrow><mo>−</mo><mrow><mn>12</mn><mo>⁢</mo><msup><mi>x</mi><mn>2</mn></msup><mo>⁢</mo><msup><mi>y</mi><mn>4</mn></msup></mrow></mrow><mo>−</mo><mrow><mn>12</mn><mo>⁢</mo><mi>x</mi><mo>⁢</mo><msup><mi>y</mi><mn>5</mn></msup></mrow></mrow><mo>+</mo><mrow><mn>2</mn><mo>⁢</mo><msup><mi>y</mi><mn>6</mn></msup></mrow></mrow><mo>−</mo><mrow><msup><mi>a</mi><mn>3</mn></msup><mo>⁢</mo><msup><mi>b</mi><mn>3</mn></msup></mrow></mrow></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable align="bottom1" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable align="bottom" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable align="bottom1" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable align="bottom" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="A=\begin{multlined}\boxed{first}\\
+\boxed{last}\end{multlined}\boxed{first}\\
+\boxed{last}B" display="block"><mrow><mi>A</mi><mo>=</mo><mrow><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>f</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>l</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi></mrow></menclose></mtd></mtr></mtable><mo>⁢</mo><mi>B</mi></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_math_unparsed" alttext="foo\Coloneqq\begin{lgathered}x=1,\quad x+1=2\\
+y=2\end{lgathered}x=1,\quad x+1=2\\
+y=2" display="block"><mrow><mrow><mi>f</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>o</mi></mrow><mo>⩴</mo><mtable align="bottom1" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mi>x</mi><mo>=</mo><mn>1</mn></mrow><mo rspace="1.167em">,</mo><mrow><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow><mo>=</mo><mn>2</mn></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>y</mi><mo>=</mo><mn>2</mn></mrow></mtd></mtr></mtable></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(14)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_math_unparsed" alttext="bar\Coloneqq\begin{rgathered}x=1,\quad x+1=2\\
+y=2\end{rgathered}x=1,\quad x+1=2\\
+y=2" display="block"><mrow><mrow><mi>b</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>r</mi></mrow><mo>⩴</mo><mtable align="bottom" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mi>x</mi><mo>=</mo><mn>1</mn></mrow><mo rspace="1.167em">,</mo><mrow><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow><mo>=</mo><mn>2</mn></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mi>y</mi><mo>=</mo><mn>2</mn></mrow></mtd></mtr></mtable></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(15)</span></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">10 </span>Spread-lines</h2>
+
+<div  class="ltx_para">
+<p class="ltx_p">Spread it</p>
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{matrix}a&amp;b&amp;c\\
+d&amp;e&amp;f\\
+g&amp;h&amp;i\end{matrix}" display="block"><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd><mtd><mi>c</mi></mtd></mtr><mtr><mtd><mi>d</mi></mtd><mtd><mi>e</mi></mtd><mtd><mi>f</mi></mtd></mtr><mtr><mtd><mi>g</mi></mtd><mtd><mi>h</mi></mtd><mtd><mi>i</mi></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{pmatrix}a_{1,1}&amp;a_{1,2}&amp;\cdots&amp;a_{1,n}\\
+a_{2,1}&amp;a_{2,2}&amp;\cdots&amp;a_{2,n}\\
+\vdots&amp;\vdots&amp;\ddots&amp;\vdots\\
+a_{m,1}&amp;a_{m,2}&amp;\cdots&amp;a_{m,n}\end{pmatrix}" display="block"><mrow><mo>(</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><msub><mi>a</mi><mrow><mn>1</mn><mo>,</mo><mn>1</mn></mrow></msub></mtd><mtd><msub><mi>a</mi><mrow><mn>1</mn><mo>,</mo><mn>2</mn></mrow></msub></mtd><mtd><mi mathvariant="normal">⋯</mi></mtd><mtd><msub><mi>a</mi><mrow><mn>1</mn><mo>,</mo><mi>n</mi></mrow></msub></mtd></mtr><mtr><mtd><msub><mi>a</mi><mrow><mn>2</mn><mo>,</mo><mn>1</mn></mrow></msub></mtd><mtd><msub><mi>a</mi><mrow><mn>2</mn><mo>,</mo><mn>2</mn></mrow></msub></mtd><mtd><mi mathvariant="normal">⋯</mi></mtd><mtd><msub><mi>a</mi><mrow><mn>2</mn><mo>,</mo><mi>n</mi></mrow></msub></mtd></mtr><mtr><mtd><mi mathvariant="normal">⋮</mi></mtd><mtd><mi mathvariant="normal">⋮</mi></mtd><mtd><mi mathvariant="normal">⋱</mi></mtd><mtd><mi mathvariant="normal">⋮</mi></mtd></mtr><mtr><mtd><msub><mi>a</mi><mrow><mi>m</mi><mo>,</mo><mn>1</mn></mrow></msub></mtd><mtd><msub><mi>a</mi><mrow><mi>m</mi><mo>,</mo><mn>2</mn></mrow></msub></mtd><mtd><mi mathvariant="normal">⋯</mi></mtd><mtd><msub><mi>a</mi><mrow><mi>m</mi><mo>,</mo><mi>n</mi></mrow></msub></mtd></mtr></mtable><mo>)</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p"><math  class="ltx_Math" alttext="\begin{smallmatrix}a&amp;b\\
+c&amp;d\end{smallmatrix}" display="inline"><mtable columnspacing="5pt" rowspacing="0pt"><mtr><mtd><mi mathsize="70%">a</mi></mtd><mtd><mi mathsize="70%">b</mi></mtd></mtr><mtr><mtd><mi mathsize="70%">c</mi></mtd><mtd><mi mathsize="70%">d</mi></mtd></mtr></mtable></math></p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p"><math  class="ltx_Math" alttext="\begin{cases}n/2&amp;\quad\text{if }n\text{ is even}\\
+-(n+1)/2&amp;\quad\text{if }n\text{ is odd}\\
+\end{cases}" display="inline"><mrow><mo>{</mo><mtable columnspacing="5pt" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>n</mi><mo>/</mo><mn>2</mn></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mtext>if </mtext><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mtext> is even</mtext></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mo>−</mo><mrow><mrow><mo stretchy="false">(</mo><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow><mo stretchy="false">)</mo></mrow><mo>/</mo><mn>2</mn></mrow></mrow></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mtext>if </mtext><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mtext> is odd</mtext></mrow></mtd></mtr></mtable></mrow></math></p>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{split}a&amp;=b+c-d\\
+&amp;\quad+e-f\\
+&amp;=g+h\\
+&amp;=i\end{split}" display="block"><mtable columnspacing="0pt" displaystyle="true" rowspacing="30.0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mi>a</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi></mi><mo>=</mo><mrow><mrow><mi>b</mi><mo>+</mo><mi>c</mi></mrow><mo>−</mo><mi>d</mi></mrow></mrow></mtd></mtr><mtr><mtd></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mo>+</mo><mi>e</mi></mrow><mo>−</mo><mi>f</mi></mrow></mtd></mtr><mtr><mtd></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi></mi><mo>=</mo><mrow><mi>g</mi><mo>+</mo><mi>h</mi></mrow></mrow></mtd></mtr><mtr><mtd></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mi></mi><mo>=</mo><mi>i</mi></mrow></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(16)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="a+b+c+d+e+f\\
++i+j+k+l+m+n" display="block"><mtable displaystyle="true" rowspacing="30.0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>a</mi><mo>+</mo><mi>b</mi><mo>+</mo><mi>c</mi><mo>+</mo><mi>d</mi><mo>+</mo><mi>e</mi><mo>+</mo><mi>f</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mo>+</mo><mi>i</mi></mrow><mo>+</mo><mi>j</mi><mo>+</mo><mi>k</mi><mo>+</mo><mi>l</mi><mo>+</mo><mi>m</mi><mo>+</mo><mi>n</mi></mrow></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(17)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_gather ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\displaystyle a=b" display="block"><mrow><mi>a</mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(18)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\displaystyle c=d" display="block"><mrow><mi>c</mi><mo>=</mo><mi>d</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(19)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle a_{1}" display="inline"><msub><mi>a</mi><mn>1</mn></msub></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=b_{1}+c_{1}" display="inline"><mrow><mi></mi><mo>=</mo><mrow><msub><mi>b</mi><mn>1</mn></msub><mo>+</mo><msub><mi>c</mi><mn>1</mn></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(20)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle a_{2}" display="inline"><msub><mi>a</mi><mn>2</mn></msub></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=b_{2}+c_{2}-d_{2}+e_{2}" display="inline"><mrow><mi></mi><mo>=</mo><mrow><mrow><mrow><msub><mi>b</mi><mn>2</mn></msub><mo>+</mo><msub><mi>c</mi><mn>2</mn></msub></mrow><mo>−</mo><msub><mi>d</mi><mn>2</mn></msub></mrow><mo>+</mo><msub><mi>e</mi><mn>2</mn></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(21)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle a_{11}" display="inline"><msub><mi>a</mi><mn>11</mn></msub></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=b_{11}" display="inline"><mrow><mi></mi><mo>=</mo><msub><mi>b</mi><mn>11</mn></msub></mrow></math></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle a_{12}" display="inline"><msub><mi>a</mi><mn>12</mn></msub></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=b_{12}" display="inline"><mrow><mi></mi><mo>=</mo><msub><mi>b</mi><mn>12</mn></msub></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle a_{21}" display="inline"><msub><mi>a</mi><mn>21</mn></msub></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=b_{21}" display="inline"><mrow><mi></mi><mo>=</mo><msub><mi>b</mi><mn>21</mn></msub></mrow></math></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle a_{22}" display="inline"><msub><mi>a</mi><mn>22</mn></msub></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=b_{22}+c_{22}" display="inline"><mrow><mi></mi><mo>=</mo><mrow><msub><mi>b</mi><mn>22</mn></msub><mo>+</mo><msub><mi>c</mi><mn>22</mn></msub></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle x" display="inline"><mi>x</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=y_{1}-y_{2}+y_{3}-y_{5}+y_{8}-\dots" display="inline"><mrow><mi></mi><mo>=</mo><mrow><mrow><mrow><mrow><mrow><msub><mi>y</mi><mn>1</mn></msub><mo>−</mo><msub><mi>y</mi><mn>2</mn></msub></mrow><mo>+</mo><msub><mi>y</mi><mn>3</mn></msub></mrow><mo>−</mo><msub><mi>y</mi><mn>5</mn></msub></mrow><mo>+</mo><msub><mi>y</mi><mn>8</mn></msub></mrow><mo>−</mo><mi mathvariant="normal">…</mi></mrow></mrow></math></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><span class="ltx_text ltx_markedasmath">by foo</span></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(22)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=y^{\prime}\circ y^{*}" display="inline"><mrow><mi></mi><mo>=</mo><mrow><msup><mi>y</mi><mo>′</mo></msup><mo lspace="0.222em" rspace="0.222em">∘</mo><msup><mi>y</mi><mo>∗</mo></msup></mrow></mrow></math></td>
+<td class="ltx_td ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><span class="ltx_text ltx_markedasmath">by baz</span></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(23)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=y(0)y^{\prime}" display="inline"><mrow><mi></mi><mo>=</mo><mrow><mi>y</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><mo>⁢</mo><msup><mi>y</mi><mo>′</mo></msup></mrow></mrow></math></td>
+<td class="ltx_td ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><span class="ltx_text ltx_markedasmath">by Axiom 1.</span></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(24)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_math_unparsed" alttext="\left.\begin{aligned} B^{\prime}&amp;=-\partial\times E,\\
+E^{\prime}&amp;=\partial\times B-4\pi j,\end{aligned}\right\}\qquad\text{Maxwell's%
+ equations}" display="block"><mrow><mtable columnspacing="0pt" displaystyle="true" rowspacing="30.0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><msup><mi>B</mi><mo>′</mo></msup></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mi></mi><mo>=</mo><mrow><mo>−</mo><mrow><mo lspace="0em" rspace="0.055em">∂</mo><mo rspace="0.222em">×</mo><mi>E</mi></mrow></mrow></mrow><mo>,</mo></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><msup><mi>E</mi><mo>′</mo></msup></mtd><mtd class="ltx_align_left" columnalign="left"><mrow><mrow><mi></mi><mo rspace="0.1389em">=</mo><mrow><mrow><mo lspace="0.1389em" rspace="0.055em">∂</mo><mo rspace="0.222em">×</mo><mi>B</mi></mrow><mo>−</mo><mrow><mn>4</mn><mo>⁢</mo><mi>π</mi><mo>⁢</mo><mi>j</mi></mrow></mrow></mrow><mo>,</mo></mrow></mtd></mtr></mtable><mo>}</mo><mspace width="2em"></mspace><mtext>Maxwell’s equations</mtext></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\bigl{(}\begin{smallmatrix}a&amp;b\\
+c&amp;d\end{smallmatrix}\bigr{)}" display="block"><mrow><mo maxsize="120%" minsize="120%">(</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd><mi mathsize="70%">a</mi></mtd><mtd><mi mathsize="70%">b</mi></mtd></mtr><mtr><mtd><mi mathsize="70%">c</mi></mtd><mtd><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo maxsize="120%" minsize="120%">)</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\bigl{(}\begin{matrix}[l]a&amp;b\\
+c&amp;d\end{matrix}\bigr{)}" display="block"><mrow><mo maxsize="120%" minsize="120%">(</mo><mtable columnspacing="5pt" displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">a</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">b</mi></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">c</mi></mtd><mtd class="ltx_align_left" columnalign="left"><mi mathsize="70%">d</mi></mtd></mtr></mtable><mo maxsize="120%" minsize="120%">)</mo></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\sum_{\begin{subarray}{l}i\in\Lambda\\
+0&lt;j&lt;n\end{subarray}}P(i,j)" display="block"><mrow><munder><mo movablelimits="false">∑</mo><mtable rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>i</mi><mo>∈</mo><mi mathvariant="normal">Λ</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mn>0</mn><mo>&lt;</mo><mi>j</mi><mo>&lt;</mo><mi>n</mi></mrow></mtd></mtr></mtable></munder><mrow><mi>P</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mi>i</mi><mo>,</mo><mi>j</mi><mo stretchy="false">)</mo></mrow></mrow></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_eqnarray ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle y" display="inline"><mi>y</mi></math></td>
+<td class="ltx_td ltx_align_center ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=" display="inline"><mo>=</mo></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle ax^{2}+bx+c" display="inline"><mrow><mrow><mi>a</mi><mo>⁢</mo><msup><mi>x</mi><mn>2</mn></msup></mrow><mo>+</mo><mrow><mi>b</mi><mo>⁢</mo><mi>x</mi></mrow><mo>+</mo><mi>c</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(25)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle f(x)" display="inline"><mrow><mi>f</mi><mo>⁢</mo><mrow><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo></mrow></mrow></math></td>
+<td class="ltx_td ltx_align_center ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle=" display="inline"><mo>=</mo></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell" style="padding-top:15pt;padding-bottom:15pt;"><math  class="ltx_Math" alttext="\displaystyle x^{2}+2xy+y^{2}" display="inline"><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><mrow><mn>2</mn><mo>⁢</mo><mi>x</mi><mo>⁢</mo><mi>y</mi></mrow><mo>+</mo><msup><mi>y</mi><mn>2</mn></msup></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(26)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_Math" alttext="\begin{multlined}\boxed{Firstline}\\
+\boxed{Secondline}\\
+L+E+F+T\\
+R+I+G+H+T\\
+L+E+F+T\\
+R+I+G+H+T\\
+\boxed{WupWup}\\
+\boxed{Lastline}\end{multlined}\boxed{Firstline}\\
+\boxed{Secondline}\\
+L+E+F+T\\
+R+I+G+H+T\\
+L+E+F+T\\
+R+I+G+H+T\\
+\boxed{WupWup}\\
+\boxed{Lastline}" display="block"><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_left" columnalign="left"><menclose notation="box"><mrow><mi>F</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>r</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mi>e</mi></mrow></menclose></mtd></mtr><mtr><mtd><menclose notation="box"><mrow><mi>S</mi><mo>⁢</mo><mi>e</mi><mo>⁢</mo><mi>c</mi><mo>⁢</mo><mi>o</mi><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mi>d</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mi>e</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>L</mi><mo>+</mo><mi>E</mi><mo>+</mo><mi>F</mi><mo>+</mo><mi>T</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mi>R</mi><mo>+</mo><mi>I</mi><mo>+</mo><mi>G</mi><mo>+</mo><mi>H</mi><mo>+</mo><mi>T</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_left" columnalign="left"><mrow><mi>L</mi><mo>+</mo><mi>E</mi><mo>+</mo><mi>F</mi><mo>+</mo><mi>T</mi></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mi>R</mi><mo>+</mo><mi>I</mi><mo>+</mo><mi>G</mi><mo>+</mo><mi>H</mi><mo>+</mo><mi>T</mi></mrow></mtd></mtr><mtr><mtd><menclose notation="box"><mrow><mi>W</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>p</mi><mo>⁢</mo><mi>W</mi><mo>⁢</mo><mi>u</mi><mo>⁢</mo><mi>p</mi></mrow></menclose></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><menclose notation="box"><mrow><mi>L</mi><mo>⁢</mo><mi>a</mi><mo>⁢</mo><mi>s</mi><mo>⁢</mo><mi>t</mi><mo>⁢</mo><mi>l</mi><mo>⁢</mo><mi>i</mi><mo>⁢</mo><mi>n</mi><mo>⁢</mo><mi>e</mi></mrow></menclose></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">11 </span>Stepped lines</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_math_unparsed" alttext="\begin{gathered}x=1,\quad x+1=2\\
+y=2\end{gathered}" display="block"><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mrow><mrow><mpadded width="0.0pt"><mtext>1</mtext></mpadded><mo lspace="0.222em" rspace="0.222em">∗</mo><mtext> </mtext></mrow><mo>⁢</mo><mi>x</mi></mrow><mo>=</mo><mn>1</mn></mrow><mo rspace="1.167em">,</mo><mrow><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow><mo>=</mo><mrow><mn>2</mn><mo>⁢</mo><mrow><mtext> </mtext><mtext class="ltx_mathvariant_bold">over</mtext></mrow></mrow></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mrow><mpadded width="0.0pt"><mtext>2</mtext></mpadded><mo lspace="0.222em" rspace="0.222em">∗</mo><mtext> </mtext></mrow><mo>⁢</mo><mi>y</mi></mrow><mo>=</mo><mrow><mn>2</mn><mo>⁢</mo><mrow><mtext> </mtext><mtext class="ltx_mathvariant_bold">over</mtext></mrow></mrow></mrow></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">42</p>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equation ltx_eqn_table">
+
+<tbody><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_eqn_cell ltx_align_center"><math  class="ltx_math_unparsed" alttext="\begin{gathered}s=2.8,\quad s+0.2=3\\
+t=4.5\end{gathered}" display="block"><mtable displaystyle="true" rowspacing="0pt"><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mrow><mtext>See:</mtext><mo>⁢</mo><mi>s</mi></mrow><mo>=</mo><mn>2.8</mn></mrow><mo rspace="1.167em">,</mo><mrow><mrow><mi>s</mi><mo>+</mo><mn>0.2</mn></mrow><mo>=</mo><mrow><mn>3</mn><mo>⁢</mo><mtext>the end</mtext></mrow></mrow></mrow></mtd></mtr><mtr><mtd class="ltx_align_right" columnalign="right"><mrow><mrow><mtext>See:</mtext><mo>⁢</mo><mi>t</mi></mrow><mo>=</mo><mrow><mn>4.5</mn><mo>⁢</mo><mtext>the end</mtext></mrow></mrow></mtd></mtr></mtable></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">1337</p>
+</div>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">12 </span>Shifting equations</h2>
+
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><span class="ltx_text ltx_markedasmath ltx_framed ltx_framed_rectangle ltx_inline-block" style="width:284.5pt;border-color: #000000;">Part 1</span></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle={}" display="inline"><mo>=</mo></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><span class="ltx_text ltx_markedasmath ltx_framed ltx_framed_rectangle ltx_inline-block" style="width:227.6pt;border-color: #000000;">2nd line</span></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle 19" display="inline"><mn>19</mn></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle+\framebox[113.81102pt][c]{ last part}" display="inline"><mrow><mo>+</mo><mpadded class="ltx_framed_rectangle" style="border-color: #000000" width="113.8pt"><mtext> last part</mtext></mpadded></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><span class="ltx_text ltx_markedasmath ltx_framed ltx_framed_rectangle ltx_inline-block" style="width:42.7pt;border-color: #000000;">1</span></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=\framebox[85.35826pt]{2}" display="inline"><mrow><mi></mi><mo>=</mo><mpadded class="ltx_framed_rectangle" style="border-color: #000000" width="85.4pt"><mtext>2</mtext></mpadded></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(27)</span></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><span class="ltx_text ltx_markedasmath ltx_framed ltx_framed_rectangle ltx_inline-block" style="width:42.7pt;border-color: #000000;">3</span></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=\framebox[56.9055pt]{4}" display="inline"><mrow><mi></mi><mo>=</mo><mpadded class="ltx_framed_rectangle" style="border-color: #000000" width="56.9pt"><mtext>4</mtext></mpadded></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+<td rowspan="1" class="ltx_eqn_cell ltx_eqn_eqno ltx_align_middle ltx_align_right"><span class="ltx_tag ltx_tag_equation ltx_align_right">(28)</span></td>
+</tr></tbody>
+</table>
+</div>
+<div  class="ltx_para">
+<table  class="ltx_equationgroup ltx_eqn_align ltx_eqn_table">
+
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle a" display="inline"><mi>a</mi></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=b" display="inline"><mrow><mi></mi><mo>=</mo><mi>b</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle\mathmakebox[\widthof{{}={}}][c]{\vdots}" display="inline"><mi mathvariant="normal">⋮</mi></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=c" display="inline"><mrow><mi></mi><mo>=</mo><mi>c</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle\mathmakebox[\widthof{{}={}}][c]{\vdots}" display="inline"><mi mathvariant="normal">⋮</mi></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+<tbody ><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_eqn_cell"></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math  class="ltx_Math" alttext="\displaystyle=d" display="inline"><mrow><mi></mi><mo>=</mo><mi>d</mi></mrow></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+</div>
+</section>
+</article>
+</div>
+<footer class="ltx_page_footer">
+<div class="ltx_page_logo">Generated  on Sun Jan 18 10:54:04 2026 by <a href="http://dlmf.nist.gov/LaTeXML/" class="ltx_LaTeXML_logo"><span style="letter-spacing:-0.2em; margin-right:0.1em;">L<span class="ltx_font_smallcaps" style="position:relative; bottom:2.2pt;">a</span>T<span class="ltx_font_smallcaps" style="font-size:120%;position:relative; bottom:-0.2ex;">e</span></span><span style="font-size:90%; position:relative; bottom:-0.2ex;">XML</span><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAOCAYAAAD5YeaVAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9wKExQZLWTEaOUAAAAddEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIFRoZSBHSU1Q72QlbgAAAdpJREFUKM9tkL+L2nAARz9fPZNCKFapUn8kyI0e4iRHSR1Kb8ng0lJw6FYHFwv2LwhOpcWxTjeUunYqOmqd6hEoRDhtDWdA8ApRYsSUCDHNt5ul13vz4w0vWCgUnnEc975arX6ORqN3VqtVZbfbTQC4uEHANM3jSqXymFI6yWazP2KxWAXAL9zCUa1Wy2tXVxheKA9YNoR8Pt+aTqe4FVVVvz05O6MBhqUIBGk8Hn8HAOVy+T+XLJfLS4ZhTiRJgqIoVBRFIoric47jPnmeB1mW/9rr9ZpSSn3Lsmir1fJZlqWlUonKsvwWwD8ymc/nXwVBeLjf7xEKhdBut9Hr9WgmkyGEkJwsy5eHG5vN5g0AKIoCAEgkEkin0wQAfN9/cXPdheu6P33fBwB4ngcAcByHJpPJl+fn54mD3Gg0NrquXxeLRQAAwzAYj8cwTZPwPH9/sVg8PXweDAauqqr2cDjEer1GJBLBZDJBs9mE4zjwfZ85lAGg2+06hmGgXq+j3+/DsixYlgVN03a9Xu8jgCNCyIegIAgx13Vfd7vdu+FweG8YRkjXdWy329+dTgeSJD3ieZ7RNO0VAXAPwDEAO5VKndi2fWrb9jWl9Esul6PZbDY9Go1OZ7PZ9z/lyuD3OozU2wAAAABJRU5ErkJggg==" alt="Mascot Sammy"></a>
+</div></footer>
+</div>
+</body>
+</html>
