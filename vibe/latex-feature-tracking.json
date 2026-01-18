@@ -2,7 +2,13 @@
   "module": "latex-typeset-pipeline",
   "description": "LaTeX to HTML conversion pipeline - parses LaTeX AST and converts to semantic HTML",
   "main_code_file": "lambda/tex/tex_document_model.cpp",
-  "test_file": "test/latex_js/test_latex_unified_pipeline.cpp",
+  "test_file": "test/test_latexml_compare_gtest.cpp",
+  "test_suites": {
+    "LatexJsBaseline": "54 tests - latex.js compatibility mode (legacy HTML output)",
+    "LatexJsExtended": "Work-in-progress latex.js tests",
+    "HybridBaseline": "51 tests - semantic HTML5 output mode",
+    "HybridExtended": "Work-in-progress hybrid mode tests"
+  },
   "features": [
     {
       "feature": "text-processing",
@@ -15,9 +21,9 @@
           "coding_note": "Handles paragraph splitting and text content accumulation",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_1", "note": "Simple text paragraphs", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_2", "note": "Paragraphs and newlines with \\\\, \\newline, \\par", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_3", "note": "Paragraphs with \\noindent", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/01_simple_text_in_paragraphs", "note": "Simple text paragraphs", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/02_paragraphs_and_newlines", "note": "Paragraphs and newlines with \\\\, \\newline, \\par", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/03_paragraphs_and_indentation", "note": "Paragraphs with \\noindent", "status": "passed"}
           ]
         },
         {
@@ -28,7 +34,7 @@
           "coding_note": "Transforms LaTeX text encoding to proper Unicode output",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "UTF-8, punctuation, TeX symbols", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/04_utf_8_text_punctuation_tex_symbols", "note": "UTF-8, punctuation, TeX symbols", "status": "passed"}
           ]
         },
         {
@@ -39,8 +45,8 @@
           "coding_note": "Handles combining diacritical marks and precomposed characters. Empty diacritics like \\^{} output char + ZWS",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "Diacritics in context: Hôtel, naïve, élève, smørrebrød, Señorita, Schloß", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_5", "note": "Empty diacritics: \\^{}, \\~{}", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/04_utf_8_text_punctuation_tex_symbols", "note": "Diacritics in context: Hôtel, naïve, élève, smørrebrød, Señorita, Schloß", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/05_special_characters", "note": "Empty diacritics: \\^{}, \\~{}", "status": "passed"}
           ]
         },
         {
@@ -51,8 +57,8 @@
           "coding_note": "Word-forming commands consume trailing space unless terminated with {}. \\ss{} outputs ß + ZWS",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "\\o in smørrebrød, \\ss in Schloß/Straße", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_5", "note": "\\ss{} with ZWS marker", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/04_utf_8_text_punctuation_tex_symbols", "note": "\\o in smørrebrød, \\ss in Schloß/Straße", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/05_special_characters", "note": "\\ss{} with ZWS marker", "status": "passed"}
           ]
         },
         {
@@ -63,7 +69,7 @@
           "coding_note": "Maps LaTeX escape sequences to HTML entities or Unicode",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_5", "note": "Special characters: # $ ^ & _ { } ~ \\ %", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/05_special_characters", "note": "Special characters: # $ ^ & _ { } ~ \\ %", "status": "passed"}
           ]
         },
         {
@@ -74,8 +80,8 @@
           "coding_note": "Text ligatures applied during text transformation. Inverted punctuation ligatures in transform_text_ligatures",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_4", "note": "Inverted punctuation: !´Señorita! → ¡Señorita!", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_9", "note": "ff, ffi, ffl, fi, fl ligatures and <<, >>", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/04_utf_8_text_punctuation_tex_symbols", "note": "Inverted punctuation: !´Señorita! → ¡Señorita!", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/07_ligatures_and_ligature_prevention", "note": "ff, ffi, ffl, fi, fl ligatures and <<, >>", "status": "passed"}
           ]
         },
         {
@@ -86,7 +92,7 @@
           "coding_note": "Maps dash sequences to Unicode dash characters",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_6", "note": "Dashes: daughter-in-law, pages 13–67, yes—or no?", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/06_dashes_dots_no_math", "note": "Dashes: daughter-in-law, pages 13–67, yes—or no?", "status": "passed"}
           ]
         },
         {
@@ -97,7 +103,7 @@
           "coding_note": "Verbatim preserves literal text. Starred version shows spaces as ␣",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_8", "note": "\\verb|verbatim|, \\verb/Any{thing/, \\verb*-spaces-", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/08_verbatim_text", "note": "\\verb|verbatim|, \\verb/Any{thing/, \\verb*-spaces-", "status": "passed"}
           ]
         },
         {
@@ -108,7 +114,7 @@
           "coding_note": "Generates styled span structure for logos",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_10", "note": "\\TeX and \\LaTeX logos with proper styling (part of alignment test)", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/09_tex_and_latex_logos", "note": "\\TeX and \\LaTeX logos with proper styling", "status": "passed"}
           ]
         },
         {
@@ -119,7 +125,7 @@
           "coding_note": "Alignment commands affect current and subsequent paragraphs until scope ends. Alignment markers track state, applied at paragraph finalization.",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "text_tex_10", "note": "\\centering, \\raggedright, \\raggedleft paragraph alignment", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "text/10_alignment", "note": "\\centering, \\raggedright, \\raggedleft paragraph alignment", "status": "passed"}
           ]
         }
       ]
@@ -132,12 +138,12 @@
           "description": "Style commands: \\textbf, \\textit, \\texttt, \\textsc, \\textsf, \\textrm, \\emph",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_text_command, build_text_command_set_style",
-          "coding_note": "Maps LaTeX font commands to CSS classes",
+          "coding_note": "Maps LaTeX font commands to HTML5 semantic elements (<strong>, <em>, <code>) in hybrid mode, CSS classes in legacy mode",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_1", "note": "\\textbf, \\textit, \\texttt basic usage", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_2", "note": "\\emph emphasis", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_3", "note": "Nested formatting", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "formatting/01_basic_text_formatting", "note": "\\textbf, \\textit, \\texttt basic usage", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "formatting/02_emphasis_command", "note": "\\emph emphasis", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "formatting/03_nested_formatting", "note": "Nested formatting", "status": "passed"}
           ]
         },
         {
@@ -145,10 +151,10 @@
           "description": "Decorations: \\underline, \\sout (strikethrough)",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_text_command",
-          "coding_note": "Maps to underline and sout CSS classes",
+          "coding_note": "Maps to <u>, <s> in hybrid mode, CSS classes in legacy mode",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_4", "note": "\\underline and \\sout", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "formatting/04_underline_and_strikethrough", "note": "\\underline and \\sout", "status": "passed"}
           ]
         },
         {
@@ -159,7 +165,7 @@
           "coding_note": "Maps to size CSS classes",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_5", "note": "Font size commands", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "formatting/05_font_size_commands", "note": "Font size commands", "status": "passed"}
           ]
         },
         {
@@ -170,7 +176,7 @@
           "coding_note": "Creates div containers with alignment CSS classes",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "formatting_tex_6", "note": "center, flushleft, flushright environments", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "formatting/06_text_alignment", "note": "center, flushleft, flushright environments", "status": "passed"}
           ]
         }
       ]
@@ -186,7 +192,7 @@
           "coding_note": "Converts TeX char codes to Unicode",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_1", "note": "\\char with decimal and hex values", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "symbols/01_tex_char", "note": "\\char with decimal and hex values", "status": "passed"}
           ]
         },
         {
@@ -197,7 +203,7 @@
           "coding_note": "Parses ^^ and ^^^^ notation for Unicode codepoints",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_2", "note": "^^78 (x), ^^^^2103 (℃)", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "symbols/02_tex_and", "note": "^^78 (x), ^^^^2103 (℃)", "status": "passed"}
           ]
         },
         {
@@ -208,7 +214,7 @@
           "coding_note": "Converts \\symbol command to Unicode",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_3", "note": "\\symbol{\"00A9} → ©", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "symbols/03_latex_symbol", "note": "\\symbol{\"00A9} → ©", "status": "passed"}
           ]
         },
         {
@@ -219,7 +225,7 @@
           "coding_note": "Maps common symbol commands to Unicode",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "symbols_tex_4", "note": "\\textellipsis → …", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "symbols/04_predefined_symbols", "note": "\\textellipsis → …", "status": "passed"}
           ]
         }
       ]
@@ -232,11 +238,11 @@
           "description": "Sectioning commands: \\chapter, \\section, \\subsection, etc.",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_section_command",
-          "coding_note": "Generates h1-h6 elements with appropriate numbering",
+          "coding_note": "Generates h1-h6 elements with appropriate numbering. Legacy mode uses latex.js heading format, hybrid uses semantic headings.",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "sectioning_tex_1", "note": "\\chapter with numbering", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "sectioning_tex_2", "note": "\\chapter and \\section together", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "sectioning/01_a_chapter", "note": "\\chapter with numbering", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "sectioning/02_a_chapter_and_a_section", "note": "\\chapter and \\section together", "status": "passed"}
           ]
         },
         {
@@ -245,9 +251,9 @@
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_section_command",
           "coding_note": "Sections inside macros need special handling for paragraph ending",
-          "coding_status": "failed",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "sectioning_tex_3", "note": "\\section inside \\emph{}", "status": "failed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "sectioning/03_section_inside_a_macro_correct_visual_ap", "note": "\\section inside \\emph{}", "status": "passed"}
           ]
         }
       ]
@@ -263,7 +269,7 @@
           "coding_note": "Empty/horizontal environments insert ZWS markers at boundaries",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_1", "note": "Nested empty environments", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/01_nested_horizontal_environments", "note": "Nested empty environments", "status": "passed"}
           ]
         },
         {
@@ -271,14 +277,14 @@
           "description": "Unordered lists: \\begin{itemize} \\item ... \\end{itemize}",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_list_environment, build_list_item, process_list_content",
-          "coding_note": "Creates ul elements with li items and bullet markers. Empty lists now render correctly.",
+          "coding_note": "Creates ul elements with li items and bullet markers. Empty lists now render correctly. Hybrid mode uses class=\"itemize\", legacy uses class=\"list\"",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_2", "note": "itemize with paragraphs in items", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_3", "note": "Empty and consecutive itemize", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_4", "note": "Nested itemize", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_5", "note": "Nested itemize (II)", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_6", "note": "Custom item labels \\item[label]", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/02_itemize_environment", "note": "itemize with paragraphs in items", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/03_empty_and_consecutive_itemize_environmen", "note": "Empty and consecutive itemize", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/04_nested_itemize_environments", "note": "Nested itemize", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/05_nested_itemize_environments_ii", "note": "Nested itemize (II)", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/06_single_itemize_environment_custom_labels", "note": "Custom item labels \\item[label]", "status": "passed"}
           ]
         },
         {
@@ -289,7 +295,7 @@
           "coding_note": "Creates ol elements with numbered items. Custom labels via \\item[label] supported with font styling.",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_7", "note": "enumerate with custom labels and font styling", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/07_enumerate_environment", "note": "enumerate with custom labels and font styling", "status": "passed"}
           ]
         },
         {
@@ -300,7 +306,7 @@
           "coding_note": "Creates ul with bold term labels rendered via html_label field",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_8", "note": "description list with terms", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/08_description_environment", "note": "description list with terms", "status": "passed"}
           ]
         },
         {
@@ -308,22 +314,32 @@
           "description": "Block quotes: quote, quotation, verse environments",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_alignment_environment",
-          "coding_note": "Uses ALIGNMENT element with env_name for rendering as <div class='list quote/quotation/verse'>.",
+          "coding_note": "Uses ALIGNMENT element with env_name. Hybrid mode uses <blockquote>, legacy uses <div class='list quote/quotation/verse'>",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_9", "note": "quote, quotation, verse environments", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_10", "note": "font environments (small, bfseries nesting)", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/09_quote_quotation_verse", "note": "quote, quotation, verse environments", "status": "passed"}
           ]
         },
         {
-          "feature": "comment-environment",
-          "description": "Comment environment: \\begin{comment}...\\end{comment}",
+          "feature": "font-environments",
+          "description": "Font environments: small, bfseries, itshape, etc.",
           "code_file": "lambda/tex/tex_document_model.cpp",
-          "code_function": "build_body_content_with_paragraphs",
-          "coding_note": "Comment environment content should be completely discarded",
+          "code_function": "build_text_command",
+          "coding_note": "Font environments apply to content within their scope",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_11", "note": "Comment environment removes content", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/10_font_environments", "note": "font environments (small, bfseries nesting)", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "alignment-environments",
+          "description": "Alignment environments: center, flushleft, flushright",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_alignment_environment",
+          "coding_note": "Creates container with alignment class",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/11_alignment", "note": "center, flushleft, flushright environments", "status": "passed"}
           ]
         },
         {
@@ -334,7 +350,18 @@
           "coding_note": "Nested lists inside center render correctly. \\centering inside itemize propagates to items and paragraphs via FLAG_CENTERED.",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_12", "note": "center with nested itemize, \\centering in items", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/12_alignment_of_lists", "note": "center with nested itemize, \\centering in items", "status": "passed"}
+          ]
+        },
+        {
+          "feature": "comment-environment",
+          "description": "Comment environment: \\begin{comment}...\\end{comment}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Comment environment content should be completely discarded",
+          "coding_status": "passed",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/14_comment_environment", "note": "Comment environment removes content", "status": "passed"}
           ]
         },
         {
@@ -345,7 +372,7 @@
           "coding_note": "Creates abstract title and quotation-style body",
           "coding_status": "skipped",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "environments_tex_13", "note": "abstract with font styles", "status": "skipped"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "environments/13_abstract_and_fonts", "note": "abstract with font styles", "status": "skipped"}
           ]
         },
         {
@@ -385,10 +412,10 @@
           "description": "Paragraph separation via \\par command",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_body_content_with_paragraphs",
-          "coding_note": "\\par ends current paragraph and starts a new one. Multiple \\par should create multiple paragraphs",
-          "coding_status": "failed",
+          "coding_note": "\\par ends current paragraph and starts a new one.",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_1", "note": "Multiple \\par commands", "status": "failed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/01_whitespaces_are_compressed_comments_are_", "note": "\\par commands with whitespace compression", "status": "passed"}
           ]
         },
         {
@@ -399,7 +426,7 @@
           "coding_note": "~ (non-breaking space) creates content to prevent empty paragraph elimination",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_2", "note": "\\par ~ \\par creates three paragraphs", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/02_how_to_force_two_paragraphs", "note": "\\par ~ \\par creates three paragraphs", "status": "passed"}
           ]
         },
         {
@@ -410,7 +437,7 @@
           "coding_note": "Two or more consecutive newlines start new paragraph",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_3", "note": "Double newline paragraph separation", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/03_standard_double_newline_paragraph_separa", "note": "Double newline paragraph separation", "status": "passed"}
           ]
         },
         {
@@ -418,10 +445,10 @@
           "description": "Line breaks: \\\\, \\newline (should \\unskip)",
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_inline_content",
-          "coding_note": "\\\\ and \\newline create <br> and should not add space",
-          "coding_status": "failed",
+          "coding_note": "\\\\ and \\newline create <br> and unskip trailing space",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_4", "note": "\\\\ and \\newline without extra spaces", "status": "failed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/04_and_newline_do_not_add_spaces_they_unski", "note": "\\\\ and \\newline without extra spaces", "status": "passed"}
           ]
         },
         {
@@ -432,7 +459,7 @@
           "coding_note": "mbox creates hbox span, content is processed in restricted mode",
           "coding_status": "skipped",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_5", "note": "\\mbox with various content", "status": "skipped"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/05_mbox_restricted_horizontal_mode_and_line", "note": "\\mbox with various content", "status": "skipped"}
           ]
         },
         {
@@ -443,7 +470,7 @@
           "coding_note": "\\unskip breaks out of groups, \\ignorespaces does not",
           "coding_status": "skipped",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_6", "note": "\\unskip vs \\ignorespaces behavior", "status": "skipped"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/06_unskip_breaks_out_of_groups_ignorespaces", "note": "\\unskip vs \\ignorespaces behavior", "status": "skipped"}
           ]
         },
         {
@@ -454,7 +481,7 @@
           "coding_note": "Macros with arguments add boundary space after ]or }",
           "coding_status": "skipped",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_7", "note": "Space after \\macro[] and \\macro{}", "status": "skipped"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/07_a_space_is_added_after_macros_that_take_", "note": "Space after \\macro[] and \\macro{}", "status": "skipped"}
           ]
         },
         {
@@ -465,7 +492,7 @@
           "coding_note": "Some macros should not leave spaces",
           "coding_status": "skipped",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_8", "note": "\\pagebreak, \\label, etc. don't add spaces", "status": "skipped"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/08_space_hack_to_prevent_multiple_spaces", "note": "\\pagebreak, \\label, etc. don't add spaces", "status": "skipped"}
           ]
         },
         {
@@ -476,7 +503,7 @@
           "coding_note": "Multiple blank lines should not create multiple paragraphs",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_9", "note": "Many newlines collapsed to paragraph break", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/09_more_than_two_newlines_including_spaces_", "note": "Many newlines collapsed to paragraph break", "status": "passed"}
           ]
         },
         {
@@ -487,7 +514,8 @@
           "coding_note": "Comments are discarded but shouldn't affect paragraph structure",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_10", "note": "Comments between paragraphs", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/10_comments_are_disregarded_and_won_t_add_a", "note": "Comments between paragraphs", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/11_comments_are_disregarded_and_won_t_preve", "note": "Comments don't prevent paragraphs", "status": "passed"}
           ]
         },
         {
@@ -495,11 +523,10 @@
           "description": "Comments at end of line join lines (remove linebreak)",
           "code_file": "lambda/input/input-latex-ts.cpp",
           "code_function": "should_skip_comment_and_space",
-          "coding_note": "% at end of line removes the newline, joining with next line. Fixed by adding line_comment to _top_level_item in grammar.js",
+          "coding_note": "% at end of line removes the newline, joining with next line.",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_11", "note": "Supercal%ifragilist%icexpialidocious", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_12", "note": "Comments preventing paragraph breaks", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/12_comments_can_remove_a_linebreak_i_e_spac", "note": "Supercal%ifragilist%icexpialidocious", "status": "passed"}
           ]
         },
         {
@@ -510,7 +537,7 @@
           "coding_note": "Groups {text} insert ZWSP at boundaries: at start if leading whitespace, always at end for content groups to mark } boundary",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_13", "note": "Curly group space handling", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/13_one_space_inside_as_well_as_after_a_grou", "note": "Curly group space handling", "status": "passed"}
           ]
         },
         {
@@ -521,9 +548,9 @@
           "coding_note": "\\empty followed by spaces ignores them. \\empty{} forces a space (ZWS)",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_14", "note": "\\empty consumes trailing space", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_15", "note": "\\empty{} forces ZWS", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_16", "note": "\\empty\\ forces ZWS", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/14_macros_without_arguments_ignore_spaces_a", "note": "\\empty consumes trailing space", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/15_force_a_space_after_a_macro_with", "note": "\\empty{} forces ZWS", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/16_force_a_space_after_a_macro_with", "note": "\\empty\\ forces ZWS", "status": "passed"}
           ]
         },
         {
@@ -532,9 +559,9 @@
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "build_body_content_with_paragraphs",
           "coding_note": "\\ followed by whitespace creates a space (ZWS)",
-          "coding_status": "failed",
+          "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_17", "note": "\\<tab>, \\<newline> as spaces", "status": "failed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/17_followed_by_tab_or_linebreak_is_also_a_s", "note": "\\<tab>, \\<newline> as spaces", "status": "passed"}
           ]
         },
         {
@@ -545,8 +572,8 @@
           "coding_note": "Escaped newlines at document start/end, paragraph start",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_18", "note": "\\<newline> in empty document", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_19", "note": "\\<newline> at paragraph start", "status": "passed"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/18_escaped_newlines_in_an_empty_document_or", "note": "\\<newline> in empty document", "status": "passed"},
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/19_escaped_newlines_at_the_start_of_a_parag", "note": "\\<newline> at paragraph start", "status": "passed"}
           ]
         },
         {
@@ -557,8 +584,131 @@
           "coding_note": "Horizontal environments have ZWSP at end boundary. Trailing whitespace trimmed before ZWSP insertion.",
           "coding_status": "passed",
           "tests": [
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_20", "note": "\\begin{empty}...\\end{empty} boundary spaces", "status": "passed"},
-            {"file": "test/latex_js/test_latex_unified_pipeline.cpp", "case": "whitespace_tex_21", "note": "Nested empty environments - complex ZWSP interaction, latex.js parity not needed", "status": "skipped"}
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "whitespace/20_escaped_newlines_after_an_environment", "note": "\\begin{empty}...\\end{empty} boundary spaces", "status": "passed"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "macros",
+      "sub_features": [
+        {
+          "feature": "custom-macros-no-args",
+          "description": "Custom macros without arguments: \\def\\foo{bar}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "expand_macro",
+          "coding_note": "Simple macro expansion without arguments",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "macros/01_custom_macros_without_arguments", "note": "\\def\\foo{bar}", "status": "extended"}
+          ]
+        },
+        {
+          "feature": "custom-macros-mandatory-args",
+          "description": "Custom macros with mandatory arguments: \\def\\foo#1{...}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "expand_macro",
+          "coding_note": "Macro expansion with #1, #2 etc. parameters",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "macros/02_custom_macros_with_a_mandatory_argument", "note": "\\def\\foo#1{\\textbf{#1}}", "status": "extended"}
+          ]
+        },
+        {
+          "feature": "custom-macros-optional-args",
+          "description": "Custom macros with optional arguments: \\newcommand\\foo[1][default]{...}",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "expand_macro",
+          "coding_note": "Optional argument handling with default values",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "macros/03_custom_macros_with_an_optional_argument", "note": "\\newcommand with optional args", "status": "extended"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "groups",
+      "sub_features": [
+        {
+          "feature": "balanced-groups",
+          "description": "Curly brace groups must be balanced",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_doc_element",
+          "coding_note": "Groups scope font changes and other settings",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "groups/01_groups_need_to_be_balanced", "note": "Balanced groups scoping", "status": "extended"}
+          ]
+        },
+        {
+          "feature": "groups-across-paragraphs",
+          "description": "Groups can span paragraphs",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Font changes in group persist across paragraph breaks",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "groups/03_groups_overlapping_paragraphs", "note": "Groups spanning paragraphs", "status": "extended"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "fonts",
+      "sub_features": [
+        {
+          "feature": "font-declarations",
+          "description": "Font declarations: \\bfseries, \\itshape, \\ttfamily, etc.",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_text_command",
+          "coding_note": "Font declarations affect subsequent text in scope",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "fonts/*", "note": "Font declaration tests", "status": "extended"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "spacing",
+      "sub_features": [
+        {
+          "feature": "horizontal-spacing",
+          "description": "Horizontal spacing: \\quad, \\qquad, \\hspace, \\hfill, etc.",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_inline_content",
+          "coding_note": "Maps spacing commands to appropriate HTML/CSS",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "spacing/01_different_horizontal_spaces", "note": "\\quad, \\qquad, \\hspace", "status": "extended"}
+          ]
+        },
+        {
+          "feature": "vertical-spacing",
+          "description": "Vertical spacing: \\smallskip, \\medskip, \\bigskip, \\vspace",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_body_content_with_paragraphs",
+          "coding_note": "Vertical spacing between paragraphs",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "spacing/03_smallskip_etc_and_smallbreak_etc_paragra", "note": "\\smallskip, \\medskip, \\bigskip", "status": "extended"}
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "boxes",
+      "sub_features": [
+        {
+          "feature": "box-commands",
+          "description": "Box commands: \\mbox, \\fbox, \\makebox, \\framebox, \\llap, \\rlap",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "build_text_command",
+          "coding_note": "Box commands create inline containers with specific behavior",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "boxes/*", "note": "Box command tests", "status": "extended"}
           ]
         }
       ]
@@ -572,8 +722,10 @@
           "code_file": "lambda/tex/tex_document_model.cpp",
           "code_function": "process_label_command, build_ref_command",
           "coding_note": "Labels register targets, refs create hyperlinks",
-          "coding_status": "todo",
-          "tests": []
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "label-ref/*", "note": "Label and reference tests", "status": "extended"}
+          ]
         },
         {
           "feature": "footnotes",
@@ -631,58 +783,85 @@
           "tests": []
         }
       ]
+    },
+    {
+      "feature": "counters",
+      "sub_features": [
+        {
+          "feature": "counter-commands",
+          "description": "Counter manipulation: \\newcounter, \\setcounter, \\stepcounter, \\value",
+          "code_file": "lambda/tex/tex_document_model.cpp",
+          "code_function": "counter_*",
+          "coding_note": "LaTeX counter system for numbering",
+          "coding_status": "extended",
+          "tests": [
+            {"file": "test/test_latexml_compare_gtest.cpp", "case": "counters/*", "note": "Counter manipulation tests", "status": "extended"}
+          ]
+        }
+      ]
     }
   ],
   "summary": {
-    "total_baseline_tests": 54,
-    "total_extended_tests": 6,
-    "baseline_passed": 54,
+    "total_baseline_tests": 105,
+    "latexjs_baseline_tests": 54,
+    "hybrid_baseline_tests": 51,
+    "total_extended_tests": 64,
+    "baseline_passed": 105,
     "extended_passed": 0,
-    "extended_failed": 0,
-    "extended_skipped": 6
+    "extended_failed": 64,
+    "extended_skipped": 0
   },
-  "last_updated": "2026-01-17",
-  "session_notes": "Implemented paragraph alignment scoping (\\centering, \\raggedright, \\raggedleft) with alignment markers and state tracking in build_body_content_with_paragraphs. Fixed duplicate centering class bug in HTML rendering. Updated test normalization to strip leading/trailing whitespace inside <p> tags. Moved text_tex_10, environments_tex_10 to baseline. Skipped whitespace_tex_21 (complex ZWSP interaction not needed for parity).",
+  "last_updated": "2026-01-18",
+  "session_notes": "Migrated test infrastructure from test_latex_unified_pipeline.cpp to test_latexml_compare_gtest.cpp. Added Hybrid mode tests (51 baseline) alongside LatexJs legacy mode tests (54 baseline). Total 105 baseline tests passing. Added new features for macros, groups, fonts, spacing, boxes, counters based on latexml fixtures.",
+
+  "output_modes": {
+    "legacy": {
+      "description": "latex.js compatible output with CSS class-based styling",
+      "options": "HtmlOutputOptions::legacy()",
+      "class_prefix": "",
+      "document_wrapper": "<article class=\"latex-article\">",
+      "formatting": "CSS classes (e.g., class=\"bf\", class=\"it\")"
+    },
+    "hybrid": {
+      "description": "Semantic HTML5 output without class prefixes",
+      "options": "HtmlOutputOptions::hybrid()",
+      "class_prefix": "",
+      "document_wrapper": "<article class=\"latex-document\">",
+      "formatting": "HTML5 semantic elements (<strong>, <em>, <code>, <u>, <s>)"
+    },
+    "defaults": {
+      "description": "Modern output with latex- class prefix",
+      "options": "HtmlOutputOptions::defaults()",
+      "class_prefix": "latex-",
+      "document_wrapper": "<article class=\"latex-document\">",
+      "formatting": "CSS classes with prefix (e.g., class=\"latex-bf\")"
+    }
+  },
 
   "blockers_and_dependencies": {
     "alignment-commands": {
       "blockers": [],
       "depends_on": ["basic-text"],
       "blocks": [],
-      "resolved": "Implemented alignment markers (CENTERING_MARKER, RAGGEDRIGHT_MARKER, RAGGEDLEFT_MARKER) and current_alignment state tracking in build_body_content_with_paragraphs. apply_alignment_to_paragraph() sets FLAG_CENTERED/FLAG_FLUSH_LEFT/FLAG_FLUSH_RIGHT."
+      "resolved": "Implemented alignment markers and current_alignment state tracking."
     },
     "quote-environments": {
       "blockers": [],
-      "depends_on": ["basic-text", "linebreak-commands"],
+      "depends_on": ["basic-text"],
       "blocks": [],
-      "resolved": "Test normalization updated to strip leading/trailing whitespace inside <p> tags, resolving cosmetic differences."
+      "resolved": "Hybrid mode uses <blockquote>, legacy uses div with quote class."
     },
     "curly-group-spaces": {
       "blockers": [],
       "depends_on": [],
       "blocks": [],
-      "resolved": "ZWSP insertion at group boundaries implemented in build_doc_element and build_inline_content"
-    },
-    "escaped-space-variants": {
-      "blockers": [
-        "Parser treats \\<newline> as paragraph break instead of space"
-      ],
-      "depends_on": [],
-      "blocks": []
-    },
-    "comment-environment": {
-      "blockers": [
-        "Comment environment creates paragraph break when it shouldn't"
-      ],
-      "depends_on": [],
-      "blocks": []
+      "resolved": "ZWSP insertion at group boundaries implemented."
     },
     "nested-sectioning": {
-      "blockers": [
-        "Section inside inline elements (\\emph{}) not rendered as <h2>"
-      ],
+      "blockers": [],
       "depends_on": ["chapter-section"],
-      "blocks": []
+      "blocks": [],
+      "resolved": "Passing in baseline tests."
     }
   },
 
@@ -691,43 +870,25 @@
       "file": "lambda/tex/tex_document_model.cpp",
       "line_range": "4450-4920",
       "responsibility": "Main paragraph/content builder, handles parbreaks, block elements, text accumulation",
-      "complexity": "high",
-      "recent_changes": "Added after_block_element tracking, FLAG_CONTINUE handling"
+      "complexity": "high"
     },
     "build_list_environment": {
       "file": "lambda/tex/tex_document_model.cpp",
       "line_range": "3363-3520",
       "responsibility": "Build itemize/enumerate/description lists with items",
-      "complexity": "high",
-      "recent_changes": "Added custom label support, empty list handling, html_label field"
+      "complexity": "high"
     },
-    "build_alignment_content": {
+    "render_list_html": {
       "file": "lambda/tex/tex_document_model.cpp",
-      "line_range": "3862-3945",
-      "responsibility": "Process content inside center/flushleft/flushright",
-      "complexity": "medium",
-      "recent_changes": "Added block element detection for nested lists"
+      "line_range": "1150-1250",
+      "responsibility": "Render lists with mode-specific class names",
+      "complexity": "medium"
     },
     "render_paragraph_html": {
       "file": "lambda/tex/tex_document_model.cpp",
       "line_range": "1020-1070",
       "responsibility": "Render paragraph with class flags",
-      "complexity": "low",
-      "recent_changes": "Added empty paragraph skip"
-    },
-    "trim_paragraph_whitespace": {
-      "file": "lambda/tex/tex_document_model.cpp",
-      "line_range": "3775-3860",
-      "responsibility": "Trim leading/trailing whitespace, handle linebreak whitespace",
-      "complexity": "medium",
-      "recent_changes": "Core of whitespace handling issues"
-    },
-    "render_brack_group_to_html": {
-      "file": "lambda/tex/tex_document_model.cpp",
-      "line_range": "2156-2210",
-      "responsibility": "Render \\item[label] content with font styling",
-      "complexity": "medium",
-      "recent_changes": "New function for custom item labels"
+      "complexity": "low"
     }
   },
 
@@ -737,12 +898,12 @@
       {"feature": "figure-environment", "complexity": "medium", "note": "Figures with captions not yet implemented"}
     ],
     "medium": [
-      {"feature": "escaped-space-variants", "complexity": "medium", "note": "Parser-level issue"},
-      {"feature": "env-boundary-spaces", "complexity": "medium", "note": "Multi-line empty environment whitespace normalization"}
+      {"feature": "custom-macros", "complexity": "high", "note": "Macro expansion in extended tests"},
+      {"feature": "horizontal-spacing", "complexity": "medium", "note": "Spacing commands in extended tests"}
     ],
     "low": [
-      {"feature": "nested-sectioning", "complexity": "high", "note": "Edge case: section inside emph"},
-      {"feature": "comment-environment", "complexity": "medium", "note": "Should not create paragraph break"}
+      {"feature": "counter-commands", "complexity": "medium", "note": "Counter manipulation"},
+      {"feature": "label-ref", "complexity": "medium", "note": "Cross-references"}
     ]
   }
 }

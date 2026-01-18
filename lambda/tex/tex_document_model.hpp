@@ -517,6 +517,22 @@ struct HtmlOutputOptions {
         o.lang = "en";
         return o;
     }
+    
+    // Hybrid mode: semantic HTML5 tags with minimal classes
+    // Based on vibe/Latex_Html_Mapping.md decisions
+    static HtmlOutputOptions hybrid() {
+        HtmlOutputOptions o = {};
+        o.font_mode = FONT_SYSTEM;
+        o.math_as_svg = false;
+        o.typeset_paragraphs = false;
+        o.standalone = false;
+        o.pretty_print = false;
+        o.include_css = false;
+        o.legacy_mode = false;
+        o.css_class_prefix = "";  // No prefix for clean output
+        o.lang = "en";
+        return o;
+    }
 };
 
 /**
