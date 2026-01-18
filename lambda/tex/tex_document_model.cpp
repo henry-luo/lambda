@@ -84,11 +84,26 @@ const char* doc_elem_type_name(DocElemType type) {
 static void build_body_content_with_paragraphs(DocElement* container, const ElementReader& elem,
                                                 Arena* arena, TexDocumentModel* doc);
 
+// Forward declaration needed for build_section_command to process labels in titles
+static void process_label_command(const ElementReader& elem, Arena* arena,
+                                   TexDocumentModel* doc, DocElement* parent);
+
+// Helper to recursively find and process \label commands within an element
+static void process_labels_in_element(const ItemReader& item, Arena* arena,
+                                       TexDocumentModel* doc, DocElement* parent);
+
 // ============================================================================
 // Document Model Methods
 // ============================================================================
 
 void TexDocumentModel::add_label(const char* label, const char* ref_text, int page) {
+    // Legacy method - uses label as both label and ref_id
+    add_label_with_id(label, label, ref_text);
+}
+
+void TexDocumentModel::add_label_with_id(const char* label, const char* ref_id, const char* ref_text) {
+    log_debug("add_label_with_id: label='%s', ref_id='%s', ref_text='%s'",
+              label ? label : "(null)", ref_id ? ref_id : "(null)", ref_text ? ref_text : "(null)");
     if (label_count >= label_capacity) {
         int new_capacity = label_capacity == 0 ? 16 : label_capacity * 2;
         LabelEntry* new_labels = (LabelEntry*)arena_alloc(arena, new_capacity * sizeof(LabelEntry));
@@ -100,18 +115,64 @@ void TexDocumentModel::add_label(const char* label, const char* ref_text, int pa
     }
     
     labels[label_count].label = label;
+    labels[label_count].ref_id = ref_id;
     labels[label_count].ref_text = ref_text;
-    labels[label_count].page = page;
+    labels[label_count].page = -1;
     label_count++;
 }
 
 const char* TexDocumentModel::resolve_ref(const char* label) const {
     for (int i = 0; i < label_count; i++) {
         if (strcmp(labels[i].label, label) == 0) {
-            return labels[i].ref_text;
+            return labels[i].ref_text ? labels[i].ref_text : "??";
         }
     }
-    return "??";  // Unresolved reference marker
+    return nullptr;  // Unresolved - caller decides what to show
+}
+
+const char* TexDocumentModel::resolve_ref_id(const char* label) const {
+    for (int i = 0; i < label_count; i++) {
+        if (strcmp(labels[i].label, label) == 0) {
+            return labels[i].ref_id;
+        }
+    }
+    return nullptr;  // Unresolved
+}
+
+void TexDocumentModel::add_pending_ref(DocElement* elem) {
+    if (pending_ref_count >= pending_ref_capacity) {
+        int new_capacity = pending_ref_capacity == 0 ? 16 : pending_ref_capacity * 2;
+        PendingRef* new_refs = (PendingRef*)arena_alloc(arena, new_capacity * sizeof(PendingRef));
+        if (pending_refs) {
+            memcpy(new_refs, pending_refs, pending_ref_count * sizeof(PendingRef));
+        }
+        pending_refs = new_refs;
+        pending_ref_capacity = new_capacity;
+    }
+    pending_refs[pending_ref_count].elem = elem;
+    pending_ref_count++;
+}
+
+void TexDocumentModel::resolve_pending_refs() {
+    log_debug("resolve_pending_refs: %d pending refs, %d labels registered", pending_ref_count, label_count);
+    for (int i = 0; i < pending_ref_count; i++) {
+        DocElement* elem = pending_refs[i].elem;
+        if (elem && elem->type == DocElemType::CROSS_REF && elem->ref.ref_label) {
+            const char* orig_label = elem->ref.ref_label;
+            const char* ref_id = resolve_ref_id(elem->ref.ref_label);
+            const char* ref_text = resolve_ref(elem->ref.ref_label);
+            log_debug("resolve_pending_refs[%d]: label='%s' -> ref_id='%s', ref_text='%s'",
+                      i, orig_label, ref_id ? ref_id : "(null)", ref_text ? ref_text : "(null)");
+            if (ref_id) {
+                elem->ref.ref_label = ref_id;  // Update to use actual anchor id
+            }
+            if (ref_text) {
+                elem->ref.ref_text = ref_text;
+            } else {
+                elem->ref.ref_text = "??";  // Unresolved
+            }
+        }
+    }
 }
 
 void TexDocumentModel::add_macro(const char* name, int num_args, const char* replacement, const char* params) {
@@ -1604,6 +1665,7 @@ static bool is_inline_element(DocElement* elem) {
     case DocElemType::TEXT_SPAN:
     case DocElemType::SPACE:
     case DocElemType::RAW_HTML:  // inline HTML like logos
+    case DocElemType::CROSS_REF: // cross-references are inline
         return true;
     default:
         return false;
@@ -2383,6 +2445,36 @@ static const char* extract_math_source(const ElementReader& elem, Arena* arena) 
 // Forward declaration for render_brack_group_to_html
 static DocElement* build_doc_element(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
 
+// Forward declaration for inline ref handling
+static DocElement* build_ref_command(const ElementReader& elem, Arena* arena, TexDocumentModel* doc);
+
+// Helper to recursively find and process \label commands within an element
+// This is used to find labels inside section titles, figure captions, etc.
+static void process_labels_in_element(const ItemReader& item, Arena* arena,
+                                       TexDocumentModel* doc, DocElement* parent) {
+    if (!item.isElement()) return;
+    
+    ElementReader elem = item.asElement();
+    const char* tag = elem.tagName();
+    log_debug("process_labels_in_element: tag='%s'", tag ? tag : "(null)");
+    
+    // Check if this is a label command
+    if (tag && tag_eq(tag, "label")) {
+        log_debug("process_labels_in_element: found label command");
+        process_label_command(elem, arena, doc, parent);
+        return;
+    }
+    
+    // Recurse into children
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            process_labels_in_element(child, arena, doc, parent);
+        }
+    }
+}
+
 // ============================================================================
 // Macro Registration and Expansion
 // ============================================================================
@@ -2862,6 +2954,7 @@ static DocElement* build_text_command(const char* cmd_name, const ElementReader&
 // Build a HEADING element from section command
 static DocElement* build_section_command(const char* cmd_name, const ElementReader& elem,
                                           Arena* arena, TexDocumentModel* doc) {
+    log_debug("build_section_command: cmd_name='%s'", cmd_name);
     DocElement* heading = doc_alloc_element(arena, DocElemType::HEADING);
     
     // Determine level from command name
@@ -2883,43 +2976,23 @@ static DocElement* build_section_command(const char* cmd_name, const ElementRead
         heading->heading.level = 2; // default to section
     }
     
-    // Check for title attribute first (parser may output as attribute)
-    if (elem.has_attr("title")) {
-        ItemReader title_item = elem.get_attr("title");
-        heading->heading.title = extract_text_content(title_item, arena);
-    }
-    
-    // Check for starred version (no numbering) and title in children
-    // Look for "star" child element
-    auto iter = elem.children();
-    ItemReader child;
+    // First pass: check for starred version
+    auto first_iter = elem.children();
+    ItemReader first_child;
     bool has_star = false;
     
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
+    while (first_iter.next(&first_child)) {
+        if (first_child.isElement()) {
+            ElementReader child_elem = first_child.asElement();
             const char* tag = child_elem.tagName();
             if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
                 has_star = true;
-            } else if (!heading->heading.title &&
-                       (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
-                        tag_eq(tag, "brack_group") || tag_eq(tag, "text") || 
-                        tag_eq(tag, "arg"))) {
-                // Extract title text (only if not already set from attribute)
-                heading->heading.title = extract_text_content(child, arena);
-            }
-        } else if (child.isString() && !heading->heading.title) {
-            // Direct string child is the title
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0 && text[0] != '\n') {
-                size_t len = strlen(text);
-                char* title = (char*)arena_alloc(arena, len + 1);
-                memcpy(title, text, len + 1);
-                heading->heading.title = title;
+                break;
             }
         }
     }
     
+    // Generate ID and number for non-starred sections
     if (has_star) {
         heading->flags |= DocElement::FLAG_STARRED;
     } else {
@@ -2978,7 +3051,61 @@ static DocElement* build_section_command(const char* cmd_name, const ElementRead
             memcpy(num, num_buf, len + 1);
             heading->heading.number = num;
         }
+        
+        // Set current ref context for any \label commands in the title
+        doc->current_ref_id = heading->heading.label;
+        doc->current_ref_text = heading->heading.number;
     }
+    
+    // Second pass: extract title and process labels
+    // Check for title attribute first (parser may output as attribute)
+    if (elem.has_attr("title")) {
+        ItemReader title_item = elem.get_attr("title");
+        heading->heading.title = extract_text_content(title_item, arena);
+        // Also process labels in the title
+        if (title_item.isElement()) {
+            process_labels_in_element(title_item, arena, doc, heading);
+        }
+    }
+    
+    // Check for title in children AND process any label elements
+    auto iter = elem.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
+                // Already handled
+            } else if (tag && tag_eq(tag, "label")) {
+                // Direct label child - process it with the heading as parent
+                log_debug("build_section_command: found direct label child");
+                process_label_command(child_elem, arena, doc, heading);
+            } else if (!heading->heading.title &&
+                       (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
+                        tag_eq(tag, "brack_group") || tag_eq(tag, "text") || 
+                        tag_eq(tag, "arg"))) {
+                // Extract title text (only if not already set from attribute)
+                heading->heading.title = extract_text_content(child, arena);
+                // Process any labels inside the title group
+                process_labels_in_element(child, arena, doc, heading);
+            }
+        } else if (child.isString() && !heading->heading.title) {
+            // Direct string child is the title
+            const char* text = child.cstring();
+            if (text && strlen(text) > 0 && text[0] != '\n') {
+                size_t len = strlen(text);
+                char* title = (char*)arena_alloc(arena, len + 1);
+                memcpy(title, text, len + 1);
+                heading->heading.title = title;
+            }
+        }
+    }
+    
+    // Note: Don't clear current_ref_id/current_ref_text here
+    // Labels appearing after \section should still associate with this section
+    // The context will be overwritten when the next section is processed
     
     return heading;
 }
@@ -3695,6 +3822,17 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         math->math.latex_src = extract_math_source(elem, arena);
         math->math.node = nullptr; // Will be populated by typesetter if needed
         return math;
+    }
+    
+    // Cross-reference commands (inline)
+    if (tag_eq(tag, "ref") || tag_eq(tag, "eqref") || tag_eq(tag, "pageref")) {
+        return build_ref_command(elem, arena, doc);
+    }
+    
+    // Label commands - register with document but produce no visible output
+    if (tag_eq(tag, "label")) {
+        process_label_command(elem, arena, doc, nullptr);
+        return nullptr;  // Labels don't produce visible output
     }
     
     // Display math (can appear inside paragraphs too)
@@ -5102,12 +5240,21 @@ static void process_label_command(const ElementReader& elem, Arena* arena,
     }
     
     if (label) {
-        doc->add_label(label, nullptr, -1);
+        // Use current referable context if available
+        const char* ref_id = doc->current_ref_id;
+        const char* ref_text = doc->current_ref_text;
         
-        // If parent is a heading, set the label on it
+        // If parent is a heading, use its label (sec-N) and number
         if (parent && parent->type == DocElemType::HEADING) {
-            parent->heading.label = label;
+            ref_id = parent->heading.label;  // sec-N
+            ref_text = parent->heading.number;  // e.g., "1" or "2.3"
         }
+        
+        log_debug("process_label_command: label='%s', ref_id='%s', ref_text='%s', parent=%s",
+                  label, ref_id ? ref_id : "(null)", ref_text ? ref_text : "(null)",
+                  parent ? doc_elem_type_name(parent->type) : "(null)");
+        
+        doc->add_label_with_id(label, ref_id, ref_text);
     }
 }
 
@@ -5133,15 +5280,10 @@ static DocElement* build_ref_command(const ElementReader& elem, Arena* arena,
         }
     }
     
-    // Try to resolve the reference
+    // Add to pending refs for two-pass resolution
+    // The reference will be resolved after the entire document is built
     if (ref->ref.ref_label) {
-        const char* resolved = doc->resolve_ref(ref->ref.ref_label);
-        if (resolved) {
-            ref->ref.ref_text = resolved;
-        } else {
-            // Unresolved reference - show ?? for now
-            ref->ref.ref_text = "??";
-        }
+        doc->add_pending_ref(ref);
     }
     
     return ref;
@@ -7619,8 +7761,12 @@ TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, LaTeXContext& ct
         doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
     }
     
-    log_debug("doc_model_from_latex: built document with %d labels, %d macros",
-              doc->label_count, doc->macro_count);
+    // Two-pass resolution: resolve all pending cross-references
+    // Now that all labels are registered, we can resolve forward references
+    doc->resolve_pending_refs();
+    
+    log_debug("doc_model_from_latex: built document with %d labels, %d macros, %d pending refs resolved",
+              doc->label_count, doc->macro_count, doc->pending_ref_count);
     
     return doc;
 }
@@ -7671,7 +7817,12 @@ TexDocumentModel* doc_model_from_string(const char* latex, size_t len, Arena* ar
         doc->root = doc_alloc_element(arena, DocElemType::DOCUMENT);
     }
     
-    log_debug("doc_model_from_string: built document model from %zu bytes of LaTeX", len);
+    // Two-pass resolution: resolve all pending cross-references
+    // Now that all labels are registered, we can resolve forward references
+    doc->resolve_pending_refs();
+    
+    log_debug("doc_model_from_string: built document model from %zu bytes of LaTeX, %d labels, %d pending refs",
+              len, doc->label_count, doc->pending_ref_count);
     
     return doc;
 }
