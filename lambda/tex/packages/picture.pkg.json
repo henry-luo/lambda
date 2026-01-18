@@ -1,0 +1,199 @@
+{
+  "name": "picture",
+  "version": "1.6",
+  "description": "Dimen calculations and extended picture environment",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Extends LaTeX picture environment with calc-style dimension arithmetic",
+    "compatibility": "Works with standard LaTeX picture commands"
+  },
+  
+  "commands": {
+    "picture": {
+      "type": "constructor",
+      "params": "()[]",
+      "description": "Picture environment start (as command)",
+      "pattern": "<picture size=\"#1\" offset=\"#2\">"
+    },
+    "put": {
+      "type": "constructor",
+      "params": "(){}",
+      "description": "Place object at coordinates",
+      "pattern": "<put pos=\"#1\">#2</put>"
+    },
+    "multiput": {
+      "type": "constructor",
+      "params": "()(){}{}",
+      "description": "Place multiple copies with delta",
+      "pattern": "<multiput pos=\"#1\" delta=\"#2\" count=\"#3\">#4</multiput>"
+    },
+    "qbezier": {
+      "type": "constructor",
+      "params": "[]()()()[]",
+      "description": "Quadratic Bezier curve",
+      "pattern": "<qbezier points=\"#1\" p0=\"#2\" p1=\"#3\" p2=\"#4\"/>"
+    },
+    "cbezier": {
+      "type": "constructor",
+      "params": "[]()()()()[]",
+      "description": "Cubic Bezier curve (picture package)",
+      "pattern": "<cbezier p0=\"#2\" p1=\"#3\" p2=\"#4\" p3=\"#5\"/>"
+    },
+    "line": {
+      "type": "constructor",
+      "params": "(){}",
+      "description": "Draw a line",
+      "pattern": "<line slope=\"#1\" length=\"#2\"/>"
+    },
+    "vector": {
+      "type": "constructor",
+      "params": "(){}",
+      "description": "Draw an arrow/vector",
+      "pattern": "<vector slope=\"#1\" length=\"#2\"/>"
+    },
+    "circle": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Draw a circle (* = filled)",
+      "pattern": "<circle diameter=\"#2\" filled=\"#1\"/>"
+    },
+    "oval": {
+      "type": "constructor",
+      "params": "()[]",
+      "description": "Draw an oval or part of oval",
+      "pattern": "<oval size=\"#1\" part=\"#2\"/>"
+    },
+    "frame": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Frame around content",
+      "pattern": "<frame>#1</frame>"
+    },
+    "dashbox": {
+      "type": "constructor",
+      "params": "{}()[]{}",
+      "description": "Dashed box",
+      "pattern": "<dashbox dash=\"#1\" size=\"#2\" pos=\"#3\">#4</dashbox>"
+    },
+    "framebox": {
+      "type": "constructor",
+      "params": "()[]{}",
+      "description": "Framed box in picture",
+      "pattern": "<framebox size=\"#1\" pos=\"#2\">#3</framebox>"
+    },
+    "makebox": {
+      "type": "constructor",
+      "params": "()[]{}",
+      "description": "Box in picture",
+      "pattern": "<makebox size=\"#1\" pos=\"#2\">#3</makebox>"
+    },
+    "savebox": {
+      "type": "primitive",
+      "params": "{}()[]{}",
+      "description": "Save box for later use",
+      "pattern": ""
+    },
+    "usebox": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Use saved box",
+      "pattern": "<usebox name=\"#1\"/>"
+    },
+    "shortstack": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Stack of short text",
+      "pattern": "<shortstack align=\"#1\">#2</shortstack>"
+    },
+    "thinlines": {
+      "type": "primitive",
+      "params": "",
+      "description": "Use thin lines (0.4pt)",
+      "pattern": ""
+    },
+    "thicklines": {
+      "type": "primitive",
+      "params": "",
+      "description": "Use thick lines (0.8pt)",
+      "pattern": ""
+    },
+    "linethickness": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set line thickness",
+      "pattern": ""
+    },
+    "arrowlength": {
+      "type": "primitive",
+      "params": "",
+      "description": "Arrow head length parameter",
+      "pattern": ""
+    },
+    "unitlength": {
+      "type": "primitive",
+      "params": "",
+      "description": "Scale factor for coordinates",
+      "pattern": ""
+    },
+    "setlength": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length with calc expressions",
+      "pattern": ""
+    },
+    "addtolength": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add to length with calc expressions",
+      "pattern": ""
+    },
+    "settodepth": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length to depth of box",
+      "pattern": ""
+    },
+    "settoheight": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length to height of box",
+      "pattern": ""
+    },
+    "settowidth": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length to width of box",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "picture": {
+      "description": "Picture drawing environment",
+      "begin": "<picture size=\"#1\" offset=\"#2\">",
+      "end": "</picture>",
+      "params": "()[]"
+    }
+  },
+  
+  "coordinate_system": {
+    "origin": "bottom-left corner",
+    "units": "multiples of \\unitlength",
+    "default_unitlength": "1pt"
+  },
+  
+  "slope_restrictions": {
+    "line": "slopes (x,y) where x,y in {-6..6}, gcd=1",
+    "vector": "slopes (x,y) where x,y in {-4..4}, gcd=1"
+  },
+  
+  "package_enhancements": {
+    "description": "The picture package adds calc-style arithmetic to dimension commands",
+    "examples": [
+      "\\setlength{\\unitlength}{1cm/2}",
+      "\\put(1+2,3*4){text}",
+      "\\line(1,2){3cm+5mm}"
+    ]
+  }
+}

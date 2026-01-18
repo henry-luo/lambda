@@ -1,0 +1,127 @@
+{
+  "name": "calc",
+  "version": "4.3",
+  "description": "Infix notation arithmetic in LaTeX commands",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Allow arithmetic in length/counter commands",
+    "modern": "Many features now in LaTeX kernel"
+  },
+  
+  "commands": {
+    "setlength": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length with calc expressions",
+      "pattern": ""
+    },
+    "addtolength": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add to length with calc",
+      "pattern": ""
+    },
+    "setcounter": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set counter with calc",
+      "pattern": ""
+    },
+    "addtocounter": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Add to counter with calc",
+      "pattern": ""
+    },
+    "stepcounter": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Step counter",
+      "pattern": ""
+    },
+    "settowidth": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length to width of text",
+      "pattern": ""
+    },
+    "settoheight": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length to height of text",
+      "pattern": ""
+    },
+    "settodepth": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set length to depth of text",
+      "pattern": ""
+    },
+    "widthof": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Width of text",
+      "pattern": "<widthof>#1</widthof>"
+    },
+    "heightof": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Height of text",
+      "pattern": "<heightof>#1</heightof>"
+    },
+    "depthof": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Depth of text",
+      "pattern": "<depthof>#1</depthof>"
+    },
+    "totalheightof": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Total height (height + depth)",
+      "pattern": "<totalheightof>#1</totalheightof>"
+    },
+    "maxof": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Maximum of two lengths",
+      "pattern": "<maxof><a>#1</a><b>#2</b></maxof>"
+    },
+    "minof": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Minimum of two lengths",
+      "pattern": "<minof><a>#1</a><b>#2</b></minof>"
+    },
+    "ratio": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Ratio of two lengths",
+      "pattern": "<ratio><num>#1</num><den>#2</den></ratio>"
+    },
+    "real": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Real number multiplier",
+      "pattern": "<real>#1</real>"
+    }
+  },
+  
+  "operators": {
+    "+": "addition",
+    "-": "subtraction",
+    "*": "multiplication (with integer or real)",
+    "/": "division (with integer)",
+    "()": "grouping"
+  },
+  
+  "examples": {
+    "length_calc": "\\setlength{\\mylen}{(\\textwidth-2cm)/3}",
+    "counter_calc": "\\setcounter{page}{\\value{page}+10}",
+    "width": "\\setlength{\\mylen}{\\widthof{Some text}}",
+    "ratio": "\\setlength{\\mylen}{\\textwidth*\\ratio{1pt}{3pt}}",
+    "real": "\\setlength{\\mylen}{0.5\\textwidth}",
+    "complex": "\\setlength{\\len}{(\\textwidth-\\leftmargin-\\rightmargin)/2+1cm}"
+  }
+}

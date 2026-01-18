@@ -1,0 +1,67 @@
+{
+  "name": "xargs",
+  "version": "1.1",
+  "description": "Extended arguments for commands",
+  "requires": ["latex_base", "xkeyval"],
+  
+  "notes": {
+    "purpose": "Define commands with many optional arguments"
+  },
+  
+  "commands": {
+    "newcommandx": {
+      "type": "primitive",
+      "params": "{}[][]{}",
+      "description": "Define command with optional args",
+      "pattern": ""
+    },
+    "renewcommandx": {
+      "type": "primitive",
+      "params": "{}[][]{}",
+      "description": "Redefine command with optional args",
+      "pattern": ""
+    },
+    "providecommandx": {
+      "type": "primitive",
+      "params": "{}[][]{}",
+      "description": "Provide command with optional args",
+      "pattern": ""
+    },
+    "DeclareRobustCommandx": {
+      "type": "primitive",
+      "params": "{}[][]{}",
+      "description": "Declare robust command with optional args",
+      "pattern": ""
+    },
+    "newenvironmentx": {
+      "type": "primitive",
+      "params": "{}[][]{}{}",
+      "description": "Define environment with optional args",
+      "pattern": ""
+    },
+    "renewenvironmentx": {
+      "type": "primitive",
+      "params": "{}[][]{}{}",
+      "description": "Redefine environment with optional args",
+      "pattern": ""
+    },
+    "CheckCommandx": {
+      "type": "primitive",
+      "params": "{}[][]{}",
+      "description": "Check command definition",
+      "pattern": ""
+    }
+  },
+  
+  "key_syntax": {
+    "usealiasaliasaliases": "Number of args: [3] means 3 arguments",
+    "usealiasdefaults": "Default values: [1=default1, 2=default2]",
+    "addprefix": "Add prefix to argument",
+    "addsuffix": "Add suffix to argument"
+  },
+  
+  "examples": {
+    "basic": "\\newcommandx{\\foo}[3][1=default1,2=default2]{...#1...#2...#3...}",
+    "description": "Creates \\foo with 3 args, where #1 defaults to 'default1', #2 to 'default2'"
+  }
+}

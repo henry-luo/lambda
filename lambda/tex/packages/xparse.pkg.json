@@ -1,0 +1,196 @@
+{
+  "name": "xparse",
+  "version": "2023-02-02",
+  "description": "High-level interface for declaring document commands",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "modern_latex": "Integrated into LaTeX kernel since 2020-10-01",
+    "purpose": "Flexible argument specification for command definitions"
+  },
+  
+  "commands": {
+    "NewDocumentCommand": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define new document command",
+      "pattern": ""
+    },
+    "RenewDocumentCommand": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Redefine existing command",
+      "pattern": ""
+    },
+    "ProvideDocumentCommand": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define only if not exists",
+      "pattern": ""
+    },
+    "DeclareDocumentCommand": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define (overwrite silently)",
+      "pattern": ""
+    },
+    "NewDocumentEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define new environment",
+      "pattern": ""
+    },
+    "RenewDocumentEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Redefine environment",
+      "pattern": ""
+    },
+    "ProvideDocumentEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define environment if not exists",
+      "pattern": ""
+    },
+    "DeclareDocumentEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define environment (overwrite)",
+      "pattern": ""
+    },
+    "NewExpandableDocumentCommand": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define expandable command",
+      "pattern": ""
+    },
+    "IfNoValueTF": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if argument was given",
+      "pattern": ""
+    },
+    "IfNoValueT": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "True branch if no value",
+      "pattern": ""
+    },
+    "IfNoValueF": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "False branch if no value",
+      "pattern": ""
+    },
+    "IfValueTF": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test if argument has value",
+      "pattern": ""
+    },
+    "IfValueT": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "True branch if has value",
+      "pattern": ""
+    },
+    "IfValueF": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "False branch if has value",
+      "pattern": ""
+    },
+    "IfBooleanTF": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Test boolean (star) argument",
+      "pattern": ""
+    },
+    "IfBooleanT": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "True branch for boolean",
+      "pattern": ""
+    },
+    "IfBooleanF": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "False branch for boolean",
+      "pattern": ""
+    },
+    "BooleanTrue": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Marker for true star"
+    },
+    "BooleanFalse": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Marker for false star"
+    },
+    "ProcessedArgument": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Result from processor"
+    },
+    "ReverseBoolean": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Reverse boolean value",
+      "pattern": ""
+    },
+    "SplitArgument": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Split on delimiter",
+      "pattern": ""
+    },
+    "SplitList": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Split list on separator",
+      "pattern": ""
+    },
+    "TrimSpaces": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Remove surrounding spaces",
+      "pattern": ""
+    },
+    "ProcessList": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Process each list item",
+      "pattern": ""
+    }
+  },
+  
+  "argument_specifiers": {
+    "m": "mandatory argument {...}",
+    "r<tok1><tok2>": "required delimited arg",
+    "R<tok1><tok2>{default}": "required with default",
+    "v": "verbatim argument",
+    "b": "body of environment",
+    "o": "optional [...] with -NoValue- default",
+    "O{default}": "optional [...] with default",
+    "d<tok1><tok2>": "optional delimited",
+    "D<tok1><tok2>{default}": "optional delimited with default",
+    "s": "optional star",
+    "t<token>": "optional token",
+    "e{tokens}": "set of embellishments",
+    "E{tokens}{defaults}": "embellishments with defaults",
+    "+": "long (allow \\par)",
+    "!": "don't skip spaces",
+    ">": "argument processor"
+  },
+  
+  "examples": {
+    "basic": "\\NewDocumentCommand{\\foo}{m}{do #1}",
+    "optional": "\\NewDocumentCommand{\\foo}{O{default}m}{opt=#1, req=#2}",
+    "star": "\\NewDocumentCommand{\\foo}{sm}{\\IfBooleanTF{#1}{star}{no}#2}",
+    "environment": "\\NewDocumentEnvironment{myenv}{O{}}{begin #1}{end}"
+  }
+}

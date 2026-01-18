@@ -1,0 +1,91 @@
+{
+  "name": "ulem",
+  "version": "2019-11-18",
+  "description": "Underline, strikeout, wave, crossing out",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "warning": "By default, redefines \\emph to underline",
+    "usage": "Use [normalem] option to keep italic emphasis"
+  },
+  
+  "commands": {
+    "uline": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Underline",
+      "pattern": "<u>#1</u>"
+    },
+    "uuline": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Double underline",
+      "pattern": "<u class=\"double\">#1</u>"
+    },
+    "uwave": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Wavy underline",
+      "pattern": "<u class=\"wavy\">#1</u>"
+    },
+    "sout": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Strike out",
+      "pattern": "<s>#1</s>"
+    },
+    "xout": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Cross out with ////",
+      "pattern": "<s class=\"cross\">#1</s>"
+    },
+    "dashuline": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Dashed underline",
+      "pattern": "<u class=\"dashed\">#1</u>"
+    },
+    "dotuline": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Dotted underline",
+      "pattern": "<u class=\"dotted\">#1</u>"
+    },
+    "markoverwith": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Mark over with pattern",
+      "pattern": ""
+    },
+    "ULdepth": {
+      "type": "length",
+      "description": "Underline depth"
+    },
+    "ULthickness": {
+      "type": "primitive",
+      "params": "",
+      "description": "Underline thickness",
+      "pattern": ""
+    },
+    "normalem": {
+      "type": "primitive",
+      "params": "",
+      "description": "Restore \\emph to italics",
+      "pattern": ""
+    },
+    "ULforem": {
+      "type": "primitive",
+      "params": "",
+      "description": "Use underline for \\emph",
+      "pattern": ""
+    }
+  },
+  
+  "options": {
+    "normalem": "keep \\emph as italics",
+    "ULforem": "use underline for \\emph",
+    "normalbf": "keep \\textbf normal",
+    "UWforbf": "use wavy for \\textbf"
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "name": "ifthen",
+  "version": "1.1c",
+  "description": "Conditional commands in LaTeX documents",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Standard conditionals for documents",
+    "alternative": "etoolbox provides more modern alternatives"
+  },
+  
+  "commands": {
+    "ifthenelse": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "If-then-else construct",
+      "pattern": ""
+    },
+    "whiledo": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "While loop",
+      "pattern": ""
+    },
+    "newboolean": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Declare new boolean",
+      "pattern": ""
+    },
+    "provideboolean": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Declare boolean if not exists",
+      "pattern": ""
+    },
+    "setboolean": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set boolean true or false",
+      "pattern": ""
+    },
+    "boolean": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Test boolean in condition",
+      "pattern": ""
+    },
+    "equal": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "String equality test",
+      "pattern": ""
+    },
+    "lengthtest": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Length comparison",
+      "pattern": ""
+    },
+    "isodd": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Test if number is odd",
+      "pattern": ""
+    },
+    "isundefined": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Test if command undefined",
+      "pattern": ""
+    },
+    "NOT": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Logical not",
+      "pattern": ""
+    },
+    "AND": {
+      "type": "primitive",
+      "params": "",
+      "description": "Logical and",
+      "pattern": ""
+    },
+    "OR": {
+      "type": "primitive",
+      "params": "",
+      "description": "Logical or",
+      "pattern": ""
+    }
+  },
+  
+  "test_expressions": {
+    "numeric": "\\value{counter} < 10",
+    "length": "\\lengthtest{\\len > 5cm}",
+    "string": "\\equal{\\x}{yes}",
+    "boolean": "\\boolean{mybool}",
+    "odd": "\\isodd{\\value{page}}",
+    "undefined": "\\isundefined{\\mycmd}",
+    "compound": "\\boolean{a} \\AND \\NOT\\boolean{b}"
+  },
+  
+  "examples": {
+    "simple": "\\ifthenelse{\\value{page}>10}{many pages}{few pages}",
+    "boolean": "\\ifthenelse{\\boolean{draft}}{DRAFT}{final}",
+    "compound": "\\ifthenelse{\\value{n}>0 \\AND \\value{n}<100}{valid}{invalid}",
+    "loop": "\\whiledo{\\value{cnt}<10}{step \\stepcounter{cnt}}"
+  }
+}

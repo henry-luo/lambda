@@ -1,0 +1,73 @@
+{
+  "name": "amscd",
+  "version": "2.1",
+  "description": "Commutative diagrams in AMS-LaTeX",
+  "requires": ["latex_base", "amsmath"],
+  
+  "notes": {
+    "purpose": "Simple commutative diagrams",
+    "alternative": "tikz-cd for more complex diagrams"
+  },
+  
+  "commands": {
+    "@>>>": {
+      "type": "constructor",
+      "params": "",
+      "description": "Right arrow",
+      "pattern": "<cd-arrow dir=\"right\"/>"
+    },
+    "@<<<": {
+      "type": "constructor",
+      "params": "",
+      "description": "Left arrow",
+      "pattern": "<cd-arrow dir=\"left\"/>"
+    },
+    "@VVV": {
+      "type": "constructor",
+      "params": "",
+      "description": "Down arrow",
+      "pattern": "<cd-arrow dir=\"down\"/>"
+    },
+    "@AAA": {
+      "type": "constructor",
+      "params": "",
+      "description": "Up arrow",
+      "pattern": "<cd-arrow dir=\"up\"/>"
+    },
+    "@=": {
+      "type": "constructor",
+      "params": "",
+      "description": "Horizontal double line",
+      "pattern": "<cd-line dir=\"horizontal\" double=\"true\"/>"
+    },
+    "@|": {
+      "type": "constructor",
+      "params": "",
+      "description": "Vertical double line",
+      "pattern": "<cd-line dir=\"vertical\" double=\"true\"/>"
+    },
+    "@.": {
+      "type": "constructor",
+      "params": "",
+      "description": "Empty (no arrow)",
+      "pattern": "<cd-empty/>"
+    }
+  },
+  
+  "environments": {
+    "CD": {
+      "description": "Commutative diagram",
+      "begin": "<CD>",
+      "end": "</CD>"
+    }
+  },
+  
+  "arrow_labels": {
+    "description": "Labels between arrows",
+    "syntax": "@>{label}>{label}>",
+    "positions": {
+      "first": "above/left of arrow",
+      "second": "below/right of arrow"
+    }
+  }
+}

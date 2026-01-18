@@ -1,0 +1,279 @@
+{
+  "name": "marvosym",
+  "version": "2.2a",
+  "description": "Martin Vogel's symbol font",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "EUR": {
+      "type": "macro",
+      "params": "",
+      "replacement": "€",
+      "description": "Euro sign"
+    },
+    "EURdig": {
+      "type": "macro",
+      "params": "",
+      "replacement": "€",
+      "description": "Euro sign (alternate)"
+    },
+    "EURhv": {
+      "type": "macro",
+      "params": "",
+      "replacement": "€",
+      "description": "Euro sign Helvetica"
+    },
+    "EURcr": {
+      "type": "macro",
+      "params": "",
+      "replacement": "€",
+      "description": "Euro sign Courier"
+    },
+    "EURtm": {
+      "type": "macro",
+      "params": "",
+      "replacement": "€",
+      "description": "Euro sign Times"
+    },
+    "Cent": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¢",
+      "description": "Cent sign"
+    },
+    "Emark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "℮",
+      "description": "Estimated symbol"
+    },
+    "Shilling": {
+      "type": "macro",
+      "params": "",
+      "replacement": "/",
+      "description": "Shilling mark"
+    },
+    "Denarius": {
+      "type": "macro",
+      "params": "",
+      "replacement": "₰",
+      "description": "Denarius"
+    },
+    "Pfund": {
+      "type": "macro",
+      "params": "",
+      "replacement": "£",
+      "description": "Pound symbol"
+    },
+    "Letter": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✉",
+      "description": "Letter/envelope"
+    },
+    "Writinghand": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✍",
+      "description": "Writing hand"
+    },
+    "Telefon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☎",
+      "description": "Telephone"
+    },
+    "Faxmachine": {
+      "type": "macro",
+      "params": "",
+      "replacement": "📠",
+      "description": "Fax machine"
+    },
+    "Email": {
+      "type": "macro",
+      "params": "",
+      "replacement": "@",
+      "description": "Email at-sign"
+    },
+    "Mobilefone": {
+      "type": "macro",
+      "params": "",
+      "replacement": "📱",
+      "description": "Mobile phone"
+    },
+    "Info": {
+      "type": "macro",
+      "params": "",
+      "replacement": "ℹ",
+      "description": "Info symbol"
+    },
+    "Pointinghand": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☞",
+      "description": "Pointing hand"
+    },
+    "Checkmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✓",
+      "description": "Check mark"
+    },
+    "CrossMaltese": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✠",
+      "description": "Maltese cross"
+    },
+    "Sun": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☀",
+      "description": "Sun"
+    },
+    "Moon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☾",
+      "description": "Moon"
+    },
+    "Lightning": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⚡",
+      "description": "Lightning"
+    },
+    "Bicycle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "🚲",
+      "description": "Bicycle"
+    },
+    "Male": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♂",
+      "description": "Male symbol"
+    },
+    "Female": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♀",
+      "description": "Female symbol"
+    },
+    "Neutral": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⚲",
+      "description": "Neutral gender"
+    },
+    "Smiley": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☺",
+      "description": "Smiley face"
+    },
+    "Frowny": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☹",
+      "description": "Frowning face"
+    },
+    "Recmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♻",
+      "description": "Recycling symbol"
+    },
+    "Heart": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♥",
+      "description": "Heart"
+    },
+    "FullMoon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "●",
+      "description": "Full moon"
+    },
+    "NewMoon": {
+      "type": "macro",
+      "params": "",
+      "replacement": "○",
+      "description": "New moon"
+    },
+    "Aries": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♈",
+      "description": "Zodiac Aries"
+    },
+    "Taurus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♉",
+      "description": "Zodiac Taurus"
+    },
+    "Gemini": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♊",
+      "description": "Zodiac Gemini"
+    },
+    "Cancer": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♋",
+      "description": "Zodiac Cancer"
+    },
+    "Leo": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♌",
+      "description": "Zodiac Leo"
+    },
+    "Virgo": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♍",
+      "description": "Zodiac Virgo"
+    },
+    "Libra": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♎",
+      "description": "Zodiac Libra"
+    },
+    "Scorpio": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♏",
+      "description": "Zodiac Scorpio"
+    },
+    "Sagittarius": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♐",
+      "description": "Zodiac Sagittarius"
+    },
+    "Capricorn": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♑",
+      "description": "Zodiac Capricorn"
+    },
+    "Aquarius": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♒",
+      "description": "Zodiac Aquarius"
+    },
+    "Pisces": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♓",
+      "description": "Zodiac Pisces"
+    }
+  }
+}

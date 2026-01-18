@@ -1,0 +1,164 @@
+{
+  "name": "fancyvrb",
+  "version": "4.5a",
+  "description": "Sophisticated verbatim text",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Highly configurable verbatim environments",
+    "features": "Line numbers, frames, colors, font selection"
+  },
+  
+  "commands": {
+    "VerbatimInput": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Input file verbatim",
+      "pattern": "<VerbatimInput options=\"#1\" file=\"#2\"/>"
+    },
+    "BVerbatimInput": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Boxed verbatim input",
+      "pattern": "<BVerbatimInput options=\"#1\" file=\"#2\"/>"
+    },
+    "LVerbatimInput": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Left-aligned verbatim input",
+      "pattern": "<LVerbatimInput options=\"#1\" file=\"#2\"/>"
+    },
+    "Verb": {
+      "type": "constructor",
+      "params": "[]!{}!",
+      "description": "Inline verbatim with options",
+      "pattern": "<Verb options=\"#1\">#2</Verb>"
+    },
+    "DefineVerbatimEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define custom verbatim environment",
+      "pattern": ""
+    },
+    "RecustomVerbatimEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Modify verbatim environment",
+      "pattern": ""
+    },
+    "CustomVerbatimEnvironment": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Create environment variant",
+      "pattern": ""
+    },
+    "DefineShortVerb": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Define short verbatim char (e.g., |)",
+      "pattern": ""
+    },
+    "UndefineShortVerb": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Undefine short verbatim",
+      "pattern": ""
+    },
+    "fvset": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set default options",
+      "pattern": ""
+    },
+    "SaveVerb": {
+      "type": "primitive",
+      "params": "[]{}!{}!",
+      "description": "Save verbatim for later",
+      "pattern": ""
+    },
+    "UseVerb": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Use saved verbatim",
+      "pattern": "<UseVerb name=\"#1\"/>"
+    }
+  },
+  
+  "environments": {
+    "Verbatim": {
+      "description": "Main verbatim environment",
+      "begin": "<Verbatim options=\"#1\">",
+      "end": "</Verbatim>",
+      "params": "[]",
+      "verbatim": true
+    },
+    "BVerbatim": {
+      "description": "Boxed verbatim",
+      "begin": "<BVerbatim options=\"#1\">",
+      "end": "</BVerbatim>",
+      "params": "[]",
+      "verbatim": true
+    },
+    "LVerbatim": {
+      "description": "Left-aligned verbatim",
+      "begin": "<LVerbatim options=\"#1\">",
+      "end": "</LVerbatim>",
+      "params": "[]",
+      "verbatim": true
+    },
+    "SaveVerbatim": {
+      "description": "Save verbatim for later use",
+      "begin": "<SaveVerbatim name=\"#1\">",
+      "end": "</SaveVerbatim>",
+      "params": "{}",
+      "verbatim": true
+    },
+    "VerbatimOut": {
+      "description": "Write to file",
+      "begin": "<VerbatimOut file=\"#1\">",
+      "end": "</VerbatimOut>",
+      "params": "{}",
+      "verbatim": true
+    }
+  },
+  
+  "options": {
+    "numbering": {
+      "numbers": "none|left|right",
+      "stepnumber": "line number interval",
+      "firstnumber": "auto|last|<number>",
+      "numberblanklines": "true|false"
+    },
+    "formatting": {
+      "fontsize": "font size command",
+      "fontfamily": "tt|courier|...",
+      "fontshape": "n|it|sl|...",
+      "formatcom": "command before each line",
+      "xleftmargin": "left margin",
+      "xrightmargin": "right margin"
+    },
+    "frames": {
+      "frame": "none|leftline|topline|bottomline|lines|single",
+      "framesep": "frame separation",
+      "framerule": "rule width",
+      "rulecolor": "frame color"
+    },
+    "lines": {
+      "firstline": "first line to show",
+      "lastline": "last line to show",
+      "gobble": "chars to remove from start"
+    },
+    "behavior": {
+      "showspaces": "show spaces as ␣",
+      "showtabs": "show tabs",
+      "obeytabs": "respect tab width",
+      "tabsize": "tab width",
+      "commandchars": "chars for commands",
+      "commentchar": "comment character"
+    },
+    "labels": {
+      "label": "caption label",
+      "labelposition": "topline|bottomline|all|none"
+    }
+  }
+}

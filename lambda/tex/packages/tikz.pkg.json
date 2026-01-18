@@ -1,0 +1,208 @@
+{
+  "name": "tikz",
+  "version": "3.1.10",
+  "description": "Create graphics programmatically (TikZ & PGF)",
+  "requires": ["latex_base", "xcolor"],
+  
+  "notes": {
+    "complexity": "Very extensive package - this covers core functionality",
+    "libraries": "Many features require \\usetikzlibrary{...}",
+    "alternative": "Use \\usepackage{pgf} for lower-level interface"
+  },
+  
+  "commands": {
+    "tikz": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Inline TikZ drawing",
+      "pattern": "<tikz options=\"#1\">#2</tikz>"
+    },
+    "tikzset": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set TikZ options globally",
+      "pattern": ""
+    },
+    "usetikzlibrary": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Load TikZ libraries",
+      "pattern": ""
+    },
+    "pgfmathsetmacro": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define macro with math result",
+      "pattern": ""
+    },
+    "pgfmathparse": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Parse math expression",
+      "pattern": ""
+    },
+    "pgfmathresult": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Result of last pgfmathparse"
+    },
+    "draw": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Draw path (in tikzpicture)",
+      "pattern": "<draw options=\"#1\">"
+    },
+    "fill": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Fill path",
+      "pattern": "<fill options=\"#1\">"
+    },
+    "filldraw": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Fill and draw path",
+      "pattern": "<filldraw options=\"#1\">"
+    },
+    "path": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Define path without drawing",
+      "pattern": "<path options=\"#1\">"
+    },
+    "node": {
+      "type": "constructor",
+      "params": "[](){}",
+      "description": "Place a node",
+      "pattern": "<node options=\"#1\" name=\"#2\">#3</node>"
+    },
+    "coordinate": {
+      "type": "constructor",
+      "params": "[]()at()",
+      "description": "Define coordinate",
+      "pattern": "<coordinate options=\"#1\" name=\"#2\" at=\"#3\"/>"
+    },
+    "clip": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Clip following content",
+      "pattern": "<clip options=\"#1\">"
+    },
+    "shade": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Shade path",
+      "pattern": "<shade options=\"#1\">"
+    },
+    "shadedraw": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Shade and draw path",
+      "pattern": "<shadedraw options=\"#1\">"
+    },
+    "foreach": {
+      "type": "constructor",
+      "params": "{} in {}{}",
+      "description": "Loop construct",
+      "pattern": "<foreach var=\"#1\" in=\"#2\">#3</foreach>"
+    },
+    "definecolor": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define a color",
+      "pattern": ""
+    },
+    "colorlet": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Create color alias",
+      "pattern": ""
+    },
+    "tikzstyle": {
+      "type": "primitive",
+      "params": "{}=[]",
+      "description": "Define style (deprecated, use tikzset)",
+      "pattern": ""
+    },
+    "pgfdeclarelayer": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Declare a layer",
+      "pattern": ""
+    },
+    "pgfsetlayers": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set layer order",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "tikzpicture": {
+      "description": "TikZ drawing environment",
+      "begin": "<tikzpicture options=\"#1\">",
+      "end": "</tikzpicture>",
+      "params": "[]"
+    },
+    "scope": {
+      "description": "Scoped options",
+      "begin": "<scope options=\"#1\">",
+      "end": "</scope>",
+      "params": "[]"
+    },
+    "pgfonlayer": {
+      "description": "Draw on specific layer",
+      "begin": "<layer name=\"#1\">",
+      "end": "</layer>",
+      "params": "{}"
+    }
+  },
+  
+  "path_operations": {
+    "basic": ["--", "-|", "|-", "to", ".."],
+    "shapes": ["circle", "ellipse", "arc", "rectangle", "grid"],
+    "curves": [".. controls (p1) and (p2) ..", "to[out=a,in=b]"],
+    "decorations": ["decorate"],
+    "nodes": ["node", "coordinate", "pic"]
+  },
+  
+  "coordinate_systems": {
+    "cartesian": "(x,y)",
+    "polar": "(angle:radius)",
+    "relative": "++(x,y) or +(x,y)",
+    "named": "(nodename)",
+    "anchor": "(nodename.anchor)",
+    "intersection": "intersection of A--B and C--D",
+    "perpendicular": "(A |- B) or (A -| B)",
+    "barycentric": "barycentric cs:A=1,B=2,C=1"
+  },
+  
+  "common_options": {
+    "drawing": ["color", "draw", "fill", "line width", "dashed", "dotted"],
+    "arrows": ["->", "<-", "<->", "-latex", "-stealth", "arrows={...}"],
+    "nodes": ["anchor", "at", "label", "pin", "above", "below", "left", "right"],
+    "shapes": ["circle", "rectangle", "ellipse", "diamond", "rounded corners"],
+    "transformations": ["shift", "rotate", "scale", "xshift", "yshift"]
+  },
+  
+  "libraries": {
+    "shapes": ["shapes.geometric", "shapes.symbols", "shapes.arrows", "shapes.misc"],
+    "arrows": ["arrows", "arrows.meta"],
+    "positioning": ["positioning"],
+    "calc": ["calc"],
+    "decorations": ["decorations.pathmorphing", "decorations.pathreplacing", "decorations.markings"],
+    "patterns": ["patterns"],
+    "backgrounds": ["backgrounds"],
+    "trees": ["trees"],
+    "graphs": ["graphs", "graphdrawing"],
+    "matrices": ["matrix"],
+    "chains": ["chains"],
+    "fit": ["fit"],
+    "through": ["through"],
+    "intersections": ["intersections"],
+    "3d": ["3d"],
+    "circuits": ["circuits.logic", "circuits.ee"]
+  }
+}

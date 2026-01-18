@@ -1,0 +1,136 @@
+{
+  "name": "latexml",
+  "version": "0.8.7",
+  "description": "LaTeXML-specific commands and compatibility",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Commands for LaTeXML document conversion",
+    "scope": "LaTeXML-specific, not standard LaTeX"
+  },
+  
+  "commands": {
+    "lxDocumentID": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set document ID",
+      "pattern": ""
+    },
+    "lxAddClass": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Add CSS class to element",
+      "pattern": ""
+    },
+    "lxWithClass": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Wrap content with CSS class",
+      "pattern": "<span class=\"#1\">#2</span>"
+    },
+    "lxBeginTableHead": {
+      "type": "primitive",
+      "params": "",
+      "description": "Begin table head",
+      "pattern": ""
+    },
+    "lxEndTableHead": {
+      "type": "primitive",
+      "params": "",
+      "description": "End table head",
+      "pattern": ""
+    },
+    "lxBeginTableFoot": {
+      "type": "primitive",
+      "params": "",
+      "description": "Begin table foot",
+      "pattern": ""
+    },
+    "lxEndTableFoot": {
+      "type": "primitive",
+      "params": "",
+      "description": "End table foot",
+      "pattern": ""
+    },
+    "lxID": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set element ID",
+      "pattern": ""
+    },
+    "lxRef": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Create reference",
+      "pattern": "<ref href=\"#1\">#2</ref>"
+    },
+    "lxFcn": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Function name",
+      "pattern": "<mi>#1</mi>"
+    },
+    "lxMathIn": {
+      "type": "primitive",
+      "params": "",
+      "description": "Enter inline math mode",
+      "pattern": ""
+    },
+    "lxMathOut": {
+      "type": "primitive",
+      "params": "",
+      "description": "Exit inline math mode",
+      "pattern": ""
+    },
+    "lxContextTOC": {
+      "type": "primitive",
+      "params": "",
+      "description": "Context-sensitive TOC",
+      "pattern": ""
+    },
+    "lxNavbar": {
+      "type": "primitive",
+      "params": "",
+      "description": "Navigation bar",
+      "pattern": ""
+    },
+    "lxPrintIndex": {
+      "type": "primitive",
+      "params": "",
+      "description": "Print index",
+      "pattern": ""
+    },
+    "lxPrintBibliography": {
+      "type": "primitive",
+      "params": "",
+      "description": "Print bibliography",
+      "pattern": ""
+    },
+    "lxDeclare": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "Declare LaTeXML binding",
+      "pattern": ""
+    },
+    "lxDef": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define macro for LaTeXML",
+      "pattern": ""
+    },
+    "lxRDFa": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Add RDFa attributes",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "lxNamespace": {
+      "description": "Namespace declaration",
+      "begin": "",
+      "end": ""
+    }
+  }
+}

@@ -1,0 +1,511 @@
+{
+  "name": "stmaryrd",
+  "version": "1.0",
+  "description": "St Mary Road symbols for theoretical computer science",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Brackets, arrows, and operators for CS/logic"
+  },
+  
+  "commands": {
+    "llbracket": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟦",
+      "description": "Left double bracket"
+    },
+    "rrbracket": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟧",
+      "description": "Right double bracket"
+    },
+    "llparenthesis": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⦅",
+      "description": "Left double parenthesis"
+    },
+    "rrparenthesis": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⦆",
+      "description": "Right double parenthesis"
+    },
+    "llceil": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌈",
+      "description": "Left ceiling"
+    },
+    "rrceil": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌉",
+      "description": "Right ceiling"
+    },
+    "llfloor": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌊",
+      "description": "Left floor"
+    },
+    "rrfloor": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌋",
+      "description": "Right floor"
+    },
+    "Lbag": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟅",
+      "description": "Left bag bracket"
+    },
+    "Rbag": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟆",
+      "description": "Right bag bracket"
+    },
+    "lbag": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟅",
+      "description": "Left bag bracket (small)"
+    },
+    "rbag": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟆",
+      "description": "Right bag bracket (small)"
+    },
+    "Mapsto": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⤇",
+      "description": "Double-bar right arrow"
+    },
+    "mapsfrom": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↤",
+      "description": "Mapsto from left"
+    },
+    "Mapsfrom": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⤆",
+      "description": "Double-bar left arrow"
+    },
+    "longmapsto": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟼",
+      "description": "Long mapsto"
+    },
+    "Longmapsto": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟾",
+      "description": "Long double-bar right arrow"
+    },
+    "longmapsfrom": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟻",
+      "description": "Long mapsfrom"
+    },
+    "Longmapsfrom": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⟽",
+      "description": "Long double-bar left arrow"
+    },
+    "shortrightarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "→",
+      "description": "Short right arrow"
+    },
+    "shortleftarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "←",
+      "description": "Short left arrow"
+    },
+    "shortuparrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↑",
+      "description": "Short up arrow"
+    },
+    "shortdownarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↓",
+      "description": "Short down arrow"
+    },
+    "Yup": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⅄",
+      "description": "Upward Y"
+    },
+    "Ydown": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⅄",
+      "description": "Downward Y"
+    },
+    "Yleft": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⅄",
+      "description": "Leftward Y"
+    },
+    "Yright": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⅄",
+      "description": "Rightward Y"
+    },
+    "varcurlyvee": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋎",
+      "description": "Curly vee"
+    },
+    "varcurlywedge": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋏",
+      "description": "Curly wedge"
+    },
+    "minuso": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊝",
+      "description": "Circled minus"
+    },
+    "baro": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊖",
+      "description": "Circled bar"
+    },
+    "sslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫽",
+      "description": "Double slash"
+    },
+    "bbslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫿",
+      "description": "Double backslash"
+    },
+    "moo": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊛",
+      "description": "Circled asterisk"
+    },
+    "varoast": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊛",
+      "description": "Circled asterisk (variant)"
+    },
+    "varobar": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊖",
+      "description": "Circled bar (variant)"
+    },
+    "varobslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊘",
+      "description": "Circled backslash"
+    },
+    "varocircle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊚",
+      "description": "Circled circle"
+    },
+    "varodot": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊙",
+      "description": "Circled dot"
+    },
+    "varominus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊖",
+      "description": "Circled minus (variant)"
+    },
+    "varoplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊕",
+      "description": "Circled plus (variant)"
+    },
+    "varoslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊘",
+      "description": "Circled slash"
+    },
+    "varotimes": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊗",
+      "description": "Circled times (variant)"
+    },
+    "boxast": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⧆",
+      "description": "Boxed asterisk"
+    },
+    "boxbar": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◫",
+      "description": "Boxed bar"
+    },
+    "boxbox": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⧈",
+      "description": "Boxed box"
+    },
+    "boxbslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⧅",
+      "description": "Boxed backslash"
+    },
+    "boxcircle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⧇",
+      "description": "Boxed circle"
+    },
+    "boxdot": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊡",
+      "description": "Boxed dot"
+    },
+    "boxempty": {
+      "type": "macro",
+      "params": "",
+      "replacement": "□",
+      "description": "Empty box"
+    },
+    "boxminus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊟",
+      "description": "Boxed minus"
+    },
+    "boxplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊞",
+      "description": "Boxed plus"
+    },
+    "boxslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⧄",
+      "description": "Boxed slash"
+    },
+    "boxtimes": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊠",
+      "description": "Boxed times"
+    },
+    "bigcurlyvee": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋁",
+      "description": "Big curly vee"
+    },
+    "bigcurlywedge": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋀",
+      "description": "Big curly wedge"
+    },
+    "bigbox": {
+      "type": "macro",
+      "params": "",
+      "replacement": "□",
+      "description": "Big box"
+    },
+    "biginterleave": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫼",
+      "description": "Big interleave"
+    },
+    "bignplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨀",
+      "description": "Big n-ary plus"
+    },
+    "bigparallel": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∥",
+      "description": "Big parallel"
+    },
+    "bigsqcap": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨅",
+      "description": "Big square cap"
+    },
+    "bigtriangleleft": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨞",
+      "description": "Big triangle left"
+    },
+    "inplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨢",
+      "description": "Plus in set"
+    },
+    "niplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨣",
+      "description": "Ni plus"
+    },
+    "subsetplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⪿",
+      "description": "Subset with plus"
+    },
+    "supsetplus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫀",
+      "description": "Superset with plus"
+    },
+    "subsetpluseq": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫁",
+      "description": "Subset-or-equal with plus"
+    },
+    "supsetpluseq": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫂",
+      "description": "Superset-or-equal with plus"
+    },
+    "Lsh": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↰",
+      "description": "Left shift"
+    },
+    "Rsh": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↱",
+      "description": "Right shift"
+    },
+    "leftslice": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⪦",
+      "description": "Left slice"
+    },
+    "rightslice": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⪧",
+      "description": "Right slice"
+    },
+    "leftthreetimes": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋋",
+      "description": "Left semidirect product"
+    },
+    "rightthreetimes": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⋌",
+      "description": "Right semidirect product"
+    },
+    "merge": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫴",
+      "description": "Merge"
+    },
+    "fatsemi": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨟",
+      "description": "Fat semicolon"
+    },
+    "fatslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫻",
+      "description": "Fat slash"
+    },
+    "fatbslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫷",
+      "description": "Fat backslash"
+    },
+    "interleave": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⫴",
+      "description": "Interleave"
+    },
+    "obar": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌽",
+      "description": "O with bar"
+    },
+    "obslash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⦸",
+      "description": "O with backslash"
+    },
+    "nmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✗",
+      "description": "Ballot X"
+    },
+    "ymark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✓",
+      "description": "Check mark"
+    }
+  }
+}

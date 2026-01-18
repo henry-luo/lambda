@@ -1,0 +1,188 @@
+{
+  "name": "tcolorbox",
+  "version": "6.0.4",
+  "description": "Colored and framed text boxes with TikZ",
+  "requires": ["latex_base", "tikz", "xcolor"],
+  
+  "notes": {
+    "complexity": "Extensive package with many libraries",
+    "purpose": "Create highly customizable colored boxes"
+  },
+  
+  "commands": {
+    "tcbox": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Inline colored box",
+      "pattern": "<tcbox options=\"#1\">#2</tcbox>"
+    },
+    "tcboxfit": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Box with fitted content",
+      "pattern": "<tcboxfit options=\"#1\">#2</tcboxfit>"
+    },
+    "tcbset": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set tcolorbox options globally",
+      "pattern": ""
+    },
+    "tcbuselibrary": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Load tcolorbox libraries",
+      "pattern": ""
+    },
+    "newtcolorbox": {
+      "type": "primitive",
+      "params": "[]{}[]{}",
+      "description": "Define new box environment",
+      "pattern": ""
+    },
+    "renewtcolorbox": {
+      "type": "primitive",
+      "params": "[]{}[]{}",
+      "description": "Redefine box environment",
+      "pattern": ""
+    },
+    "newtcbox": {
+      "type": "primitive",
+      "params": "[]{}[]{}",
+      "description": "Define new box command",
+      "pattern": ""
+    },
+    "DeclareTColorBox": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Full box declaration",
+      "pattern": ""
+    },
+    "tcbline": {
+      "type": "constructor",
+      "params": "*",
+      "description": "Horizontal line in box",
+      "pattern": "<tcbline/>"
+    },
+    "tcblower": {
+      "type": "primitive",
+      "params": "",
+      "description": "Separator between upper and lower part",
+      "pattern": ""
+    },
+    "tcbsubtitle": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Subtitle within box",
+      "pattern": "<tcbsubtitle options=\"#1\">#2</tcbsubtitle>"
+    },
+    "tcbincludegraphics": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Include graphics in box",
+      "pattern": "<tcbincludegraphics options=\"#1\">#2</tcbincludegraphics>"
+    },
+    "tcbhighmath": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Highlighted math",
+      "pattern": "<tcbhighmath options=\"#1\">#2</tcbhighmath>"
+    },
+    "tcboxmath": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Math in colored box",
+      "pattern": "<tcboxmath options=\"#1\">#2</tcboxmath>"
+    }
+  },
+  
+  "environments": {
+    "tcolorbox": {
+      "description": "Main colored box environment",
+      "begin": "<tcolorbox options=\"#1\">",
+      "end": "</tcolorbox>",
+      "params": "[]"
+    },
+    "tcbraster": {
+      "description": "Arrange boxes in grid",
+      "begin": "<tcbraster options=\"#1\">",
+      "end": "</tcbraster>",
+      "params": "[]"
+    },
+    "tcbitemize": {
+      "description": "Itemize with boxes",
+      "begin": "<tcbitemize options=\"#1\">",
+      "end": "</tcbitemize>",
+      "params": "[]"
+    },
+    "tcblisting": {
+      "description": "Code listing box",
+      "begin": "<tcblisting options=\"#1\">",
+      "end": "</tcblisting>",
+      "params": "[]"
+    }
+  },
+  
+  "options": {
+    "colors": {
+      "colback": "background color",
+      "colframe": "frame color",
+      "coltitle": "title text color",
+      "coltext": "content text color",
+      "colbacktitle": "title background color"
+    },
+    "dimensions": {
+      "width": "box width",
+      "height": "box height",
+      "boxsep": "separation from content",
+      "left": "left margin",
+      "right": "right margin",
+      "top": "top margin",
+      "bottom": "bottom margin",
+      "arc": "corner arc radius",
+      "boxrule": "frame rule width"
+    },
+    "title": {
+      "title": "box title text",
+      "titlerule": "rule below title",
+      "toptitle": "space above title",
+      "bottomtitle": "space below title"
+    },
+    "content": {
+      "fonttitle": "font for title",
+      "fontupper": "font for upper part",
+      "fontlower": "font for lower part",
+      "halign": "horizontal alignment",
+      "valign": "vertical alignment"
+    },
+    "breakable": {
+      "breakable": "allow page breaks",
+      "unbreakable": "prevent page breaks",
+      "break at": "specific break point"
+    },
+    "skins": {
+      "enhanced": "use TikZ for drawing",
+      "standard": "default style",
+      "bicolor": "two colors",
+      "beamer": "beamer-style"
+    }
+  },
+  
+  "libraries": {
+    "most": "loads most common libraries",
+    "all": "loads all libraries",
+    "skins": "additional box skins",
+    "breakable": "multi-page boxes",
+    "listings": "code listings integration",
+    "listingsutf8": "listings with UTF-8",
+    "minted": "minted code highlighting",
+    "theorems": "theorem-like boxes",
+    "fitting": "content fitting",
+    "raster": "box grids",
+    "magazine": "magazine-style layouts",
+    "documentation": "documentation tools",
+    "vignette": "vignette effects",
+    "poster": "poster layouts",
+    "xparse": "xparse integration"
+  }
+}

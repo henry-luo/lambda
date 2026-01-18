@@ -1,0 +1,204 @@
+{
+  "name": "tocloft",
+  "version": "2.3i",
+  "description": "Control table of contents, figures, etc",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "cftmarktoc": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Marks for toc header"
+    },
+    "cftmarklof": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Marks for lof header"
+    },
+    "cftmarklot": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Marks for lot header"
+    },
+    "cfttoctitlefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for toc title"
+    },
+    "cftloftitlefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for lof title"
+    },
+    "cftlottitlefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for lot title"
+    },
+    "cftaftertoctitle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Code after toc title"
+    },
+    "cftafterloftitle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Code after lof title"
+    },
+    "cftafterlottitle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Code after lot title"
+    },
+    "cftdot": {
+      "type": "macro",
+      "params": "",
+      "replacement": ".",
+      "description": "Dot character"
+    },
+    "cftdotsep": {
+      "type": "primitive",
+      "params": "",
+      "description": "Separation between dots",
+      "pattern": ""
+    },
+    "cftpartfont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for part entries"
+    },
+    "cftpartpagefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for part page numbers"
+    },
+    "cftchapfont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for chapter entries"
+    },
+    "cftchappagefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for chapter page numbers"
+    },
+    "cftsecfont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for section entries"
+    },
+    "cftsecpagefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for section page numbers"
+    },
+    "cftsubsecfont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for subsection entries"
+    },
+    "cftsubsecpagefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for subsection page numbers"
+    },
+    "cftfigfont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for figure entries"
+    },
+    "cftfigpagefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for figure page numbers"
+    },
+    "cfttabfont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for table entries"
+    },
+    "cfttabpagefont": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Font for table page numbers"
+    },
+    "newlistof": {
+      "type": "primitive",
+      "params": "[]{}{}{}",
+      "description": "Create new list-of",
+      "pattern": ""
+    },
+    "newlistentry": {
+      "type": "primitive",
+      "params": "[]{}{}",
+      "description": "New entry type for list",
+      "pattern": ""
+    },
+    "setpnumwidth": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set page number width",
+      "pattern": ""
+    },
+    "setrmarg": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set right margin",
+      "pattern": ""
+    },
+    "cftsetindents": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Set entry indentation",
+      "pattern": ""
+    }
+  },
+  
+  "lengths": {
+    "cftbeforetoctitleskip": "space before toc title",
+    "cftaftertoctitleskip": "space after toc title",
+    "cftbeforeloftitleskip": "space before lof title",
+    "cftafterloftitleskip": "space after lof title",
+    "cftbeforelottitleskip": "space before lot title",
+    "cftafterlottitleskip": "space after lot title",
+    "cftparskip": "extra skip between entries",
+    "cftpartindent": "part entry indent",
+    "cftchapindent": "chapter entry indent",
+    "cftsecindent": "section entry indent",
+    "cftsubsecindent": "subsection entry indent",
+    "cftfigindent": "figure entry indent",
+    "cfttabindent": "table entry indent",
+    "cftpartnumwidth": "part number width",
+    "cftchapnumwidth": "chapter number width",
+    "cftsecnumwidth": "section number width",
+    "cftsubsecnumwidth": "subsection number width",
+    "cftfignumwidth": "figure number width",
+    "cfttabnumwidth": "table number width"
+  },
+  
+  "options": {
+    "titles": "use standard titling code (compatibility)",
+    "subfigure": "subfigure compatibility"
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "name": "pict2e",
+  "version": "0.4b",
+  "description": "New implementation of picture commands",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Removes slope restrictions from LaTeX picture environment",
+    "enhancement": "Lines and vectors can have any slope, circles any size"
+  },
+  
+  "commands": {
+    "line": {
+      "type": "constructor",
+      "params": "(){}",
+      "description": "Line with arbitrary slope",
+      "pattern": "<line slope=\"#1\" length=\"#2\"/>"
+    },
+    "vector": {
+      "type": "constructor",
+      "params": "(){}",
+      "description": "Vector with arbitrary slope",
+      "pattern": "<vector slope=\"#1\" length=\"#2\"/>"
+    },
+    "Line": {
+      "type": "constructor",
+      "params": "()()...",
+      "description": "Polyline through points",
+      "pattern": "<polyline points=\"#1\"/>"
+    },
+    "polyline": {
+      "type": "constructor",
+      "params": "()()...",
+      "description": "Open polyline",
+      "pattern": "<polyline points=\"#1\" closed=\"false\"/>"
+    },
+    "polygon": {
+      "type": "constructor",
+      "params": "()()...",
+      "description": "Closed polygon",
+      "pattern": "<polygon points=\"#1\"/>"
+    },
+    "polygon*": {
+      "type": "constructor",
+      "params": "()()...",
+      "description": "Filled polygon",
+      "pattern": "<polygon points=\"#1\" filled=\"true\"/>"
+    },
+    "circle": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Circle with any diameter",
+      "pattern": "<circle diameter=\"#2\" filled=\"#1\"/>"
+    },
+    "Circle": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Circle specified by radius",
+      "pattern": "<circle radius=\"#2\" filled=\"#1\"/>"
+    },
+    "arc": {
+      "type": "constructor",
+      "params": "*[]{}{}{}",
+      "description": "Circular arc",
+      "pattern": "<arc radius=\"#3\" start=\"#4\" end=\"#5\" filled=\"#1\"/>"
+    },
+    "oval": {
+      "type": "constructor",
+      "params": "()[]",
+      "description": "Oval with any size",
+      "pattern": "<oval size=\"#1\" part=\"#2\"/>"
+    },
+    "cbezier": {
+      "type": "constructor",
+      "params": "()()()()[]",
+      "description": "Cubic Bezier curve",
+      "pattern": "<cbezier p0=\"#1\" p1=\"#2\" p2=\"#3\" p3=\"#4\" arrows=\"#5\"/>"
+    },
+    "qbezier": {
+      "type": "constructor",
+      "params": "[]()()()[]",
+      "description": "Quadratic Bezier (enhanced)",
+      "pattern": "<qbezier points=\"#1\" p0=\"#2\" p1=\"#3\" p2=\"#4\" arrows=\"#5\"/>"
+    },
+    "moveto": {
+      "type": "constructor",
+      "params": "()",
+      "description": "Move to point",
+      "pattern": "<moveto pos=\"#1\"/>"
+    },
+    "lineto": {
+      "type": "constructor",
+      "params": "()",
+      "description": "Line to point",
+      "pattern": "<lineto pos=\"#1\"/>"
+    },
+    "curveto": {
+      "type": "constructor",
+      "params": "()()()",
+      "description": "Bezier curve to point",
+      "pattern": "<curveto p1=\"#1\" p2=\"#2\" p3=\"#3\"/>"
+    },
+    "closepath": {
+      "type": "constructor",
+      "params": "",
+      "description": "Close current path",
+      "pattern": "<closepath/>"
+    },
+    "strokepath": {
+      "type": "constructor",
+      "params": "",
+      "description": "Stroke the path",
+      "pattern": "<strokepath/>"
+    },
+    "fillpath": {
+      "type": "constructor",
+      "params": "",
+      "description": "Fill the path",
+      "pattern": "<fillpath/>"
+    },
+    "pmark": {
+      "type": "constructor",
+      "params": "*(){}",
+      "description": "Place marker at point",
+      "pattern": "<marker pos=\"#2\">#3</marker>"
+    },
+    "linecap": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set line cap style: 0=butt, 1=round, 2=square",
+      "pattern": ""
+    },
+    "linejoin": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set line join style: 0=miter, 1=round, 2=bevel",
+      "pattern": ""
+    },
+    "miterlimit": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set miter limit",
+      "pattern": ""
+    },
+    "arrowlength": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set arrow length multiplier",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "picture": {
+      "description": "Enhanced picture environment",
+      "begin": "<picture size=\"#1\" offset=\"#2\">",
+      "end": "</picture>",
+      "params": "()[]"
+    }
+  },
+  
+  "enhancements": {
+    "lines": "Any slope allowed (not just -6..6)",
+    "vectors": "Any slope allowed (not just -4..4)", 
+    "circles": "Any diameter (not limited to 40pt)",
+    "ovals": "Any size (not limited)",
+    "paths": "PostScript-like path construction",
+    "arrows": "Configurable arrow styles"
+  },
+  
+  "options": {
+    "original": "use original LaTeX restrictions",
+    "ltxarrows": "use LaTeX arrow style",
+    "pstarrows": "use PSTricks arrow style"
+  }
+}
