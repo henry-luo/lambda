@@ -1,0 +1,54 @@
+{
+  "name": "verbatim",
+  "version": "1.5u",
+  "description": "Reimplementation of the LaTeX verbatim environments",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Enhanced verbatim with comments and file input",
+    "improvement": "More flexible than standard verbatim"
+  },
+  
+  "commands": {
+    "verbatiminput": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Input file verbatim",
+      "pattern": "<verbatiminput file=\"#1\"/>"
+    },
+    "verbatiminput*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Input file verbatim (show spaces)",
+      "pattern": "<verbatiminput file=\"#1\" showspaces=\"true\"/>"
+    }
+  },
+  
+  "environments": {
+    "verbatim": {
+      "description": "Verbatim text",
+      "begin": "<verbatim>",
+      "end": "</verbatim>",
+      "verbatim": true
+    },
+    "verbatim*": {
+      "description": "Verbatim showing spaces",
+      "begin": "<verbatim showspaces=\"true\">",
+      "end": "</verbatim>",
+      "verbatim": true
+    },
+    "comment": {
+      "description": "Commented-out text",
+      "begin": "",
+      "end": "",
+      "verbatim": true,
+      "notes": "Content is discarded"
+    }
+  },
+  
+  "features": {
+    "comment_environment": "Ignore content entirely",
+    "file_input": "Include external files verbatim",
+    "extensible": "Can define custom verbatim-like environments"
+  }
+}

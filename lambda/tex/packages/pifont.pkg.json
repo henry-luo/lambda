@@ -1,0 +1,95 @@
+{
+  "name": "pifont",
+  "version": "2020-01-24",
+  "description": "Access to PostScript standard Symbol and Dingbats fonts",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "ding": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Dingbat by number",
+      "pattern": "<ding number=\"#1\"/>"
+    },
+    "Pisymbol": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Symbol from Pi font",
+      "pattern": "<pisymbol font=\"#1\" number=\"#2\"/>"
+    },
+    "dingfill": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Fill with dingbat",
+      "pattern": "<dingfill number=\"#1\"/>"
+    },
+    "dingline": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Line of dingbats",
+      "pattern": "<dingline number=\"#1\"/>"
+    }
+  },
+  
+  "environments": {
+    "dinglist": {
+      "description": "List with dingbat bullets",
+      "begin": "<dinglist number=\"#1\">",
+      "end": "</dinglist>",
+      "params": "{}"
+    },
+    "dingautolist": {
+      "description": "List with sequential dingbats",
+      "begin": "<dingautolist start=\"#1\">",
+      "end": "</dingautolist>",
+      "params": "{}"
+    }
+  },
+  
+  "common_dingbats": {
+    "checkmarks": {
+      "51": "✓ checkmark",
+      "52": "✓ heavy checkmark"
+    },
+    "crosses": {
+      "53": "✗ ballot x",
+      "54": "✘ heavy ballot x",
+      "55": "✕ multiplication x",
+      "56": "✖ heavy multiplication x"
+    },
+    "stars": {
+      "72": "★ star",
+      "73": "★ filled star",
+      "74": "✶ six-pointed star"
+    },
+    "arrows": {
+      "212": "➔ right arrow",
+      "213": "➘ down-right arrow",
+      "214": "➙ right arrow",
+      "215": "➚ up-right arrow",
+      "216": "➛ right arrow",
+      "217": "➜ right arrow",
+      "218": "➝ right arrow",
+      "219": "➞ right arrow",
+      "220": "➟ right arrow"
+    },
+    "bullets": {
+      "108": "● bullet",
+      "109": "● filled bullet",
+      "110": "◆ diamond bullet",
+      "111": "◆ filled diamond"
+    },
+    "numbers": {
+      "172": "❶ circled 1",
+      "173": "❷ circled 2",
+      "174": "❸ circled 3",
+      "175": "❹ circled 4",
+      "176": "❺ circled 5",
+      "177": "❻ circled 6",
+      "178": "❼ circled 7",
+      "179": "❽ circled 8",
+      "180": "❾ circled 9",
+      "181": "❿ circled 10"
+    }
+  }
+}

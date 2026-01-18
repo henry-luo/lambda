@@ -1,0 +1,99 @@
+{
+  "name": "subcaption",
+  "version": "1.6",
+  "description": "Support for sub-captions (subfigures, subtables)",
+  "requires": ["latex_base", "caption"],
+  
+  "notes": {
+    "purpose": "Create subfigures and subtables with independent captions",
+    "successor": "Replaces obsolete subfigure and subfig packages"
+  },
+  
+  "commands": {
+    "subcaption": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Caption for subfloat",
+      "pattern": "<subcaption short=\"#1\">#2</subcaption>"
+    },
+    "subcaptionbox": {
+      "type": "constructor",
+      "params": "[]{}[][]{}",
+      "description": "Boxed subfigure with caption",
+      "pattern": "<subcaptionbox short=\"#1\" caption=\"#2\" width=\"#3\" innerpos=\"#4\">#5</subcaptionbox>"
+    },
+    "phantomcaption": {
+      "type": "constructor",
+      "params": "",
+      "description": "Invisible caption (for label only)",
+      "pattern": "<phantomcaption/>"
+    },
+    "phantomsubcaption": {
+      "type": "constructor",
+      "params": "",
+      "description": "Invisible subcaption",
+      "pattern": "<phantomsubcaption/>"
+    },
+    "subref": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Reference to subfloat label",
+      "pattern": "<subref starred=\"#1\">#2</subref>"
+    },
+    "DeclareCaptionSubType": {
+      "type": "primitive",
+      "params": "*[]{}",
+      "description": "Declare sub-caption type",
+      "pattern": ""
+    },
+    "captionsetup": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Configure caption (inherited from caption)",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "subfigure": {
+      "description": "Subfigure environment",
+      "begin": "<subfigure pos=\"#1\" width=\"#2\">",
+      "end": "</subfigure>",
+      "params": "[]{}",
+      "notes": "Use within figure environment"
+    },
+    "subtable": {
+      "description": "Subtable environment",
+      "begin": "<subtable pos=\"#1\" width=\"#2\">",
+      "end": "</subtable>",
+      "params": "[]{}",
+      "notes": "Use within table environment"
+    }
+  },
+  
+  "configuration": {
+    "subfigure_options": "Use \\captionsetup[subfigure]{...}",
+    "subtable_options": "Use \\captionsetup[subtable]{...}",
+    "labeling": {
+      "default": "(a), (b), (c)...",
+      "customizable": "Via labelformat and labelsep"
+    }
+  },
+  
+  "common_patterns": {
+    "two_subfigures": [
+      "\\begin{figure}",
+      "  \\begin{subfigure}{0.48\\textwidth}",
+      "    \\includegraphics{img1}",
+      "    \\caption{First}\\label{fig:a}",
+      "  \\end{subfigure}",
+      "  \\hfill",
+      "  \\begin{subfigure}{0.48\\textwidth}",
+      "    \\includegraphics{img2}",
+      "    \\caption{Second}\\label{fig:b}",
+      "  \\end{subfigure}",
+      "  \\caption{Overall caption}",
+      "\\end{figure}"
+    ]
+  }
+}

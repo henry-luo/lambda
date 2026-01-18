@@ -1,0 +1,199 @@
+{
+  "name": "mathabx",
+  "version": "2005-05-08",
+  "description": "Mathematical alphabets and symbols",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Complete set of math alphabets with consistent style",
+    "conflicts": "May conflict with amssymb, use one or the other"
+  },
+  
+  "commands": {
+    "wmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✓",
+      "description": "Check mark"
+    },
+    "xmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✗",
+      "description": "X mark"
+    },
+    "dlsh": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↲",
+      "description": "Downwards arrow with tip leftwards"
+    },
+    "drsh": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↳",
+      "description": "Downwards arrow with tip rightwards"
+    },
+    "ulmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↰",
+      "description": "Upwards arrow with tip leftwards"
+    },
+    "urmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "↱",
+      "description": "Upwards arrow with tip rightwards"
+    },
+    "astermark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⁎",
+      "description": "Low asterisk"
+    },
+    "divmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "÷",
+      "description": "Division mark"
+    },
+    "colmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": ":",
+      "description": "Colon"
+    },
+    "nmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "N",
+      "description": "Natural numbers"
+    },
+    "zmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Z",
+      "description": "Integers"
+    },
+    "widebar": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Wide bar over expression",
+      "pattern": "<mover>#1<mo>¯</mo></mover>"
+    },
+    "widetilde": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Wide tilde over expression",
+      "pattern": "<mover>#1<mo>˜</mo></mover>"
+    },
+    "widehat": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Wide hat over expression",
+      "pattern": "<mover>#1<mo>^</mo></mover>"
+    },
+    "widecheck": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Wide check over expression",
+      "pattern": "<mover>#1<mo>ˇ</mo></mover>"
+    },
+    "vmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "√",
+      "description": "Check/radical mark"
+    },
+    "sqmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "□",
+      "description": "Square"
+    },
+    "trimark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "△",
+      "description": "Triangle"
+    },
+    "cirmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "○",
+      "description": "Circle"
+    },
+    "varnothing": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∅",
+      "description": "Empty set"
+    },
+    "varhash": {
+      "type": "macro",
+      "params": "",
+      "replacement": "#",
+      "description": "Hash"
+    },
+    "digmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "†",
+      "description": "Dagger"
+    },
+    "ddigmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "‡",
+      "description": "Double dagger"
+    },
+    "starmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "★",
+      "description": "Star"
+    },
+    "varhexmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⬢",
+      "description": "Hexagon"
+    },
+    "varheartsuit": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♥",
+      "description": "Heart"
+    },
+    "vardiamondsuit": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♦",
+      "description": "Diamond"
+    },
+    "varclubsuit": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♣",
+      "description": "Club"
+    },
+    "varspadesuit": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♠",
+      "description": "Spade"
+    }
+  },
+  
+  "alphabets": {
+    "mathrm": "Roman (upright)",
+    "mathbf": "Bold",
+    "mathit": "Italic",
+    "mathsf": "Sans-serif",
+    "mathtt": "Typewriter",
+    "mathbb": "Blackboard bold",
+    "mathcal": "Calligraphic",
+    "mathfrak": "Fraktur"
+  }
+}

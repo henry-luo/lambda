@@ -1,0 +1,104 @@
+{
+  "name": "xkeyval",
+  "version": "2.9",
+  "description": "Extension of the keyval package",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Extended key-value parsing for package options"
+  },
+  
+  "commands": {
+    "define@key": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define a key",
+      "pattern": ""
+    },
+    "setkeys": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set keys",
+      "pattern": ""
+    },
+    "DeclareOptionX": {
+      "type": "primitive",
+      "params": "[]{}[]{}",
+      "description": "Declare package option",
+      "pattern": ""
+    },
+    "ExecuteOptionsX": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Execute options",
+      "pattern": ""
+    },
+    "ProcessOptionsX": {
+      "type": "primitive",
+      "params": "[]",
+      "description": "Process options",
+      "pattern": ""
+    },
+    "define@boolkey": {
+      "type": "primitive",
+      "params": "[]{}[]{}{}",
+      "description": "Define boolean key",
+      "pattern": ""
+    },
+    "define@cmdkey": {
+      "type": "primitive",
+      "params": "[]{}[]{}{}",
+      "description": "Define command key",
+      "pattern": ""
+    },
+    "define@choicekey": {
+      "type": "primitive",
+      "params": "[]{}{}[]{}{}",
+      "description": "Define choice key",
+      "pattern": ""
+    },
+    "presetkeys": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Preset keys",
+      "pattern": ""
+    },
+    "savekeys": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Save keys",
+      "pattern": ""
+    },
+    "gsavekeys": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Globally save keys",
+      "pattern": ""
+    },
+    "delsavekeys": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Delete saved keys",
+      "pattern": ""
+    },
+    "unsavekeys": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Unsave keys",
+      "pattern": ""
+    },
+    "disable@keys": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Disable keys",
+      "pattern": ""
+    }
+  },
+  
+  "key_features": {
+    "pointer_keys": "Keys that store values in macros",
+    "boolean_keys": "Keys with true/false values",
+    "choice_keys": "Keys with predefined choices",
+    "command_keys": "Keys that execute commands"
+  }
+}

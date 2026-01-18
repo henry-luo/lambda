@@ -1,0 +1,44 @@
+{
+  "name": "cancel",
+  "version": "2.2",
+  "description": "Place lines through maths formulae",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "cancel": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Diagonal line (lower-left to upper-right)",
+      "pattern": "<cancel dir=\"ne\">#1</cancel>"
+    },
+    "bcancel": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Diagonal line (upper-left to lower-right)",
+      "pattern": "<cancel dir=\"se\">#1</cancel>"
+    },
+    "xcancel": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "X through expression",
+      "pattern": "<cancel dir=\"x\">#1</cancel>"
+    },
+    "cancelto": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Cancel with value at end",
+      "pattern": "<cancelto value=\"#1\">#2</cancelto>"
+    }
+  },
+  
+  "options": {
+    "thicklines": "use thicker lines",
+    "samesize": "cancellation same size as content",
+    "smaller": "smaller cancellation marks",
+    "Smaller": "even smaller marks"
+  },
+  
+  "colors": {
+    "description": "Use \\renewcommand{\\CancelColor}{\\color{red}} to set color"
+  }
+}

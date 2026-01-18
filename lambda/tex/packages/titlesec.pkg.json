@@ -1,0 +1,145 @@
+{
+  "name": "titlesec",
+  "version": "2.14",
+  "description": "Select alternative section titles",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "titleformat": {
+      "type": "primitive",
+      "params": "*{}[]{}{}{}{}",
+      "description": "Format sectioning command",
+      "pattern": ""
+    },
+    "titlespacing": {
+      "type": "primitive",
+      "params": "*{}{}{}{}[]",
+      "description": "Set sectioning spacing",
+      "pattern": ""
+    },
+    "titleclass": {
+      "type": "primitive",
+      "params": "{}[]{}",
+      "description": "Set sectioning class",
+      "pattern": ""
+    },
+    "titlelabel": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Format for label",
+      "pattern": ""
+    },
+    "chaptertitlename": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Name for chapter"
+    },
+    "filright": {
+      "type": "primitive",
+      "params": "",
+      "description": "Ragged right",
+      "pattern": ""
+    },
+    "filcenter": {
+      "type": "primitive",
+      "params": "",
+      "description": "Centered",
+      "pattern": ""
+    },
+    "filleft": {
+      "type": "primitive",
+      "params": "",
+      "description": "Ragged left",
+      "pattern": ""
+    },
+    "fillast": {
+      "type": "primitive",
+      "params": "",
+      "description": "Last line fill",
+      "pattern": ""
+    },
+    "filinner": {
+      "type": "primitive",
+      "params": "",
+      "description": "Inner side fill",
+      "pattern": ""
+    },
+    "filouter": {
+      "type": "primitive",
+      "params": "",
+      "description": "Outer side fill",
+      "pattern": ""
+    },
+    "wordsep": {
+      "type": "primitive",
+      "params": "",
+      "description": "Word separator",
+      "pattern": ""
+    },
+    "thepart": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Part number"
+    },
+    "thechapter": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Chapter number"
+    },
+    "thesection": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Section number"
+    }
+  },
+  
+  "titleformat_shapes": {
+    "hang": "hanging indent (default)",
+    "block": "paragraph block",
+    "display": "label on separate line",
+    "runin": "run-in heading",
+    "leftmargin": "in left margin",
+    "rightmargin": "in right margin",
+    "drop": "drop first lines",
+    "wrap": "text wraps around",
+    "frame": "framed title"
+  },
+  
+  "titleformat_params": {
+    "command": "sectioning command to format",
+    "shape": "hang|block|display|runin|...",
+    "format": "format applied to whole title",
+    "label": "format of label/number",
+    "sep": "separation between label and title",
+    "before-code": "code before title body",
+    "after-code": "code after title (runin only)"
+  },
+  
+  "titlespacing_params": {
+    "command": "sectioning command",
+    "left": "left margin increase",
+    "before-sep": "vertical space before",
+    "after-sep": "vertical/horizontal space after",
+    "right-sep": "right margin (optional)"
+  },
+  
+  "page_styles": {
+    "newpagestyle": "define new page style",
+    "renewpagestyle": "redefine page style",
+    "sethead": "set headers",
+    "setfoot": "set footers"
+  },
+  
+  "options": {
+    "explicit": "require explicit #1 in format",
+    "compact": "reduce spacing",
+    "bf": "bold titles",
+    "sf": "sans-serif titles",
+    "it": "italic titles",
+    "rm": "roman titles"
+  }
+}

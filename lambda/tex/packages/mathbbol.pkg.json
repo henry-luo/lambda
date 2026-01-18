@@ -1,0 +1,27 @@
+{
+  "name": "mathbbol",
+  "version": "1.0",
+  "description": "Mathematical blackboard bold for lowercase and more",
+  "requires": ["latex_base", "bbold"],
+  
+  "notes": {
+    "purpose": "Extends blackboard bold to lowercase letters",
+    "usage": "Use \\mathbb for both upper and lowercase"
+  },
+  
+  "commands": {
+    "mathbb": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Blackboard bold (including lowercase)",
+      "pattern": "<mi class=\"bb\">#1</mi>"
+    }
+  },
+  
+  "characters": {
+    "uppercase": "A-Z (standard blackboard bold)",
+    "lowercase": "a-z (extended)",
+    "digits": "0-9",
+    "greek": "Some Greek letters"
+  }
+}

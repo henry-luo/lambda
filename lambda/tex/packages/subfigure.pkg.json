@@ -1,0 +1,79 @@
+{
+  "name": "subfigure",
+  "version": "2.1.5",
+  "description": "Deprecated subfigure package (use subcaption instead)",
+  "requires": ["latex_base", "caption"],
+  
+  "notes": {
+    "status": "OBSOLETE - use subcaption package instead",
+    "purpose": "Subfigures and subtables"
+  },
+  
+  "commands": {
+    "subfigure": {
+      "type": "constructor",
+      "params": "[][]{}",
+      "description": "Create a subfigure",
+      "pattern": "<subfigure caption=\"#1\" label=\"#2\">#3</subfigure>"
+    },
+    "subtable": {
+      "type": "constructor",
+      "params": "[][]{}",
+      "description": "Create a subtable",
+      "pattern": "<subtable caption=\"#1\" label=\"#2\">#3</subtable>"
+    },
+    "Subref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Reference subfigure with parentheses",
+      "pattern": "<subref>#1</subref>"
+    },
+    "subref": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Reference subfigure",
+      "pattern": "<subref bare=\"true\">#1</subref>"
+    },
+    "subfigcapmargin": {
+      "type": "length",
+      "description": "Margin around subfigure caption"
+    },
+    "subfigcaptopadj": {
+      "type": "length",
+      "description": "Adjustment above subfigure caption"
+    },
+    "subfiglabelskip": {
+      "type": "length",
+      "description": "Skip after subfigure label"
+    },
+    "subfigbottomskip": {
+      "type": "length",
+      "description": "Skip below subfigure"
+    },
+    "subfigtopskip": {
+      "type": "length",
+      "description": "Skip above subfigure"
+    }
+  },
+  
+  "options": {
+    "normal": "normal caption layout",
+    "hang": "hanging caption",
+    "center": "centered caption",
+    "centerlast": "center last line",
+    "nooneline": "no special treatment for one-line captions",
+    "isu": "ISU thesis style",
+    "raggedright": "ragged right captions",
+    "FIGBOTCAP": "figure captions below",
+    "FIGTOPCAP": "figure captions above",
+    "TABBOTCAP": "table captions below",
+    "TABTOPCAP": "table captions above",
+    "loose": "loose spacing",
+    "tight": "tight spacing"
+  },
+  
+  "counters": {
+    "subfigure": "subfigure number within figure",
+    "subtable": "subtable number within table"
+  }
+}
