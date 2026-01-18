@@ -1,0 +1,69 @@
+{
+  "name": "color",
+  "version": "1.2a",
+  "description": "Color control (standard LaTeX)",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Standard color package, subset of xcolor",
+    "recommendation": "Use xcolor instead for more features"
+  },
+  
+  "commands": {
+    "color": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Switch to color",
+      "pattern": "<color model=\"#1\" value=\"#2\">"
+    },
+    "textcolor": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Colored text",
+      "pattern": "<textcolor model=\"#1\" color=\"#2\">#3</textcolor>"
+    },
+    "colorbox": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Box with background color",
+      "pattern": "<colorbox model=\"#1\" color=\"#2\">#3</colorbox>"
+    },
+    "fcolorbox": {
+      "type": "constructor",
+      "params": "[]{}{}{}",
+      "description": "Framed colored box",
+      "pattern": "<fcolorbox frame=\"#2\" bg=\"#3\">#4</fcolorbox>"
+    },
+    "definecolor": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define a color",
+      "pattern": ""
+    },
+    "pagecolor": {
+      "type": "primitive",
+      "params": "[]{}",
+      "description": "Set page background color",
+      "pattern": ""
+    },
+    "normalcolor": {
+      "type": "primitive",
+      "params": "",
+      "description": "Reset to normal color",
+      "pattern": ""
+    }
+  },
+  
+  "color_models": {
+    "rgb": "red, green, blue (0-1)",
+    "RGB": "Red, Green, Blue (0-255)",
+    "gray": "grayscale (0-1)",
+    "cmyk": "cyan, magenta, yellow, black (0-1)",
+    "named": "predefined color name"
+  },
+  
+  "predefined_colors": [
+    "black", "white", "red", "green", "blue",
+    "cyan", "magenta", "yellow"
+  ]
+}

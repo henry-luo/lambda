@@ -1,0 +1,117 @@
+{
+  "name": "esint",
+  "version": "1.2d",
+  "description": "Extended set of integrals for Computer Modern",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "iint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∬",
+      "description": "Double integral"
+    },
+    "iiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∭",
+      "description": "Triple integral"
+    },
+    "iiiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨌",
+      "description": "Quadruple integral"
+    },
+    "dotsint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∫⋯∫",
+      "description": "Multiple integral with dots"
+    },
+    "oint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∮",
+      "description": "Contour integral"
+    },
+    "oiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∯",
+      "description": "Double contour integral"
+    },
+    "oiiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∰",
+      "description": "Triple contour integral"
+    },
+    "ointctrclockwise": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∳",
+      "description": "Counter-clockwise contour integral"
+    },
+    "ointclockwise": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∲",
+      "description": "Clockwise contour integral"
+    },
+    "sqint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨖",
+      "description": "Square integral"
+    },
+    "sqiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "",
+      "description": "Double square integral"
+    },
+    "fint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨍",
+      "description": "Finite part integral"
+    },
+    "varint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∫",
+      "description": "Variant integral"
+    },
+    "variint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∬",
+      "description": "Variant double integral"
+    },
+    "variiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∭",
+      "description": "Variant triple integral"
+    },
+    "varoiint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∯",
+      "description": "Variant double contour integral"
+    },
+    "landupint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨛",
+      "description": "Upward-pointing land integral"
+    },
+    "landdownint": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⨜",
+      "description": "Downward-pointing land integral"
+    }
+  }
+}

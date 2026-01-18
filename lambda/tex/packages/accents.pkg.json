@@ -1,0 +1,51 @@
+{
+  "name": "accents",
+  "version": "1.4",
+  "description": "Multiple mathematical accents",
+  "requires": ["latex_base", "amsmath"],
+  
+  "commands": {
+    "accentset": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Place accent on symbol",
+      "pattern": "<accentset accent=\"#1\">#2</accentset>"
+    },
+    "underaccent": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Place accent below symbol",
+      "pattern": "<underaccent accent=\"#1\">#2</underaccent>"
+    },
+    "undertilde": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Tilde below",
+      "pattern": "<munder>#1<mo>~</mo></munder>"
+    },
+    "underbar": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Bar below",
+      "pattern": "<munder>#1<mo>_</mo></munder>"
+    },
+    "dddot": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Triple dot accent",
+      "pattern": "<mover>#1<mo>⃛</mo></mover>"
+    },
+    "ddddot": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Quadruple dot accent",
+      "pattern": "<mover>#1<mo>⃜</mo></mover>"
+    },
+    "ring": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Ring accent (math)",
+      "pattern": "<mover>#1<mo>̊</mo></mover>"
+    }
+  }
+}

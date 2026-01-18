@@ -1,0 +1,68 @@
+{
+  "name": "wrapfig",
+  "version": "3.6",
+  "description": "Produces figures which text can flow around",
+  "requires": ["latex_base", "graphicx"],
+  
+  "commands": {
+    "columnsep": {
+      "type": "primitive",
+      "params": "",
+      "description": "Space between figure and text",
+      "pattern": ""
+    },
+    "intextsep": {
+      "type": "primitive",
+      "params": "",
+      "description": "Vertical space above/below",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "wrapfigure": {
+      "description": "Figure with text wrap",
+      "begin": "<wrapfigure lines=\"#1\" placement=\"#2\" width=\"#3\" overhang=\"#4\">",
+      "end": "</wrapfigure>",
+      "params": "[]{}{}[]"
+    },
+    "wraptable": {
+      "description": "Table with text wrap",
+      "begin": "<wraptable lines=\"#1\" placement=\"#2\" width=\"#3\" overhang=\"#4\">",
+      "end": "</wraptable>",
+      "params": "[]{}{}[]"
+    },
+    "wrapfloat": {
+      "description": "Generic float with wrap",
+      "begin": "<wrapfloat type=\"#1\" lines=\"#2\" placement=\"#3\" width=\"#4\">",
+      "end": "</wrapfloat>",
+      "params": "{}[]{}{}[]"
+    }
+  },
+  
+  "placement_specifiers": {
+    "r": "right side of text",
+    "R": "right, allow float",
+    "l": "left side of text",
+    "L": "left, allow float",
+    "i": "inside margin (two-sided)",
+    "I": "inside, allow float",
+    "o": "outside margin (two-sided)",
+    "O": "outside, allow float"
+  },
+  
+  "lengths": {
+    "wrapoverhang": {
+      "default": "0pt",
+      "description": "Amount to extend into margin"
+    }
+  },
+  
+  "notes": {
+    "limitations": [
+      "Cannot span multiple columns",
+      "Conflicts with some list environments",
+      "Must appear before the paragraph it wraps"
+    ]
+  }
+}

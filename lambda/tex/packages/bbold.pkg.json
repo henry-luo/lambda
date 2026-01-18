@@ -1,0 +1,32 @@
+{
+  "name": "bbold",
+  "version": "1.01",
+  "description": "Sans serif blackboard bold font",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Alternative blackboard bold font (geometric sans-serif style)",
+    "comparison": "Different from AMS \\mathbb which uses a serifed style"
+  },
+  
+  "commands": {
+    "mathbb": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Blackboard bold (bbold style)",
+      "pattern": "<mi class=\"bb bbold\">#1</mi>"
+    }
+  },
+  
+  "fonts": {
+    "bbold": "Sans-serif blackboard bold font",
+    "sizes": ["5", "6", "7", "8", "9", "10", "12", "17"]
+  },
+  
+  "characters": {
+    "uppercase": "A-Z",
+    "lowercase": "a-z",
+    "digits": "0-9",
+    "symbols": "Various mathematical symbols"
+  }
+}

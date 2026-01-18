@@ -1,0 +1,452 @@
+{
+  "name": "wasysym",
+  "version": "2.4",
+  "description": "Waldi's symbol font",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "male": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♂",
+      "description": "Male symbol"
+    },
+    "female": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♀",
+      "description": "Female symbol"
+    },
+    "phone": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☎",
+      "description": "Telephone"
+    },
+    "recorder": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌕",
+      "description": "Recorder"
+    },
+    "clock": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⏰",
+      "description": "Clock"
+    },
+    "lightning": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⚡",
+      "description": "Lightning"
+    },
+    "pointer": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☞",
+      "description": "Pointing hand"
+    },
+    "RIGHTarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "➡",
+      "description": "Heavy right arrow"
+    },
+    "LEFTarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⬅",
+      "description": "Heavy left arrow"
+    },
+    "UParrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⬆",
+      "description": "Heavy up arrow"
+    },
+    "DOWNarrow": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⬇",
+      "description": "Heavy down arrow"
+    },
+    "diameter": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌀",
+      "description": "Diameter sign"
+    },
+    "invdiameter": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⍜",
+      "description": "Inverted diameter"
+    },
+    "varangle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "∠",
+      "description": "Angle"
+    },
+    "wasylozenge": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◊",
+      "description": "Lozenge"
+    },
+    "kremark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✗",
+      "description": "Cross mark"
+    },
+    "smiley": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☺",
+      "description": "Smiley face"
+    },
+    "frownie": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☹",
+      "description": "Frowning face"
+    },
+    "blacksmiley": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☻",
+      "description": "Black smiley face"
+    },
+    "sun": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☀",
+      "description": "Sun"
+    },
+    "checked": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✓",
+      "description": "Check mark"
+    },
+    "bell": {
+      "type": "macro",
+      "params": "",
+      "replacement": "🔔",
+      "description": "Bell"
+    },
+    "atmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "@",
+      "description": "At sign"
+    },
+    "cent": {
+      "type": "macro",
+      "params": "",
+      "replacement": "¢",
+      "description": "Cent sign"
+    },
+    "permil": {
+      "type": "macro",
+      "params": "",
+      "replacement": "‰",
+      "description": "Per mille"
+    },
+    "amark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Ⓐ",
+      "description": "Circled A"
+    },
+    "bmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Ⓑ",
+      "description": "Circled B"
+    },
+    "Square": {
+      "type": "macro",
+      "params": "",
+      "replacement": "□",
+      "description": "Square"
+    },
+    "XBox": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☒",
+      "description": "Checked box"
+    },
+    "CheckedBox": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☑",
+      "description": "Box with check"
+    },
+    "Circle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "○",
+      "description": "Circle"
+    },
+    "CIRCLE": {
+      "type": "macro",
+      "params": "",
+      "replacement": "●",
+      "description": "Filled circle"
+    },
+    "Leftcircle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◐",
+      "description": "Left half circle"
+    },
+    "Rightcircle": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◑",
+      "description": "Right half circle"
+    },
+    "LEmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◖",
+      "description": "Left half black circle"
+    },
+    "REmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "◗",
+      "description": "Right half black circle"
+    },
+    "APLstar": {
+      "type": "macro",
+      "params": "",
+      "replacement": "✱",
+      "description": "APL star"
+    },
+    "APLlog": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⍟",
+      "description": "APL log"
+    },
+    "APLbox": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌷",
+      "description": "APL box"
+    },
+    "APLup": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⍋",
+      "description": "APL up"
+    },
+    "APLdown": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⍒",
+      "description": "APL down"
+    },
+    "APLinput": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⍞",
+      "description": "APL input"
+    },
+    "APLcomment": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⍝",
+      "description": "APL comment"
+    },
+    "notmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌐",
+      "description": "Not mark"
+    },
+    "newmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "★",
+      "description": "Star mark"
+    },
+    "halfnote": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♩",
+      "description": "Quarter note"
+    },
+    "fullnote": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♪",
+      "description": "Eighth note"
+    },
+    "twonotes": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♫",
+      "description": "Beamed eighth notes"
+    },
+    "brokenmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⌇",
+      "description": "Wavy line"
+    },
+    "emark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "ℇ",
+      "description": "Euler's number"
+    },
+    "hmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "ℏ",
+      "description": "Planck constant"
+    },
+    "plmark": {
+      "type": "macro",
+      "params": "",
+      "replacement": "ℓ",
+      "description": "Script l"
+    },
+    "Mercury": {
+      "type": "macro",
+      "params": "",
+      "replacement": "☿",
+      "description": "Mercury"
+    },
+    "Venus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♀",
+      "description": "Venus"
+    },
+    "Earth": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⊕",
+      "description": "Earth"
+    },
+    "Mars": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♂",
+      "description": "Mars"
+    },
+    "Jupiter": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♃",
+      "description": "Jupiter"
+    },
+    "Saturn": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♄",
+      "description": "Saturn"
+    },
+    "Uranus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "⛢",
+      "description": "Uranus"
+    },
+    "Neptune": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♆",
+      "description": "Neptune"
+    },
+    "Pluto": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♇",
+      "description": "Pluto"
+    },
+    "Aries": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♈",
+      "description": "Aries"
+    },
+    "Taurus": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♉",
+      "description": "Taurus"
+    },
+    "Gemini": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♊",
+      "description": "Gemini"
+    },
+    "Cancer": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♋",
+      "description": "Cancer"
+    },
+    "Leo": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♌",
+      "description": "Leo"
+    },
+    "Virgo": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♍",
+      "description": "Virgo"
+    },
+    "Libra": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♎",
+      "description": "Libra"
+    },
+    "Scorpio": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♏",
+      "description": "Scorpio"
+    },
+    "Sagittarius": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♐",
+      "description": "Sagittarius"
+    },
+    "Capricorn": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♑",
+      "description": "Capricorn"
+    },
+    "Aquarius": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♒",
+      "description": "Aquarius"
+    },
+    "Pisces": {
+      "type": "macro",
+      "params": "",
+      "replacement": "♓",
+      "description": "Pisces"
+    }
+  },
+  
+  "options": {
+    "integrals": "provide integral symbols",
+    "nointegrals": "do not provide integral symbols"
+  }
+}

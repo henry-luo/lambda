@@ -1,0 +1,88 @@
+{
+  "name": "soul",
+  "version": "2.4",
+  "description": "Letterspacing, underlining, striking out",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "so": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Space out (letterspacing)",
+      "pattern": "<so>#1</so>"
+    },
+    "caps": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Caps with letterspacing",
+      "pattern": "<caps>#1</caps>"
+    },
+    "ul": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Underline",
+      "pattern": "<u>#1</u>"
+    },
+    "st": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Strike through",
+      "pattern": "<s>#1</s>"
+    },
+    "hl": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Highlight",
+      "pattern": "<mark>#1</mark>"
+    },
+    "setul": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set underline depth and thickness",
+      "pattern": ""
+    },
+    "setuloverlap": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set underline overlap",
+      "pattern": ""
+    },
+    "setulcolor": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set underline color",
+      "pattern": ""
+    },
+    "setstcolor": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set strikethrough color",
+      "pattern": ""
+    },
+    "sethlcolor": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set highlight color",
+      "pattern": ""
+    },
+    "sodef": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define spacing-out command",
+      "pattern": ""
+    },
+    "capsdef": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define caps command",
+      "pattern": ""
+    }
+  },
+  
+  "options": {
+    "dvips": "use dvips driver",
+    "pdftex": "use pdftex driver",
+    "xetex": "use xetex driver",
+    "luatex": "use luatex driver"
+  }
+}
