@@ -2802,6 +2802,59 @@
                         "icon": "🔧"
                     },
                     {
+                        "source": "test/test_tex_expander_gtest.cpp",
+                        "name": "TeX Expander Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_expander_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_catcode.cpp",
+                            "lambda/tex/tex_token.cpp",
+                            "lambda/tex/tex_tokenizer.cpp",
+                            "lambda/tex/tex_expander.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔄"
+                    },
+                    {
+                        "source": "test/test_tex_digester_gtest.cpp",
+                        "name": "TeX Digester Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_tex_digester_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_catcode.cpp",
+                            "lambda/tex/tex_token.cpp",
+                            "lambda/tex/tex_tokenizer.cpp",
+                            "lambda/tex/tex_expander.cpp",
+                            "lambda/tex/tex_digester.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/memtrack.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🍽️"
+                    },
+                    {
                         "source": "test/test_tex_conditional_gtest.cpp",
                         "name": "TeX Conditional Tests",
                         "dependencies": [
