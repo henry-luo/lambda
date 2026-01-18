@@ -144,6 +144,9 @@ struct DocTextStyle {
         SUBSCRIPT   = 0x0080,
         SANS_SERIF  = 0x0100,
         ROMAN       = 0x0200,
+        SLANTED     = 0x0400,   // \slshape - slanted text
+        UPRIGHT     = 0x0800,   // \upshape - upright (non-italic) text
+        EMPHASIS    = 0x1000,   // \emph - toggles between italic/upright based on context
     };
     
     uint16_t flags;

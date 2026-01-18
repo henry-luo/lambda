@@ -644,7 +644,18 @@ static const std::set<std::string> LATEXJS_BASELINE_FIXTURES = {
     "whitespace/19_escaped_newlines_at_the_start_of_a_parag",
     "whitespace/20_escaped_newlines_after_an_environment",
     // whitespace/21 is complex - excluded from baseline
-    // Extended tests (not in baseline): boxes, counters, fonts, groups, label-ref, layout-marginpar, macros, spacing
+    // fonts - partial
+    "fonts/01_bfseries_declaration",
+    "fonts/02_em_and_emph",
+    "fonts/03_emph_command_and_nesting",
+    // groups - partial
+    "groups/01_groups_need_to_be_balanced",
+    "groups/02_brackets_do_not_need_to_be_balanced_they",
+    // macros - partial
+    "macros/01_custom_macros_without_arguments",
+    // preamble - partial
+    "preamble/01_document_with_a_preamble",
+    // Extended tests (not in baseline): boxes, counters, fonts/04+, groups/03+, label-ref, layout-marginpar, macros/02+, spacing
 };
 
 // Check if a fixture is in the baseline set
@@ -700,7 +711,14 @@ static std::string normalize_for_latexjs(const std::string& s) {
     // Step 1: Collapse whitespace
     std::string result;
     bool in_whitespace = false;
-    for (char c : s) {
+    for (size_t i = 0; i < s.size(); i++) {
+        char c = s[i];
+        // Skip ZWSP (U+200B) - 3-byte UTF-8 sequence E2 80 8B
+        if ((unsigned char)c == 0xE2 && i + 2 < s.size() && 
+            (unsigned char)s[i+1] == 0x80 && (unsigned char)s[i+2] == 0x8B) {
+            i += 2;  // skip the 3-byte sequence
+            continue;
+        }
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             if (!in_whitespace && !result.empty()) {
                 result += ' ';
@@ -995,7 +1013,14 @@ static bool is_hybrid_baseline(const std::string& rel_path) {
 static std::string normalize_for_hybrid(const std::string& s) {
     std::string result;
     bool in_whitespace = false;
-    for (char c : s) {
+    for (size_t i = 0; i < s.size(); i++) {
+        char c = s[i];
+        // Skip ZWSP (U+200B) - 3-byte UTF-8 sequence E2 80 8B
+        if ((unsigned char)c == 0xE2 && i + 2 < s.size() && 
+            (unsigned char)s[i+1] == 0x80 && (unsigned char)s[i+2] == 0x8B) {
+            i += 2;  // skip the 3-byte sequence
+            continue;
+        }
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             if (!in_whitespace && !result.empty()) {
                 result += ' ';
