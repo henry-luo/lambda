@@ -834,58 +834,104 @@ void html_write_default_css(StrBuf* out, const char* prefix) {
 // HTML Element Rendering
 // ============================================================================
 
+// Helper to check if any ancestor TEXT_SPAN has ITALIC flag
+static bool has_italic_ancestor(DocElement* elem) {
+    DocElement* parent = elem->parent;
+    while (parent) {
+        if (parent->type == DocElemType::TEXT_SPAN) {
+            if (parent->text.style.has(DocTextStyle::ITALIC)) {
+                return true;
+            }
+        }
+        parent = parent->parent;
+    }
+    return false;
+}
+
 // Forward declarations for mutual recursion
+static void render_children_html_with_context(DocElement* parent, StrBuf* out, 
+                                  const HtmlOutputOptions& opts, int depth, uint16_t inherited_flags);
 static void render_children_html(DocElement* parent, StrBuf* out, 
                                   const HtmlOutputOptions& opts, int depth);
 
-static void render_text_span_html(DocElement* elem, StrBuf* out, 
-                                   const HtmlOutputOptions& opts) {
+// Render a TEXT_SPAN element with inherited style context for emphasis toggling
+static void render_text_span_html_with_context(DocElement* elem, StrBuf* out, 
+                                   const HtmlOutputOptions& opts, uint16_t inherited_flags) {
     DocTextStyle& style = elem->text.style;
+    
+    // Resolve EMPHASIS flag: toggle between italic and upright based on context
+    // \emph inside italic context -> upright; \emph in upright context -> italic
+    uint16_t resolved_flags = style.flags;
+    if (style.has(DocTextStyle::EMPHASIS)) {
+        // Clear the EMPHASIS flag from resolved
+        resolved_flags &= ~DocTextStyle::EMPHASIS;
+        // Check if we're already in an italic context (from parent, inherited, or ancestors)
+        bool in_italic_context = (inherited_flags & DocTextStyle::ITALIC) != 0 || has_italic_ancestor(elem);
+        if (in_italic_context) {
+            // In italic context: emphasis means upright
+            resolved_flags |= DocTextStyle::UPRIGHT;
+        } else {
+            // In upright context: emphasis means italic
+            resolved_flags |= DocTextStyle::ITALIC;
+        }
+    }
+    
+    // Create a temporary style for rendering with resolved flags
+    DocTextStyle resolved_style = style;
+    resolved_style.flags = resolved_flags;
     
     // Opening tags
     if (opts.legacy_mode) {
         // Legacy mode: use span classes
         // Font size (must be outermost)
-        const char* size_class = font_size_name_class(style.font_size_name);
+        const char* size_class = font_size_name_class(resolved_style.font_size_name);
         if (size_class) {
             strbuf_append_format(out, "<span class=\"%s\">", size_class);
         }
-        if (style.has(DocTextStyle::BOLD))
+        if (resolved_style.has(DocTextStyle::BOLD))
             strbuf_append_str(out, "<span class=\"bf\">");
-        if (style.has(DocTextStyle::ITALIC))
+        if (resolved_style.has(DocTextStyle::ITALIC))
             strbuf_append_str(out, "<span class=\"it\">");
-        if (style.has(DocTextStyle::MONOSPACE))
+        if (resolved_style.has(DocTextStyle::SLANTED))
+            strbuf_append_str(out, "<span class=\"sl\">");
+        if (resolved_style.has(DocTextStyle::UPRIGHT))
+            strbuf_append_str(out, "<span class=\"up\">");
+        if (resolved_style.has(DocTextStyle::MONOSPACE))
             strbuf_append_str(out, "<span class=\"tt\">");
-        if (style.has(DocTextStyle::UNDERLINE))
+        if (resolved_style.has(DocTextStyle::UNDERLINE))
             strbuf_append_str(out, "<span class=\"underline\">");
-        if (style.has(DocTextStyle::STRIKEOUT))
+        if (resolved_style.has(DocTextStyle::STRIKEOUT))
             strbuf_append_str(out, "<span class=\"sout\">");
-        if (style.has(DocTextStyle::SMALLCAPS))
+        if (resolved_style.has(DocTextStyle::SMALLCAPS))
             strbuf_append_str(out, "<span class=\"sc\">");
-        if (style.has(DocTextStyle::SUPERSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
             strbuf_append_str(out, "<sup>");
-        if (style.has(DocTextStyle::SUBSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
             strbuf_append_str(out, "<sub>");
     } else {
         // Modern mode: use semantic HTML tags
-        if (style.has(DocTextStyle::BOLD))
+        if (resolved_style.has(DocTextStyle::BOLD))
             strbuf_append_str(out, "<strong>");
-        if (style.has(DocTextStyle::ITALIC))
+        if (resolved_style.has(DocTextStyle::ITALIC))
             strbuf_append_str(out, "<em>");
-        if (style.has(DocTextStyle::MONOSPACE))
+        if (resolved_style.has(DocTextStyle::MONOSPACE))
             strbuf_append_str(out, "<code>");
-        if (style.has(DocTextStyle::UNDERLINE))
+        if (resolved_style.has(DocTextStyle::SLANTED))
+            strbuf_append_format(out, "<span class=\"%ssl\">", opts.css_class_prefix);
+        if (resolved_style.has(DocTextStyle::UPRIGHT))
+            strbuf_append_format(out, "<span class=\"%sup\">", opts.css_class_prefix);
+        if (resolved_style.has(DocTextStyle::UNDERLINE))
             strbuf_append_str(out, "<u>");
-        if (style.has(DocTextStyle::STRIKEOUT))
+        if (resolved_style.has(DocTextStyle::STRIKEOUT))
             strbuf_append_str(out, "<s>");
-        if (style.has(DocTextStyle::SMALLCAPS))
+        if (resolved_style.has(DocTextStyle::SMALLCAPS))
             strbuf_append_format(out, "<span class=\"%ssmallcaps\">", opts.css_class_prefix);
-        if (style.has(DocTextStyle::SUPERSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
             strbuf_append_str(out, "<sup>");
-        if (style.has(DocTextStyle::SUBSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
             strbuf_append_str(out, "<sub>");
         // Font size in modern mode - use class
-        const char* size_class = font_size_name_class(style.font_size_name);
+        const char* size_class = font_size_name_class(resolved_style.font_size_name);
         if (size_class) {
             strbuf_append_format(out, "<span class=\"%s%s\">", opts.css_class_prefix, size_class);
         }
@@ -896,53 +942,68 @@ static void render_text_span_html(DocElement* elem, StrBuf* out,
         html_escape_append(out, elem->text.text, elem->text.text_len);
     }
     
-    // Recurse to children
-    render_children_html(elem, out, opts, 0);
+    // Recurse to children with combined flags
+    uint16_t child_inherited = inherited_flags | resolved_flags;
+    render_children_html_with_context(elem, out, opts, 0, child_inherited);
     
     // Closing tags (reverse order)
     if (opts.legacy_mode) {
         // Legacy mode: close span tags
-        if (style.has(DocTextStyle::SUBSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
             strbuf_append_str(out, "</sub>");
-        if (style.has(DocTextStyle::SUPERSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
             strbuf_append_str(out, "</sup>");
-        if (style.has(DocTextStyle::SMALLCAPS))
+        if (resolved_style.has(DocTextStyle::SMALLCAPS))
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::STRIKEOUT))
+        if (resolved_style.has(DocTextStyle::STRIKEOUT))
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::UNDERLINE))
+        if (resolved_style.has(DocTextStyle::UNDERLINE))
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::MONOSPACE))
+        if (resolved_style.has(DocTextStyle::MONOSPACE))
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::ITALIC))
+        if (resolved_style.has(DocTextStyle::UPRIGHT))
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::BOLD))
+        if (resolved_style.has(DocTextStyle::SLANTED))
+            strbuf_append_str(out, "</span>");
+        if (resolved_style.has(DocTextStyle::ITALIC))
+            strbuf_append_str(out, "</span>");
+        if (resolved_style.has(DocTextStyle::BOLD))
             strbuf_append_str(out, "</span>");
         // Close font size (outermost)
-        if (style.font_size_name != FontSizeName::INHERIT)
+        if (resolved_style.font_size_name != FontSizeName::INHERIT)
             strbuf_append_str(out, "</span>");
     } else {
         // Modern mode: close semantic tags
         // Close font size first (innermost in modern mode)
-        if (style.font_size_name != FontSizeName::INHERIT)
+        if (resolved_style.font_size_name != FontSizeName::INHERIT)
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::SUBSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
             strbuf_append_str(out, "</sub>");
-        if (style.has(DocTextStyle::SUPERSCRIPT))
+        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
             strbuf_append_str(out, "</sup>");
-        if (style.has(DocTextStyle::SMALLCAPS))
+        if (resolved_style.has(DocTextStyle::SMALLCAPS))
             strbuf_append_str(out, "</span>");
-        if (style.has(DocTextStyle::STRIKEOUT))
+        if (resolved_style.has(DocTextStyle::STRIKEOUT))
             strbuf_append_str(out, "</s>");
-        if (style.has(DocTextStyle::UNDERLINE))
+        if (resolved_style.has(DocTextStyle::UNDERLINE))
             strbuf_append_str(out, "</u>");
-        if (style.has(DocTextStyle::MONOSPACE))
+        if (resolved_style.has(DocTextStyle::UPRIGHT))
+            strbuf_append_str(out, "</span>");
+        if (resolved_style.has(DocTextStyle::SLANTED))
+            strbuf_append_str(out, "</span>");
+        if (resolved_style.has(DocTextStyle::MONOSPACE))
             strbuf_append_str(out, "</code>");
-        if (style.has(DocTextStyle::ITALIC))
+        if (resolved_style.has(DocTextStyle::ITALIC))
             strbuf_append_str(out, "</em>");
-        if (style.has(DocTextStyle::BOLD))
+        if (resolved_style.has(DocTextStyle::BOLD))
             strbuf_append_str(out, "</strong>");
     }
+}
+
+// Legacy wrapper that doesn't pass context
+static void render_text_span_html(DocElement* elem, StrBuf* out, 
+                                   const HtmlOutputOptions& opts) {
+    render_text_span_html_with_context(elem, out, opts, 0);
 }
 
 static void render_heading_html(DocElement* elem, StrBuf* out,
@@ -1598,6 +1659,42 @@ static void render_children_html(DocElement* parent, StrBuf* out,
     }
 }
 
+// Forward declaration for context-aware element rendering
+static void doc_element_to_html_with_context(DocElement* elem, StrBuf* out,
+                          const HtmlOutputOptions& opts, int depth, uint16_t inherited_flags);
+
+// Context-aware version that propagates inherited style flags for emphasis toggling
+static void render_children_html_with_context(DocElement* parent, StrBuf* out,
+                                  const HtmlOutputOptions& opts, int depth, uint16_t inherited_flags) {
+    for (DocElement* child = parent->first_child; child; child = child->next_sibling) {
+        doc_element_to_html_with_context(child, out, opts, depth, inherited_flags);
+    }
+}
+
+// Context-aware element rendering that handles emphasis toggling
+static void doc_element_to_html_with_context(DocElement* elem, StrBuf* out,
+                          const HtmlOutputOptions& opts, int depth, uint16_t inherited_flags) {
+    if (!elem) return;
+    
+    switch (elem->type) {
+    case DocElemType::TEXT_SPAN:
+        render_text_span_html_with_context(elem, out, opts, inherited_flags);
+        break;
+        
+    case DocElemType::TEXT_RUN:
+        if (elem->text.text && elem->text.text_len > 0) {
+            bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
+            html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
+        }
+        break;
+        
+    default:
+        // For all other elements, fall back to the regular renderer
+        doc_element_to_html(elem, out, opts, depth);
+        break;
+    }
+}
+
 // helper: check if element is inline (should be wrapped in paragraph at doc level)
 static bool is_inline_element(DocElement* elem) {
     if (!elem) return false;
@@ -2081,6 +2178,16 @@ static DocElement* const CENTERING_MARKER = (DocElement*)4;    // \centering com
 static DocElement* const RAGGEDRIGHT_MARKER = (DocElement*)5;  // \raggedright command marker
 static DocElement* const RAGGEDLEFT_MARKER = (DocElement*)6;   // \raggedleft command marker
 
+// Font declaration markers for font commands without arguments (\bfseries, \itshape, etc.)
+// These affect all following content in the current scope
+static DocElement* const BOLD_MARKER = (DocElement*)7;         // \bfseries, \bf
+static DocElement* const ITALIC_MARKER = (DocElement*)8;       // \itshape, \it
+static DocElement* const MONOSPACE_MARKER = (DocElement*)9;    // \ttfamily, \tt
+static DocElement* const SMALLCAPS_MARKER = (DocElement*)10;   // \scshape
+static DocElement* const SLANTED_MARKER = (DocElement*)11;     // \slshape
+static DocElement* const UPRIGHT_MARKER = (DocElement*)12;     // \upshape
+static DocElement* const EMPHASIS_MARKER = (DocElement*)13;    // \em (toggles italic/upright)
+
 // Alignment state enumeration for paragraph building
 enum class ParagraphAlignment : uint8_t {
     NONE = 0,       // No explicit alignment (default)
@@ -2094,10 +2201,17 @@ static bool is_alignment_marker(DocElement* elem) {
     return elem == CENTERING_MARKER || elem == RAGGEDRIGHT_MARKER || elem == RAGGEDLEFT_MARKER;
 }
 
+// Check if a marker is a font style marker
+static bool is_font_marker(DocElement* elem) {
+    return elem == BOLD_MARKER || elem == ITALIC_MARKER || elem == MONOSPACE_MARKER || 
+           elem == SMALLCAPS_MARKER || elem == SLANTED_MARKER || elem == UPRIGHT_MARKER ||
+           elem == EMPHASIS_MARKER;
+}
+
 // Check if a pointer is any special marker (not a real DocElement pointer)
 static bool is_special_marker(DocElement* elem) {
     return elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER || 
-           is_alignment_marker(elem);
+           is_alignment_marker(elem) || is_font_marker(elem);
 }
 
 // Get alignment from marker
@@ -2106,6 +2220,29 @@ static ParagraphAlignment marker_to_alignment(DocElement* elem) {
     if (elem == RAGGEDRIGHT_MARKER) return ParagraphAlignment::RAGGEDRIGHT;
     if (elem == RAGGEDLEFT_MARKER) return ParagraphAlignment::RAGGEDLEFT;
     return ParagraphAlignment::NONE;
+}
+
+// Convert font marker to DocTextStyle flags
+static uint32_t font_marker_to_style_flags(DocElement* elem) {
+    if (elem == BOLD_MARKER) return DocTextStyle::BOLD;
+    if (elem == ITALIC_MARKER) return DocTextStyle::ITALIC;
+    if (elem == MONOSPACE_MARKER) return DocTextStyle::MONOSPACE;
+    if (elem == SMALLCAPS_MARKER) return DocTextStyle::SMALLCAPS;
+    if (elem == SLANTED_MARKER) return DocTextStyle::SLANTED;
+    if (elem == UPRIGHT_MARKER) return DocTextStyle::UPRIGHT;
+    if (elem == EMPHASIS_MARKER) return DocTextStyle::EMPHASIS;
+    return 0;
+}
+
+// Wrap a DocElement in a styled span using font flags
+static DocElement* wrap_in_font_style(DocElement* elem, unsigned int font_flags, Arena* arena) {
+    if (!elem || font_flags == 0) return elem;
+    
+    DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+    styled_span->text.style = DocTextStyle::plain();
+    styled_span->text.style.flags |= font_flags;
+    doc_append_child(styled_span, elem);
+    return styled_span;
 }
 
 // Apply alignment to paragraph flags
@@ -2494,9 +2631,15 @@ static void build_text_command_set_style(const char* cmd_name, DocTextStyle* sty
     // Style flags
     if (tag_eq(cmd_name, "textbf") || tag_eq(cmd_name, "bf") || tag_eq(cmd_name, "bfseries")) {
         style->flags |= DocTextStyle::BOLD;
-    } else if (tag_eq(cmd_name, "textit") || tag_eq(cmd_name, "it") || 
-               tag_eq(cmd_name, "itshape") || tag_eq(cmd_name, "emph")) {
+    } else if (tag_eq(cmd_name, "textit") || tag_eq(cmd_name, "it") || tag_eq(cmd_name, "itshape")) {
         style->flags |= DocTextStyle::ITALIC;
+    } else if (tag_eq(cmd_name, "textsl") || tag_eq(cmd_name, "sl") || tag_eq(cmd_name, "slshape")) {
+        style->flags |= DocTextStyle::SLANTED;
+    } else if (tag_eq(cmd_name, "textup") || tag_eq(cmd_name, "upshape")) {
+        style->flags |= DocTextStyle::UPRIGHT;
+    } else if (tag_eq(cmd_name, "emph")) {
+        // \emph uses EMPHASIS flag for context-dependent toggling
+        style->flags |= DocTextStyle::EMPHASIS;
     } else if (tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "tt") || tag_eq(cmd_name, "ttfamily")) {
         style->flags |= DocTextStyle::MONOSPACE;
     } else if (tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "scshape")) {
@@ -2539,9 +2682,15 @@ static DocElement* build_text_command(const char* cmd_name, const ElementReader&
     // Set style flags based on command
     if (tag_eq(cmd_name, "textbf") || tag_eq(cmd_name, "bf") || tag_eq(cmd_name, "bfseries")) {
         span->text.style.flags |= DocTextStyle::BOLD;
-    } else if (tag_eq(cmd_name, "textit") || tag_eq(cmd_name, "it") || 
-               tag_eq(cmd_name, "itshape") || tag_eq(cmd_name, "emph")) {
+    } else if (tag_eq(cmd_name, "textit") || tag_eq(cmd_name, "it") || tag_eq(cmd_name, "itshape")) {
         span->text.style.flags |= DocTextStyle::ITALIC;
+    } else if (tag_eq(cmd_name, "textsl") || tag_eq(cmd_name, "sl") || tag_eq(cmd_name, "slshape")) {
+        span->text.style.flags |= DocTextStyle::SLANTED;
+    } else if (tag_eq(cmd_name, "textup") || tag_eq(cmd_name, "upshape")) {
+        span->text.style.flags |= DocTextStyle::UPRIGHT;
+    } else if (tag_eq(cmd_name, "emph")) {
+        // \emph uses EMPHASIS flag for context-dependent toggling
+        span->text.style.flags |= DocTextStyle::EMPHASIS;
     } else if (tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "tt") || tag_eq(cmd_name, "ttfamily")) {
         span->text.style.flags |= DocTextStyle::MONOSPACE;
     } else if (tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "scshape")) {
@@ -2750,7 +2899,8 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     
     // Text formatting commands
     if (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
-        tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline")) {
+        tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline") ||
+        tag_eq(tag, "textup") || tag_eq(tag, "textsl")) {
         return build_text_command(tag, elem, arena, doc);
     }
     
@@ -3013,13 +3163,62 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "textregistered")) {
         return doc_create_text_cstr(arena, "\xC2\xAE", DocTextStyle::plain());  // ®
     }
-    // Spacing commands that output space
-    if (tag_eq(tag, "quad") || tag_eq(tag, "qquad") || 
-        tag_eq(tag, "enspace") || tag_eq(tag, "enskip") ||
-        tag_eq(tag, "thinspace")) {
-        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
-        space->space.is_linebreak = false;
-        return space;
+    // Spacing commands that output Unicode space characters
+    // U+2003 Em Space for \quad
+    if (tag_eq(tag, "quad")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x83", DocTextStyle::plain());  // em space
+    }
+    // U+2003 Em Space twice for \qquad
+    if (tag_eq(tag, "qquad")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x83\xE2\x80\x83", DocTextStyle::plain());  // 2x em space
+    }
+    // U+2002 En Space for \enspace/\enskip
+    if (tag_eq(tag, "enspace") || tag_eq(tag, "enskip")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x82", DocTextStyle::plain());  // en space
+    }
+    // U+2009 Thin Space for \thinspace/\,
+    if (tag_eq(tag, "thinspace")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x89", DocTextStyle::plain());  // thin space
+    }
+    // Negative thin space needs CSS styling
+    if (tag_eq(tag, "negthinspace")) {
+        return doc_create_raw_html_cstr(arena, "<span class=\"negthinspace\"></span>");
+    }
+    // \hspace{...} - horizontal space with specified width
+    if (tag_eq(tag, "hspace")) {
+        // Get width from child text content using extract_text_content
+        const char* width_str = extract_text_content(item, arena);
+        if (width_str && strlen(width_str) > 0) {
+            // Parse length and convert to pixels
+            char* end = nullptr;
+            double num = strtod(width_str, &end);  // use double for precision
+            if (end != width_str) {
+                // Skip whitespace
+                while (end && *end == ' ') end++;
+                // Handle units - use precise conversion factors
+                double width_px = num;  // default: assume pixels
+                if (end && *end) {
+                    if (strncmp(end, "pt", 2) == 0) {
+                        width_px = num * (96.0 / 72.0);  // 1pt = 1/72 in
+                    } else if (strncmp(end, "cm", 2) == 0) {
+                        width_px = num * (96.0 / 2.54);  // 1cm = 96/2.54 px
+                    } else if (strncmp(end, "mm", 2) == 0) {
+                        width_px = num * (96.0 / 25.4);  // 1mm = 96/25.4 px
+                    } else if (strncmp(end, "in", 2) == 0) {
+                        width_px = num * 96.0;           // 1in = 96px
+                    } else if (strncmp(end, "em", 2) == 0) {
+                        width_px = num * 16.0;           // assume 1em = 16px
+                    }
+                }
+                if (width_px > 0) {
+                    char buf[128];
+                    snprintf(buf, sizeof(buf), "<span style=\"margin-right:%.3fpx\"></span>", width_px);
+                    return doc_create_raw_html_cstr(arena, buf);
+                }
+            }
+        }
+        // Default: output a regular space if width not specified
+        return doc_create_text_cstr(arena, " ", DocTextStyle::plain());
     }
     // Non-breaking space
     if (tag_eq(tag, "nobreakspace") || tag_eq(tag, "nbsp")) {
@@ -3105,7 +3304,8 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         if (cmd_name) {
             if (tag_eq(cmd_name, "textbf") || tag_eq(cmd_name, "textit") || 
                 tag_eq(cmd_name, "texttt") || tag_eq(cmd_name, "emph") ||
-                tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "underline")) {
+                tag_eq(cmd_name, "textsc") || tag_eq(cmd_name, "underline") ||
+                tag_eq(cmd_name, "textup") || tag_eq(cmd_name, "textsl")) {
                 return build_text_command(cmd_name, elem, arena, doc);
             }
             
@@ -3172,13 +3372,72 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             if (tag_eq(cmd_name, "textregistered")) {
                 return doc_create_text_cstr(arena, "\xC2\xAE", DocTextStyle::plain());  // ®
             }
-            // Spacing commands that output space
-            if (tag_eq(cmd_name, "quad") || tag_eq(cmd_name, "qquad") || 
-                tag_eq(cmd_name, "enspace") || tag_eq(cmd_name, "enskip") ||
-                tag_eq(cmd_name, "thinspace")) {
-                DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
-                space->space.is_linebreak = false;
-                return space;
+            // Spacing commands that output Unicode space characters
+            // U+2003 Em Space for \quad
+            if (tag_eq(cmd_name, "quad")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x83", DocTextStyle::plain());
+            }
+            // U+2003 Em Space twice for \qquad
+            if (tag_eq(cmd_name, "qquad")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x83\xE2\x80\x83", DocTextStyle::plain());
+            }
+            // U+2002 En Space for \enspace/\enskip
+            if (tag_eq(cmd_name, "enspace") || tag_eq(cmd_name, "enskip")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x82", DocTextStyle::plain());
+            }
+            // U+2009 Thin Space for \thinspace/\,
+            if (tag_eq(cmd_name, "thinspace")) {
+                return doc_create_text_cstr(arena, "\xE2\x80\x89", DocTextStyle::plain());
+            }
+            // Negative thin space needs CSS styling
+            if (tag_eq(cmd_name, "negthinspace")) {
+                return doc_create_raw_html_cstr(arena, "<span class=\"negthinspace\"></span>");
+            }
+            // \hspace{...} - horizontal space with specified width
+            if (tag_eq(cmd_name, "hspace")) {
+                // Get width from the argument (next curly_group)
+                const char* width_str = nullptr;
+                auto iter2 = elem.children();
+                ItemReader arg;
+                while (iter2.next(&arg)) {
+                    if (arg.isElement()) {
+                        ElementReader arg_elem = arg.asElement();
+                        const char* arg_tag = arg_elem.tagName();
+                        if (tag_eq(arg_tag, "curly_group") || tag_eq(arg_tag, "group")) {
+                            width_str = extract_text_content(arg, arena);
+                            break;
+                        }
+                    }
+                }
+                if (width_str && width_str[0]) {
+                    // Parse length and convert to pixels
+                    char* end = nullptr;
+                    double num = strtod(width_str, &end);  // use double for precision
+                    if (end != width_str) {
+                        while (end && *end == ' ') end++;
+                        double width_px = num;  // default: assume pixels
+                        if (end && *end) {
+                            if (strncmp(end, "pt", 2) == 0) {
+                                width_px = num * (96.0 / 72.0);
+                            } else if (strncmp(end, "cm", 2) == 0) {
+                                width_px = num * (96.0 / 2.54);
+                            } else if (strncmp(end, "mm", 2) == 0) {
+                                width_px = num * (96.0 / 25.4);
+                            } else if (strncmp(end, "in", 2) == 0) {
+                                width_px = num * 96.0;
+                            } else if (strncmp(end, "em", 2) == 0) {
+                                width_px = num * 16.0;
+                            }
+                        }
+                        if (width_px > 0) {
+                            char buf[128];
+                            snprintf(buf, sizeof(buf), "<span style=\"margin-right:%.3fpx\"></span>", width_px);
+                            return doc_create_raw_html_cstr(arena, buf);
+                        }
+                    }
+                }
+                // Default: output a regular space if width not specified
+                return doc_create_text_cstr(arena, " ", DocTextStyle::plain());
             }
             // Non-breaking space
             if (tag_eq(cmd_name, "nobreakspace") || tag_eq(cmd_name, "nbsp")) {
@@ -3272,12 +3531,45 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
         }
         
+        // Track active font flags within this group for \em toggle behavior
+        uint32_t active_font_flags = 0;
+        
         auto iter = elem.children();
         ItemReader child;
         while (iter.next(&child)) {
             DocElement* child_elem = build_inline_content(child, arena, doc);
             if (child_elem) {
-                doc_append_child(span, child_elem);
+                // Handle font markers with toggle logic for \em
+                if (is_font_marker(child_elem)) {
+                    uint32_t new_flags = font_marker_to_style_flags(child_elem);
+                    if (new_flags == DocTextStyle::EMPHASIS) {
+                        // \em toggles between italic and upright
+                        bool currently_italic = (active_font_flags & DocTextStyle::ITALIC) != 0;
+                        bool currently_upright = (active_font_flags & DocTextStyle::UPRIGHT) != 0;
+                        active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT);
+                        if (currently_italic) {
+                            active_font_flags |= DocTextStyle::UPRIGHT;
+                        } else if (currently_upright) {
+                            active_font_flags |= DocTextStyle::ITALIC;
+                        } else {
+                            active_font_flags |= DocTextStyle::ITALIC;
+                        }
+                    } else {
+                        active_font_flags |= new_flags;
+                    }
+                    continue;  // Don't add marker to output
+                }
+                
+                // Wrap content with active font flags if any
+                if (active_font_flags != 0) {
+                    DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                    styled_span->text.style = DocTextStyle::plain();
+                    styled_span->text.style.flags = active_font_flags;
+                    doc_append_child(styled_span, child_elem);
+                    doc_append_child(span, styled_span);
+                } else {
+                    doc_append_child(span, child_elem);
+                }
             }
         }
         
@@ -4365,7 +4657,7 @@ static void build_alignment_content(DocElement* container, const ElementReader& 
                         }
                         // Build block element directly
                         DocElement* block_elem = build_doc_element(para_child, arena, doc);
-                        if (block_elem && block_elem != PARBREAK_MARKER) {
+                        if (block_elem && !is_special_marker(block_elem)) {
                             doc_append_child(container, block_elem);
                         }
                         continue;
@@ -4392,7 +4684,7 @@ static void build_alignment_content(DocElement* container, const ElementReader& 
         } else {
             // Non-paragraph children - process directly
             DocElement* child_doc = build_doc_element(child, arena, doc);
-            if (child_doc && child_doc != PARBREAK_MARKER) {
+            if (child_doc && !is_special_marker(child_doc)) {
                 doc_append_child(container, child_doc);
             }
         }
@@ -4919,12 +5211,14 @@ static bool is_inline_or_break(DocElement* elem) {
     if (!elem) return false;
     if (elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER) return false;
     if (is_alignment_marker(elem)) return false;  // alignment markers are not inline content
+    if (is_font_marker(elem)) return false;  // font markers are not inline content
     return is_inline_element(elem);
 }
 
 // Helper function to process body content with paragraph grouping
 // Collects inline content into paragraphs, respecting parbreak markers
 // Also tracks paragraph alignment (\centering, \raggedright, \raggedleft)
+// and font declarations (\bfseries, \itshape, etc.)
 static void build_body_content_with_paragraphs(DocElement* container, const ElementReader& elem,
                                                 Arena* arena, TexDocumentModel* doc) {
     DocElement* current_para = nullptr;
@@ -4932,6 +5226,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     bool next_para_noindent = false;   // Track if next paragraph should have noindent class
     bool strip_next_leading_space = false;  // Track if next text should have leading space stripped
     ParagraphAlignment current_alignment = ParagraphAlignment::NONE;  // Track current alignment
+    uint32_t active_font_flags = 0;  // Track active font style flags from declarations
     
     int64_t child_count = elem.childCount();
     for (int64_t i = 0; i < child_count; i++) {
@@ -4963,9 +5258,20 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                         next_para_noindent = false;
                     }
                 }
-                DocElement* text_elem = doc_create_text_normalized(arena, text, DocTextStyle::plain());
+                // Create text element with active font style if any
+                DocTextStyle style = DocTextStyle::plain();
+                style.flags = active_font_flags;
+                DocElement* text_elem = doc_create_text_normalized(arena, text, style);
                 if (text_elem) {
-                    doc_append_child(current_para, text_elem);
+                    // If there's an active font style, wrap in a styled span
+                    if (active_font_flags != 0) {
+                        DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                        styled_span->text.style = style;
+                        doc_append_child(styled_span, text_elem);
+                        doc_append_child(current_para, styled_span);
+                    } else {
+                        doc_append_child(current_para, text_elem);
+                    }
                 }
             }
             continue;
@@ -5599,6 +5905,34 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             continue;
         }
         
+        // Font style markers - update active font style flags
+        // Font declarations like \bfseries affect all following content until scope ends
+        if (is_font_marker(child_elem)) {
+            uint32_t new_flags = font_marker_to_style_flags(child_elem);
+            if (new_flags == DocTextStyle::EMPHASIS) {
+                // \em toggles between italic and upright
+                // Check current state of italic/upright in active_font_flags
+                bool currently_italic = (active_font_flags & DocTextStyle::ITALIC) != 0;
+                bool currently_upright = (active_font_flags & DocTextStyle::UPRIGHT) != 0;
+                // Clear both italic and upright
+                active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT);
+                if (currently_italic) {
+                    // Was italic, toggle to upright
+                    active_font_flags |= DocTextStyle::UPRIGHT;
+                } else if (currently_upright) {
+                    // Was upright, toggle to italic
+                    active_font_flags |= DocTextStyle::ITALIC;
+                } else {
+                    // Neither set - start with italic
+                    active_font_flags |= DocTextStyle::ITALIC;
+                }
+            } else {
+                active_font_flags |= new_flags;
+            }
+            strip_next_leading_space = true;  // strip space after font declaration
+            continue;
+        }
+        
         // Check if this is inline content or a block element
         if (is_inline_or_break(child_elem)) {
             // Start a new paragraph if needed
@@ -5615,7 +5949,16 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                     next_para_noindent = false;
                 }
             }
-            doc_append_child(current_para, child_elem);
+            // If there's an active font style from declarations like \em, wrap inline content
+            if (active_font_flags != 0) {
+                DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+                styled_span->text.style = DocTextStyle::plain();
+                styled_span->text.style.flags = active_font_flags;
+                doc_append_child(styled_span, child_elem);
+                doc_append_child(current_para, styled_span);
+            } else {
+                doc_append_child(current_para, child_elem);
+            }
         } else {
             // Block element - finalize current paragraph first
             if (current_para && current_para->first_child) {
@@ -5752,10 +6095,13 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     // Text formatting commands (not environments - those with paragraph children get different handling)
     // Commands like \textbf{...} vs environments like \begin{bfseries}...\end{bfseries}
     bool is_font_tag = (tag_eq(tag, "textbf") || tag_eq(tag, "textit") || tag_eq(tag, "texttt") ||
+        tag_eq(tag, "textup") || tag_eq(tag, "textsl") ||
         tag_eq(tag, "emph") || tag_eq(tag, "textsc") || tag_eq(tag, "underline") ||
-        tag_eq(tag, "bf") || tag_eq(tag, "it") || tag_eq(tag, "tt") ||
+        tag_eq(tag, "bf") || tag_eq(tag, "it") || tag_eq(tag, "tt") || tag_eq(tag, "em") ||
+        tag_eq(tag, "sl") || tag_eq(tag, "up") ||
         tag_eq(tag, "bfseries") || tag_eq(tag, "itshape") || tag_eq(tag, "ttfamily") ||
-        tag_eq(tag, "scshape") || tag_eq(tag, "sout") || tag_eq(tag, "st") ||
+        tag_eq(tag, "scshape") || tag_eq(tag, "slshape") || tag_eq(tag, "upshape") ||
+        tag_eq(tag, "sout") || tag_eq(tag, "st") ||
         // Font size commands
         tag_eq(tag, "tiny") || tag_eq(tag, "scriptsize") || tag_eq(tag, "footnotesize") ||
         tag_eq(tag, "small") || tag_eq(tag, "normalsize") || tag_eq(tag, "large") ||
@@ -5763,6 +6109,20 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     
     // Use text command handler only if NOT an environment (no paragraph children)
     if (is_font_tag && !has_paragraph_children()) {
+        // Check if this is a font declaration (no children) that affects following content
+        // Font declarations like \bfseries, \itshape have no arguments but affect subsequent text
+        bool has_children = (elem.childCount() > 0);
+        if (!has_children) {
+            // No children - this is a font declaration, return marker for parent to handle
+            if (tag_eq(tag, "bfseries") || tag_eq(tag, "bf")) return BOLD_MARKER;
+            if (tag_eq(tag, "itshape") || tag_eq(tag, "it")) return ITALIC_MARKER;
+            if (tag_eq(tag, "em")) return EMPHASIS_MARKER;
+            if (tag_eq(tag, "ttfamily") || tag_eq(tag, "tt")) return MONOSPACE_MARKER;
+            if (tag_eq(tag, "scshape")) return SMALLCAPS_MARKER;
+            if (tag_eq(tag, "slshape")) return SLANTED_MARKER;
+            if (tag_eq(tag, "upshape")) return UPRIGHT_MARKER;
+            // Other font commands without children - return empty span (no visible effect)
+        }
         return build_text_command(tag, elem, arena, doc);
     }
     
@@ -6132,13 +6492,62 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "textregistered")) {
         return doc_create_text_cstr(arena, "\xC2\xAE", DocTextStyle::plain());  // ®
     }
-    // Spacing commands that output space
-    if (tag_eq(tag, "quad") || tag_eq(tag, "qquad") || 
-        tag_eq(tag, "enspace") || tag_eq(tag, "enskip") ||
-        tag_eq(tag, "thinspace")) {
-        DocElement* space = doc_alloc_element(arena, DocElemType::SPACE);
-        space->space.is_linebreak = false;
-        return space;
+    // Spacing commands that output Unicode space characters
+    // U+2003 Em Space for \quad
+    if (tag_eq(tag, "quad")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x83", DocTextStyle::plain());  // em space
+    }
+    // U+2003 Em Space twice for \qquad
+    if (tag_eq(tag, "qquad")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x83\xE2\x80\x83", DocTextStyle::plain());  // 2x em space
+    }
+    // U+2002 En Space for \enspace/\enskip
+    if (tag_eq(tag, "enspace") || tag_eq(tag, "enskip")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x82", DocTextStyle::plain());  // en space
+    }
+    // U+2009 Thin Space for \thinspace/\,
+    if (tag_eq(tag, "thinspace")) {
+        return doc_create_text_cstr(arena, "\xE2\x80\x89", DocTextStyle::plain());  // thin space
+    }
+    // Negative thin space needs CSS styling
+    if (tag_eq(tag, "negthinspace")) {
+        return doc_create_raw_html_cstr(arena, "<span class=\"negthinspace\"></span>");
+    }
+    // \hspace{...} - horizontal space with specified width
+    if (tag_eq(tag, "hspace")) {
+        // Get width from child text content using extract_text_content
+        const char* width_str = extract_text_content(item, arena);
+        if (width_str && strlen(width_str) > 0) {
+            // Parse length and convert to pixels
+            char* end = nullptr;
+            double num = strtod(width_str, &end);  // use double for precision
+            if (end != width_str) {
+                // Skip whitespace
+                while (end && *end == ' ') end++;
+                // Handle units - use precise conversion factors
+                double width_px = num;  // default: assume pixels
+                if (end && *end) {
+                    if (strncmp(end, "pt", 2) == 0) {
+                        width_px = num * (96.0 / 72.0);  // 1pt = 1/72 in
+                    } else if (strncmp(end, "cm", 2) == 0) {
+                        width_px = num * (96.0 / 2.54);  // 1cm = 96/2.54 px
+                    } else if (strncmp(end, "mm", 2) == 0) {
+                        width_px = num * (96.0 / 25.4);  // 1mm = 96/25.4 px
+                    } else if (strncmp(end, "in", 2) == 0) {
+                        width_px = num * 96.0;           // 1in = 96px
+                    } else if (strncmp(end, "em", 2) == 0) {
+                        width_px = num * 16.0;           // assume 1em = 16px
+                    }
+                }
+                if (width_px > 0) {
+                    char buf[128];
+                    snprintf(buf, sizeof(buf), "<span style=\"margin-right:%.3fpx\"></span>", width_px);
+                    return doc_create_raw_html_cstr(arena, buf);
+                }
+            }
+        }
+        // Default: output a regular space if width not specified
+        return doc_create_text_cstr(arena, " ", DocTextStyle::plain());
     }
     // Non-breaking space
     if (tag_eq(tag, "nobreakspace") || tag_eq(tag, "nbsp")) {
@@ -6926,19 +7335,68 @@ static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
         }
         
+        // Track font state within this group - font declarations apply until group ends
+        unsigned int group_font_flags = 0;
+        bool need_strip_leading_space = false;
+        
         auto iter = elem.children();
         ItemReader child;
         while (iter.next(&child)) {
             DocElement* child_elem = build_doc_element(child, arena, doc);
-            if (child_elem && child_elem != PARBREAK_MARKER && child_elem != NOINDENT_MARKER) {
+            if (!child_elem) continue;
+            
+            // Font markers update group font state with toggle logic for \em
+            if (is_font_marker(child_elem)) {
+                uint32_t new_flags = font_marker_to_style_flags(child_elem);
+                if (new_flags == DocTextStyle::EMPHASIS) {
+                    // \em toggles between italic and upright
+                    bool currently_italic = (group_font_flags & DocTextStyle::ITALIC) != 0;
+                    bool currently_upright = (group_font_flags & DocTextStyle::UPRIGHT) != 0;
+                    group_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT);
+                    if (currently_italic) {
+                        group_font_flags |= DocTextStyle::UPRIGHT;
+                    } else if (currently_upright) {
+                        group_font_flags |= DocTextStyle::ITALIC;
+                    } else {
+                        group_font_flags |= DocTextStyle::ITALIC;
+                    }
+                } else {
+                    group_font_flags |= new_flags;
+                }
+                need_strip_leading_space = true;  // strip space after font declaration
+                continue;
+            }
+            
+            // Skip other special markers
+            if (is_special_marker(child_elem)) continue;
+            
+            // Strip leading space after font declaration (e.g., "\bfseries text" should not have space before "text")
+            if (need_strip_leading_space && child_elem->type == DocElemType::TEXT_RUN) {
+                const char* text = child_elem->text.text;
+                if (text && text[0] == ' ') {
+                    // Skip the leading space by adjusting pointer
+                    if (text[1]) {
+                        child_elem->text.text = arena_strdup(arena, text + 1);
+                    } else {
+                        // Just a space - skip entirely
+                        continue;
+                    }
+                }
+                need_strip_leading_space = false;
+            }
+            // If font flags are active, wrap content in styled element
+            if (group_font_flags != 0) {
+                DocElement* styled = wrap_in_font_style(child_elem, group_font_flags, arena);
+                doc_append_child(span, styled);
+            } else {
                 doc_append_child(span, child_elem);
             }
         }
         
         // Add ZWSP at end of curly_group/brack_group/group (not _seq):
-        // - If trailing whitespace inside: marks the boundary
-        // - If content but no trailing whitespace: marks the } boundary for word-break
-        if (!is_seq && (ends_with_space || has_content)) {
+        // Only add ZWSP if group has content but NO trailing whitespace
+        // When trailing whitespace exists, the space character marks the boundary
+        if (!is_seq && has_content && !ends_with_space) {
             doc_append_child(span, doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain()));
         }
         

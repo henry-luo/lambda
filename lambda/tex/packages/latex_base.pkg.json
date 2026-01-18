@@ -553,6 +553,10 @@
       "description": "Thin space",
       "replacement": " "
     },
+    "negthinspace": {
+      "type": "primitive",
+      "description": "Negative thin space"
+    },
     ",": {
       "type": "macro",
       "description": "Thin space (math)",
