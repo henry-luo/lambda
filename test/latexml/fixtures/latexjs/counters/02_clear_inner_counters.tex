@@ -1,0 +1,34 @@
+% clear inner counters
+\newcounter{c}
+\stepcounter{c}
+
+\newcounter{a}[c]	% c -> a,b -> d
+\newcounter{b}[c]
+\newcounter{d}[b]
+
+\setcounter{a}{5}
+\setcounter{b}{6}
+\setcounter{d}{3}
+
+\arabic{a}
+\arabic{b}
+\arabic{c}
+\arabic{d}
+
+\stepcounter{a}
+\arabic{a}
+\arabic{b}
+\arabic{c}
+\arabic{d}
+
+\stepcounter{c}
+\arabic{a}          % should be reset now due to stepcounter
+\arabic{b}          % should be reset now due to stepcounter
+\arabic{c}
+\arabic{d}
+
+\stepcounter{b}
+\arabic{a}
+\arabic{b}
+\arabic{c}
+\arabic{d}

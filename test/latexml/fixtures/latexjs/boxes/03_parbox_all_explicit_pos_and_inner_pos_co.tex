@@ -1,0 +1,38 @@
+% parbox - all explicit pos and inner-pos combinations
+% SCREENSHOT: marked as screenshot test in latex.js
+\noindent
+The following examples demonstrate all explicit \emph{pos}/\emph{inner-pos} combinations:
+\begin{itemize}
+\item center alignment:
+
+\noindent
+Some text
+\fbox{\parbox[c][3cm][t]{2cm}{parbox default alignment, parbox test text}}
+some text
+\fbox{\parbox[c][3cm][c]{2cm}{parbox top alignment, text parbox test text}}
+some text
+\fbox{\parbox[c][3cm][b]{2cm}{parbox bottom alignment, text parbox test text}}
+some text.
+
+\item top alignment:
+
+\noindent
+Some text
+\fbox{\parbox[t][3cm][t]{2cm}{parbox default alignment, parbox test text}}
+some text
+\fbox{\parbox[t][3cm][c]{2cm}{parbox top alignment, text parbox test text}}
+some text
+\fbox{\parbox[t][3cm][b]{2cm}{parbox bottom alignment, text parbox test text}}
+some text.
+
+\item bottom alignment:
+
+\noindent
+Some text
+\fbox{\parbox[b][3cm][t]{2cm}{parbox default alignment, parbox test text}}
+some text
+\fbox{\parbox[b][3cm][c]{2cm}{parbox top alignment, text parbox test text}}
+some text
+\fbox{\parbox[b][3cm][b]{2cm}{parbox bottom alignment, text parbox test text}}
+some text.
+\end{itemize}

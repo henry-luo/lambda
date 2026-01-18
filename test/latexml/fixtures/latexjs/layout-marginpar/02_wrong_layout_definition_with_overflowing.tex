@@ -1,0 +1,15 @@
+% wrong layout definition with overflowing margins
+% SCREENSHOT: marked as screenshot test in latex.js
+\documentclass{article}
+
+\setlength{\textwidth}{12cm}
+\setlength{\oddsidemargin}{3cm}
+\setlength{\marginparwidth}{7cm}
+\setlength{\marginparsep}{2cm}
+
+\begin{document}
+\marginpar{And here is a piece on the right.}
+This is just some simple text. This is just some simple text.
+This is just some simple text. This is just some simple text.
+This is just some simple text. This is just some simple text.
+\end{document}

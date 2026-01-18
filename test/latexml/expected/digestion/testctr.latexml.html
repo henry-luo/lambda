@@ -1,0 +1,331 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>1 Testing LaTeX Counters</title>
+<!--Generated on Sun Jan 18 10:54:10 2026 by LaTeXML (version 0.8.8) http://dlmf.nist.gov/LaTeXML/.-->
+
+<link rel="stylesheet" href="LaTeXML.css" type="text/css">
+<link rel="stylesheet" href="ltx-article.css" type="text/css">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+</head>
+<body>
+<div class="ltx_page_main">
+<div class="ltx_page_content">
+<article class="ltx_document">
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">1 </span>Testing LaTeX Counters</h2>
+
+<div  class="ltx_para">
+<p class="ltx_p">Counter Foo [0] = 0.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Increment Foo[1] = 1.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Set Foo to 2 = 2.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Add 10 to Foo [12] = 12.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Double Foo [24] = 24.</p>
+</div>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">1.1 </span>Testing RefStep</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">Define bar to be reset within foo.
+
+Now (Foo,Bar)[24,0] is (24,0)</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Refstep bar: 
+Now (Foo,Bar)[24,1] is (24,1)</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Refstep foo: 
+Now (Foo,Bar)[25,0] is (25,0)</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">1.2 </span>Number formatting</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">arabic[6] = 6</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">roman [vi] = vi</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Roman [VI] = VI</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">alph [f] = f</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Alph [F] = F</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">fnsymbol [<math  class="ltx_Math" alttext="\|" display="inline"><mo>∥</mo></math>] = ∥</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">How far will <span class="ltx_text ltx_TeX_logo" style="letter-spacing:-0.2em; margin-right:0.2em;">T<span class="ltx_text" style="position:relative; bottom:-0.2ex;font-variant:small-caps;font-size:120%;;">e</span>X</span> go?
+
+
+Fubar is mmmmmmmmmcmxcix</p>
+</div>
+</section>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">2 </span>Expanding LaTeX Counter Names</h2>
+
+<div  class="ltx_para">
+<p class="ltx_p">Counter Foo [0] = 0.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Increment Foo[1] = 1.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Set Foo to 2 = 2.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Add 10 to Foo [12] = 12.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Double Foo [24] = 24.</p>
+</div>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.1 </span>Testing RefStep</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">Define bar to be reset within Foo.
+
+Now (Foo,Bar)[24,0] is (24,0)</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Refstep Bar: 
+Now (Foo,Bar)[24,1] is (24,1)</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Refstep Foo: 
+Now (Foo,Bar)[25,0] is (25,0)</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.2 </span>Number formatting</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">arabic[6] = 6</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">roman [vi] = vi</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Roman [VI] = VI</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">alph [f] = f</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Alph [F] = F</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">fnsymbol [<math  class="ltx_Math" alttext="\|" display="inline"><mo>∥</mo></math>] = ∥</p>
+</div>
+</section>
+</section>
+<section  class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">3 </span>TeX Counters</h2>
+
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.1 </span>Integers</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">7 = 7.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">7 = 7.</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.2 </span>Dimensions</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">HFuzz is 0.1pt.
+Now HFuzz is 2.0pt.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">HFuzz is 2.0pt.
+Now HFuzz is 2.0pt.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Dimen 1.23pt = 1.23pt.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Dimen 1.23pt = 1.23pt.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Dimen 1.23pt = 1.23pt.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">count 2: 3*65536 = 196608.</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Now dimen: 3pt = 3.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">One em = 10.00002pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">One ex = 4.30554pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Dimen: one ex = 4.30554pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Dimen: 1pt = 1.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Dimen: 1pt = 1.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">8 pt = 8.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">15 pt = 15.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Catcodes?
+
+15.0 POINTS = 15.0 POINTS</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.3 </span>Glue</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">1pt plus 3pt = 1.0pt plus 3.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">1pt plus 3fil = 1.0pt plus 3.0fil</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">1pt plus 3fill = 1.0pt plus 3.0fill</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Skip: 2pt plus 3fill = 2.0pt plus 3.0fill</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">0.1pt plus 3fill = 0.1pt plus 3.0fill</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Catcodes?
+
+1.0 POINTS PLUS 3.0 POINTS = 1.0 POINTS   PLUS  3.0 POINTS</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.4 </span>The</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">the count 127 [99] : 99</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">the two (countdef 2)[196608] : 196608</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Tokens: abFOOcd = abFOOcd</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Catcode: 11 = 11</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Catcode: 12 = 12</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.5 </span>New Count, etc</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">3 = 3</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.6 </span><span class="ltx_text ltx_LaTeX_logo" style="letter-spacing:-0.2em; margin-right:0.1em;">L<span class="ltx_text" style="position:relative; bottom:0.4ex;font-variant:small-caps;;">a</span>T<span class="ltx_text" style="position:relative; bottom:-0.2ex;font-variant:small-caps;font-size:120%;">e</span>X</span> style</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">1em = 10.00002pt
+3em = 30.00005pt</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.7 </span>Macrology</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">1=1</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">[23=23]</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">[29=29]</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">[29=29]</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">[10000=10000]
+[$a$ = $a$]</p>
+</div>
+</section>
+<section  class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.8 </span>Quirks</h3>
+
+<div  class="ltx_para">
+<p class="ltx_p">Note that for toksdef and otheres, <span class="ltx_text ltx_TeX_logo" style="letter-spacing:-0.2em; margin-right:0.2em;">T<span class="ltx_text" style="position:relative; bottom:-0.2ex;font-variant:small-caps;font-size:120%;;">e</span>X</span> binds the token to relax
+before reading the number, in case the definition is immediagely
+followed by a usage or assignment (See TeX Program §1224)</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">Tooks:abc</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">dima:1.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">skipa:1.0pt plus 1.0pt</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">muskipa:1.0mu</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p">@</p>
+</div>
+<div  class="ltx_para">
+<p class="ltx_p"><math  class="ltx_Math" alttext="\mathchar 4944\relax" display="inline"><mo largeop="false">∑</mo></math></p>
+</div>
+</section>
+</section>
+</article>
+</div>
+<footer class="ltx_page_footer">
+<div class="ltx_page_logo">Generated  on Sun Jan 18 10:54:10 2026 by <a href="http://dlmf.nist.gov/LaTeXML/" class="ltx_LaTeXML_logo"><span style="letter-spacing:-0.2em; margin-right:0.1em;">L<span class="ltx_font_smallcaps" style="position:relative; bottom:2.2pt;">a</span>T<span class="ltx_font_smallcaps" style="font-size:120%;position:relative; bottom:-0.2ex;">e</span></span><span style="font-size:90%; position:relative; bottom:-0.2ex;">XML</span><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAOCAYAAAD5YeaVAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9wKExQZLWTEaOUAAAAddEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIFRoZSBHSU1Q72QlbgAAAdpJREFUKM9tkL+L2nAARz9fPZNCKFapUn8kyI0e4iRHSR1Kb8ng0lJw6FYHFwv2LwhOpcWxTjeUunYqOmqd6hEoRDhtDWdA8ApRYsSUCDHNt5ul13vz4w0vWCgUnnEc975arX6ORqN3VqtVZbfbTQC4uEHANM3jSqXymFI6yWazP2KxWAXAL9zCUa1Wy2tXVxheKA9YNoR8Pt+aTqe4FVVVvz05O6MBhqUIBGk8Hn8HAOVy+T+XLJfLS4ZhTiRJgqIoVBRFIoric47jPnmeB1mW/9rr9ZpSSn3Lsmir1fJZlqWlUonKsvwWwD8ymc/nXwVBeLjf7xEKhdBut9Hr9WgmkyGEkJwsy5eHG5vN5g0AKIoCAEgkEkin0wQAfN9/cXPdheu6P33fBwB4ngcAcByHJpPJl+fn54mD3Gg0NrquXxeLRQAAwzAYj8cwTZPwPH9/sVg8PXweDAauqqr2cDjEer1GJBLBZDJBs9mE4zjwfZ85lAGg2+06hmGgXq+j3+/DsixYlgVN03a9Xu8jgCNCyIegIAgx13Vfd7vdu+FweG8YRkjXdWy329+dTgeSJD3ieZ7RNO0VAXAPwDEAO5VKndi2fWrb9jWl9Esul6PZbDY9Go1OZ7PZ9z/lyuD3OozU2wAAAABJRU5ErkJggg==" alt="Mascot Sammy"></a>
+</div></footer>
+</div>
+</body>
+</html>
