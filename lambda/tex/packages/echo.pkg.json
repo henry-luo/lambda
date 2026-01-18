@@ -1,0 +1,33 @@
+{
+  "name": "echo",
+  "version": "1.0",
+  "description": "Test package for macro argument handling (LaTeX.js compatibility)",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "gobbleO": {
+      "type": "primitive",
+      "params": "[]",
+      "description": "Gobble optional argument",
+      "pattern": ""
+    },
+    "echoO": {
+      "type": "constructor",
+      "params": "[]",
+      "description": "Echo optional argument with dashes",
+      "pattern": "-#1-"
+    },
+    "echoOGO": {
+      "type": "constructor",
+      "params": "[]{}[]",
+      "description": "Echo with optional, mandatory, optional args",
+      "pattern": "+#2+"
+    },
+    "echoGOG": {
+      "type": "constructor",
+      "params": "{}[]{}",
+      "description": "Echo mandatory, optional, mandatory args",
+      "pattern": "+#1++#3+"
+    }
+  }
+}

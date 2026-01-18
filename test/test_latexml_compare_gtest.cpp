@@ -1000,7 +1000,6 @@ int main(int argc, char** argv) {
     
     // Initialize test file lists
     LaTeXMLCompareTest::test_files = LaTeXMLCompareTest::get_test_files();
-    LatexJsFixturesTest::latexjs_test_files = LatexJsFixturesTest::get_latexjs_test_files();
     HybridFixturesTest::hybrid_test_files = HybridFixturesTest::get_hybrid_test_files();
     
     std::cout << "LaTeXML Comparison Tests" << std::endl;
@@ -1008,12 +1007,6 @@ int main(int argc, char** argv) {
     std::cout << "Fixtures: " << LaTeXMLCompareTest::fixtures_dir << std::endl;
     std::cout << "Expected: " << LaTeXMLCompareTest::expected_dir << std::endl;
     std::cout << "Test files: " << LaTeXMLCompareTest::test_files.size() << std::endl;
-    std::cout << std::endl;
-    std::cout << "LaTeX.js Fixtures" << std::endl;
-    std::cout << "-----------------" << std::endl;
-    std::cout << "Fixtures: " << LatexJsFixturesTest::latexjs_fixtures_dir << std::endl;
-    std::cout << "Expected: " << LatexJsFixturesTest::latexjs_expected_dir << std::endl;
-    std::cout << "Test files: " << LatexJsFixturesTest::latexjs_test_files.size() << std::endl;
     std::cout << std::endl;
     std::cout << "Hybrid Mode Fixtures" << std::endl;
     std::cout << "--------------------" << std::endl;
