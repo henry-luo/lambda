@@ -1,0 +1,160 @@
+{
+  "name": "xcolor",
+  "version": "2.14",
+  "description": "Driver-independent color extensions for LaTeX",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "color": {
+      "type": "constructor",
+      "params": "[]{}", 
+      "description": "Switch to specified color",
+      "pattern": "<color-switch model=\"#1\" color=\"#2\"/>"
+    },
+    "textcolor": {
+      "type": "constructor",
+      "params": "[]{}{}", 
+      "description": "Typeset text in specified color",
+      "pattern": "<span style=\"color:#2\">#3</span>"
+    },
+    "colorbox": {
+      "type": "constructor",
+      "params": "[]{}{}", 
+      "description": "Box with colored background",
+      "pattern": "<span style=\"background-color:#2\">#3</span>"
+    },
+    "fcolorbox": {
+      "type": "constructor",
+      "params": "[]{}{}{}", 
+      "description": "Box with colored frame and background",
+      "pattern": "<span style=\"border-color:#2;background-color:#3\">#4</span>"
+    },
+    "pagecolor": {
+      "type": "primitive",
+      "params": "[]{}", 
+      "description": "Set page background color",
+      "pattern": ""
+    },
+    "nopagecolor": {
+      "type": "primitive",
+      "params": "", 
+      "description": "Remove page background color",
+      "pattern": ""
+    },
+    "definecolor": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define a new color",
+      "pattern": ""
+    },
+    "providecolor": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Define color if not already defined",
+      "pattern": ""
+    },
+    "colorlet": {
+      "type": "primitive",
+      "params": "[]{}[]{}",
+      "description": "Define color as copy of another",
+      "pattern": ""
+    },
+    "DefineNamedColor": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define named color in a color set",
+      "pattern": ""
+    },
+    "rowcolors": {
+      "type": "primitive",
+      "params": "[]{}{}{}",
+      "description": "Alternate row colors in tables",
+      "pattern": ""
+    },
+    "extractcolorspec": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Extract color specification",
+      "pattern": ""
+    },
+    "extractcolorspecs": {
+      "type": "primitive",
+      "params": "{}{}{}",
+      "description": "Extract color specifications",
+      "pattern": ""
+    },
+    "convertcolorspec": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Convert between color models",
+      "pattern": ""
+    }
+  },
+  
+  "color_models": {
+    "rgb": { "params": 3, "description": "Red, Green, Blue (0-1 each)" },
+    "RGB": { "params": 3, "description": "Red, Green, Blue (0-255 each)" },
+    "HTML": { "params": 1, "description": "HTML hex code (e.g., FF0000)" },
+    "cmyk": { "params": 4, "description": "Cyan, Magenta, Yellow, Black (0-1 each)" },
+    "cmy": { "params": 3, "description": "Cyan, Magenta, Yellow (0-1 each)" },
+    "hsb": { "params": 3, "description": "Hue, Saturation, Brightness (0-1 each)" },
+    "Hsb": { "params": 3, "description": "Hue (0-360), Saturation, Brightness (0-1)" },
+    "HSB": { "params": 3, "description": "Hue, Saturation, Brightness (0-240 each)" },
+    "gray": { "params": 1, "description": "Gray scale (0-1)" },
+    "Gray": { "params": 1, "description": "Gray scale (0-15)" },
+    "wave": { "params": 1, "description": "Wavelength in nm (363-814)" }
+  },
+  
+  "predefined_colors": {
+    "base": ["red", "green", "blue", "cyan", "magenta", "yellow", "black", "white"],
+    "dvipsnames": [
+      "Apricot", "Aquamarine", "Bittersweet", "Black", "Blue", "BlueGreen",
+      "BlueViolet", "BrickRed", "Brown", "BurntOrange", "CadetBlue", "CarnationPink",
+      "Cerulean", "CornflowerBlue", "Cyan", "Dandelion", "DarkOrchid", "Emerald",
+      "ForestGreen", "Fuchsia", "Goldenrod", "Gray", "Green", "GreenYellow",
+      "JungleGreen", "Lavender", "LimeGreen", "Magenta", "Mahogany", "Maroon",
+      "Melon", "MidnightBlue", "Mulberry", "NavyBlue", "OliveGreen", "Orange",
+      "OrangeRed", "Orchid", "Peach", "Periwinkle", "PineGreen", "Plum",
+      "ProcessBlue", "Purple", "RawSienna", "Red", "RedOrange", "RedViolet",
+      "Rhodamine", "RoyalBlue", "RoyalPurple", "RubineRed", "Salmon", "SeaGreen",
+      "Sepia", "SkyBlue", "SpringGreen", "Tan", "TealBlue", "Thistle",
+      "Turquoise", "Violet", "VioletRed", "White", "WildStrawberry", "Yellow",
+      "YellowGreen", "YellowOrange"
+    ],
+    "svgnames": [
+      "AliceBlue", "AntiqueWhite", "Aqua", "Aquamarine", "Azure", "Beige",
+      "Bisque", "Black", "BlanchedAlmond", "Blue", "BlueViolet", "Brown",
+      "BurlyWood", "CadetBlue", "Chartreuse", "Chocolate", "Coral", "CornflowerBlue",
+      "Cornsilk", "Crimson", "Cyan", "DarkBlue", "DarkCyan", "DarkGoldenrod",
+      "DarkGray", "DarkGreen", "DarkKhaki", "DarkMagenta", "DarkOliveGreen",
+      "DarkOrange", "DarkOrchid", "DarkRed", "DarkSalmon", "DarkSeaGreen",
+      "DarkSlateBlue", "DarkSlateGray", "DarkTurquoise", "DarkViolet", "DeepPink",
+      "DeepSkyBlue", "DimGray", "DodgerBlue", "FireBrick", "FloralWhite",
+      "ForestGreen", "Fuchsia", "Gainsboro", "GhostWhite", "Gold", "Goldenrod",
+      "Gray", "Green", "GreenYellow", "Honeydew", "HotPink", "IndianRed",
+      "Indigo", "Ivory", "Khaki", "Lavender", "LavenderBlush", "LawnGreen",
+      "LemonChiffon", "LightBlue", "LightCoral", "LightCyan", "LightGoldenrodYellow",
+      "LightGray", "LightGreen", "LightPink", "LightSalmon", "LightSeaGreen",
+      "LightSkyBlue", "LightSlateGray", "LightSteelBlue", "LightYellow", "Lime",
+      "LimeGreen", "Linen", "Magenta", "Maroon", "MediumAquamarine", "MediumBlue",
+      "MediumOrchid", "MediumPurple", "MediumSeaGreen", "MediumSlateBlue",
+      "MediumSpringGreen", "MediumTurquoise", "MediumVioletRed", "MidnightBlue",
+      "MintCream", "MistyRose", "Moccasin", "NavajoWhite", "Navy", "OldLace",
+      "Olive", "OliveDrab", "Orange", "OrangeRed", "Orchid", "PaleGoldenrod",
+      "PaleGreen", "PaleTurquoise", "PaleVioletRed", "PapayaWhip", "PeachPuff",
+      "Peru", "Pink", "Plum", "PowderBlue", "Purple", "Red", "RosyBrown",
+      "RoyalBlue", "SaddleBrown", "Salmon", "SandyBrown", "SeaGreen", "Seashell",
+      "Sienna", "Silver", "SkyBlue", "SlateBlue", "SlateGray", "Snow",
+      "SpringGreen", "SteelBlue", "Tan", "Teal", "Thistle", "Tomato",
+      "Turquoise", "Violet", "Wheat", "White", "WhiteSmoke", "Yellow", "YellowGreen"
+    ],
+    "x11names": "Extended X11 color names (over 300 colors)"
+  },
+  
+  "color_expressions": {
+    "mixing": "color1!percentage!color2",
+    "complement": "-color",
+    "tint": "color!percentage",
+    "shades": "color!!percentage"
+  }
+}

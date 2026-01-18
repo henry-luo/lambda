@@ -1,0 +1,42 @@
+{
+  "name": "inputenc",
+  "version": "1.3d",
+  "description": "Accept different input encodings",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "modern_latex": "Not needed with LuaLaTeX/XeLaTeX (use fontspec instead)",
+    "purpose": "Allow non-ASCII characters in pdfLaTeX source files"
+  },
+  
+  "commands": {
+    "inputencoding": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Switch input encoding mid-document",
+      "pattern": ""
+    },
+    "DeclareInputText": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define character mapping",
+      "pattern": ""
+    },
+    "DeclareInputMath": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define math character mapping",
+      "pattern": ""
+    }
+  },
+  
+  "options": {
+    "utf8": "UTF-8 encoding (default in LaTeX 2018+)",
+    "latin1": "ISO Latin-1 (Western European)",
+    "latin2": "ISO Latin-2 (Central European)",
+    "latin9": "ISO Latin-9 (Latin-1 + Euro)",
+    "cp1252": "Windows Western European",
+    "applemac": "Macintosh Roman",
+    "ascii": "ASCII only"
+  }
+}

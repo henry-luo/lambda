@@ -1,0 +1,91 @@
+{
+  "name": "geometry",
+  "version": "5.0",
+  "description": "Flexible and complete interface to document dimensions",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "geometry": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set page geometry options",
+      "pattern": ""
+    },
+    "newgeometry": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Change geometry mid-document",
+      "pattern": ""
+    },
+    "restoregeometry": {
+      "type": "primitive",
+      "params": "",
+      "description": "Restore original geometry",
+      "pattern": ""
+    },
+    "savegeometry": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Save current geometry with a name",
+      "pattern": ""
+    },
+    "loadgeometry": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Load a saved geometry",
+      "pattern": ""
+    }
+  },
+  
+  "dimensions": {
+    "paperwidth": { "default": "8.5in", "description": "Paper width" },
+    "paperheight": { "default": "11in", "description": "Paper height" },
+    "textwidth": { "default": "345pt", "description": "Text area width" },
+    "textheight": { "default": "550pt", "description": "Text area height" },
+    "oddsidemargin": { "default": "0pt", "description": "Left margin on odd pages" },
+    "evensidemargin": { "default": "0pt", "description": "Left margin on even pages" },
+    "topmargin": { "default": "0pt", "description": "Top margin" },
+    "headheight": { "default": "12pt", "description": "Header height" },
+    "headsep": { "default": "25pt", "description": "Space between header and text" },
+    "footskip": { "default": "30pt", "description": "Space from baseline of text to baseline of footer" },
+    "marginparwidth": { "default": "65pt", "description": "Margin note width" },
+    "marginparsep": { "default": "11pt", "description": "Space between text and margin notes" }
+  },
+  
+  "options": {
+    "paper": ["a0paper", "a1paper", "a2paper", "a3paper", "a4paper", "a5paper", "a6paper",
+              "b0paper", "b1paper", "b2paper", "b3paper", "b4paper", "b5paper", "b6paper",
+              "letterpaper", "legalpaper", "executivepaper"],
+    "orientation": ["portrait", "landscape"],
+    "driver": ["pdftex", "xetex", "luatex", "dvips", "dvipdfm", "dvipdfmx"],
+    "layout": ["twoside", "oneside", "asymmetric"],
+    "margins": {
+      "left": "dimension",
+      "right": "dimension",
+      "top": "dimension",
+      "bottom": "dimension",
+      "inner": "dimension",
+      "outer": "dimension",
+      "hmargin": "dimension or {left,right}",
+      "vmargin": "dimension or {top,bottom}",
+      "margin": "dimension or {h,v}",
+      "bindingoffset": "dimension"
+    },
+    "body": {
+      "width": "dimension",
+      "height": "dimension",
+      "total": "{width,height}",
+      "body": "{width,height}",
+      "text": "{width,height}"
+    },
+    "ratio": {
+      "hmarginratio": "ratio",
+      "vmarginratio": "ratio",
+      "marginratio": "ratio or {h,v}"
+    },
+    "other": ["centering", "includehead", "includefoot", "includeheadfoot", 
+              "includemp", "includeall", "ignorehead", "ignorefoot", 
+              "ignoreheadfoot", "ignoremp", "ignoreall",
+              "heightrounded", "pass", "showframe", "showcrop", "verbose", "reset"]
+  }
+}

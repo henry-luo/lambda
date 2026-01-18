@@ -1,0 +1,80 @@
+{
+  "name": "setspace",
+  "version": "6.7a",
+  "description": "Set space between lines",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "singlespacing": {
+      "type": "primitive",
+      "params": "",
+      "description": "Switch to single spacing",
+      "pattern": ""
+    },
+    "onehalfspacing": {
+      "type": "primitive",
+      "params": "",
+      "description": "Switch to 1.5 line spacing",
+      "pattern": ""
+    },
+    "doublespacing": {
+      "type": "primitive",
+      "params": "",
+      "description": "Switch to double spacing",
+      "pattern": ""
+    },
+    "setstretch": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set custom stretch factor",
+      "pattern": ""
+    },
+    "SetSinglespace": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Define single-space factor",
+      "pattern": ""
+    }
+  },
+  
+  "environments": {
+    "singlespace": {
+      "description": "Single-spaced region",
+      "begin": "<spacing factor=\"1\">",
+      "end": "</spacing>"
+    },
+    "singlespace*": {
+      "description": "Single-spaced, ignoring rubber space",
+      "begin": "<spacing factor=\"1\" exact=\"true\">",
+      "end": "</spacing>"
+    },
+    "onehalfspace": {
+      "description": "1.5-spaced region",
+      "begin": "<spacing factor=\"1.5\">",
+      "end": "</spacing>"
+    },
+    "doublespace": {
+      "description": "Double-spaced region",
+      "begin": "<spacing factor=\"2\">",
+      "end": "</spacing>"
+    },
+    "spacing": {
+      "description": "Custom spaced region",
+      "begin": "<spacing factor=\"#1\">",
+      "end": "</spacing>",
+      "params": "{}"
+    }
+  },
+  
+  "options": {
+    "singlespacing": "document single-spaced (default)",
+    "onehalfspacing": "document 1.5-spaced",
+    "doublespacing": "document double-spaced",
+    "nodisplayskipstretch": "don't stretch display math spacing"
+  },
+  
+  "notes": {
+    "behavior": "Affects footnotes and floats proportionally",
+    "caution": "Large spacing can affect page breaking"
+  }
+}

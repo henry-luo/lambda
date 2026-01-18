@@ -633,6 +633,66 @@ TEST_F(DigesterTest, IntegrationMathMode) {
 }
 
 // ============================================================================
+// JSON Package Loader Tests (basic structure tests only)
+// ============================================================================
+
+#include "../lambda/tex/tex_package_json.hpp"
+
+class JsonPackageTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    Arena* arena;
+    CommandRegistry* registry;
+    JsonPackageLoader* json_loader;
+    
+    void SetUp() override {
+        pool = pool_create();
+        arena = arena_create_default(pool);
+        registry = new CommandRegistry(arena);
+        json_loader = new JsonPackageLoader(registry, arena);
+    }
+    
+    void TearDown() override {
+        delete json_loader;
+        delete registry;
+        arena_destroy(arena);
+        pool_destroy(pool);
+    }
+};
+
+// Test JsonPackageLoader basic initialization
+TEST_F(JsonPackageTest, BasicInit) {
+    // Just verify the loader was created successfully
+    EXPECT_NE(json_loader, nullptr);
+    EXPECT_NE(registry, nullptr);
+    
+    // Initially no packages are loaded
+    EXPECT_FALSE(json_loader->is_loaded("nonexistent"));
+}
+
+// Test search path addition
+TEST_F(JsonPackageTest, AddSearchPath) {
+    // Add a custom search path
+    json_loader->add_search_path("/custom/path");
+    
+    // This just verifies it doesn't crash
+    EXPECT_FALSE(json_loader->is_loaded("nonexistent"));
+}
+
+// Test get_loaded_packages when empty
+TEST_F(JsonPackageTest, GetLoadedPackagesEmpty) {
+    size_t count = 0;
+    const char** packages = json_loader->get_loaded_packages(&count);
+    
+    // Initially no packages loaded
+    EXPECT_EQ(count, 0u);
+    (void)packages;  // may be nullptr
+}
+
+// Note: Full JSON parsing tests require rpmalloc initialization
+// which is handled separately. These tests verify the API structure.
+
+// ============================================================================
 // Main
 // ============================================================================
 

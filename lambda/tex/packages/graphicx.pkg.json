@@ -1,0 +1,135 @@
+{
+  "name": "graphicx",
+  "version": "1.0",
+  "description": "Graphics package for including images",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "includegraphics": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Include an image",
+      "pattern": "<image src=\"#2\" options=\"#1\"/>",
+      "callback": "graphicx_includegraphics"
+    },
+    "graphicspath": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set image search paths",
+      "callback": "graphicx_set_path"
+    },
+    "DeclareGraphicsExtensions": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set file extensions to try",
+      "callback": "graphicx_declare_extensions"
+    },
+    "DeclareGraphicsRule": {
+      "type": "primitive",
+      "params": "{}{}{}{}",
+      "description": "Define graphics handling rule",
+      "callback": "graphicx_declare_rule"
+    },
+    
+    "rotatebox": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Rotate content",
+      "pattern": "<rotate angle=\"#2\" options=\"#1\">#3</rotate>"
+    },
+    "scalebox": {
+      "type": "constructor",
+      "params": "{}[]{}",
+      "description": "Scale content",
+      "pattern": "<scale x=\"#1\" y=\"#2\">#3</scale>"
+    },
+    "reflectbox": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Horizontally reflect content",
+      "pattern": "<scale x=\"-1\">#1</scale>"
+    },
+    "resizebox": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "Resize content to specific dimensions",
+      "pattern": "<resize width=\"#1\" height=\"#2\">#3</resize>"
+    },
+    "resizebox*": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "Resize content (total height)",
+      "pattern": "<resize width=\"#1\" totalheight=\"#2\">#3</resize>"
+    },
+    
+    "setkeys": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Set key-value options",
+      "callback": "graphicx_setkeys"
+    }
+  },
+  
+  "graphics_options": {
+    "width": {
+      "description": "Width to scale to",
+      "type": "dimension"
+    },
+    "height": {
+      "description": "Height to scale to",
+      "type": "dimension"
+    },
+    "totalheight": {
+      "description": "Total height (including depth)",
+      "type": "dimension"
+    },
+    "keepaspectratio": {
+      "description": "Maintain aspect ratio",
+      "type": "boolean"
+    },
+    "scale": {
+      "description": "Scale factor",
+      "type": "number"
+    },
+    "angle": {
+      "description": "Rotation angle",
+      "type": "number"
+    },
+    "origin": {
+      "description": "Origin point for transformations",
+      "type": "string"
+    },
+    "clip": {
+      "description": "Clip to bounding box",
+      "type": "boolean"
+    },
+    "draft": {
+      "description": "Draft mode (no loading)",
+      "type": "boolean"
+    },
+    "bb": {
+      "description": "Bounding box",
+      "type": "string"
+    },
+    "viewport": {
+      "description": "Viewport region",
+      "type": "string"
+    },
+    "trim": {
+      "description": "Trim margins",
+      "type": "string"
+    },
+    "page": {
+      "description": "PDF page number",
+      "type": "integer"
+    },
+    "interpolate": {
+      "description": "Enable interpolation",
+      "type": "boolean"
+    },
+    "quiet": {
+      "description": "Suppress warnings",
+      "type": "boolean"
+    }
+  }
+}

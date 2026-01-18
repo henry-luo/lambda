@@ -1,0 +1,174 @@
+{
+  "name": "natbib",
+  "version": "8.31b",
+  "description": "Flexible bibliography support (author-year and numerical)",
+  "requires": ["latex_base"],
+  
+  "notes": {
+    "purpose": "Enhanced citation commands supporting multiple styles",
+    "bibtex_styles": "Works with standard and custom .bst files",
+    "compatible": "Works with bibtex, can be replaced by biblatex"
+  },
+  
+  "commands": {
+    "citet": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Textual citation: Jones et al. (1990)",
+      "pattern": "<cite type=\"text\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "citep": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Parenthetical citation: (Jones et al., 1990)",
+      "pattern": "<cite type=\"paren\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "citealt": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Like citet without parentheses: Jones et al. 1990",
+      "pattern": "<cite type=\"alt\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "citealp": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Like citep without parentheses: Jones et al., 1990",
+      "pattern": "<cite type=\"alp\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "citeauthor": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Author only: Jones et al.",
+      "pattern": "<cite type=\"author\" starred=\"#1\">#2</cite>"
+    },
+    "citeyear": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Year only: 1990",
+      "pattern": "<cite type=\"year\">#1</cite>"
+    },
+    "citeyearpar": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Year in parentheses: (1990)",
+      "pattern": "<cite type=\"yearpar\">#1</cite>"
+    },
+    "citenum": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Number only (numerical mode): 5",
+      "pattern": "<cite type=\"num\">#1</cite>"
+    },
+    "Citet": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Capitalized textual",
+      "pattern": "<cite type=\"text\" cap=\"true\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "Citep": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Capitalized parenthetical",
+      "pattern": "<cite type=\"paren\" cap=\"true\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "Citealt": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Capitalized alt textual",
+      "pattern": "<cite type=\"alt\" cap=\"true\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "Citealp": {
+      "type": "constructor",
+      "params": "*[][]{}",
+      "description": "Capitalized alt parenthetical",
+      "pattern": "<cite type=\"alp\" cap=\"true\" starred=\"#1\" pre=\"#2\" post=\"#3\">#4</cite>"
+    },
+    "Citeauthor": {
+      "type": "constructor",
+      "params": "*{}",
+      "description": "Capitalized author",
+      "pattern": "<cite type=\"author\" cap=\"true\" starred=\"#1\">#2</cite>"
+    },
+    "defcitealias": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Define citation alias",
+      "pattern": ""
+    },
+    "citetalias": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Textual alias citation",
+      "pattern": "<cite type=\"talias\">#1</cite>"
+    },
+    "citepalias": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Parenthetical alias citation",
+      "pattern": "<cite type=\"palias\">#1</cite>"
+    },
+    "bibliography": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Include bibliography",
+      "pattern": "<bibliography>#1</bibliography>"
+    },
+    "bibliographystyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set bibliography style",
+      "pattern": ""
+    },
+    "bibpunct": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}{}",
+      "description": "Set citation punctuation",
+      "pattern": ""
+    },
+    "setcitestyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set citation style options",
+      "pattern": ""
+    }
+  },
+  
+  "options": {
+    "citation_mode": {
+      "authoryear": "author-year citations (default)",
+      "numbers": "numerical citations",
+      "super": "superscript numerical"
+    },
+    "brackets": {
+      "round": "parentheses (default)",
+      "square": "square brackets",
+      "curly": "curly braces",
+      "angle": "angle brackets"
+    },
+    "separator": {
+      "colon": "colon separator",
+      "comma": "comma separator (default)"
+    },
+    "author_handling": {
+      "longnamesfirst": "full name first citation",
+      "sectionbib": "bibliography per chapter",
+      "sort": "sort multiple citations",
+      "sort&compress": "sort and compress ranges"
+    },
+    "compatibility": {
+      "merge": "merge adjacent citations",
+      "elide": "elide repeated info",
+      "mcite": "mcite compatibility"
+    }
+  },
+  
+  "bibliography_styles": {
+    "plainnat": "plain with natbib support",
+    "abbrvnat": "abbreviated with natbib",
+    "unsrtnat": "unsorted with natbib",
+    "apalike": "APA-like style",
+    "chicago": "Chicago style",
+    "named": "author-year named",
+    "description": "Use \\bibliographystyle{style} to select"
+  }
+}

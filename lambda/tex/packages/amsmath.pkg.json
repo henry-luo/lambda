@@ -1,0 +1,765 @@
+{
+  "name": "amsmath",
+  "version": "1.0",
+  "description": "AMS math package",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "frac": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Fraction",
+      "pattern": "<frac><numer>#1</numer><denom>#2</denom></frac>",
+      "mode": "math"
+    },
+    "dfrac": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Display-style fraction",
+      "pattern": "<frac style=\"display\"><numer>#1</numer><denom>#2</denom></frac>",
+      "mode": "math"
+    },
+    "tfrac": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Text-style fraction",
+      "pattern": "<frac style=\"text\"><numer>#1</numer><denom>#2</denom></frac>",
+      "mode": "math"
+    },
+    "cfrac": {
+      "type": "constructor",
+      "params": "[]{}{}",
+      "description": "Continued fraction",
+      "pattern": "<cfrac align=\"#1\"><numer>#2</numer><denom>#3</denom></cfrac>",
+      "mode": "math"
+    },
+    
+    "binom": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Binomial coefficient",
+      "pattern": "<binom><top>#1</top><bottom>#2</bottom></binom>",
+      "mode": "math"
+    },
+    "dbinom": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Display-style binomial",
+      "pattern": "<binom style=\"display\"><top>#1</top><bottom>#2</bottom></binom>",
+      "mode": "math"
+    },
+    "tbinom": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Text-style binomial",
+      "pattern": "<binom style=\"text\"><top>#1</top><bottom>#2</bottom></binom>",
+      "mode": "math"
+    },
+    
+    "genfrac": {
+      "type": "constructor",
+      "params": "{}{}{}{}{}{}",
+      "description": "Generalized fraction",
+      "pattern": "<genfrac left=\"#1\" right=\"#2\" thickness=\"#3\" style=\"#4\"><numer>#5</numer><denom>#6</denom></genfrac>",
+      "mode": "math"
+    },
+    
+    "sqrt": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Square/nth root",
+      "pattern": "?#1(<root index=\"#1\">#2</root>)(<sqrt>#2</sqrt>)",
+      "mode": "math"
+    },
+    
+    "text": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Text in math",
+      "pattern": "<text>#1</text>",
+      "mode": "math"
+    },
+    "intertext": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Text between align rows",
+      "pattern": "<intertext>#1</intertext>",
+      "mode": "math"
+    },
+    "shortintertext": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Short intertext",
+      "pattern": "<intertext short=\"true\">#1</intertext>",
+      "mode": "math"
+    },
+    
+    "operatorname": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Named operator",
+      "pattern": "<operator>#1</operator>",
+      "mode": "math"
+    },
+    "operatorname*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Named operator with limits",
+      "pattern": "<operator limits=\"true\">#1</operator>",
+      "mode": "math"
+    },
+    "DeclareMathOperator": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Declare math operator",
+      "callback": "ams_declare_operator"
+    },
+    "DeclareMathOperator*": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Declare math operator with limits",
+      "callback": "ams_declare_operator_limits"
+    },
+    
+    "boldsymbol": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Bold symbol",
+      "pattern": "<mi mathvariant=\"bold\">#1</mi>",
+      "mode": "math"
+    },
+    "pmb": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Poor man's bold",
+      "pattern": "<mi mathvariant=\"bold\">#1</mi>",
+      "mode": "math"
+    },
+    
+    "overset": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Symbol with accent above",
+      "pattern": "<overset><over>#1</over><base>#2</base></overset>",
+      "mode": "math"
+    },
+    "underset": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Symbol with accent below",
+      "pattern": "<underset><under>#1</under><base>#2</base></underset>",
+      "mode": "math"
+    },
+    "stackrel": {
+      "type": "constructor",
+      "params": "{}{}",
+      "description": "Symbol with accent (deprecated)",
+      "pattern": "<overset><over>#1</over><base>#2</base></overset>",
+      "mode": "math"
+    },
+    
+    "sideset": {
+      "type": "constructor",
+      "params": "{}{}{}",
+      "description": "Side scripts on large operator",
+      "pattern": "<sideset left=\"#1\" right=\"#2\">#3</sideset>",
+      "mode": "math"
+    },
+    
+    "substack": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Stacked subscripts/superscripts",
+      "pattern": "<substack>#1</substack>",
+      "mode": "math"
+    },
+    
+    "xleftarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Left arrow with text",
+      "pattern": "<xleftarrow below=\"#1\" above=\"#2\"/>",
+      "mode": "math"
+    },
+    "xrightarrow": {
+      "type": "constructor",
+      "params": "[]{}",
+      "description": "Right arrow with text",
+      "pattern": "<xrightarrow below=\"#1\" above=\"#2\"/>",
+      "mode": "math"
+    },
+    
+    "boxed": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Boxed equation",
+      "pattern": "<boxed>#1</boxed>",
+      "mode": "math"
+    },
+    
+    "tag": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Custom equation tag",
+      "pattern": "<tag>#1</tag>",
+      "mode": "math"
+    },
+    "tag*": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Custom equation tag (no parens)",
+      "pattern": "<tag parens=\"false\">#1</tag>",
+      "mode": "math"
+    },
+    "notag": {
+      "type": "constructor",
+      "description": "Suppress equation number",
+      "pattern": "<notag/>",
+      "mode": "math"
+    },
+    "nonumber": {
+      "type": "constructor",
+      "description": "Suppress equation number (alias)",
+      "pattern": "<notag/>",
+      "mode": "math"
+    },
+    
+    "numberwithin": {
+      "type": "primitive",
+      "params": "{}{}",
+      "description": "Reset counter within",
+      "callback": "ams_numberwithin"
+    },
+    
+    "mod": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Modulo",
+      "pattern": "<operator>mod</operator><mo>(</mo>#1<mo>)</mo>",
+      "mode": "math"
+    },
+    "bmod": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Binary modulo",
+      "pattern": "<operator>mod</operator>#1",
+      "mode": "math"
+    },
+    "pmod": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Parenthesized modulo",
+      "pattern": "<mo>(</mo><operator>mod</operator>#1<mo>)</mo>",
+      "mode": "math"
+    },
+    "pod": {
+      "type": "constructor",
+      "params": "{}",
+      "description": "Parenthesized",
+      "pattern": "<mo>(</mo>#1<mo>)</mo>",
+      "mode": "math"
+    },
+    
+    "iint": {
+      "type": "math",
+      "meaning": "∬",
+      "description": "Double integral",
+      "role": "INTOP"
+    },
+    "iiint": {
+      "type": "math",
+      "meaning": "∭",
+      "description": "Triple integral",
+      "role": "INTOP"
+    },
+    "iiiint": {
+      "type": "math",
+      "meaning": "⨌",
+      "description": "Quadruple integral",
+      "role": "INTOP"
+    },
+    "idotsint": {
+      "type": "math",
+      "meaning": "∫⋯∫",
+      "description": "Multiple integral with dots",
+      "role": "INTOP"
+    },
+    "oint": {
+      "type": "math",
+      "meaning": "∮",
+      "description": "Contour integral",
+      "role": "INTOP"
+    },
+    "oiint": {
+      "type": "math",
+      "meaning": "∯",
+      "description": "Surface integral",
+      "role": "INTOP"
+    },
+    "oiiint": {
+      "type": "math",
+      "meaning": "∰",
+      "description": "Volume integral",
+      "role": "INTOP"
+    }
+  },
+  
+  "environments": {
+    "align": {
+      "begin": "<math-align numbered=\"true\">",
+      "end": "</math-align>",
+      "mode": "math",
+      "counter": "equation"
+    },
+    "align*": {
+      "begin": "<math-align>",
+      "end": "</math-align>",
+      "mode": "math"
+    },
+    "alignat": {
+      "params": "{}",
+      "begin": "<math-alignat cols=\"#1\" numbered=\"true\">",
+      "end": "</math-alignat>",
+      "mode": "math",
+      "counter": "equation"
+    },
+    "alignat*": {
+      "params": "{}",
+      "begin": "<math-alignat cols=\"#1\">",
+      "end": "</math-alignat>",
+      "mode": "math"
+    },
+    "aligned": {
+      "params": "[]",
+      "begin": "<math-aligned>",
+      "end": "</math-aligned>",
+      "mode": "math"
+    },
+    "alignedat": {
+      "params": "{}",
+      "begin": "<math-alignedat cols=\"#1\">",
+      "end": "</math-alignedat>",
+      "mode": "math"
+    },
+    
+    "gather": {
+      "begin": "<math-gather numbered=\"true\">",
+      "end": "</math-gather>",
+      "mode": "math",
+      "counter": "equation"
+    },
+    "gather*": {
+      "begin": "<math-gather>",
+      "end": "</math-gather>",
+      "mode": "math"
+    },
+    "gathered": {
+      "params": "[]",
+      "begin": "<math-gathered>",
+      "end": "</math-gathered>",
+      "mode": "math"
+    },
+    
+    "multline": {
+      "begin": "<math-multline numbered=\"true\">",
+      "end": "</math-multline>",
+      "mode": "math",
+      "counter": "equation"
+    },
+    "multline*": {
+      "begin": "<math-multline>",
+      "end": "</math-multline>",
+      "mode": "math"
+    },
+    
+    "flalign": {
+      "begin": "<math-flalign numbered=\"true\">",
+      "end": "</math-flalign>",
+      "mode": "math",
+      "counter": "equation"
+    },
+    "flalign*": {
+      "begin": "<math-flalign>",
+      "end": "</math-flalign>",
+      "mode": "math"
+    },
+    
+    "split": {
+      "begin": "<math-split>",
+      "end": "</math-split>",
+      "mode": "math"
+    },
+    
+    "cases": {
+      "begin": "<math-cases>",
+      "end": "</math-cases>",
+      "mode": "math"
+    },
+    "dcases": {
+      "begin": "<math-cases style=\"display\">",
+      "end": "</math-cases>",
+      "mode": "math"
+    },
+    "rcases": {
+      "begin": "<math-cases side=\"right\">",
+      "end": "</math-cases>",
+      "mode": "math"
+    },
+    "drcases": {
+      "begin": "<math-cases style=\"display\" side=\"right\">",
+      "end": "</math-cases>",
+      "mode": "math"
+    },
+    
+    "matrix": {
+      "begin": "<matrix>",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    "pmatrix": {
+      "begin": "<matrix delimiters=\"()\">",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    "bmatrix": {
+      "begin": "<matrix delimiters=\"[]\">",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    "Bmatrix": {
+      "begin": "<matrix delimiters=\"{}\">",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    "vmatrix": {
+      "begin": "<matrix delimiters=\"||\">",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    "Vmatrix": {
+      "begin": "<matrix delimiters=\"‖‖\">",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    "smallmatrix": {
+      "begin": "<matrix style=\"small\">",
+      "end": "</matrix>",
+      "mode": "math"
+    },
+    
+    "subarray": {
+      "params": "{}",
+      "begin": "<subarray align=\"#1\">",
+      "end": "</subarray>",
+      "mode": "math"
+    }
+  },
+  
+  "math_operators": {
+    "sin": { "meaning": "sin", "role": "TRIGFUNCTION" },
+    "cos": { "meaning": "cos", "role": "TRIGFUNCTION" },
+    "tan": { "meaning": "tan", "role": "TRIGFUNCTION" },
+    "sec": { "meaning": "sec", "role": "TRIGFUNCTION" },
+    "csc": { "meaning": "csc", "role": "TRIGFUNCTION" },
+    "cot": { "meaning": "cot", "role": "TRIGFUNCTION" },
+    
+    "arcsin": { "meaning": "arcsin", "role": "TRIGFUNCTION" },
+    "arccos": { "meaning": "arccos", "role": "TRIGFUNCTION" },
+    "arctan": { "meaning": "arctan", "role": "TRIGFUNCTION" },
+    
+    "sinh": { "meaning": "sinh", "role": "TRIGFUNCTION" },
+    "cosh": { "meaning": "cosh", "role": "TRIGFUNCTION" },
+    "tanh": { "meaning": "tanh", "role": "TRIGFUNCTION" },
+    "coth": { "meaning": "coth", "role": "TRIGFUNCTION" },
+    
+    "log": { "meaning": "log", "role": "FUNCTION" },
+    "ln": { "meaning": "ln", "role": "FUNCTION" },
+    "lg": { "meaning": "lg", "role": "FUNCTION" },
+    "exp": { "meaning": "exp", "role": "FUNCTION" },
+    
+    "lim": { "meaning": "lim", "role": "LIMITOP", "limits": true },
+    "limsup": { "meaning": "lim sup", "role": "LIMITOP", "limits": true },
+    "liminf": { "meaning": "lim inf", "role": "LIMITOP", "limits": true },
+    "varlimsup": { "meaning": "lim̅", "role": "LIMITOP", "limits": true },
+    "varliminf": { "meaning": "lim̲", "role": "LIMITOP", "limits": true },
+    "injlim": { "meaning": "inj lim", "role": "LIMITOP", "limits": true },
+    "projlim": { "meaning": "proj lim", "role": "LIMITOP", "limits": true },
+    
+    "sum": { "meaning": "∑", "role": "SUMOP", "limits": true },
+    "prod": { "meaning": "∏", "role": "SUMOP", "limits": true },
+    "coprod": { "meaning": "∐", "role": "SUMOP", "limits": true },
+    "bigcup": { "meaning": "⋃", "role": "SUMOP", "limits": true },
+    "bigcap": { "meaning": "⋂", "role": "SUMOP", "limits": true },
+    "bigsqcup": { "meaning": "⨆", "role": "SUMOP", "limits": true },
+    "bigvee": { "meaning": "⋁", "role": "SUMOP", "limits": true },
+    "bigwedge": { "meaning": "⋀", "role": "SUMOP", "limits": true },
+    "bigodot": { "meaning": "⨀", "role": "SUMOP", "limits": true },
+    "bigoplus": { "meaning": "⨁", "role": "SUMOP", "limits": true },
+    "bigotimes": { "meaning": "⨂", "role": "SUMOP", "limits": true },
+    "biguplus": { "meaning": "⨄", "role": "SUMOP", "limits": true },
+    
+    "int": { "meaning": "∫", "role": "INTOP" },
+    
+    "max": { "meaning": "max", "role": "LIMITOP", "limits": true },
+    "min": { "meaning": "min", "role": "LIMITOP", "limits": true },
+    "sup": { "meaning": "sup", "role": "LIMITOP", "limits": true },
+    "inf": { "meaning": "inf", "role": "LIMITOP", "limits": true },
+    
+    "arg": { "meaning": "arg", "role": "FUNCTION" },
+    "det": { "meaning": "det", "role": "FUNCTION" },
+    "dim": { "meaning": "dim", "role": "FUNCTION" },
+    "hom": { "meaning": "hom", "role": "FUNCTION" },
+    "ker": { "meaning": "ker", "role": "FUNCTION" },
+    "deg": { "meaning": "deg", "role": "FUNCTION" },
+    "gcd": { "meaning": "gcd", "role": "FUNCTION" },
+    "Pr": { "meaning": "Pr", "role": "FUNCTION" },
+    
+    "mod": { "meaning": "mod", "role": "FUNCTION" }
+  },
+  
+  "math_symbols": {
+    "implies": { "meaning": "⟹", "role": "ARROW" },
+    "impliedby": { "meaning": "⟸", "role": "ARROW" },
+    "iff": { "meaning": "⟺", "role": "ARROW" },
+    
+    "to": { "meaning": "→", "role": "ARROW" },
+    "gets": { "meaning": "←", "role": "ARROW" },
+    "leftrightarrow": { "meaning": "↔", "role": "ARROW" },
+    "Leftrightarrow": { "meaning": "⇔", "role": "ARROW" },
+    "rightarrow": { "meaning": "→", "role": "ARROW" },
+    "Rightarrow": { "meaning": "⇒", "role": "ARROW" },
+    "leftarrow": { "meaning": "←", "role": "ARROW" },
+    "Leftarrow": { "meaning": "⇐", "role": "ARROW" },
+    "uparrow": { "meaning": "↑", "role": "ARROW" },
+    "Uparrow": { "meaning": "⇑", "role": "ARROW" },
+    "downarrow": { "meaning": "↓", "role": "ARROW" },
+    "Downarrow": { "meaning": "⇓", "role": "ARROW" },
+    "updownarrow": { "meaning": "↕", "role": "ARROW" },
+    "Updownarrow": { "meaning": "⇕", "role": "ARROW" },
+    
+    "mapsto": { "meaning": "↦", "role": "ARROW" },
+    "longmapsto": { "meaning": "⟼", "role": "ARROW" },
+    "longrightarrow": { "meaning": "⟶", "role": "ARROW" },
+    "Longrightarrow": { "meaning": "⟹", "role": "ARROW" },
+    "longleftarrow": { "meaning": "⟵", "role": "ARROW" },
+    "Longleftarrow": { "meaning": "⟸", "role": "ARROW" },
+    "longleftrightarrow": { "meaning": "⟷", "role": "ARROW" },
+    "Longleftrightarrow": { "meaning": "⟺", "role": "ARROW" },
+    
+    "hookrightarrow": { "meaning": "↪", "role": "ARROW" },
+    "hookleftarrow": { "meaning": "↩", "role": "ARROW" },
+    "nearrow": { "meaning": "↗", "role": "ARROW" },
+    "nwarrow": { "meaning": "↖", "role": "ARROW" },
+    "searrow": { "meaning": "↘", "role": "ARROW" },
+    "swarrow": { "meaning": "↙", "role": "ARROW" },
+    
+    "leq": { "meaning": "≤", "role": "RELOP" },
+    "le": { "meaning": "≤", "role": "RELOP" },
+    "geq": { "meaning": "≥", "role": "RELOP" },
+    "ge": { "meaning": "≥", "role": "RELOP" },
+    "neq": { "meaning": "≠", "role": "RELOP" },
+    "ne": { "meaning": "≠", "role": "RELOP" },
+    "ll": { "meaning": "≪", "role": "RELOP" },
+    "gg": { "meaning": "≫", "role": "RELOP" },
+    "leqslant": { "meaning": "⩽", "role": "RELOP" },
+    "geqslant": { "meaning": "⩾", "role": "RELOP" },
+    
+    "sim": { "meaning": "∼", "role": "RELOP" },
+    "simeq": { "meaning": "≃", "role": "RELOP" },
+    "cong": { "meaning": "≅", "role": "RELOP" },
+    "approx": { "meaning": "≈", "role": "RELOP" },
+    "equiv": { "meaning": "≡", "role": "RELOP" },
+    "propto": { "meaning": "∝", "role": "RELOP" },
+    "prec": { "meaning": "≺", "role": "RELOP" },
+    "succ": { "meaning": "≻", "role": "RELOP" },
+    "preceq": { "meaning": "⪯", "role": "RELOP" },
+    "succeq": { "meaning": "⪰", "role": "RELOP" },
+    
+    "subset": { "meaning": "⊂", "role": "RELOP" },
+    "supset": { "meaning": "⊃", "role": "RELOP" },
+    "subseteq": { "meaning": "⊆", "role": "RELOP" },
+    "supseteq": { "meaning": "⊇", "role": "RELOP" },
+    "subsetneq": { "meaning": "⊊", "role": "RELOP" },
+    "supsetneq": { "meaning": "⊋", "role": "RELOP" },
+    "sqsubset": { "meaning": "⊏", "role": "RELOP" },
+    "sqsupset": { "meaning": "⊐", "role": "RELOP" },
+    "sqsubseteq": { "meaning": "⊑", "role": "RELOP" },
+    "sqsupseteq": { "meaning": "⊒", "role": "RELOP" },
+    
+    "in": { "meaning": "∈", "role": "RELOP" },
+    "ni": { "meaning": "∋", "role": "RELOP" },
+    "notin": { "meaning": "∉", "role": "RELOP" },
+    
+    "mid": { "meaning": "∣", "role": "RELOP" },
+    "nmid": { "meaning": "∤", "role": "RELOP" },
+    "parallel": { "meaning": "∥", "role": "RELOP" },
+    "nparallel": { "meaning": "∦", "role": "RELOP" },
+    "perp": { "meaning": "⊥", "role": "RELOP" },
+    
+    "vdash": { "meaning": "⊢", "role": "RELOP" },
+    "dashv": { "meaning": "⊣", "role": "RELOP" },
+    "models": { "meaning": "⊧", "role": "RELOP" },
+    "vDash": { "meaning": "⊨", "role": "RELOP" },
+    "Vdash": { "meaning": "⊩", "role": "RELOP" },
+    "Vvdash": { "meaning": "⊪", "role": "RELOP" },
+    
+    "pm": { "meaning": "±", "role": "BINOP" },
+    "mp": { "meaning": "∓", "role": "BINOP" },
+    "times": { "meaning": "×", "role": "BINOP" },
+    "div": { "meaning": "÷", "role": "BINOP" },
+    "cdot": { "meaning": "⋅", "role": "BINOP" },
+    "ast": { "meaning": "∗", "role": "BINOP" },
+    "star": { "meaning": "⋆", "role": "BINOP" },
+    "circ": { "meaning": "∘", "role": "BINOP" },
+    "bullet": { "meaning": "∙", "role": "BINOP" },
+    "oplus": { "meaning": "⊕", "role": "BINOP" },
+    "ominus": { "meaning": "⊖", "role": "BINOP" },
+    "otimes": { "meaning": "⊗", "role": "BINOP" },
+    "oslash": { "meaning": "⊘", "role": "BINOP" },
+    "odot": { "meaning": "⊙", "role": "BINOP" },
+    
+    "wedge": { "meaning": "∧", "role": "BINOP" },
+    "land": { "meaning": "∧", "role": "BINOP" },
+    "vee": { "meaning": "∨", "role": "BINOP" },
+    "lor": { "meaning": "∨", "role": "BINOP" },
+    "cap": { "meaning": "∩", "role": "BINOP" },
+    "cup": { "meaning": "∪", "role": "BINOP" },
+    "sqcap": { "meaning": "⊓", "role": "BINOP" },
+    "sqcup": { "meaning": "⊔", "role": "BINOP" },
+    "setminus": { "meaning": "∖", "role": "BINOP" },
+    
+    "neg": { "meaning": "¬", "role": "UNARY" },
+    "lnot": { "meaning": "¬", "role": "UNARY" },
+    
+    "forall": { "meaning": "∀", "role": "QUANTIFIER" },
+    "exists": { "meaning": "∃", "role": "QUANTIFIER" },
+    "nexists": { "meaning": "∄", "role": "QUANTIFIER" },
+    
+    "emptyset": { "meaning": "∅", "role": "ORDINARY" },
+    "varnothing": { "meaning": "∅", "role": "ORDINARY" },
+    "infty": { "meaning": "∞", "role": "ORDINARY" },
+    "nabla": { "meaning": "∇", "role": "ORDINARY" },
+    "partial": { "meaning": "∂", "role": "ORDINARY" },
+    
+    "aleph": { "meaning": "ℵ", "role": "ORDINARY" },
+    "beth": { "meaning": "ℶ", "role": "ORDINARY" },
+    "hbar": { "meaning": "ℏ", "role": "ORDINARY" },
+    "ell": { "meaning": "ℓ", "role": "ORDINARY" },
+    "wp": { "meaning": "℘", "role": "ORDINARY" },
+    "Re": { "meaning": "ℜ", "role": "ORDINARY" },
+    "Im": { "meaning": "ℑ", "role": "ORDINARY" },
+    
+    "angle": { "meaning": "∠", "role": "ORDINARY" },
+    "measuredangle": { "meaning": "∡", "role": "ORDINARY" },
+    "sphericalangle": { "meaning": "∢", "role": "ORDINARY" },
+    "triangle": { "meaning": "△", "role": "ORDINARY" },
+    "square": { "meaning": "□", "role": "ORDINARY" },
+    "diamond": { "meaning": "◇", "role": "ORDINARY" },
+    
+    "prime": { "meaning": "′", "role": "ORDINARY" },
+    "backprime": { "meaning": "‵", "role": "ORDINARY" },
+    
+    "cdots": { "meaning": "⋯", "role": "ORDINARY" },
+    "ddots": { "meaning": "⋱", "role": "ORDINARY" },
+    "vdots": { "meaning": "⋮", "role": "ORDINARY" },
+    "ldots": { "meaning": "…", "role": "ORDINARY" },
+    "dots": { "meaning": "…", "role": "ORDINARY" },
+    "dotsb": { "meaning": "⋯", "role": "ORDINARY" },
+    "dotsc": { "meaning": "…", "role": "ORDINARY" },
+    "dotsi": { "meaning": "⋯", "role": "ORDINARY" },
+    "dotsm": { "meaning": "⋯", "role": "ORDINARY" },
+    "dotso": { "meaning": "…", "role": "ORDINARY" },
+    
+    "alpha": { "meaning": "α", "role": "GREEK" },
+    "beta": { "meaning": "β", "role": "GREEK" },
+    "gamma": { "meaning": "γ", "role": "GREEK" },
+    "delta": { "meaning": "δ", "role": "GREEK" },
+    "epsilon": { "meaning": "ϵ", "role": "GREEK" },
+    "varepsilon": { "meaning": "ε", "role": "GREEK" },
+    "zeta": { "meaning": "ζ", "role": "GREEK" },
+    "eta": { "meaning": "η", "role": "GREEK" },
+    "theta": { "meaning": "θ", "role": "GREEK" },
+    "vartheta": { "meaning": "ϑ", "role": "GREEK" },
+    "iota": { "meaning": "ι", "role": "GREEK" },
+    "kappa": { "meaning": "κ", "role": "GREEK" },
+    "lambda": { "meaning": "λ", "role": "GREEK" },
+    "mu": { "meaning": "μ", "role": "GREEK" },
+    "nu": { "meaning": "ν", "role": "GREEK" },
+    "xi": { "meaning": "ξ", "role": "GREEK" },
+    "omicron": { "meaning": "ο", "role": "GREEK" },
+    "pi": { "meaning": "π", "role": "GREEK" },
+    "varpi": { "meaning": "ϖ", "role": "GREEK" },
+    "rho": { "meaning": "ρ", "role": "GREEK" },
+    "varrho": { "meaning": "ϱ", "role": "GREEK" },
+    "sigma": { "meaning": "σ", "role": "GREEK" },
+    "varsigma": { "meaning": "ς", "role": "GREEK" },
+    "tau": { "meaning": "τ", "role": "GREEK" },
+    "upsilon": { "meaning": "υ", "role": "GREEK" },
+    "phi": { "meaning": "ϕ", "role": "GREEK" },
+    "varphi": { "meaning": "φ", "role": "GREEK" },
+    "chi": { "meaning": "χ", "role": "GREEK" },
+    "psi": { "meaning": "ψ", "role": "GREEK" },
+    "omega": { "meaning": "ω", "role": "GREEK" },
+    
+    "Gamma": { "meaning": "Γ", "role": "GREEK" },
+    "Delta": { "meaning": "Δ", "role": "GREEK" },
+    "Theta": { "meaning": "Θ", "role": "GREEK" },
+    "Lambda": { "meaning": "Λ", "role": "GREEK" },
+    "Xi": { "meaning": "Ξ", "role": "GREEK" },
+    "Pi": { "meaning": "Π", "role": "GREEK" },
+    "Sigma": { "meaning": "Σ", "role": "GREEK" },
+    "Upsilon": { "meaning": "Υ", "role": "GREEK" },
+    "Phi": { "meaning": "Φ", "role": "GREEK" },
+    "Psi": { "meaning": "Ψ", "role": "GREEK" },
+    "Omega": { "meaning": "Ω", "role": "GREEK" },
+    
+    "lvert": { "meaning": "|", "role": "OPEN" },
+    "rvert": { "meaning": "|", "role": "CLOSE" },
+    "lVert": { "meaning": "‖", "role": "OPEN" },
+    "rVert": { "meaning": "‖", "role": "CLOSE" },
+    "langle": { "meaning": "⟨", "role": "OPEN" },
+    "rangle": { "meaning": "⟩", "role": "CLOSE" },
+    "lceil": { "meaning": "⌈", "role": "OPEN" },
+    "rceil": { "meaning": "⌉", "role": "CLOSE" },
+    "lfloor": { "meaning": "⌊", "role": "OPEN" },
+    "rfloor": { "meaning": "⌋", "role": "CLOSE" },
+    "lbrace": { "meaning": "{", "role": "OPEN" },
+    "rbrace": { "meaning": "}", "role": "CLOSE" },
+    "lbrack": { "meaning": "[", "role": "OPEN" },
+    "rbrack": { "meaning": "]", "role": "CLOSE" }
+  },
+  
+  "delimiters": {
+    "left": {
+      "type": "primitive",
+      "description": "Auto-sizing left delimiter",
+      "callback": "ams_left"
+    },
+    "right": {
+      "type": "primitive",
+      "description": "Auto-sizing right delimiter",
+      "callback": "ams_right"
+    },
+    "middle": {
+      "type": "primitive",
+      "description": "Auto-sizing middle delimiter",
+      "callback": "ams_middle"
+    },
+    "big": { "size": 1.2 },
+    "Big": { "size": 1.5 },
+    "bigg": { "size": 2.0 },
+    "Bigg": { "size": 2.5 },
+    "bigl": { "size": 1.2, "type": "open" },
+    "Bigl": { "size": 1.5, "type": "open" },
+    "biggl": { "size": 2.0, "type": "open" },
+    "Biggl": { "size": 2.5, "type": "open" },
+    "bigr": { "size": 1.2, "type": "close" },
+    "Bigr": { "size": 1.5, "type": "close" },
+    "biggr": { "size": 2.0, "type": "close" },
+    "Biggr": { "size": 2.5, "type": "close" },
+    "bigm": { "size": 1.2, "type": "middle" },
+    "Bigm": { "size": 1.5, "type": "middle" },
+    "biggm": { "size": 2.0, "type": "middle" },
+    "Biggm": { "size": 2.5, "type": "middle" }
+  }
+}

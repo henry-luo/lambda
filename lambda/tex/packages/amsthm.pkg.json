@@ -1,0 +1,150 @@
+{
+  "name": "amsthm",
+  "version": "2.20.6",
+  "description": "Typesetting theorems (AMS style)",
+  "requires": ["latex_base"],
+  
+  "commands": {
+    "newtheorem": {
+      "type": "primitive",
+      "params": "*{}[]{}[]",
+      "description": "Define a theorem-like environment",
+      "pattern": ""
+    },
+    "theoremstyle": {
+      "type": "primitive",
+      "params": "{}",
+      "description": "Set style for subsequent theorem definitions",
+      "pattern": ""
+    },
+    "newtheoremstyle": {
+      "type": "primitive",
+      "params": "{}{}{}{}{}{}{}{}{}",
+      "description": "Define a custom theorem style",
+      "pattern": ""
+    },
+    "swapnumbers": {
+      "type": "primitive",
+      "params": "",
+      "description": "Put numbers before theorem name",
+      "pattern": ""
+    },
+    "qed": {
+      "type": "constructor",
+      "params": "",
+      "description": "End of proof mark",
+      "pattern": "<qed/>"
+    },
+    "qedhere": {
+      "type": "constructor",
+      "params": "",
+      "description": "Place QED symbol at current location",
+      "pattern": "<qedhere/>"
+    },
+    "qedsymbol": {
+      "type": "macro",
+      "params": "",
+      "replacement": "□",
+      "description": "QED symbol (default: open box)"
+    },
+    "proofname": {
+      "type": "macro",
+      "params": "",
+      "replacement": "Proof",
+      "description": "Name used for proof"
+    }
+  },
+  
+  "environments": {
+    "proof": {
+      "description": "Proof environment",
+      "begin": "<proof name=\"#1\">",
+      "end": "</proof>",
+      "params": "[]"
+    }
+  },
+  
+  "theorem_styles": {
+    "plain": {
+      "description": "Default - italic body, bold header",
+      "heading": "bold",
+      "body": "italic",
+      "spacing": {
+        "above": "\\topsep",
+        "below": "\\topsep"
+      }
+    },
+    "definition": {
+      "description": "Upright body, bold header",
+      "heading": "bold",
+      "body": "normal",
+      "spacing": {
+        "above": "\\topsep",
+        "below": "\\topsep"
+      }
+    },
+    "remark": {
+      "description": "Upright body, italic header",
+      "heading": "italic",
+      "body": "normal",
+      "spacing": {
+        "above": "0.5\\topsep",
+        "below": "0.5\\topsep"
+      }
+    }
+  },
+  
+  "common_environments": {
+    "theorem": {
+      "style": "plain",
+      "name": "Theorem"
+    },
+    "lemma": {
+      "style": "plain",
+      "name": "Lemma"
+    },
+    "corollary": {
+      "style": "plain",
+      "name": "Corollary"
+    },
+    "proposition": {
+      "style": "plain",
+      "name": "Proposition"
+    },
+    "conjecture": {
+      "style": "plain",
+      "name": "Conjecture"
+    },
+    "definition": {
+      "style": "definition",
+      "name": "Definition"
+    },
+    "example": {
+      "style": "definition",
+      "name": "Example"
+    },
+    "exercise": {
+      "style": "definition",
+      "name": "Exercise"
+    },
+    "remark": {
+      "style": "remark",
+      "name": "Remark"
+    },
+    "note": {
+      "style": "remark",
+      "name": "Note"
+    },
+    "case": {
+      "style": "remark",
+      "name": "Case"
+    }
+  },
+  
+  "usage_patterns": {
+    "basic": "\\newtheorem{theorem}{Theorem}",
+    "numbered_within": "\\newtheorem{theorem}{Theorem}[section]",
+    "shared_counter": "\\newtheorem{lemma}[theorem]{Lemma}",
+    "unnumbered": "\\newtheorem*{remark}{Remark}"
+  }
+}
