@@ -489,10 +489,10 @@ struct HtmlOutputOptions {
     bool standalone;            // Include <!DOCTYPE>, <html> wrapper
     bool pretty_print;          // Indent output
     bool include_css;           // Include default CSS styles
-    bool legacy_mode;           // true = latex-js compatible output
     const char* css_class_prefix; // Prefix for CSS classes (default "latex-")
     const char* lang;           // Language code (default "en")
     
+    // Full standalone mode with fonts and CSS
     static HtmlOutputOptions defaults() {
         HtmlOutputOptions o = {};
         o.font_mode = FONT_WEBFONT;
@@ -501,28 +501,13 @@ struct HtmlOutputOptions {
         o.standalone = true;
         o.pretty_print = true;
         o.include_css = true;
-        o.legacy_mode = false;
         o.css_class_prefix = "latex-";
         o.lang = "en";
         return o;
     }
     
-    static HtmlOutputOptions legacy() {
-        HtmlOutputOptions o = {};
-        o.font_mode = FONT_WEBFONT;
-        o.math_as_svg = false;
-        o.typeset_paragraphs = false;
-        o.standalone = false;
-        o.pretty_print = true;
-        o.include_css = false;
-        o.legacy_mode = true;
-        o.css_class_prefix = "";  // No prefix in legacy mode
-        o.lang = "en";
-        return o;
-    }
-    
     // Hybrid mode: semantic HTML5 tags with minimal classes
-    // Based on vibe/Latex_Html_Mapping.md decisions
+    // Clean output without CSS prefix, suitable for embedding
     static HtmlOutputOptions hybrid() {
         HtmlOutputOptions o = {};
         o.font_mode = FONT_SYSTEM;
@@ -531,7 +516,6 @@ struct HtmlOutputOptions {
         o.standalone = false;
         o.pretty_print = false;
         o.include_css = false;
-        o.legacy_mode = false;
         o.css_class_prefix = "";  // No prefix for clean output
         o.lang = "en";
         return o;

@@ -41,7 +41,7 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     
     // Render to HTML
     StrBuf* out = strbuf_new_cap(4096);
-    HtmlOutputOptions opts = HtmlOutputOptions::legacy();
+    HtmlOutputOptions opts = HtmlOutputOptions::hybrid();
     opts.standalone = false;
     opts.pretty_print = false;
     opts.include_css = false;

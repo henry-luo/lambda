@@ -880,61 +880,31 @@ static void render_text_span_html_with_context(DocElement* elem, StrBuf* out,
     DocTextStyle resolved_style = style;
     resolved_style.flags = resolved_flags;
     
-    // Opening tags
-    if (opts.legacy_mode) {
-        // Legacy mode: use span classes
-        // Font size (must be outermost)
-        const char* size_class = font_size_name_class(resolved_style.font_size_name);
-        if (size_class) {
-            strbuf_append_format(out, "<span class=\"%s\">", size_class);
-        }
-        if (resolved_style.has(DocTextStyle::BOLD))
-            strbuf_append_str(out, "<span class=\"bf\">");
-        if (resolved_style.has(DocTextStyle::ITALIC))
-            strbuf_append_str(out, "<span class=\"it\">");
-        if (resolved_style.has(DocTextStyle::SLANTED))
-            strbuf_append_str(out, "<span class=\"sl\">");
-        if (resolved_style.has(DocTextStyle::UPRIGHT))
-            strbuf_append_str(out, "<span class=\"up\">");
-        if (resolved_style.has(DocTextStyle::MONOSPACE))
-            strbuf_append_str(out, "<span class=\"tt\">");
-        if (resolved_style.has(DocTextStyle::UNDERLINE))
-            strbuf_append_str(out, "<span class=\"underline\">");
-        if (resolved_style.has(DocTextStyle::STRIKEOUT))
-            strbuf_append_str(out, "<span class=\"sout\">");
-        if (resolved_style.has(DocTextStyle::SMALLCAPS))
-            strbuf_append_str(out, "<span class=\"sc\">");
-        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
-            strbuf_append_str(out, "<sup>");
-        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
-            strbuf_append_str(out, "<sub>");
-    } else {
-        // Modern mode: use semantic HTML tags
-        if (resolved_style.has(DocTextStyle::BOLD))
-            strbuf_append_str(out, "<strong>");
-        if (resolved_style.has(DocTextStyle::ITALIC))
-            strbuf_append_str(out, "<em>");
-        if (resolved_style.has(DocTextStyle::MONOSPACE))
-            strbuf_append_str(out, "<code>");
-        if (resolved_style.has(DocTextStyle::SLANTED))
-            strbuf_append_format(out, "<span class=\"%ssl\">", opts.css_class_prefix);
-        if (resolved_style.has(DocTextStyle::UPRIGHT))
-            strbuf_append_format(out, "<span class=\"%sup\">", opts.css_class_prefix);
-        if (resolved_style.has(DocTextStyle::UNDERLINE))
-            strbuf_append_str(out, "<u>");
-        if (resolved_style.has(DocTextStyle::STRIKEOUT))
-            strbuf_append_str(out, "<s>");
-        if (resolved_style.has(DocTextStyle::SMALLCAPS))
-            strbuf_append_format(out, "<span class=\"%ssmallcaps\">", opts.css_class_prefix);
-        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
-            strbuf_append_str(out, "<sup>");
-        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
-            strbuf_append_str(out, "<sub>");
-        // Font size in modern mode - use class
-        const char* size_class = font_size_name_class(resolved_style.font_size_name);
-        if (size_class) {
-            strbuf_append_format(out, "<span class=\"%s%s\">", opts.css_class_prefix, size_class);
-        }
+    // Opening tags - use semantic HTML tags
+    if (resolved_style.has(DocTextStyle::BOLD))
+        strbuf_append_str(out, "<strong>");
+    if (resolved_style.has(DocTextStyle::ITALIC))
+        strbuf_append_str(out, "<em>");
+    if (resolved_style.has(DocTextStyle::MONOSPACE))
+        strbuf_append_str(out, "<code>");
+    if (resolved_style.has(DocTextStyle::SLANTED))
+        strbuf_append_format(out, "<span class=\"%ssl\">", opts.css_class_prefix);
+    if (resolved_style.has(DocTextStyle::UPRIGHT))
+        strbuf_append_format(out, "<span class=\"%sup\">", opts.css_class_prefix);
+    if (resolved_style.has(DocTextStyle::UNDERLINE))
+        strbuf_append_str(out, "<u>");
+    if (resolved_style.has(DocTextStyle::STRIKEOUT))
+        strbuf_append_str(out, "<s>");
+    if (resolved_style.has(DocTextStyle::SMALLCAPS))
+        strbuf_append_format(out, "<span class=\"%ssmallcaps\">", opts.css_class_prefix);
+    if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
+        strbuf_append_str(out, "<sup>");
+    if (resolved_style.has(DocTextStyle::SUBSCRIPT))
+        strbuf_append_str(out, "<sub>");
+    // Font size - use class
+    const char* size_class = font_size_name_class(resolved_style.font_size_name);
+    if (size_class) {
+        strbuf_append_format(out, "<span class=\"%s%s\">", opts.css_class_prefix, size_class);
     }
     
     // Content
@@ -947,57 +917,29 @@ static void render_text_span_html_with_context(DocElement* elem, StrBuf* out,
     render_children_html_with_context(elem, out, opts, 0, child_inherited);
     
     // Closing tags (reverse order)
-    if (opts.legacy_mode) {
-        // Legacy mode: close span tags
-        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
-            strbuf_append_str(out, "</sub>");
-        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
-            strbuf_append_str(out, "</sup>");
-        if (resolved_style.has(DocTextStyle::SMALLCAPS))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::STRIKEOUT))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::UNDERLINE))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::MONOSPACE))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::UPRIGHT))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::SLANTED))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::ITALIC))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::BOLD))
-            strbuf_append_str(out, "</span>");
-        // Close font size (outermost)
-        if (resolved_style.font_size_name != FontSizeName::INHERIT)
-            strbuf_append_str(out, "</span>");
-    } else {
-        // Modern mode: close semantic tags
-        // Close font size first (innermost in modern mode)
-        if (resolved_style.font_size_name != FontSizeName::INHERIT)
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::SUBSCRIPT))
-            strbuf_append_str(out, "</sub>");
-        if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
-            strbuf_append_str(out, "</sup>");
-        if (resolved_style.has(DocTextStyle::SMALLCAPS))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::STRIKEOUT))
-            strbuf_append_str(out, "</s>");
-        if (resolved_style.has(DocTextStyle::UNDERLINE))
-            strbuf_append_str(out, "</u>");
-        if (resolved_style.has(DocTextStyle::UPRIGHT))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::SLANTED))
-            strbuf_append_str(out, "</span>");
-        if (resolved_style.has(DocTextStyle::MONOSPACE))
-            strbuf_append_str(out, "</code>");
-        if (resolved_style.has(DocTextStyle::ITALIC))
-            strbuf_append_str(out, "</em>");
-        if (resolved_style.has(DocTextStyle::BOLD))
-            strbuf_append_str(out, "</strong>");
-    }
+    // Close font size first (innermost)
+    if (resolved_style.font_size_name != FontSizeName::INHERIT)
+        strbuf_append_str(out, "</span>");
+    if (resolved_style.has(DocTextStyle::SUBSCRIPT))
+        strbuf_append_str(out, "</sub>");
+    if (resolved_style.has(DocTextStyle::SUPERSCRIPT))
+        strbuf_append_str(out, "</sup>");
+    if (resolved_style.has(DocTextStyle::SMALLCAPS))
+        strbuf_append_str(out, "</span>");
+    if (resolved_style.has(DocTextStyle::STRIKEOUT))
+        strbuf_append_str(out, "</s>");
+    if (resolved_style.has(DocTextStyle::UNDERLINE))
+        strbuf_append_str(out, "</u>");
+    if (resolved_style.has(DocTextStyle::UPRIGHT))
+        strbuf_append_str(out, "</span>");
+    if (resolved_style.has(DocTextStyle::SLANTED))
+        strbuf_append_str(out, "</span>");
+    if (resolved_style.has(DocTextStyle::MONOSPACE))
+        strbuf_append_str(out, "</code>");
+    if (resolved_style.has(DocTextStyle::ITALIC))
+        strbuf_append_str(out, "</em>");
+    if (resolved_style.has(DocTextStyle::BOLD))
+        strbuf_append_str(out, "</strong>");
 }
 
 // Legacy wrapper that doesn't pass context
@@ -1008,65 +950,25 @@ static void render_text_span_html(DocElement* elem, StrBuf* out,
 
 static void render_heading_html(DocElement* elem, StrBuf* out,
                                  const HtmlOutputOptions& opts, int depth) {
-    // Map level to HTML heading
-    // Legacy mode: chapter->h1, section->h2, etc.
-    // Modern mode: part(0)->h1, chapter(1)->h2, etc.
-    int h_level;
-    if (opts.legacy_mode) {
-        // Legacy mapping: chapter=h1, section=h2, subsection=h3, etc.
-        // level 1 (chapter) -> h1, level 2 (section) -> h2
-        h_level = elem->heading.level;
-        if (h_level < 1) h_level = 1;  // part->h1
-        if (h_level > 6) h_level = 6;
-    } else {
-        h_level = elem->heading.level + 1;  // level 0 (part) -> h1
-        if (h_level > 6) h_level = 6;
-    }
+    // Map level to HTML heading: part(0)->h1, chapter(1)->h2, section(2)->h3, etc.
+    int h_level = elem->heading.level + 1;
+    if (h_level > 6) h_level = 6;
     
     if (opts.pretty_print) html_indent(out, depth);
     
-    if (opts.legacy_mode) {
-        // Legacy mode: <h1 id="sec-N">
-        // Use explicit label if set, otherwise auto-generate from section number
-        const char* id_str = elem->heading.label;
-        char auto_id[64] = {0};
-        if (!id_str && elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
-            // Auto-generate ID as "sec-N" from section number
-            snprintf(auto_id, sizeof(auto_id), "sec-%s", elem->heading.number);
-            id_str = auto_id;
-        }
-        
-        if (id_str) {
-            strbuf_append_format(out, "<h%d id=\"%s\">", h_level, id_str);
-        } else {
-            strbuf_append_format(out, "<h%d>", h_level);
-        }
-        
-        // Chapter number in a div
-        if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
-            if (elem->heading.level == 1) {
-                // Chapter: <div>Chapter N</div>
-                strbuf_append_format(out, "<div>Chapter %s</div>", elem->heading.number);
-            } else {
-                // Section: number before title with em quad space (U+2003)
-                strbuf_append_format(out, "%s\xE2\x80\x83", elem->heading.number);
-            }
-        }
+    // Build heading tag with optional id and class
+    if (elem->heading.label) {
+        strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
+            h_level, elem->heading.label, opts.css_class_prefix, elem->heading.level);
     } else {
-        // Modern mode: <h1 class="latex-heading-0">
-        if (elem->heading.label) {
-            strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
-                h_level, elem->heading.label, opts.css_class_prefix, elem->heading.level);
-        } else {
-            strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
-                h_level, opts.css_class_prefix, elem->heading.level);
-        }
-        
-        // Number if present
-        if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
-            strbuf_append_format(out, "<span class=\"%ssection-number\">%s</span>",
-                opts.css_class_prefix, elem->heading.number);
-        }
+        strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
+            h_level, opts.css_class_prefix, elem->heading.level);
+    }
+    
+    // Number if present
+    if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+        strbuf_append_format(out, "<span class=\"%ssection-number\">%s</span>",
+            opts.css_class_prefix, elem->heading.number);
     }
     
     // Title
@@ -1114,42 +1016,8 @@ static void render_paragraph_html(DocElement* elem, StrBuf* out,
     
     bool has_any_class = has_continue || has_noindent || has_centered || has_raggedright || has_raggedleft;
     
-    if (opts.legacy_mode) {
-        // In legacy mode, add class attributes for flags
-        // Build class string dynamically
-        if (has_any_class) {
-            strbuf_append_str(out, "<p class=\"");
-            bool first = true;
-            if (has_raggedright) {
-                strbuf_append_str(out, "raggedright");
-                first = false;
-            }
-            if (has_raggedleft) {
-                if (!first) strbuf_append_str(out, " ");
-                strbuf_append_str(out, "raggedleft");
-                first = false;
-            }
-            if (has_centered) {
-                if (!first) strbuf_append_str(out, " ");
-                strbuf_append_str(out, "centering");
-                first = false;
-            }
-            if (has_continue) {
-                if (!first) strbuf_append_str(out, " ");
-                strbuf_append_str(out, "continue");
-                first = false;
-            }
-            if (has_noindent) {
-                if (!first) strbuf_append_str(out, " ");
-                strbuf_append_str(out, "noindent");
-                first = false;
-            }
-            strbuf_append_str(out, "\">");
-        } else {
-            strbuf_append_str(out, "<p>");
-        }
-    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
-        // Modern mode with prefix: always add class="latex-paragraph"
+    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Mode with prefix: always add class="latex-paragraph"
         if (has_continue && has_noindent) {
             strbuf_append_format(out, "<p class=\"%sparagraph continue noindent\">", opts.css_class_prefix);
         } else if (has_continue) {
@@ -1216,11 +1084,8 @@ static void render_list_html(DocElement* elem, StrBuf* out,
     // Build class list - add "centering" if centered
     const char* centering = (elem->flags & DocElement::FLAG_CENTERED) ? " centering" : "";
     
-    if (opts.legacy_mode) {
-        // Legacy mode: class="list"
-        strbuf_append_format(out, "<%s class=\"list%s\">", tag, centering);
-    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
-        // Modern mode with prefix: class="latex-list"
+    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Mode with prefix: class="latex-list"
         strbuf_append_format(out, "<%s class=\"%slist%s\">", tag, opts.css_class_prefix, centering);
     } else {
         // Hybrid mode (no prefix): class="itemize" / "enumerate" / "description"
@@ -1272,69 +1137,11 @@ static void render_list_item_html(DocElement* elem, StrBuf* out,
         strbuf_append_format(out, "<dd%s>", centering_class);
     } else {
         strbuf_append_format(out, "<li%s>", centering_class);
-        
-        // In legacy mode, add item label (bullet or number)
-        if (opts.legacy_mode) {
-            strbuf_append_str(out, "<span class=\"itemlabel\">");
-            
-            // Check for custom label
-            if (elem->list_item.has_custom_label) {
-                // Custom label from \item[label]
-                strbuf_append_str(out, "<span class=\"hbox llap\">");
-                if (elem->list_item.html_label) {
-                    // Use rendered HTML (for styled labels like \itshape text)
-                    strbuf_append_str(out, elem->list_item.html_label);
-                }
-                // Empty label is valid (renders as empty span)
-                strbuf_append_str(out, "</span>");
-            } else if (parent_type == ListType::ITEMIZE) {
-                // Get nesting level (0 = top-level, 1 = nested, etc.)
-                int nest_level = get_list_nesting_level(elem);
-                
-                // LaTeX itemize bullets by level:
-                // Level 0: • (bullet)
-                // Level 1: – (en-dash, in bold)
-                // Level 2: * (asterisk)
-                // Level 3+: · (middle dot)
-                if (nest_level == 0) {
-                    strbuf_append_str(out, "<span class=\"hbox llap\">\xE2\x80\xA2</span>");  // •
-                } else if (nest_level == 1) {
-                    // En-dash with rm bf up styling
-                    strbuf_append_str(out, "<span class=\"hbox llap\"><span class=\"rm bf up\">\xE2\x80\x93</span></span>");  // –
-                } else if (nest_level == 2) {
-                    strbuf_append_str(out, "<span class=\"hbox llap\">*</span>");  // *
-                } else {
-                    strbuf_append_str(out, "<span class=\"hbox llap\">\xC2\xB7</span>");  // · (middle dot)
-                }
-            } else if (parent_type == ListType::ENUMERATE && elem->list_item.item_number > 0) {
-                // Number: (number) in a span with id attribute
-                strbuf_append_format(out, "<span class=\"hbox llap\"><span id=\"item-%d\">%d.</span></span>",
-                                     elem->list_item.item_number, elem->list_item.item_number);
-            }
-            strbuf_append_str(out, "</span>");
-        }
+        // Semantic HTML: no bullet/number markup - let CSS handle list styling
     }
     
-    // Check if children already contain PARAGRAPH elements (new list item structure)
-    bool has_paragraph_children = false;
-    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
-        if (child->type == DocElemType::PARAGRAPH) {
-            has_paragraph_children = true;
-            break;
-        }
-    }
-    
-    // Wrap children in <p> tags for legacy mode if they're text content 
-    // BUT not if they already have paragraph structure
-    if (opts.legacy_mode && parent_type != ListType::DESCRIPTION && !has_paragraph_children) {
-        // Old-style items without paragraph children - wrap in single <p>
-        strbuf_append_str(out, "<p>");
-        render_children_html(elem, out, opts, depth + 1);
-        strbuf_append_str(out, "</p>");
-    } else {
-        // Either non-legacy mode, description list, or already has paragraph children
-        render_children_html(elem, out, opts, depth + 1);
-    }
+    // Render children directly
+    render_children_html(elem, out, opts, depth + 1);
     
     if (parent_type == ListType::DESCRIPTION) {
         strbuf_append_str(out, "</dd>");
@@ -1671,6 +1478,20 @@ static void render_children_html_with_context(DocElement* parent, StrBuf* out,
     }
 }
 
+// Helper to check if an element is inline content
+static bool is_inline_element(DocElement* elem) {
+    if (!elem) return false;
+    switch (elem->type) {
+    case DocElemType::TEXT_RUN:
+    case DocElemType::TEXT_SPAN:
+    case DocElemType::SPACE:
+    case DocElemType::RAW_HTML:  // inline HTML like logos
+        return true;
+    default:
+        return false;
+    }
+}
+
 // Context-aware element rendering that handles emphasis toggling
 static void doc_element_to_html_with_context(DocElement* elem, StrBuf* out,
                           const HtmlOutputOptions& opts, int depth, uint16_t inherited_flags) {
@@ -1695,72 +1516,13 @@ static void doc_element_to_html_with_context(DocElement* elem, StrBuf* out,
     }
 }
 
-// helper: check if element is inline (should be wrapped in paragraph at doc level)
-static bool is_inline_element(DocElement* elem) {
-    if (!elem) return false;
-    switch (elem->type) {
-    case DocElemType::TEXT_RUN:
-    case DocElemType::TEXT_SPAN:
-    case DocElemType::SPACE:
-    case DocElemType::RAW_HTML:  // inline HTML like logos
-        return true;
-    default:
-        return false;
-    }
-}
-
-// render document children in legacy mode - wraps consecutive inline elements in <p>
-static void render_document_children_legacy(DocElement* doc, StrBuf* out,
-                                            const HtmlOutputOptions& opts, int depth) {
-    bool in_paragraph = false;
-    
-    for (DocElement* child = doc->first_child; child; child = child->next_sibling) {
-        if (is_inline_element(child)) {
-            // skip whitespace-only text runs at start
-            if (!in_paragraph) {
-                if (child->type == DocElemType::TEXT_RUN && child->text.text) {
-                    // check if whitespace only
-                    bool whitespace_only = true;
-                    for (size_t i = 0; i < child->text.text_len; i++) {
-                        char c = child->text.text[i];
-                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
-                            whitespace_only = false;
-                            break;
-                        }
-                    }
-                    if (whitespace_only) continue;
-                }
-                strbuf_append_str(out, "<p>");
-                in_paragraph = true;
-            }
-            doc_element_to_html(child, out, opts, depth);
-        } else {
-            // block element - close paragraph if open
-            if (in_paragraph) {
-                strbuf_append_str(out, "</p>\n");
-                in_paragraph = false;
-            }
-            doc_element_to_html(child, out, opts, depth);
-        }
-    }
-    
-    // close trailing paragraph
-    if (in_paragraph) {
-        strbuf_append_str(out, "</p>\n");
-    }
-}
-
 void doc_element_to_html(DocElement* elem, StrBuf* out,
                           const HtmlOutputOptions& opts, int depth) {
     if (!elem) return;
     
     switch (elem->type) {
     case DocElemType::DOCUMENT:
-        if (opts.legacy_mode) {
-            render_document_children_legacy(elem, out, opts, depth);
-        } else {
-            render_children_html(elem, out, opts, depth);
-        }
+        render_children_html(elem, out, opts, depth);
         break;
         
     case DocElemType::TEXT_SPAN:
@@ -1839,7 +1601,7 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
     case DocElemType::ALIGNMENT: {
         // Determine alignment class from env_name or flags
         const char* align_class = "list";
-        bool use_list_prefix = opts.legacy_mode || (opts.css_class_prefix && opts.css_class_prefix[0]);
+        bool use_list_prefix = (opts.css_class_prefix && opts.css_class_prefix[0]);
         bool is_quote_env = false;
         if (elem->alignment.env_name) {
             // Check if this is a quote-like environment
@@ -1861,8 +1623,8 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
         } else if (elem->flags & DocElement::FLAG_FLUSH_RIGHT) {
             align_class = use_list_prefix ? "list flushright" : "flushright";
         }
-        // In hybrid mode, use <blockquote> for quote environments
-        if (!opts.legacy_mode && is_quote_env) {
+        // Use <blockquote> for quote environments
+        if (is_quote_env) {
             strbuf_append_format(out, "<blockquote class=\"%s\">", align_class);
             if (opts.pretty_print) strbuf_append_str(out, "\n");
             render_children_html(elem, out, opts, depth + 1);
@@ -1975,11 +1737,8 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     }
     
     // Document container
-    if (opts.legacy_mode) {
-        // Legacy mode: <div class="body">
-        strbuf_append_str(output, "<div class=\"body\">\n");
-    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
-        // Modern mode with prefix: <article class="latex-document latex-article">
+    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Mode with prefix: <article class="latex-document latex-article">
         strbuf_append_format(output, "<article class=\"%sdocument %s%s\">\n", 
             opts.css_class_prefix, opts.css_class_prefix, doc->document_class);
     } else {
@@ -1987,8 +1746,8 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
         strbuf_append_str(output, "<article class=\"latex-document\">");
     }
     
-    // Title block (only in non-legacy mode)
-    if (!opts.legacy_mode && (doc->title || doc->author || doc->date)) {
+    // Title block
+    if (doc->title || doc->author || doc->date) {
         strbuf_append_format(output, "  <header class=\"%stitle-block\">\n", opts.css_class_prefix);
         if (doc->title) {
             strbuf_append_format(output, "    <h1 class=\"%sdoc-title\">", opts.css_class_prefix);
@@ -2014,9 +1773,7 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     }
     
     // Close document container
-    if (opts.legacy_mode) {
-        strbuf_append_str(output, "</div>\n");
-    } else if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
         strbuf_append_str(output, "</article>\n");
     } else {
         // Hybrid mode: no trailing newline for compact output
@@ -2590,9 +2347,7 @@ static const char* render_brack_group_to_html(const ItemReader& item, Arena* are
             }
             
             // Render the styled wrapper
-            HtmlOutputOptions opts = {};
-            opts.legacy_mode = true;
-            opts.css_class_prefix = "";
+            HtmlOutputOptions opts = HtmlOutputOptions::hybrid();
             doc_element_to_html(wrapper, buf, opts, 0);
             
             // Close outer wrapper
@@ -2603,9 +2358,7 @@ static const char* render_brack_group_to_html(const ItemReader& item, Arena* are
             while (iter.next(&child)) {
                 DocElement* child_elem = build_doc_element(child, arena, doc);
                 if (child_elem) {
-                    HtmlOutputOptions opts = {};
-                    opts.legacy_mode = true;
-                    opts.css_class_prefix = "";
+                    HtmlOutputOptions opts = HtmlOutputOptions::hybrid();
                     doc_element_to_html(child_elem, buf, opts, 0);
                 }
             }
