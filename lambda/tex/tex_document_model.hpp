@@ -344,8 +344,9 @@ struct TexDocumentModel {
     
     // Cross-reference tables
     struct LabelEntry {
-        const char* label;
-        const char* ref_text;
+        const char* label;     // User-defined label name (e.g., "sec:test")
+        const char* ref_id;    // Anchor id for href (e.g., "sec-1")
+        const char* ref_text;  // Display text for reference (e.g., "1")
         int page;
     };
     LabelEntry* labels;
@@ -385,9 +386,25 @@ struct TexDocumentModel {
     int page_num;
     int section_id_counter;  // Global counter for sequential section IDs
     
+    // Current referable context (set when entering a section/figure/equation/etc.)
+    const char* current_ref_id;    // Current anchor id (e.g., "sec-1")
+    const char* current_ref_text;  // Current reference text (e.g., "1" or "2.3")
+    
+    // Pending cross-references for two-pass resolution
+    struct PendingRef {
+        DocElement* elem;  // The CROSS_REF element to resolve
+    };
+    PendingRef* pending_refs;
+    int pending_ref_count;
+    int pending_ref_capacity;
+    
     // Methods
     void add_label(const char* label, const char* ref_text, int page);
+    void add_label_with_id(const char* label, const char* ref_id, const char* ref_text);
     const char* resolve_ref(const char* label) const;
+    const char* resolve_ref_id(const char* label) const;  // Get the anchor id for a label
+    void add_pending_ref(DocElement* elem);
+    void resolve_pending_refs();
     void add_macro(const char* name, int num_args, const char* replacement, const char* params = nullptr);
     const MacroDef* find_macro(const char* name) const;
     void add_bib_entry(const char* key, const char* formatted);
