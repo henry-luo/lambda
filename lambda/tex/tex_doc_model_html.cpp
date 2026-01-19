@@ -321,27 +321,62 @@ static void render_text_span_html(DocElement* elem, StrBuf* out,
     render_text_span_html_with_context(elem, out, opts, 0);
 }
 
+// Helper to check if document class has chapters
+static bool opts_has_chapters(const HtmlOutputOptions& opts) {
+    if (!opts.document_class) return false;
+    return strcmp(opts.document_class, "book") == 0 || 
+           strcmp(opts.document_class, "report") == 0;
+}
+
 static void render_heading_html(DocElement* elem, StrBuf* out,
                                  const HtmlOutputOptions& opts, int depth) {
-    // Map level to HTML heading: part(0)->h1, chapter(1)->h2, section(2)->h3, etc.
-    int h_level = elem->heading.level + 1;
+    bool has_chapters = opts_has_chapters(opts);
+    int latex_level = elem->heading.level;  // 0=part, 1=chapter, 2=section, etc.
+    
+    // Calculate HTML heading level based on document class
+    // For book/report: chapter(1)->h1, section(2)->h2, subsection(3)->h3
+    // For article: section(2)->h2, subsection(3)->h3, subsubsection(4)->h4
+    int h_level;
+    if (has_chapters) {
+        // Book/report class: chapter is h1
+        h_level = latex_level;  // chapter(1)->h1, section(2)->h2
+        if (h_level < 1) h_level = 1;  // part also becomes h1
+    } else {
+        // Article class: section(2)->h2, subsection(3)->h3
+        // Section stays at h2 level (h1 reserved for document title if any)
+        h_level = latex_level;  // section(2)->h2, subsection(3)->h3
+        if (h_level < 2) h_level = 2;  // no chapters in article, min is h2
+    }
     if (h_level > 6) h_level = 6;
     
     if (opts.pretty_print) html_indent(out, depth);
     
-    // Build heading tag with optional id and class
-    if (elem->heading.label) {
-        strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
-            h_level, elem->heading.label, opts.css_class_prefix, elem->heading.level);
+    // Build heading tag - use minimal attributes in hybrid mode
+    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Full mode with CSS classes
+        if (elem->heading.label) {
+            strbuf_append_format(out, "<h%d id=\"%s\" class=\"%sheading-%d\">", 
+                h_level, elem->heading.label, opts.css_class_prefix, latex_level);
+        } else {
+            strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
+                h_level, opts.css_class_prefix, latex_level);
+        }
     } else {
-        strbuf_append_format(out, "<h%d class=\"%sheading-%d\">", 
-            h_level, opts.css_class_prefix, elem->heading.level);
+        // Hybrid mode: minimal attributes
+        if (elem->heading.label) {
+            strbuf_append_format(out, "<h%d id=\"%s\">", h_level, elem->heading.label);
+        } else {
+            strbuf_append_format(out, "<h%d>", h_level);
+        }
     }
     
-    // Number if present
-    if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
-        strbuf_append_format(out, "<span class=\"%ssection-number\">%s</span>",
-            opts.css_class_prefix, elem->heading.number);
+    // For chapters in book/report class, add "Chapter N" prefix in a div
+    bool is_chapter = (latex_level == 1 && has_chapters);
+    if (is_chapter && elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+        strbuf_append_format(out, "<div>Chapter %s</div>", elem->heading.number);
+    } else if (elem->heading.number && !(elem->flags & DocElement::FLAG_STARRED)) {
+        // For non-chapter sections, include number inline with space
+        strbuf_append_format(out, "%s ", elem->heading.number);
     }
     
     // Title
@@ -1104,10 +1139,14 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
 bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOptions& opts) {
     if (!doc || !output) return false;
     
+    // Create local copy of options and set document class from model
+    HtmlOutputOptions local_opts = opts;
+    local_opts.document_class = doc->document_class;
+    
     // HTML header
-    if (opts.standalone) {
+    if (local_opts.standalone) {
         strbuf_append_str(output, "<!DOCTYPE html>\n");
-        strbuf_append_format(output, "<html lang=\"%s\">\n", opts.lang);
+        strbuf_append_format(output, "<html lang=\"%s\">\n", local_opts.lang);
         strbuf_append_str(output, "<head>\n");
         strbuf_append_str(output, "  <meta charset=\"UTF-8\">\n");
         strbuf_append_str(output, "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
@@ -1122,14 +1161,14 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
         }
         
         // Web fonts
-        if (opts.font_mode == HtmlOutputOptions::FONT_WEBFONT) {
+        if (local_opts.font_mode == HtmlOutputOptions::FONT_WEBFONT) {
             strbuf_append_str(output, "  <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/computer-modern@0.1.2/cmsans.min.css\">\n");
             strbuf_append_str(output, "  <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/computer-modern@0.1.2/cmserif.min.css\">\n");
         }
         
         // CSS
-        if (opts.include_css) {
-            html_write_default_css(output, opts.css_class_prefix);
+        if (local_opts.include_css) {
+            html_write_default_css(output, local_opts.css_class_prefix);
         }
         
         strbuf_append_str(output, "</head>\n");
@@ -1137,10 +1176,10 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     }
     
     // Document container
-    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+    if (local_opts.css_class_prefix && local_opts.css_class_prefix[0]) {
         // Mode with prefix: <article class="latex-document latex-article">
         strbuf_append_format(output, "<article class=\"%sdocument %s%s\">\n", 
-            opts.css_class_prefix, opts.css_class_prefix, doc->document_class);
+            local_opts.css_class_prefix, local_opts.css_class_prefix, doc->document_class);
     } else {
         // Hybrid mode: <article class="latex-document">
         strbuf_append_str(output, "<article class=\"latex-document\">");
@@ -1148,19 +1187,19 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     
     // Title block
     if (doc->title || doc->author || doc->date) {
-        strbuf_append_format(output, "  <header class=\"%stitle-block\">\n", opts.css_class_prefix);
+        strbuf_append_format(output, "  <header class=\"%stitle-block\">\n", local_opts.css_class_prefix);
         if (doc->title) {
-            strbuf_append_format(output, "    <h1 class=\"%sdoc-title\">", opts.css_class_prefix);
+            strbuf_append_format(output, "    <h1 class=\"%sdoc-title\">", local_opts.css_class_prefix);
             html_escape_append(output, doc->title, strlen(doc->title));
             strbuf_append_str(output, "</h1>\n");
         }
         if (doc->author) {
-            strbuf_append_format(output, "    <div class=\"%sdoc-author\">", opts.css_class_prefix);
+            strbuf_append_format(output, "    <div class=\"%sdoc-author\">", local_opts.css_class_prefix);
             html_escape_append(output, doc->author, strlen(doc->author));
             strbuf_append_str(output, "</div>\n");
         }
         if (doc->date) {
-            strbuf_append_format(output, "    <div class=\"%sdoc-date\">", opts.css_class_prefix);
+            strbuf_append_format(output, "    <div class=\"%sdoc-date\">", local_opts.css_class_prefix);
             html_escape_append(output, doc->date, strlen(doc->date));
             strbuf_append_str(output, "</div>\n");
         }
@@ -1169,11 +1208,11 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     
     // Document content
     if (doc->root) {
-        doc_element_to_html(doc->root, output, opts, 1);
+        doc_element_to_html(doc->root, output, local_opts, 1);
     }
     
     // Close document container
-    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+    if (local_opts.css_class_prefix && local_opts.css_class_prefix[0]) {
         strbuf_append_str(output, "</article>\n");
     } else {
         // Hybrid mode: no trailing newline for compact output
@@ -1181,7 +1220,7 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     }
     
     // HTML footer
-    if (opts.standalone) {
+    if (local_opts.standalone) {
         strbuf_append_str(output, "</body>\n");
         strbuf_append_str(output, "</html>\n");
     }
