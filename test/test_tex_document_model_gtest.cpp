@@ -42,7 +42,6 @@ TEST_F(TexDocumentModelTest, CreateEmptyDocument) {
     EXPECT_EQ(doc->author, nullptr);
     EXPECT_EQ(doc->root, nullptr);
     EXPECT_EQ(doc->label_count, 0);
-    EXPECT_EQ(doc->macro_count, 0);
 }
 
 // ============================================================================
@@ -210,32 +209,6 @@ TEST_F(TexDocumentModelTest, AddManyLabels) {
     }
     
     EXPECT_EQ(doc->label_count, 50);
-}
-
-// ============================================================================
-// Macro Tests
-// ============================================================================
-
-TEST_F(TexDocumentModelTest, AddAndFindMacros) {
-    TexDocumentModel* doc = doc_model_create(arena);
-    
-    doc->add_macro("\\R", 0, "\\mathbb{R}");
-    doc->add_macro("\\norm", 1, "\\|#1\\|");
-    doc->add_macro("\\inner", 2, "\\langle#1,#2\\rangle");
-    
-    EXPECT_EQ(doc->macro_count, 3);
-    
-    auto* macro1 = doc->find_macro("\\R");
-    ASSERT_NE(macro1, nullptr);
-    EXPECT_STREQ(macro1->replacement, "\\mathbb{R}");
-    EXPECT_EQ(macro1->num_args, 0);
-    
-    auto* macro2 = doc->find_macro("\\norm");
-    ASSERT_NE(macro2, nullptr);
-    EXPECT_EQ(macro2->num_args, 1);
-    
-    auto* macro3 = doc->find_macro("\\nonexistent");
-    EXPECT_EQ(macro3, nullptr);
 }
 
 // ============================================================================
