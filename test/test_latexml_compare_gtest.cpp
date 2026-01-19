@@ -87,6 +87,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "latexjs/environments/10_font_environments",
     "latexjs/environments/11_alignment",
     "latexjs/environments/12_alignment_of_lists",
+    "latexjs/environments/13_abstract_and_fonts",
     "latexjs/environments/14_comment_environment",
     
     // latexjs/whitespace - most passing
@@ -94,6 +95,10 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "latexjs/whitespace/02_how_to_force_two_paragraphs",
     "latexjs/whitespace/03_standard_double_newline_paragraph_separa",
     "latexjs/whitespace/04_and_newline_do_not_add_spaces_they_unski",
+    "latexjs/whitespace/05_mbox_restricted_horizontal_mode_and_line",
+    "latexjs/whitespace/06_unskip_breaks_out_of_groups_ignorespaces",
+    "latexjs/whitespace/07_a_space_is_added_after_macros_that_take_",
+    "latexjs/whitespace/08_space_hack_to_prevent_multiple_spaces",
     "latexjs/whitespace/09_more_than_two_newlines_including_spaces_",
     "latexjs/whitespace/10_comments_are_disregarded_and_won_t_add_a",
     "latexjs/whitespace/11_comments_are_disregarded_and_won_t_preve",
@@ -106,11 +111,14 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     "latexjs/whitespace/18_escaped_newlines_in_an_empty_document_or",
     "latexjs/whitespace/19_escaped_newlines_at_the_start_of_a_parag",
     "latexjs/whitespace/20_escaped_newlines_after_an_environment",
+    "latexjs/whitespace/21_spaces_before_and_after_horizontal_envir",
     
     // latexjs/fonts - partial
     "latexjs/fonts/01_bfseries_declaration",
     "latexjs/fonts/02_em_and_emph",
     "latexjs/fonts/03_emph_command_and_nesting",
+    "latexjs/fonts/05_fonts_reach_across_paragraphs_if_no_grou",
+    "latexjs/fonts/06_monospaced_fonts_do_not_use_ligatures",
     
     // latexjs/groups - partial
     "latexjs/groups/01_groups_need_to_be_balanced",
@@ -119,6 +127,20 @@ static const std::set<std::string> BASELINE_FIXTURES = {
     // latexjs/macros - partial
     "latexjs/macros/01_custom_macros_without_arguments",
     "latexjs/macros/02_custom_macros_with_a_mandatory_argument",
+    "latexjs/macros/03_custom_macros_with_an_optional_argument",
+    
+    // latexjs/label-ref - all passing
+    "latexjs/label-ref/01_empty_currentlabel",
+    "latexjs/label-ref/02_forward_and_back_referencing_a_label",
+    "latexjs/label-ref/03_forward_referencing_a_section",
+    "latexjs/label-ref/04_label_a_section_inside",
+    "latexjs/label-ref/05_back_referencing_a_section",
+    "latexjs/label-ref/06_forward_and_back_referencing_a_section_i",
+    
+    // latexjs/sectioning - all passing
+    "latexjs/sectioning/01_a_chapter",
+    "latexjs/sectioning/02_a_chapter_and_a_section",
+    "latexjs/sectioning/03_section_inside_a_macro_correct_visual_ap",
     
     // latexjs/preamble
     "latexjs/preamble/01_document_with_a_preamble",
