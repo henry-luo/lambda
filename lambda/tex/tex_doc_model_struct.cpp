@@ -692,15 +692,19 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
     // Verse environment preserves leading whitespace after linebreaks
     bool preserve_ws = tag_eq(env_name, "verse");
     
+    // Helper to finalize and emit current paragraph
+    auto finalize_para = [&]() {
+        if (current_para && current_para->first_child) {
+            trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
+            doc_append_child(container, current_para);
+        }
+        current_para = nullptr;
+    };
+    
     auto process_item = [&](const ItemReader& item) {
         // Check for parbreak symbol
         if (is_parbreak_item(item)) {
-            // Finalize current paragraph
-            if (current_para && current_para->first_child) {
-                trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
-                doc_append_child(container, current_para);
-            }
-            current_para = nullptr;
+            finalize_para();
             return;
         }
         
@@ -716,14 +720,25 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
             return;
         }
         
+        // Check for block-level elements in AST (lists, nested environments)
+        if (item.isElement()) {
+            ElementReader elem = item.asElement();
+            const char* tag = elem.tagName();
+            if (tag && is_block_element_tag(tag)) {
+                // Finalize current paragraph before adding block element
+                finalize_para();
+                // Build and add the block element directly
+                DocElement* block = build_doc_element(item, arena, doc);
+                if (block && !is_special_marker(block)) {
+                    doc_append_child(container, block);
+                }
+                return;
+            }
+        }
+        
         DocElement* content = build_doc_element(item, arena, doc);
         if (content == PARBREAK_MARKER) {
-            // Finalize current paragraph
-            if (current_para && current_para->first_child) {
-                trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
-                doc_append_child(container, current_para);
-            }
-            current_para = nullptr;
+            finalize_para();
         } else if (content == LINEBREAK_MARKER) {
             // Line break within paragraph
             if (!current_para) {
@@ -763,10 +778,7 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
     }
     
     // Finalize last paragraph
-    if (current_para && current_para->first_child) {
-        trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
-        doc_append_child(container, current_para);
-    }
+    finalize_para();
     
     return container;
 }
