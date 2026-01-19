@@ -745,6 +745,18 @@ static DocElement* const SLANTED_MARKER = (DocElement*)11;     // \slshape
 static DocElement* const UPRIGHT_MARKER = (DocElement*)12;     // \upshape
 static DocElement* const EMPHASIS_MARKER = (DocElement*)13;    // \em (toggles italic/upright)
 
+// Font size markers for size commands (\tiny, \small, \large, etc.)
+static DocElement* const FONTSIZE_TINY_MARKER = (DocElement*)20;        // \tiny
+static DocElement* const FONTSIZE_SCRIPTSIZE_MARKER = (DocElement*)21;  // \scriptsize
+static DocElement* const FONTSIZE_FOOTNOTESIZE_MARKER = (DocElement*)22;// \footnotesize
+static DocElement* const FONTSIZE_SMALL_MARKER = (DocElement*)23;       // \small
+static DocElement* const FONTSIZE_NORMALSIZE_MARKER = (DocElement*)24;  // \normalsize
+static DocElement* const FONTSIZE_LARGE_MARKER = (DocElement*)25;       // \large
+static DocElement* const FONTSIZE_LARGE2_MARKER = (DocElement*)26;      // \Large
+static DocElement* const FONTSIZE_LARGE3_MARKER = (DocElement*)27;      // \LARGE
+static DocElement* const FONTSIZE_HUGE_MARKER = (DocElement*)28;        // \huge
+static DocElement* const FONTSIZE_HUGE2_MARKER = (DocElement*)29;       // \Huge
+
 // ParagraphAlignment is now defined in tex_doc_model_internal.hpp
 
 // Check if a marker is an alignment marker
@@ -760,11 +772,35 @@ static bool is_font_marker(DocElement* elem) {
            elem == EMPHASIS_MARKER;
 }
 
+// Check if a marker is a font size marker
+static bool is_fontsize_marker(DocElement* elem) {
+    return elem == FONTSIZE_TINY_MARKER || elem == FONTSIZE_SCRIPTSIZE_MARKER ||
+           elem == FONTSIZE_FOOTNOTESIZE_MARKER || elem == FONTSIZE_SMALL_MARKER ||
+           elem == FONTSIZE_NORMALSIZE_MARKER || elem == FONTSIZE_LARGE_MARKER ||
+           elem == FONTSIZE_LARGE2_MARKER || elem == FONTSIZE_LARGE3_MARKER ||
+           elem == FONTSIZE_HUGE_MARKER || elem == FONTSIZE_HUGE2_MARKER;
+}
+
+// Convert font size marker to FontSizeName
+static FontSizeName fontsize_marker_to_size(DocElement* elem) {
+    if (elem == FONTSIZE_TINY_MARKER) return FontSizeName::FONT_TINY;
+    if (elem == FONTSIZE_SCRIPTSIZE_MARKER) return FontSizeName::FONT_SCRIPTSIZE;
+    if (elem == FONTSIZE_FOOTNOTESIZE_MARKER) return FontSizeName::FONT_FOOTNOTESIZE;
+    if (elem == FONTSIZE_SMALL_MARKER) return FontSizeName::FONT_SMALL;
+    if (elem == FONTSIZE_NORMALSIZE_MARKER) return FontSizeName::FONT_NORMALSIZE;
+    if (elem == FONTSIZE_LARGE_MARKER) return FontSizeName::FONT_LARGE;
+    if (elem == FONTSIZE_LARGE2_MARKER) return FontSizeName::FONT_LARGE2;
+    if (elem == FONTSIZE_LARGE3_MARKER) return FontSizeName::FONT_LARGE3;
+    if (elem == FONTSIZE_HUGE_MARKER) return FontSizeName::FONT_HUGE;
+    if (elem == FONTSIZE_HUGE2_MARKER) return FontSizeName::FONT_HUGE2;
+    return FontSizeName::INHERIT;
+}
+
 // Check if a pointer is any special marker (not a real DocElement pointer)
 // Non-static: used by tex_doc_model_struct.cpp
 bool is_special_marker(DocElement* elem) {
     return elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER || 
-           is_alignment_marker(elem) || is_font_marker(elem);
+           is_alignment_marker(elem) || is_font_marker(elem) || is_fontsize_marker(elem);
 }
 
 // Get alignment from marker
@@ -2034,7 +2070,7 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
                         // \em toggles between italic and upright
                         bool currently_italic = (active_font_flags & DocTextStyle::ITALIC) != 0;
                         bool currently_upright = (active_font_flags & DocTextStyle::UPRIGHT) != 0;
-                        active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT);
+                        active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT | DocTextStyle::SLANTED);
                         if (currently_italic) {
                             active_font_flags |= DocTextStyle::UPRIGHT;
                         } else if (currently_upright) {
@@ -2042,7 +2078,13 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
                         } else {
                             active_font_flags |= DocTextStyle::ITALIC;
                         }
+                    } else if (new_flags == DocTextStyle::ITALIC || new_flags == DocTextStyle::SLANTED ||
+                               new_flags == DocTextStyle::UPRIGHT) {
+                        // Shape commands are mutually exclusive: clear other shapes, then set new one
+                        active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::SLANTED | DocTextStyle::UPRIGHT);
+                        active_font_flags |= new_flags;
                     } else {
+                        // Series (BOLD) and family (MONOSPACE) just add to flags
                         active_font_flags |= new_flags;
                     }
                     continue;  // Don't add marker to output
@@ -2722,6 +2764,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     bool strip_next_leading_space = false;  // Track if next text should have leading space stripped
     ParagraphAlignment current_alignment = ParagraphAlignment::NONE;  // Track current alignment
     uint32_t active_font_flags = 0;  // Track active font style flags from declarations
+    FontSizeName active_font_size = FontSizeName::INHERIT;  // Track active font size from declarations
     
     int64_t child_count = elem.childCount();
     for (int64_t i = 0; i < child_count; i++) {
@@ -2731,10 +2774,10 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
         if (child_item.isString()) {
             const char* text = child_item.cstring();
             if (text && text[0] != '\0') {
-                // Strip leading space if flag is set
+                // Strip leading whitespace if flag is set (after font declaration)
                 if (strip_next_leading_space) {
                     strip_next_leading_space = false;
-                    while (*text == ' ' || *text == '\t') text++;
+                    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
                     if (text[0] == '\0') continue;  // String was only whitespace
                 }
                 
@@ -2756,10 +2799,11 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                 // Create text element with active font style if any
                 DocTextStyle style = DocTextStyle::plain();
                 style.flags = active_font_flags;
+                style.font_size_name = active_font_size;
                 DocElement* text_elem = doc_create_text_normalized(arena, text, style);
                 if (text_elem) {
-                    // If there's an active font style, wrap in a styled span
-                    if (active_font_flags != 0) {
+                    // If there's an active font style or size, wrap in a styled span
+                    if (active_font_flags != 0 || active_font_size != FontSizeName::INHERIT) {
                         DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
                         styled_span->text.style = style;
                         doc_append_child(styled_span, text_elem);
@@ -3410,7 +3454,7 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                 bool currently_italic = (active_font_flags & DocTextStyle::ITALIC) != 0;
                 bool currently_upright = (active_font_flags & DocTextStyle::UPRIGHT) != 0;
                 // Clear both italic and upright
-                active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT);
+                active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT | DocTextStyle::SLANTED);
                 if (currently_italic) {
                     // Was italic, toggle to upright
                     active_font_flags |= DocTextStyle::UPRIGHT;
@@ -3421,15 +3465,43 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                     // Neither set - start with italic
                     active_font_flags |= DocTextStyle::ITALIC;
                 }
+            } else if (new_flags == DocTextStyle::ITALIC || new_flags == DocTextStyle::SLANTED ||
+                       new_flags == DocTextStyle::UPRIGHT) {
+                // Shape commands are mutually exclusive: clear other shapes, then set new one
+                active_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::SLANTED | DocTextStyle::UPRIGHT);
+                active_font_flags |= new_flags;
             } else {
+                // Series (BOLD) and family (MONOSPACE) just add to flags
                 active_font_flags |= new_flags;
             }
             strip_next_leading_space = true;  // strip space after font declaration
             continue;
         }
         
+        // Font size markers - update active font size
+        // Font size declarations like \small affect all following content until scope ends
+        if (is_fontsize_marker(child_elem)) {
+            active_font_size = fontsize_marker_to_size(child_elem);
+            strip_next_leading_space = true;  // strip space after font declaration
+            continue;
+        }
+        
         // Check if this is inline content or a block element
         if (is_inline_or_break(child_elem)) {
+            // Strip leading whitespace if flagged (after font declaration)
+            if (strip_next_leading_space && child_elem->type == DocElemType::TEXT_RUN) {
+                strip_next_leading_space = false;
+                const char* text = child_elem->text.text;
+                if (text) {
+                    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+                    if (text[0] == '\0') continue;  // Skip if text was only whitespace
+                    child_elem->text.text = arena_strdup(arena, text);
+                    child_elem->text.text_len = strlen(text);
+                }
+            } else {
+                strip_next_leading_space = false;  // Clear flag for non-TEXT_RUN elements
+            }
+            
             // Start a new paragraph if needed
             if (!current_para) {
                 current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
@@ -3444,11 +3516,12 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                     next_para_noindent = false;
                 }
             }
-            // If there's an active font style from declarations like \em, wrap inline content
-            if (active_font_flags != 0) {
+            // If there's an active font style or size from declarations, wrap inline content
+            if (active_font_flags != 0 || active_font_size != FontSizeName::INHERIT) {
                 DocElement* styled_span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
                 styled_span->text.style = DocTextStyle::plain();
                 styled_span->text.style.flags = active_font_flags;
+                styled_span->text.style.font_size_name = active_font_size;
                 doc_append_child(styled_span, child_elem);
                 doc_append_child(current_para, styled_span);
             } else {
@@ -3847,6 +3920,7 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         bool has_children = (elem.childCount() > 0);
         if (!has_children) {
             // No children - this is a font declaration, return marker for parent to handle
+            // Font style markers
             if (tag_eq(tag, "bfseries") || tag_eq(tag, "bf")) return BOLD_MARKER;
             if (tag_eq(tag, "itshape") || tag_eq(tag, "it")) return ITALIC_MARKER;
             if (tag_eq(tag, "em")) return EMPHASIS_MARKER;
@@ -3854,6 +3928,17 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             if (tag_eq(tag, "scshape")) return SMALLCAPS_MARKER;
             if (tag_eq(tag, "slshape")) return SLANTED_MARKER;
             if (tag_eq(tag, "upshape")) return UPRIGHT_MARKER;
+            // Font size markers
+            if (tag_eq(tag, "tiny")) return FONTSIZE_TINY_MARKER;
+            if (tag_eq(tag, "scriptsize")) return FONTSIZE_SCRIPTSIZE_MARKER;
+            if (tag_eq(tag, "footnotesize")) return FONTSIZE_FOOTNOTESIZE_MARKER;
+            if (tag_eq(tag, "small")) return FONTSIZE_SMALL_MARKER;
+            if (tag_eq(tag, "normalsize")) return FONTSIZE_NORMALSIZE_MARKER;
+            if (tag_eq(tag, "large")) return FONTSIZE_LARGE_MARKER;
+            if (tag_eq(tag, "Large")) return FONTSIZE_LARGE2_MARKER;
+            if (tag_eq(tag, "LARGE")) return FONTSIZE_LARGE3_MARKER;
+            if (tag_eq(tag, "huge")) return FONTSIZE_HUGE_MARKER;
+            if (tag_eq(tag, "Huge")) return FONTSIZE_HUGE2_MARKER;
             // Other font commands without children - return empty span (no visible effect)
         }
         return build_text_command(tag, elem, arena, doc);
@@ -5180,7 +5265,7 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
                     // \em toggles between italic and upright
                     bool currently_italic = (group_font_flags & DocTextStyle::ITALIC) != 0;
                     bool currently_upright = (group_font_flags & DocTextStyle::UPRIGHT) != 0;
-                    group_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT);
+                    group_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::UPRIGHT | DocTextStyle::SLANTED);
                     if (currently_italic) {
                         group_font_flags |= DocTextStyle::UPRIGHT;
                     } else if (currently_upright) {
@@ -5188,7 +5273,13 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
                     } else {
                         group_font_flags |= DocTextStyle::ITALIC;
                     }
+                } else if (new_flags == DocTextStyle::ITALIC || new_flags == DocTextStyle::SLANTED ||
+                           new_flags == DocTextStyle::UPRIGHT) {
+                    // Shape commands are mutually exclusive: clear other shapes, then set new one
+                    group_font_flags &= ~(DocTextStyle::ITALIC | DocTextStyle::SLANTED | DocTextStyle::UPRIGHT);
+                    group_font_flags |= new_flags;
                 } else {
+                    // Series (BOLD) and family (MONOSPACE) just add to flags
                     group_font_flags |= new_flags;
                 }
                 need_strip_leading_space = true;  // strip space after font declaration

@@ -933,7 +933,9 @@ static void doc_element_to_html_with_context(DocElement* elem, StrBuf* out,
             if (elem->text.style.has(DocTextStyle::VERBATIM)) {
                 html_escape_append(out, elem->text.text, elem->text.text_len);
             } else {
-                bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
+                // Check both the element's own MONOSPACE flag AND inherited flags from parent spans
+                bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE) ||
+                                    (inherited_flags & DocTextStyle::MONOSPACE) != 0;
                 html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
             }
         }
