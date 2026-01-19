@@ -67,13 +67,23 @@ const char* doc_elem_type_name(DocElemType type) {
 static void build_body_content_with_paragraphs(DocElement* container, const ElementReader& elem,
                                                 Arena* arena, TexDocumentModel* doc);
 
-// Forward declaration needed for build_section_command to process labels in titles
-static void process_label_command(const ElementReader& elem, Arena* arena,
-                                   TexDocumentModel* doc, DocElement* parent);
+// process_label_command is now declared in tex_doc_model_internal.hpp
+// and defined in tex_doc_model_commands.cpp
 
-// Helper to recursively find and process \label commands within an element
-static void process_labels_in_element(const ItemReader& item, Arena* arena,
-                                       TexDocumentModel* doc, DocElement* parent);
+// Forward declarations for helper functions shared across modules
+void process_labels_in_element(const ItemReader& item, Arena* arena,
+                               TexDocumentModel* doc, DocElement* parent);
+bool is_block_element_tag(const char* tag);
+bool is_document_block_tag(const char* tag);
+bool is_special_marker(DocElement* elem);
+bool is_alignment_marker(DocElement* elem);
+ParagraphAlignment marker_to_alignment(DocElement* elem);
+void apply_alignment_to_paragraph(DocElement* para, ParagraphAlignment align);
+bool is_parbreak_item(const ItemReader& item);
+void trim_paragraph_whitespace(DocElement* para, Arena* arena);
+void trim_paragraph_whitespace_ex(DocElement* para, Arena* arena, bool preserve_linebreak_space);
+DocElement* build_inline_content(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
+const char* render_brack_group_to_html(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
 
 // ============================================================================
 // Document Model Methods
@@ -550,13 +560,15 @@ void doc_model_dump(TexDocumentModel* doc, StrBuf* out) {
 #ifndef DOC_MODEL_MINIMAL
 
 // Forward declarations for recursive builders
-static DocElement* build_doc_element(const ItemReader& item, Arena* arena, 
-                                      TexDocumentModel* doc);
-static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
-                                         TexDocumentModel* doc);
+// Non-static: build_doc_element is used by tex_doc_model_commands.cpp
+DocElement* build_doc_element(const ItemReader& item, Arena* arena, 
+                               TexDocumentModel* doc);
+// Forward declaration for build_inline_content - defined later
+// Non-static: used by tex_doc_model_struct.cpp
 
 // Helper to check tag name equality (case-insensitive for safety)
-static bool tag_eq(const char* a, const char* b) {
+// Non-static: used by tex_doc_model_commands.cpp
+bool tag_eq(const char* a, const char* b) {
     if (!a || !b) return false;
     return strcmp(a, b) == 0;
 }
@@ -594,9 +606,10 @@ static const char* transform_text_ligatures(const char* text, Arena* arena) {
 }
 
 // Sentinel pointer values for special markers (used internally during tree building)
-static DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break marker
-static DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
-static DocElement* const NOINDENT_MARKER = (DocElement*)3;  // \noindent command marker
+// Non-static: shared across tex_doc_model_*.cpp files
+DocElement* const PARBREAK_MARKER = (DocElement*)1;  // paragraph break marker
+DocElement* const LINEBREAK_MARKER = (DocElement*)2; // line break marker
+DocElement* const NOINDENT_MARKER = (DocElement*)3;  // \noindent command marker
 
 // Alignment markers for paragraph alignment scoping (\centering, \raggedright, \raggedleft)
 static DocElement* const CENTERING_MARKER = (DocElement*)4;    // \centering command marker
@@ -613,16 +626,11 @@ static DocElement* const SLANTED_MARKER = (DocElement*)11;     // \slshape
 static DocElement* const UPRIGHT_MARKER = (DocElement*)12;     // \upshape
 static DocElement* const EMPHASIS_MARKER = (DocElement*)13;    // \em (toggles italic/upright)
 
-// Alignment state enumeration for paragraph building
-enum class ParagraphAlignment : uint8_t {
-    NONE = 0,       // No explicit alignment (default)
-    CENTERING,      // \centering - center alignment
-    RAGGEDRIGHT,    // \raggedright - left alignment (ragged right)
-    RAGGEDLEFT      // \raggedleft - right alignment (ragged left)
-};
+// ParagraphAlignment is now defined in tex_doc_model_internal.hpp
 
 // Check if a marker is an alignment marker
-static bool is_alignment_marker(DocElement* elem) {
+// Non-static: used by tex_doc_model_struct.cpp
+bool is_alignment_marker(DocElement* elem) {
     return elem == CENTERING_MARKER || elem == RAGGEDRIGHT_MARKER || elem == RAGGEDLEFT_MARKER;
 }
 
@@ -634,13 +642,15 @@ static bool is_font_marker(DocElement* elem) {
 }
 
 // Check if a pointer is any special marker (not a real DocElement pointer)
-static bool is_special_marker(DocElement* elem) {
+// Non-static: used by tex_doc_model_struct.cpp
+bool is_special_marker(DocElement* elem) {
     return elem == PARBREAK_MARKER || elem == LINEBREAK_MARKER || elem == NOINDENT_MARKER || 
            is_alignment_marker(elem) || is_font_marker(elem);
 }
 
 // Get alignment from marker
-static ParagraphAlignment marker_to_alignment(DocElement* elem) {
+// Non-static: used by tex_doc_model_struct.cpp
+ParagraphAlignment marker_to_alignment(DocElement* elem) {
     if (elem == CENTERING_MARKER) return ParagraphAlignment::CENTERING;
     if (elem == RAGGEDRIGHT_MARKER) return ParagraphAlignment::RAGGEDRIGHT;
     if (elem == RAGGEDLEFT_MARKER) return ParagraphAlignment::RAGGEDLEFT;
@@ -671,7 +681,8 @@ static DocElement* wrap_in_font_style(DocElement* elem, unsigned int font_flags,
 }
 
 // Apply alignment to paragraph flags
-static void apply_alignment_to_paragraph(DocElement* para, ParagraphAlignment align) {
+// Non-static: used by tex_doc_model_struct.cpp
+void apply_alignment_to_paragraph(DocElement* para, ParagraphAlignment align) {
     if (!para) return;
     // Clear existing alignment flags
     para->flags &= ~(DocElement::FLAG_CENTERED | DocElement::FLAG_FLUSH_LEFT | DocElement::FLAG_FLUSH_RIGHT);
@@ -690,8 +701,7 @@ static void apply_alignment_to_paragraph(DocElement* para, ParagraphAlignment al
     }
 }
 
-// Forward declaration for is_block_element_tag (defined later)
-static bool is_block_element_tag(const char* tag);
+// Forward declarations already at top of file - remove duplicate
 
 // Helper to check if an element contains block elements (center, lists, etc.)
 // This is used to detect when a paragraph element needs special handling
@@ -758,7 +768,8 @@ static bool contains_alignment_commands(const ElementReader& elem) {
 }
 
 // Check if an item is a paragraph break marker (parbreak symbol or \par command)
-static bool is_parbreak_item(const ItemReader& item) {
+// Non-static: used by tex_doc_model_struct.cpp
+bool is_parbreak_item(const ItemReader& item) {
     // Symbol "parbreak" (from paragraph_break in grammar)
     if (item.isSymbol()) {
         const char* sym = item.cstring();
@@ -822,7 +833,8 @@ static FontSizeName get_font_size_cmd(const char* text) {
 }
 
 // Extract text content from an item (recursively collects all text)
-static const char* extract_text_content(const ItemReader& item, Arena* arena) {
+// Non-static: used by tex_doc_model_commands.cpp
+const char* extract_text_content(const ItemReader& item, Arena* arena) {
     if (item.isString()) {
         const char* str = item.cstring();
         if (str) {
@@ -931,15 +943,16 @@ static const char* extract_math_source(const ElementReader& elem, Arena* arena) 
 }
 
 // Forward declaration for render_brack_group_to_html
-static DocElement* build_doc_element(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
+DocElement* build_doc_element(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
 
-// Forward declaration for inline ref handling
-static DocElement* build_ref_command(const ElementReader& elem, Arena* arena, TexDocumentModel* doc);
+// Forward declaration for inline ref handling - now in tex_doc_model_commands.cpp
+// DocElement* build_ref_command(const ElementReader& elem, Arena* arena, TexDocumentModel* doc);
 
 // Helper to recursively find and process \label commands within an element
 // This is used to find labels inside section titles, figure captions, etc.
-static void process_labels_in_element(const ItemReader& item, Arena* arena,
-                                       TexDocumentModel* doc, DocElement* parent) {
+// Non-static: used by tex_doc_model_struct.cpp
+void process_labels_in_element(const ItemReader& item, Arena* arena,
+                               TexDocumentModel* doc, DocElement* parent) {
     if (!item.isElement()) return;
     
     ElementReader elem = item.asElement();
@@ -1197,7 +1210,8 @@ static bool is_font_declaration_tag(const char* tag) {
 // Render brack_group content to HTML string
 // Used for custom item labels like \item[\itshape text]
 // Handles font declarations that affect following text
-static const char* render_brack_group_to_html(const ItemReader& item, Arena* arena, TexDocumentModel* doc) {
+// Non-static: used by tex_doc_model_struct.cpp
+const char* render_brack_group_to_html(const ItemReader& item, Arena* arena, TexDocumentModel* doc) {
     StrBuf* buf = strbuf_new();
     
     if (item.isElement()) {
@@ -1439,168 +1453,21 @@ static DocElement* build_text_command(const char* cmd_name, const ElementReader&
     return span;
 }
 
-// Build a HEADING element from section command
-static DocElement* build_section_command(const char* cmd_name, const ElementReader& elem,
-                                          Arena* arena, TexDocumentModel* doc) {
-    log_debug("build_section_command: cmd_name='%s'", cmd_name);
-    DocElement* heading = doc_alloc_element(arena, DocElemType::HEADING);
-    
-    // Determine level from command name
-    if (tag_eq(cmd_name, "part")) {
-        heading->heading.level = 0;
-    } else if (tag_eq(cmd_name, "chapter")) {
-        heading->heading.level = 1;
-    } else if (tag_eq(cmd_name, "section")) {
-        heading->heading.level = 2;
-    } else if (tag_eq(cmd_name, "subsection")) {
-        heading->heading.level = 3;
-    } else if (tag_eq(cmd_name, "subsubsection")) {
-        heading->heading.level = 4;
-    } else if (tag_eq(cmd_name, "paragraph")) {
-        heading->heading.level = 5;
-    } else if (tag_eq(cmd_name, "subparagraph")) {
-        heading->heading.level = 6;
-    } else {
-        heading->heading.level = 2; // default to section
-    }
-    
-    // First pass: check for starred version
-    auto first_iter = elem.children();
-    ItemReader first_child;
-    bool has_star = false;
-    
-    while (first_iter.next(&first_child)) {
-        if (first_child.isElement()) {
-            ElementReader child_elem = first_child.asElement();
-            const char* tag = child_elem.tagName();
-            if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
-                has_star = true;
-                break;
-            }
-        }
-    }
-    
-    // Generate ID and number for non-starred sections
-    if (has_star) {
-        heading->flags |= DocElement::FLAG_STARRED;
-    } else {
-        heading->flags |= DocElement::FLAG_NUMBERED;
-        
-        // Generate global section ID (sec-1, sec-2, sec-3, etc.)
-        doc->section_id_counter++;
-        char id_buf[32];
-        snprintf(id_buf, sizeof(id_buf), "sec-%d", doc->section_id_counter);
-        size_t id_len = strlen(id_buf);
-        char* id_str = (char*)arena_alloc(arena, id_len + 1);
-        memcpy(id_str, id_buf, id_len + 1);
-        heading->heading.label = id_str;  // Store as label so render uses it as id
-        
-        // Generate section number for display
-        switch (heading->heading.level) {
-            case 1: doc->chapter_num++; 
-                    doc->section_num = 0; 
-                    break;
-            case 2: doc->section_num++;
-                    doc->subsection_num = 0;
-                    break;
-            case 3: doc->subsection_num++; break;
-        }
-        
-        // Format number string
-        char num_buf[64];
-        switch (heading->heading.level) {
-            case 1:
-                snprintf(num_buf, sizeof(num_buf), "%d", doc->chapter_num);
-                break;
-            case 2:
-                if (doc->chapter_num > 0) {
-                    snprintf(num_buf, sizeof(num_buf), "%d.%d", 
-                             doc->chapter_num, doc->section_num);
-                } else {
-                    snprintf(num_buf, sizeof(num_buf), "%d", doc->section_num);
-                }
-                break;
-            case 3:
-                if (doc->chapter_num > 0) {
-                    snprintf(num_buf, sizeof(num_buf), "%d.%d.%d",
-                             doc->chapter_num, doc->section_num, doc->subsection_num);
-                } else {
-                    snprintf(num_buf, sizeof(num_buf), "%d.%d", 
-                             doc->section_num, doc->subsection_num);
-                }
-                break;
-            default:
-                num_buf[0] = '\0';
-        }
-        
-        if (num_buf[0]) {
-            size_t len = strlen(num_buf);
-            char* num = (char*)arena_alloc(arena, len + 1);
-            memcpy(num, num_buf, len + 1);
-            heading->heading.number = num;
-        }
-        
-        // Set current ref context for any \label commands in the title
-        doc->current_ref_id = heading->heading.label;
-        doc->current_ref_text = heading->heading.number;
-    }
-    
-    // Second pass: extract title and process labels
-    // Check for title attribute first (parser may output as attribute)
-    if (elem.has_attr("title")) {
-        ItemReader title_item = elem.get_attr("title");
-        heading->heading.title = extract_text_content(title_item, arena);
-        // Also process labels in the title
-        if (title_item.isElement()) {
-            process_labels_in_element(title_item, arena, doc, heading);
-        }
-    }
-    
-    // Check for title in children AND process any label elements
-    auto iter = elem.children();
-    ItemReader child;
-    
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* tag = child_elem.tagName();
-            if (tag_eq(tag, "star") || tag_eq(tag, "*")) {
-                // Already handled
-            } else if (tag && tag_eq(tag, "label")) {
-                // Direct label child - process it with the heading as parent
-                log_debug("build_section_command: found direct label child");
-                process_label_command(child_elem, arena, doc, heading);
-            } else if (!heading->heading.title &&
-                       (tag_eq(tag, "curly_group") || tag_eq(tag, "title") || 
-                        tag_eq(tag, "brack_group") || tag_eq(tag, "text") || 
-                        tag_eq(tag, "arg"))) {
-                // Extract title text (only if not already set from attribute)
-                heading->heading.title = extract_text_content(child, arena);
-                // Process any labels inside the title group
-                process_labels_in_element(child, arena, doc, heading);
-            }
-        } else if (child.isString() && !heading->heading.title) {
-            // Direct string child is the title
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0 && text[0] != '\n') {
-                size_t len = strlen(text);
-                char* title = (char*)arena_alloc(arena, len + 1);
-                memcpy(title, text, len + 1);
-                heading->heading.title = title;
-            }
-        }
-    }
-    
-    // Note: Don't clear current_ref_id/current_ref_text here
-    // Labels appearing after \section should still associate with this section
-    // The context will be overwritten when the next section is processed
-    
-    return heading;
-}
+// ============================================================================
+// Structural Builders - now in tex_doc_model_struct.cpp
+// ============================================================================
+// The following functions are implemented in tex_doc_model_struct.cpp:
+// - build_section_command
+// - build_list_environment (and helpers: build_list_item, process_list_content)
+// - build_table_environment (and helpers: get_column_alignment, count_columns_from_spec)
+// - build_blockquote_environment
+// - build_alignment_environment (and helper: build_alignment_content)
+// - build_code_block_environment (and helper: collect_text_recursive)
 
 // Build inline content (text runs, styled spans, etc.)
-static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
-                                         TexDocumentModel* doc) {
+// Non-static: used by tex_doc_model_struct.cpp
+DocElement* build_inline_content(const ItemReader& item, Arena* arena,
+                                  TexDocumentModel* doc) {
     if (item.isString()) {
         const char* text = item.cstring();
         if (text && strlen(text) > 0) {
@@ -2426,8 +2293,7 @@ static DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     return result;
 }
 
-// Forward declaration for trim_paragraph_whitespace
-static void trim_paragraph_whitespace(DocElement* para, Arena* arena);
+// Forward declaration for trim_paragraph_whitespace - now non-static, declared at top
 
 // Try to apply a diacritic command to the next child in sequence
 // Returns true if diacritic was applied, false otherwise
@@ -2568,53 +2434,17 @@ static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
 // ============================================================================
 // Phase D: List and Table Environment Builders
 // ============================================================================
-
-// Forward declaration for recursive builder
-static DocElement* build_doc_element(const ItemReader& item, Arena* arena, 
-                                      TexDocumentModel* doc);
-
-// Build a list item element
-static DocElement* build_list_item(const ElementReader& item_elem, Arena* arena,
-                                    TexDocumentModel* doc, ListType list_type) {
-    DocElement* li = doc_alloc_element(arena, DocElemType::LIST_ITEM);
-    
-    // For description lists, extract label from optional argument
-    if (list_type == ListType::DESCRIPTION) {
-        // Look for label child
-        auto iter = item_elem.children();
-        ItemReader child;
-        while (iter.next(&child)) {
-            if (child.isElement()) {
-                ElementReader child_elem = child.asElement();
-                const char* child_tag = child_elem.tagName();
-                if (child_tag && (tag_eq(child_tag, "label") || tag_eq(child_tag, "optional"))) {
-                    li->list_item.label = extract_text_content(child, arena);
-                    continue;
-                }
-            }
-            // Build content
-            DocElement* content_elem = build_doc_element(child, arena, doc);
-            if (content_elem) {
-                doc_append_child(li, content_elem);
-            }
-        }
-    } else {
-        // Process all children as content
-        auto iter = item_elem.children();
-        ItemReader child;
-        while (iter.next(&child)) {
-            DocElement* content_elem = build_doc_element(child, arena, doc);
-            if (content_elem) {
-                doc_append_child(li, content_elem);
-            }
-        }
-    }
-    
-    return li;
-}
+// Structural builders are now in tex_doc_model_struct.cpp:
+// - build_list_item, process_list_content, build_list_environment
+// - get_column_alignment, count_columns_from_spec, build_table_environment
+// - build_blockquote_environment
+// - build_alignment_content, build_alignment_environment
+// - collect_text_recursive, build_code_block_environment
+// ============================================================================
 
 // Helper to check if a tag is a block element (list, alignment, etc.)
-static bool is_block_element_tag(const char* tag) {
+// Non-static: used by tex_doc_model_struct.cpp
+bool is_block_element_tag(const char* tag) {
     if (!tag) return false;
     return tag_eq(tag, "itemize") || tag_eq(tag, "enumerate") || tag_eq(tag, "description") ||
            tag_eq(tag, "center") || tag_eq(tag, "quote") || tag_eq(tag, "quotation") ||
@@ -2623,7 +2453,8 @@ static bool is_block_element_tag(const char* tag) {
 
 // Helper to check if a tag is a document-level block (section, environment, etc.)
 // These should not be wrapped in TEXT_SPAN
-static bool is_document_block_tag(const char* tag) {
+// Non-static: used by tex_doc_model_struct.cpp
+bool is_document_block_tag(const char* tag) {
     if (!tag) return false;
     // Sectioning
     if (tag_eq(tag, "section") || tag_eq(tag, "subsection") || tag_eq(tag, "subsubsection") ||
@@ -2638,486 +2469,6 @@ static bool is_document_block_tag(const char* tag) {
     }
     // Other block-level
     return is_block_element_tag(tag);
-}
-
-// Helper to process items from a content container
-// Each list item can contain multiple paragraphs separated by parbreaks
-static void process_list_content(DocElement* list, const ItemReader& container,
-                                  Arena* arena, TexDocumentModel* doc, int& item_number) {
-    if (!container.isElement()) return;
-    
-    bool list_centered = (list->flags & DocElement::FLAG_CENTERED) != 0;
-    ElementReader elem = container.asElement();
-    DocElement* current_item = nullptr;
-    DocElement* current_para = nullptr;  // Current paragraph within item
-    bool at_item_start = true;  // For trimming leading whitespace
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            // Handle centering command - set list flag for subsequent items
-            if (child_tag && tag_eq(child_tag, "centering")) {
-                list->flags |= DocElement::FLAG_CENTERED;
-                list_centered = true;
-                continue;
-            }
-            
-            if (child_tag && tag_eq(child_tag, "item")) {
-                // Finalize current paragraph if exists
-                if (current_para && current_para->first_child && current_item) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    doc_append_child(current_item, current_para);
-                }
-                // Save previous item if exists
-                if (current_item && current_item->first_child) {
-                    doc_append_child(list, current_item);
-                }
-                // Start new item
-                current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
-                if (list_centered) {
-                    current_item->flags |= DocElement::FLAG_CENTERED;
-                }
-                // Start first paragraph in item
-                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                if (list_centered) {
-                    current_para->flags |= DocElement::FLAG_CENTERED;
-                }
-                at_item_start = true;
-                
-                // First, check if item has custom label (brack_group)
-                bool has_brack_group = false;
-                auto peek_iter = child_elem.children();
-                ItemReader peek_child;
-                while (peek_iter.next(&peek_child)) {
-                    if (peek_child.isElement()) {
-                        ElementReader peek_elem = peek_child.asElement();
-                        const char* peek_tag = peek_elem.tagName();
-                        if (peek_tag && tag_eq(peek_tag, "brack_group")) {
-                            has_brack_group = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // Assign item number only if no custom label (enumerate only)
-                if (list->list.list_type == ListType::ENUMERATE && !has_brack_group) {
-                    current_item->list_item.item_number = item_number++;
-                }
-                
-                // Process item children for brack_group labels
-                auto item_iter = child_elem.children();
-                ItemReader item_child;
-                while (item_iter.next(&item_child)) {
-                    if (item_child.isElement()) {
-                        ElementReader item_child_elem = item_child.asElement();
-                        const char* item_child_tag = item_child_elem.tagName();
-                        if (item_child_tag && tag_eq(item_child_tag, "brack_group")) {
-                            // Custom label via \item[label]
-                            current_item->list_item.has_custom_label = true;
-                            current_item->list_item.label = extract_text_content(item_child, arena);
-                            current_item->list_item.html_label = render_brack_group_to_html(item_child, arena, doc);
-                        } else {
-                            DocElement* content = build_doc_element(item_child, arena, doc);
-                            if (content) {
-                                doc_append_child(current_para, content);
-                                at_item_start = false;
-                            }
-                        }
-                    }
-                }
-            } else if (child_tag && (tag_eq(child_tag, "paragraph") || 
-                                     tag_eq(child_tag, "text_mode") ||
-                                     tag_eq(child_tag, "content"))) {
-                // Recurse into nested content containers
-                process_list_content(list, child, arena, doc, item_number);
-            } else if (child_tag && is_block_element_tag(child_tag) && current_item) {
-                // Block element (nested list, etc.) - close current paragraph first
-                if (current_para && current_para->first_child) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    doc_append_child(current_item, current_para);
-                }
-                // Add block element directly to item (not to paragraph)
-                DocElement* content = build_doc_element(child, arena, doc);
-                if (content && !is_special_marker(content)) {
-                    doc_append_child(current_item, content);
-                }
-                // Start new paragraph for any following content
-                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                at_item_start = true;
-            } else if (current_item && current_para) {
-                // Add content to current paragraph
-                DocElement* content = build_doc_element(child, arena, doc);
-                if (content && !is_special_marker(content)) {
-                    doc_append_child(current_para, content);
-                    at_item_start = false;
-                } else if (content == NOINDENT_MARKER) {
-                    // Apply noindent to current paragraph
-                    current_para->flags |= DocElement::FLAG_NOINDENT;
-                } else if (is_alignment_marker(content)) {
-                    // Apply alignment to current paragraph
-                    apply_alignment_to_paragraph(current_para, marker_to_alignment(content));
-                }
-            }
-        } else if (child.isSymbol()) {
-            // Check for parbreak symbol
-            String* sym = child.asSymbol();
-            if (sym && strcmp(sym->chars, "parbreak") == 0 && current_item && current_para) {
-                // Finalize current paragraph and start a new one
-                if (current_para->first_child) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    doc_append_child(current_item, current_para);
-                }
-                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                at_item_start = true;  // Trim leading whitespace in new paragraph
-            }
-        } else if (child.isString() && current_item && current_para) {
-            // String content for current paragraph
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0) {
-                // Skip whitespace-only strings at start of item/paragraph
-                const char* p = text;
-                if (at_item_start) {
-                    while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
-                }
-                if (*p) {
-                    DocElement* text_elem = doc_create_text_cstr(arena, at_item_start ? p : text, DocTextStyle::plain());
-                    if (text_elem) {
-                        doc_append_child(current_para, text_elem);
-                        at_item_start = false;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Finalize last paragraph
-    if (current_para && current_para->first_child && current_item) {
-        trim_paragraph_whitespace(current_para, arena);
-        doc_append_child(current_item, current_para);
-    }
-    // Add last item
-    if (current_item && current_item->first_child) {
-        doc_append_child(list, current_item);
-    }
-}
-
-// Build a list environment (itemize, enumerate, description)
-static DocElement* build_list_environment(const char* env_name, const ElementReader& elem,
-                                           Arena* arena, TexDocumentModel* doc) {
-    DocElement* list = doc_alloc_element(arena, DocElemType::LIST);
-    
-    // Determine list type
-    if (tag_eq(env_name, "itemize")) {
-        list->list.list_type = ListType::ITEMIZE;
-    } else if (tag_eq(env_name, "enumerate")) {
-        list->list.list_type = ListType::ENUMERATE;
-        list->list.start_num = 1;
-    } else if (tag_eq(env_name, "description")) {
-        list->list.list_type = ListType::DESCRIPTION;
-    }
-    
-    int item_number = list->list.start_num;
-    bool list_centered = false;  // Track if \centering command was encountered
-    
-    // Process children, looking for \item commands
-    // Items may be directly under the environment or nested inside paragraph elements
-    auto iter = elem.children();
-    ItemReader child;
-    DocElement* current_item = nullptr;
-    DocElement* current_para = nullptr;
-    bool at_item_start = true;
-    
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (!child_tag) continue;
-            
-            if (tag_eq(child_tag, "item")) {
-                // Finalize current paragraph if exists
-                if (current_para && current_para->first_child && current_item) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    doc_append_child(current_item, current_para);
-                }
-                // Save previous item if exists
-                if (current_item && current_item->first_child) {
-                    doc_append_child(list, current_item);
-                }
-                // Start new item
-                current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
-                if (list_centered) {
-                    current_item->flags |= DocElement::FLAG_CENTERED;
-                }
-                // Start first paragraph in item
-                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                if (list_centered) {
-                    current_para->flags |= DocElement::FLAG_CENTERED;
-                }
-                at_item_start = true;
-                
-                // First, check if item has custom label (brack_group)
-                bool has_brack_group = false;
-                auto peek_iter = child_elem.children();
-                ItemReader peek_child;
-                while (peek_iter.next(&peek_child)) {
-                    if (peek_child.isElement()) {
-                        ElementReader peek_elem = peek_child.asElement();
-                        const char* peek_tag = peek_elem.tagName();
-                        if (peek_tag && tag_eq(peek_tag, "brack_group")) {
-                            has_brack_group = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // Assign item number only if no custom label (enumerate only)
-                if (list->list.list_type == ListType::ENUMERATE && !has_brack_group) {
-                    current_item->list_item.item_number = item_number++;
-                }
-                
-                // Process item children (e.g., brack_group for labels)
-                auto item_iter = child_elem.children();
-                ItemReader item_child;
-                while (item_iter.next(&item_child)) {
-                    if (item_child.isElement()) {
-                        ElementReader item_child_elem = item_child.asElement();
-                        const char* item_child_tag = item_child_elem.tagName();
-                        if (item_child_tag && tag_eq(item_child_tag, "brack_group")) {
-                            // Custom label via \item[label]
-                            current_item->list_item.has_custom_label = true;
-                            current_item->list_item.label = extract_text_content(item_child, arena);
-                            current_item->list_item.html_label = render_brack_group_to_html(item_child, arena, doc);
-                        } else {
-                            DocElement* content = build_doc_element(item_child, arena, doc);
-                            if (content) {
-                                doc_append_child(current_para, content);
-                                at_item_start = false;
-                            }
-                        }
-                    }
-                }
-            } else if (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "text_mode") ||
-                       tag_eq(child_tag, "content")) {
-                // Items may be inside paragraph - process recursively
-                process_list_content(list, child, arena, doc, item_number);
-            } else if (tag_eq(child_tag, "centering")) {
-                // \centering command inside list - set flag to center all subsequent items
-                list_centered = true;
-                list->flags |= DocElement::FLAG_CENTERED;
-            } else if (is_block_element_tag(child_tag) && current_item) {
-                // Block element (nested list, etc.) - close current paragraph first
-                if (current_para && current_para->first_child) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    doc_append_child(current_item, current_para);
-                }
-                // Add block element directly to item
-                DocElement* content = build_doc_element(child, arena, doc);
-                if (content) {
-                    doc_append_child(current_item, content);
-                }
-                // Start new paragraph for any following content
-                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                at_item_start = true;
-            } else if (current_item && current_para) {
-                // Add element content to current paragraph
-                DocElement* content = build_doc_element(child, arena, doc);
-                if (content) {
-                    doc_append_child(current_para, content);
-                    at_item_start = false;
-                }
-            }
-        } else if (child.isSymbol()) {
-            // Check for parbreak
-            String* sym = child.asSymbol();
-            if (sym && strcmp(sym->chars, "parbreak") == 0 && current_item && current_para) {
-                if (current_para->first_child) {
-                    trim_paragraph_whitespace(current_para, arena);
-                    doc_append_child(current_item, current_para);
-                }
-                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                at_item_start = true;
-            }
-        } else if (child.isString() && current_item && current_para) {
-            // String content for current paragraph
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0) {
-                const char* p = text;
-                if (at_item_start) {
-                    while (*p && (*p == ' ' || *p == '\t' || *p == '\n')) p++;
-                }
-                if (*p) {
-                    DocElement* text_elem = doc_create_text_cstr(arena, at_item_start ? p : text, DocTextStyle::plain());
-                    if (text_elem) {
-                        doc_append_child(current_para, text_elem);
-                        at_item_start = false;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Finalize last paragraph
-    if (current_para && current_para->first_child && current_item) {
-        trim_paragraph_whitespace(current_para, arena);
-        doc_append_child(current_item, current_para);
-    }
-    // Add last item
-    if (current_item && current_item->first_child) {
-        doc_append_child(list, current_item);
-    }
-    
-    // Always return the list, even if empty (supports empty itemize/enumerate)
-    return list;
-}
-
-// Parse column alignment from column spec (e.g., "l|c|r")
-static char get_column_alignment(const char* spec, int col_index) {
-    if (!spec) return 'l';
-    
-    int col = 0;
-    for (const char* p = spec; *p; p++) {
-        if (*p == 'l' || *p == 'c' || *p == 'r' || *p == 'p') {
-            if (col == col_index) {
-                return *p;
-            }
-            col++;
-        }
-        // Skip modifiers like |, @{}, etc.
-    }
-    return 'l'; // default to left
-}
-
-// Count columns from column spec
-static int count_columns_from_spec(const char* spec) {
-    if (!spec) return 0;
-    
-    int count = 0;
-    for (const char* p = spec; *p; p++) {
-        if (*p == 'l' || *p == 'c' || *p == 'r' || *p == 'p') {
-            count++;
-        }
-    }
-    return count;
-}
-
-// Build a table environment
-static DocElement* build_table_environment(const char* env_name, const ElementReader& elem,
-                                            Arena* arena, TexDocumentModel* doc) {
-    DocElement* table = doc_alloc_element(arena, DocElemType::TABLE);
-    
-    // Look for column spec in first argument
-    auto iter = elem.children();
-    ItemReader child;
-    
-    // First pass: find column spec
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            if (child_tag && (tag_eq(child_tag, "column_spec") || tag_eq(child_tag, "arg"))) {
-                table->table.column_spec = extract_text_content(child, arena);
-                table->table.num_columns = count_columns_from_spec(table->table.column_spec);
-                break;
-            }
-        }
-    }
-    
-    // Second pass: process rows
-    DocElement* current_row = nullptr;
-    DocElement* current_cell = nullptr;
-    
-    iter = elem.children();
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (!child_tag) continue;
-            
-            // Row separator (\\)
-            if (tag_eq(child_tag, "row_sep") || tag_eq(child_tag, "newline") || 
-                tag_eq(child_tag, "\\\\")) {
-                if (current_cell) {
-                    if (!current_row) {
-                        current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
-                    }
-                    doc_append_child(current_row, current_cell);
-                    current_cell = nullptr;
-                }
-                if (current_row && current_row->first_child) {
-                    doc_append_child(table, current_row);
-                }
-                current_row = nullptr;
-                continue;
-            }
-            
-            // Cell separator (&)
-            if (tag_eq(child_tag, "cell_sep") || tag_eq(child_tag, "ampersand") ||
-                tag_eq(child_tag, "&")) {
-                if (current_cell) {
-                    if (!current_row) {
-                        current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
-                    }
-                    doc_append_child(current_row, current_cell);
-                }
-                current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
-                continue;
-            }
-            
-            // Skip column spec
-            if (tag_eq(child_tag, "column_spec") || tag_eq(child_tag, "arg")) {
-                continue;
-            }
-        }
-        
-        // Content for current cell
-        if (!current_row) {
-            current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
-        }
-        if (!current_cell) {
-            current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
-        }
-        
-        DocElement* content = build_doc_element(child, arena, doc);
-        if (content) {
-            doc_append_child(current_cell, content);
-        }
-    }
-    
-    // Append final row/cell
-    if (current_cell) {
-        if (!current_row) {
-            current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
-        }
-        doc_append_child(current_row, current_cell);
-    }
-    if (current_row && current_row->first_child) {
-        doc_append_child(table, current_row);
-    }
-    
-    return table->first_child ? table : nullptr;
-}
-
-// Build blockquote environment (quote, quotation)
-static DocElement* build_blockquote_environment(const ElementReader& elem,
-                                                 Arena* arena, TexDocumentModel* doc) {
-    DocElement* quote = doc_alloc_element(arena, DocElemType::BLOCKQUOTE);
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        DocElement* child_elem = build_doc_element(child, arena, doc);
-        if (child_elem) {
-            doc_append_child(quote, child_elem);
-        }
-    }
-    
-    return quote->first_child ? quote : nullptr;
 }
 
 // Helper function to trim leading/trailing whitespace from a string
@@ -3229,7 +2580,8 @@ static bool paragraph_has_visible_content(DocElement* para) {
 // - Optionally: trim/collapse leading whitespace from text elements that follow SPACE (linebreak)
 // If preserve_linebreak_space is true, multiple whitespace after linebreak is collapsed to one space
 // If false, all leading whitespace after linebreak is trimmed (like quote/quotation)
-static void trim_paragraph_whitespace_ex(DocElement* para, Arena* arena, bool preserve_linebreak_space) {
+// Non-static: used by tex_doc_model_struct.cpp
+void trim_paragraph_whitespace_ex(DocElement* para, Arena* arena, bool preserve_linebreak_space) {
     if (!para || !para->first_child) return;
     
     // Trim leading whitespace from first text element
@@ -3342,172 +2694,9 @@ static void trim_paragraph_whitespace_ex(DocElement* para, Arena* arena, bool pr
 }
 
 // Wrapper for the common case (default: trim all leading whitespace after linebreak)
-static void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
+// Non-static: used by tex_doc_model_struct.cpp
+void trim_paragraph_whitespace(DocElement* para, Arena* arena) {
     trim_paragraph_whitespace_ex(para, arena, false);
-}
-
-// Build alignment environment content with proper paragraph splitting
-// Environment structure is: center -> paragraph -> [content with parbreaks]
-// env_name is used to determine whitespace behavior (verse preserves leading space after \\)
-static void build_alignment_content(DocElement* container, const ElementReader& elem,
-                                     Arena* arena, TexDocumentModel* doc, const char* env_name) {
-    // Verse environment preserves leading space after linebreak, others don't
-    bool preserve_linebreak_space = env_name && tag_eq(env_name, "verse");
-    
-    // First, look for paragraph children and process them
-    auto iter = elem.children();
-    ItemReader child;
-    
-    while (iter.next(&child)) {
-        if (!child.isElement()) continue;
-        
-        ElementReader child_elem = child.asElement();
-        const char* tag = child_elem.tagName();
-        
-        // Handle "paragraph" elements by processing their contents with parbreak detection
-        if (tag && tag_eq(tag, "paragraph")) {
-            DocElement* current_para = nullptr;
-            
-            auto para_iter = child_elem.children();
-            ItemReader para_child;
-            
-            while (para_iter.next(&para_child)) {
-                // Check for parbreak
-                if (is_parbreak_item(para_child)) {
-                    if (current_para && current_para->first_child) {
-                        trim_paragraph_whitespace_ex(current_para, arena, preserve_linebreak_space);
-                        doc_append_child(container, current_para);
-                    }
-                    current_para = nullptr;
-                    continue;
-                }
-                
-                // Check if this is a block element (e.g., itemize, enumerate, etc.)
-                if (para_child.isElement()) {
-                    ElementReader para_child_elem = para_child.asElement();
-                    const char* para_child_tag = para_child_elem.tagName();
-                    if (para_child_tag && is_block_element_tag(para_child_tag)) {
-                        // Finalize current paragraph before block element
-                        if (current_para && current_para->first_child) {
-                            trim_paragraph_whitespace_ex(current_para, arena, preserve_linebreak_space);
-                            doc_append_child(container, current_para);
-                            current_para = nullptr;
-                        }
-                        // Build block element directly
-                        DocElement* block_elem = build_doc_element(para_child, arena, doc);
-                        if (block_elem && !is_special_marker(block_elem)) {
-                            doc_append_child(container, block_elem);
-                        }
-                        continue;
-                    }
-                }
-                
-                // Start a new paragraph if needed
-                if (!current_para) {
-                    current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
-                }
-                
-                // Build the inline content
-                DocElement* inline_elem = build_inline_content(para_child, arena, doc);
-                if (inline_elem) {
-                    doc_append_child(current_para, inline_elem);
-                }
-            }
-            
-            // Finalize the last paragraph
-            if (current_para && current_para->first_child) {
-                trim_paragraph_whitespace_ex(current_para, arena, preserve_linebreak_space);
-                doc_append_child(container, current_para);
-            }
-        } else {
-            // Non-paragraph children - process directly
-            DocElement* child_doc = build_doc_element(child, arena, doc);
-            if (child_doc && !is_special_marker(child_doc)) {
-                doc_append_child(container, child_doc);
-            }
-        }
-    }
-}
-
-// Build alignment environment (center, flushleft, flushright)
-// These produce a div with appropriate alignment class, containing paragraphs
-static DocElement* build_alignment_environment(const char* env_name, const ElementReader& elem,
-                                                Arena* arena, TexDocumentModel* doc) {
-    // Create a container div with the alignment
-    DocElement* container = doc_alloc_element(arena, DocElemType::ALIGNMENT);
-    
-    // Store the environment name for rendering
-    size_t len = strlen(env_name);
-    char* name_copy = (char*)arena_alloc(arena, len + 1);
-    memcpy(name_copy, env_name, len + 1);
-    container->alignment.env_name = name_copy;
-    
-    // Set alignment flag
-    if (tag_eq(env_name, "center")) {
-        container->flags |= DocElement::FLAG_CENTERED;
-    } else if (tag_eq(env_name, "flushleft")) {
-        container->flags |= DocElement::FLAG_FLUSH_LEFT;
-    } else if (tag_eq(env_name, "flushright")) {
-        container->flags |= DocElement::FLAG_FLUSH_RIGHT;
-    }
-    
-    // Process children with paragraph splitting on parbreaks
-    build_alignment_content(container, elem, arena, doc, env_name);
-    
-    return container->first_child ? container : nullptr;
-}
-
-// Build code block environment (verbatim, lstlisting)
-// Helper to collect all text content recursively
-static void collect_text_recursive(const ItemReader& item, StrBuf* buf) {
-    if (item.isString()) {
-        const char* text = item.cstring();
-        if (text) {
-            strbuf_append_str(buf, text);
-        }
-    } else if (item.isElement()) {
-        ElementReader elem = item.asElement();
-        const char* tag = elem.tagName();
-        // Skip optional arguments
-        if (tag && tag_eq(tag, "optional")) {
-            return;
-        }
-        // Recurse into children
-        auto iter = elem.children();
-        ItemReader child;
-        while (iter.next(&child)) {
-            collect_text_recursive(child, buf);
-        }
-    }
-}
-
-static DocElement* build_code_block_environment(const char* env_name, const ElementReader& elem,
-                                                 Arena* arena, TexDocumentModel* doc) {
-    (void)doc; // unused
-    (void)env_name; // unused
-    DocElement* code = doc_alloc_element(arena, DocElemType::CODE_BLOCK);
-    code->text.text = nullptr;
-    code->text.text_len = 0;
-    code->text.style = DocTextStyle::plain();
-    
-    // Collect all text content from children recursively
-    StrBuf* buf = strbuf_new_cap(256);
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        collect_text_recursive(child, buf);
-    }
-    
-    if (buf->length > 0) {
-        char* text_copy = (char*)arena_alloc(arena, buf->length + 1);
-        memcpy(text_copy, buf->str, buf->length + 1);
-        code->text.text = text_copy;
-        code->text.text_len = buf->length;
-    }
-    
-    strbuf_free(buf);
-    return code;
 }
 
 // ============================================================================
@@ -3515,7 +2704,8 @@ static DocElement* build_code_block_environment(const char* env_name, const Elem
 // ============================================================================
 
 // Parse dimension value (e.g., "10cm", "100pt", "0.5\textwidth")
-static float parse_dimension(const char* value, Arena* arena) {
+// Non-static: used by tex_doc_model_commands.cpp
+float parse_dimension(const char* value, Arena* arena) {
     (void)arena;
     if (!value) return 0.0f;
     
@@ -3554,7 +2744,8 @@ static float parse_dimension(const char* value, Arena* arena) {
 }
 
 // Parse graphics options like [width=10cm, height=5cm]
-static void parse_graphics_options(const char* opts, float* width, float* height, Arena* arena) {
+// Non-static: used by tex_doc_model_commands.cpp
+void parse_graphics_options(const char* opts, float* width, float* height, Arena* arena) {
     if (!opts) return;
     
     *width = 0.0f;
@@ -3588,362 +2779,18 @@ static void parse_graphics_options(const char* opts, float* width, float* height
     }
 }
 
-// Build image command (\includegraphics)
-static DocElement* build_image_command(const ElementReader& elem, Arena* arena,
-                                        TexDocumentModel* doc) {
-    (void)doc;
-    DocElement* img = doc_alloc_element(arena, DocElemType::IMAGE);
-    img->image.src = nullptr;
-    img->image.width = 0.0f;
-    img->image.height = 0.0f;
-    img->image.alt = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag) {
-                // Optional arguments contain width/height
-                if (tag_eq(child_tag, "optional") || tag_eq(child_tag, "brack_group")) {
-                    const char* opts = extract_text_content(child, arena);
-                    parse_graphics_options(opts, &img->image.width, &img->image.height, arena);
-                }
-                // Required argument is the file path
-                else if (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg") ||
-                         tag_eq(child_tag, "path")) {
-                    img->image.src = extract_text_content(child, arena);
-                }
-            }
-        } else if (child.isString()) {
-            // Could be the path directly
-            if (!img->image.src) {
-                img->image.src = child.cstring();
-            }
-        }
-    }
-    
-    return img;
-}
-
-// Build href command (\href{url}{text})
-static DocElement* build_href_command(const ElementReader& elem, Arena* arena,
-                                       TexDocumentModel* doc) {
-    (void)doc;
-    DocElement* link = doc_alloc_element(arena, DocElemType::LINK);
-    link->link.href = nullptr;
-    link->link.link_text = nullptr;
-    
-    int arg_index = 0;
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
-                const char* text = extract_text_content(child, arena);
-                if (arg_index == 0) {
-                    link->link.href = text;  // first arg is URL
-                } else {
-                    link->link.link_text = text;  // second arg is display text
-                }
-                arg_index++;
-            }
-        } else if (child.isString()) {
-            // Direct string children (tree-sitter output format)
-            const char* text = child.cstring();
-            if (text && strlen(text) > 0 && text[0] != '\n') {
-                // Copy the string
-                size_t len = strlen(text);
-                char* str = (char*)arena_alloc(arena, len + 1);
-                memcpy(str, text, len + 1);
-                
-                if (arg_index == 0) {
-                    link->link.href = str;  // first string is URL
-                } else {
-                    link->link.link_text = str;  // second string is display text
-                }
-                arg_index++;
-            }
-        }
-    }
-    
-    return link;
-}
-
-// Build url command (\url{...})
-static DocElement* build_url_command(const ElementReader& elem, Arena* arena,
-                                      TexDocumentModel* doc) {
-    (void)doc;
-    DocElement* link = doc_alloc_element(arena, DocElemType::LINK);
-    link->link.href = nullptr;
-    link->link.link_text = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
-                const char* url = extract_text_content(child, arena);
-                link->link.href = url;
-                link->link.link_text = url;  // Display URL as link text
-            }
-        } else if (child.isString()) {
-            const char* url = child.cstring();
-            if (url) {
-                link->link.href = url;
-                link->link.link_text = url;
-            }
-        }
-    }
-    
-    return link;
-}
-
-// Build label command (\label{...})
-static void process_label_command(const ElementReader& elem, Arena* arena,
-                                   TexDocumentModel* doc, DocElement* parent) {
-    const char* label = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
-                label = extract_text_content(child, arena);
-            }
-        } else if (child.isString()) {
-            label = child.cstring();
-        }
-    }
-    
-    if (label) {
-        // Use current referable context if available
-        const char* ref_id = doc->current_ref_id;
-        const char* ref_text = doc->current_ref_text;
-        
-        // If parent is a heading, use its label (sec-N) and number
-        if (parent && parent->type == DocElemType::HEADING) {
-            ref_id = parent->heading.label;  // sec-N
-            ref_text = parent->heading.number;  // e.g., "1" or "2.3"
-        }
-        
-        log_debug("process_label_command: label='%s', ref_id='%s', ref_text='%s', parent=%s",
-                  label, ref_id ? ref_id : "(null)", ref_text ? ref_text : "(null)",
-                  parent ? doc_elem_type_name(parent->type) : "(null)");
-        
-        doc->add_label_with_id(label, ref_id, ref_text);
-    }
-}
-
-// Build ref command (\ref{...})
-static DocElement* build_ref_command(const ElementReader& elem, Arena* arena,
-                                      TexDocumentModel* doc) {
-    DocElement* ref = doc_alloc_element(arena, DocElemType::CROSS_REF);
-    ref->ref.ref_label = nullptr;
-    ref->ref.ref_text = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
-                ref->ref.ref_label = extract_text_content(child, arena);
-            }
-        } else if (child.isString()) {
-            ref->ref.ref_label = child.cstring();
-        }
-    }
-    
-    // Add to pending refs for two-pass resolution
-    // The reference will be resolved after the entire document is built
-    if (ref->ref.ref_label) {
-        doc->add_pending_ref(ref);
-    }
-    
-    return ref;
-}
-
-// Build figure environment
-static DocElement* build_figure_environment(const ElementReader& elem, Arena* arena,
-                                             TexDocumentModel* doc) {
-    DocElement* fig = doc_alloc_element(arena, DocElemType::FIGURE);
-    fig->flags |= DocElement::FLAG_NUMBERED;
-    
-    // Track caption and label for this figure
-    const char* caption_text = nullptr;
-    const char* label = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (!child.isElement()) continue;
-        
-        ElementReader child_elem = child.asElement();
-        const char* child_tag = child_elem.tagName();
-        
-        if (!child_tag) continue;
-        
-        // Handle caption
-        if (tag_eq(child_tag, "caption")) {
-            auto caption_iter = child_elem.children();
-            ItemReader caption_child;
-            while (caption_iter.next(&caption_child)) {
-                if (caption_child.isElement()) {
-                    ElementReader cc_elem = caption_child.asElement();
-                    const char* cc_tag = cc_elem.tagName();
-                    if (cc_tag && (tag_eq(cc_tag, "curly_group") || tag_eq(cc_tag, "arg"))) {
-                        caption_text = extract_text_content(caption_child, arena);
-                    }
-                }
-            }
-        }
-        // Handle label
-        else if (tag_eq(child_tag, "label")) {
-            auto label_iter = child_elem.children();
-            ItemReader label_child;
-            while (label_iter.next(&label_child)) {
-                if (label_child.isElement()) {
-                    ElementReader lc_elem = label_child.asElement();
-                    const char* lc_tag = lc_elem.tagName();
-                    if (lc_tag && (tag_eq(lc_tag, "curly_group") || tag_eq(lc_tag, "arg"))) {
-                        label = extract_text_content(label_child, arena);
-                    }
-                } else if (label_child.isString()) {
-                    label = label_child.cstring();
-                }
-            }
-        }
-        // Handle centering (skip)
-        else if (tag_eq(child_tag, "centering")) {
-            fig->flags |= DocElement::FLAG_CENTERED;
-        }
-        // Handle includegraphics
-        else if (tag_eq(child_tag, "includegraphics")) {
-            DocElement* img = build_image_command(child_elem, arena, doc);
-            if (img) {
-                doc_append_child(fig, img);
-            }
-        }
-        // Other content
-        else {
-            DocElement* content = build_doc_element(child, arena, doc);
-            if (content) {
-                doc_append_child(fig, content);
-            }
-        }
-    }
-    
-    // Add caption element if present
-    if (caption_text) {
-        // Create figcaption structure
-        DocElement* caption_elem = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
-        caption_elem->text.style = DocTextStyle::plain();
-        
-        // Format caption with figure number
-        // Note: In a full implementation, we'd track figure numbering per chapter
-        static int figure_num = 0;
-        figure_num++;
-        
-        char* formatted = (char*)arena_alloc(arena, strlen(caption_text) + 32);
-        sprintf(formatted, "Figure %d: %s", figure_num, caption_text);
-        caption_elem->text.text = formatted;
-        caption_elem->text.text_len = strlen(formatted);
-        
-        doc_append_child(fig, caption_elem);
-        
-        // Register label if present
-        if (label) {
-            char num_str[16];
-            sprintf(num_str, "%d", figure_num);
-            doc->add_label(label, num_str, -1);
-        }
-    }
-    
-    return fig;
-}
-
-// Build footnote command (\footnote{...})
-static DocElement* build_footnote_command(const ElementReader& elem, Arena* arena,
-                                           TexDocumentModel* doc) {
-    (void)doc;
-    DocElement* fn = doc_alloc_element(arena, DocElemType::FOOTNOTE);
-    
-    static int footnote_num = 0;
-    footnote_num++;
-    fn->footnote.footnote_number = footnote_num;
-    
-    // Process footnote content
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
-                DocElement* content = build_doc_element(child, arena, doc);
-                if (content) {
-                    doc_append_child(fn, content);
-                }
-            }
-        }
-    }
-    
-    return fn;
-}
-
-// Build cite command (\cite{...})
-static DocElement* build_cite_command(const ElementReader& elem, Arena* arena,
-                                       TexDocumentModel* doc) {
-    DocElement* cite = doc_alloc_element(arena, DocElemType::CITATION);
-    cite->citation.key = nullptr;
-    cite->citation.cite_text = nullptr;
-    
-    auto iter = elem.children();
-    ItemReader child;
-    while (iter.next(&child)) {
-        if (child.isElement()) {
-            ElementReader child_elem = child.asElement();
-            const char* child_tag = child_elem.tagName();
-            
-            if (child_tag && (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg"))) {
-                cite->citation.key = extract_text_content(child, arena);
-            }
-        } else if (child.isString()) {
-            cite->citation.key = child.cstring();
-        }
-    }
-    
-    // Try to resolve citation
-    if (cite->citation.key) {
-        const char* resolved = doc->resolve_cite(cite->citation.key);
-        if (resolved) {
-            cite->citation.cite_text = resolved;
-        } else {
-            // Unresolved citation - format as [key]
-            size_t len = strlen(cite->citation.key) + 3;
-            char* text = (char*)arena_alloc(arena, len);
-            sprintf(text, "[%s]", cite->citation.key);
-            cite->citation.cite_text = text;
-        }
-    }
-    
-    return cite;
-}
+// ============================================================================
+// Command Builders - Now in tex_doc_model_commands.cpp
+// ============================================================================
+// The following functions have been moved to tex_doc_model_commands.cpp:
+// - build_image_command
+// - build_href_command
+// - build_url_command
+// - process_label_command
+// - build_ref_command
+// - build_figure_environment
+// - build_footnote_command
+// - build_cite_command
 
 // Helper function to check if an element should be collected into a paragraph
 // vs treated as a block element (like sections, lists, etc.)
@@ -4786,8 +3633,9 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
 }
 
 // Main builder - converts LaTeX AST item to DocElement
-static DocElement* build_doc_element(const ItemReader& item, Arena* arena,
-                                      TexDocumentModel* doc) {
+// Non-static: used by tex_doc_model_commands.cpp
+DocElement* build_doc_element(const ItemReader& item, Arena* arena,
+                               TexDocumentModel* doc) {
     // Check for paragraph break marker (parbreak symbol)
     if (is_parbreak_item(item)) {
         return PARBREAK_MARKER;
