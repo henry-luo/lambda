@@ -1,7 +1,7 @@
 // render_dvi.cpp - Render LaTeX to DVI format
 //
 // Renders LaTeX documents to DVI (Device Independent) format
-// using the TeX typesetting pipeline.
+// using the unified TeX typesetting pipeline.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,19 +17,21 @@ extern "C" {
 #include "../lambda/input/input.hpp"
 #include "../lambda/tex/tex_node.hpp"
 #include "../lambda/tex/tex_tfm.hpp"
+#include "../lambda/tex/tex_linebreak.hpp"
 #include "../lambda/tex/tex_pagebreak.hpp"
 #include "../lambda/tex/tex_dvi_out.hpp"
 #include "../lambda/tex/tex_latex_bridge.hpp"
+#include "../lambda/tex/tex_document_model.hpp"
 
 /**
- * Render LaTeX file to DVI format
+ * Render LaTeX file to DVI format using the unified pipeline
  *
  * @param latex_file Path to input LaTeX file
  * @param dvi_file Path to output DVI file
  * @return 0 on success, non-zero on error
  */
 int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
-    log_debug("render_latex_to_dvi called with latex_file='%s', dvi_file='%s'",
+    log_debug("render_latex_to_dvi (unified) called with latex_file='%s', dvi_file='%s'",
               latex_file, dvi_file);
 
     auto total_start = std::chrono::high_resolution_clock::now();
@@ -68,126 +70,98 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
         pool_destroy(pool);
         return 1;
     }
+    size_t latex_len = strlen(latex_content);
 
     auto step1_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 1 - Read LaTeX file: %.1fms",
              std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
 
-    // Step 2: Parse LaTeX with tree-sitter
+    // Step 2: Create arena and font manager
     auto step2_start = std::chrono::high_resolution_clock::now();
-
-    String* type_str = (String*)pool_alloc(pool, sizeof(String) + 6);
-    type_str->len = 5;
-    strcpy(type_str->chars, "latex");
-
-    Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
-    free(latex_content);
-
-    if (!latex_input || !latex_input->root.item) {
-        log_error("Failed to parse LaTeX file: %s", latex_filepath);
-        pool_destroy(pool);
-        return 1;
-    }
-
-    auto step2_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 2 - Parse LaTeX: %.1fms",
-             std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
-
-    // Step 3: Set up TeX typesetting context
-    auto step3_start = std::chrono::high_resolution_clock::now();
 
     Arena* arena = arena_create_default(pool);
     if (!arena) {
         log_error("Failed to create arena for TeX typesetting");
+        free(latex_content);
         pool_destroy(pool);
         return 1;
     }
 
-    // Create TFM font manager
     tex::TFMFontManager* fonts = tex::create_font_manager(arena);
 
-    // Create LaTeX context with default document class
+    auto step2_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 2 - Setup arena/fonts: %.1fms",
+             std::chrono::duration<double, std::milli>(step2_end - step2_start).count());
+
+    // Step 3: Parse LaTeX using unified document model
+    auto step3_start = std::chrono::high_resolution_clock::now();
+
+    tex::TexDocumentModel* doc_model = tex::doc_model_from_string(
+        latex_content, latex_len, arena, fonts
+    );
+    free(latex_content);
+
+    if (!doc_model || !doc_model->root) {
+        log_error("Failed to parse LaTeX document: %s", latex_filepath);
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+
+    auto step3_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 3 - Parse to document model: %.1fms",
+             std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+
+    // Step 4: Typeset with line and page breaking using unified pipeline
+    auto step4_start = std::chrono::high_resolution_clock::now();
+
+    // Create LaTeX context
     tex::LaTeXContext ctx = tex::LaTeXContext::create(arena, fonts, "article");
 
     // Set page dimensions to match LaTeX article class defaults
-    // LaTeX uses textheight=550pt, textwidth=345pt for US Letter paper
     ctx.doc_ctx.page_width = 612.0f;   // 8.5 inches
-    ctx.doc_ctx.page_height = 795.0f;  // 11 inches (TeX default is 794.97pt)
-    ctx.doc_ctx.margin_left = 72.0f;   // 1 inch (but textwidth differs)
+    ctx.doc_ctx.page_height = 795.0f;  // 11 inches
+    ctx.doc_ctx.margin_left = 72.0f;   // 1 inch
     ctx.doc_ctx.margin_right = 72.0f;
-    ctx.doc_ctx.margin_top = 72.0f;    // Simplified - TeX has complex top margin
+    ctx.doc_ctx.margin_top = 72.0f;
     ctx.doc_ctx.margin_bottom = 72.0f;
-    ctx.doc_ctx.text_width = 345.0f;   // Match LaTeX article class default
-    ctx.doc_ctx.text_height = 550.0f;  // Match LaTeX article class default
+    ctx.doc_ctx.text_width = 345.0f;   // LaTeX article class default
+    ctx.doc_ctx.text_height = 550.0f;  // LaTeX article class default
 
-    auto step3_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 3 - Setup context: %.1fms",
-             std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
+    // Configure line breaking parameters
+    tex::LineBreakParams line_params = tex::LineBreakParams::defaults();
+    line_params.hsize = ctx.doc_ctx.text_width;
 
-    // Step 4: Typeset document
-    auto step4_start = std::chrono::high_resolution_clock::now();
+    // Configure page breaking parameters
+    tex::PageBreakParams page_params = tex::PageBreakParams::defaults();
+    page_params.page_height = ctx.doc_ctx.text_height;
 
-    tex::TexNode* document = tex::typeset_latex_document(latex_input->root, ctx);
+    // Use unified typesetting pipeline
+    tex::TexNode* document = tex::doc_model_typeset(
+        doc_model, arena, ctx, line_params, page_params
+    );
+
     if (!document) {
-        log_error("Failed to typeset LaTeX document");
+        log_error("Failed to typeset document using unified pipeline");
         arena_destroy(arena);
         pool_destroy(pool);
         return 1;
     }
 
     auto step4_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 4 - Typeset document: %.1fms",
+    log_info("[TIMING] Step 4 - Typeset (unified pipeline): %.1fms",
              std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
 
-    // Step 5: Break into pages
+    // Step 5: Write to DVI file
     auto step5_start = std::chrono::high_resolution_clock::now();
 
-    tex::PageList pages = tex::break_latex_into_pages(document, ctx);
-    if (pages.page_count == 0) {
-        log_error("Failed to break document into pages");
-        arena_destroy(arena);
-        pool_destroy(pool);
-        return 1;
-    }
-
-    log_info("[DVI Pipeline] Document has %d pages", pages.page_count);
-
-    auto step5_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 5 - Page break: %.1fms",
-             std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
-
-    // Step 6: Write to DVI file
-    auto step6_start = std::chrono::high_resolution_clock::now();
-
-    // Convert PageList to PageContent array for DVI writing
-    tex::PageContent* page_contents = (tex::PageContent*)arena_alloc(
-        arena, pages.page_count * sizeof(tex::PageContent)
-    );
-    if (!page_contents) {
-        log_error("Failed to allocate page content array");
-        arena_destroy(arena);
-        pool_destroy(pool);
-        return 1;
-    }
-
-    for (int i = 0; i < pages.page_count; i++) {
-        page_contents[i].vlist = pages.pages[i];
-        page_contents[i].height = 0.0f;  // Will be calculated by DVI writer
-        page_contents[i].depth = 0.0f;
-        page_contents[i].break_penalty = 0;
-        page_contents[i].marks_first = nullptr;
-        page_contents[i].marks_top = nullptr;
-        page_contents[i].marks_bot = nullptr;
-        page_contents[i].inserts = nullptr;
-    }
-
     tex::DVIParams dvi_params = tex::DVIParams::defaults();
-    dvi_params.comment = "Lambda Script TeX Output";
+    dvi_params.comment = "Lambda Script TeX Output (Unified Pipeline)";
 
-    bool success = tex::write_dvi_file(
+    // Use write_dvi_page for single-page output (or the document VList)
+    bool success = tex::write_dvi_page(
         dvi_file,
-        page_contents,
-        pages.page_count,
+        document,
         fonts,
         arena,
         dvi_params
@@ -200,9 +174,9 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
         return 1;
     }
 
-    auto step6_end = std::chrono::high_resolution_clock::now();
-    log_info("[TIMING] Step 6 - Write DVI: %.1fms",
-             std::chrono::duration<double, std::milli>(step6_end - step6_start).count());
+    auto step5_end = std::chrono::high_resolution_clock::now();
+    log_info("[TIMING] Step 5 - Write DVI: %.1fms",
+             std::chrono::duration<double, std::milli>(step5_end - step5_start).count());
 
     // Cleanup
     arena_destroy(arena);
@@ -212,6 +186,6 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
     log_info("[TIMING] render_latex_to_dvi total: %.1fms",
              std::chrono::duration<double, std::milli>(total_end - total_start).count());
 
-    log_info("Successfully rendered LaTeX to DVI: %s", dvi_file);
+    log_info("Successfully rendered LaTeX to DVI (unified pipeline): %s", dvi_file);
     return 0;
 }

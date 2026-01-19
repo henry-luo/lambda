@@ -2653,6 +2653,44 @@
                         "icon": "📝"
                     },
                     {
+                        "source": "test/test_unified_dvi_gtest.cpp",
+                        "name": "Unified DVI Pipeline Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
+                        ],
+                        "binary": "test_unified_dvi_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp",
+                            "lambda/tex/tex_latex_bridge.cpp",
+                            "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_dvi_out.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
+                            "lambda/tex/dvi_parser.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "🔄"
+                    },
+                    {
                         "source": "test/test_latex_dvi_compare_gtest.cpp",
                         "name": "DVI Compare Tests",
                         "dependencies": [],
@@ -2755,103 +2793,6 @@
                         "icon": "📐"
                     },
                     {
-                        "source": "test/test_tex_macro_gtest.cpp",
-                        "name": "TeX Macro Processor Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_macro_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_macro.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "🔧"
-                    },
-                    {
-                        "source": "test/test_tex_expander_gtest.cpp",
-                        "name": "TeX Expander Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_expander_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_catcode.cpp",
-                            "lambda/tex/tex_token.cpp",
-                            "lambda/tex/tex_tokenizer.cpp",
-                            "lambda/tex/tex_expander.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "🔄"
-                    },
-                    {
-                        "source": "test/test_tex_digester_gtest.cpp",
-                        "name": "TeX Digester Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_digester_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_catcode.cpp",
-                            "lambda/tex/tex_token.cpp",
-                            "lambda/tex/tex_tokenizer.cpp",
-                            "lambda/tex/tex_expander.cpp",
-                            "lambda/tex/tex_digester.cpp",
-                            "lambda/tex/tex_package_json.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "🍽️"
-                    },
-                    {
-                        "source": "test/test_tex_conditional_gtest.cpp",
-                        "name": "TeX Conditional Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_conditional_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_macro.cpp",
-                            "lambda/tex/tex_conditional.cpp"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "❓"
-                    },
-                    {
                         "source": "test/test_tex_document_model_gtest.cpp",
                         "name": "TeX Document Model Tests",
                         "dependencies": [],
@@ -2880,36 +2821,6 @@
                         "icon": "📄"
                     },
                     {
-                        "source": "test/test_tex_integration_gtest.cpp",
-                        "name": "TeX Integration Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_integration_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_catcode.cpp",
-                            "lambda/tex/tex_token.cpp",
-                            "lambda/tex/tex_tokenizer.cpp",
-                            "lambda/tex/tex_expander.cpp",
-                            "lambda/tex/tex_digester.cpp",
-                            "lambda/tex/tex_package_json.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "🔗"
-                    },
-                    {
                         "source": "test/test_latexml_compare_gtest.cpp",
                         "name": "LaTeXML Comparison Tests",
                         "dependencies": [
@@ -2927,14 +2838,6 @@
                             "lambda/tex/tex_document_model.cpp",
                             "lambda/tex/tex_latex_bridge.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_catcode.cpp",
-                            "lambda/tex/tex_token.cpp",
-                            "lambda/tex/tex_tokenizer.cpp",
-                            "lambda/tex/tex_expander.cpp",
-                            "lambda/tex/tex_digester.cpp",
-                            "lambda/tex/tex_macro.cpp",
-                            "lambda/tex/tex_conditional.cpp",
-                            "lambda/tex/tex_package_json.cpp",
                             "lambda/tex/tex_node.cpp",
                             "lambda/tex/tex_tfm.cpp",
                             "lambda/tex/tex_hlist.cpp",
