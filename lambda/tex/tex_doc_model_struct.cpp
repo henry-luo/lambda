@@ -198,12 +198,76 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     continue;
                 }
                 
-                // Handle paragraph container
+                // Handle paragraph container - items may be inside
+                // The AST often wraps list content in a paragraph element
                 if (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "par")) {
-                    // Process content inside paragraph
+                    // Process content inside paragraph, looking for items
                     auto para_iter = child_elem.children();
                     ItemReader para_child;
                     while (para_iter.next(&para_child)) {
+                        if (para_child.isElement()) {
+                            ElementReader pc_elem = para_child.asElement();
+                            const char* pc_tag = pc_elem.tagName();
+                            
+                            // Check for \item inside paragraph
+                            if (pc_tag && (tag_eq(pc_tag, "item") || tag_eq(pc_tag, "item_command"))) {
+                                // Finalize previous item
+                                if (current_item && current_item->first_child) {
+                                    trim_paragraph_whitespace(current_item, arena);
+                                    doc_append_child(list, current_item);
+                                }
+                                
+                                // Create new item
+                                current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+                                current_item->list_item.label = nullptr;
+                                current_item->list_item.html_label = nullptr;
+                                current_item->list_item.item_number = 0;
+                                current_item->list_item.has_custom_label = false;
+                                
+                                if (list_type == ListType::ENUMERATE) {
+                                    item_number++;
+                                    current_item->list_item.item_number = item_number;
+                                }
+                                
+                                // Check for optional label [...]
+                                auto item_iter = pc_elem.children();
+                                ItemReader item_child;
+                                while (item_iter.next(&item_child)) {
+                                    if (item_child.isElement()) {
+                                        ElementReader ic_elem = item_child.asElement();
+                                        const char* ic_tag = ic_elem.tagName();
+                                        if (ic_tag && (tag_eq(ic_tag, "brack_group") || 
+                                                      tag_eq(ic_tag, "optional"))) {
+                                            current_item->list_item.has_custom_label = true;
+                                            current_item->list_item.html_label = render_brack_group_to_html(item_child, arena, doc);
+                                            current_item->list_item.label = extract_text_content(item_child, arena);
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                            
+                            // Check for nested list inside paragraph
+                            if (pc_tag && (tag_eq(pc_tag, "itemize") || tag_eq(pc_tag, "enumerate") ||
+                                          tag_eq(pc_tag, "description"))) {
+                                DocElement* nested = build_list_environment(pc_tag, pc_elem, arena, doc);
+                                if (nested) {
+                                    if (current_item) {
+                                        doc_append_child(current_item, nested);
+                                    } else {
+                                        current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
+                                        current_item->list_item.label = nullptr;
+                                        current_item->list_item.html_label = nullptr;
+                                        current_item->list_item.item_number = 0;
+                                        current_item->list_item.has_custom_label = false;
+                                        doc_append_child(current_item, nested);
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        
+                        // Other content in paragraph goes to current item
                         if (current_item) {
                             DocElement* content = build_doc_element(para_child, arena, doc);
                             if (content && content != PARBREAK_MARKER) {

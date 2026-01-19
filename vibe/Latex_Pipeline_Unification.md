@@ -186,21 +186,6 @@ enum class DocElemType {
 | `CROSS_REF` | ❌ | Reference text rendering |
 | `LINK` | ❌ | Hyperlink handling |
 
-### 4.4 Key Helper Functions
-
-```cpp
-// Font selection from DocTextStyle (lines 7866-7920)
-static FontSpec doc_style_to_font(const DocTextStyle& style, float base_size_pt, LaTeXContext& ctx);
-
-// Character with TFM metrics (lines 7922-7947)
-static TexNode* make_text_char(Arena* arena, int32_t codepoint, const FontSpec& font, TFMFontManager* fonts);
-
-// Interword glue from TFM (lines 7949-7966)
-static TexNode* make_text_space(Arena* arena, const FontSpec& font, TFMFontManager* fonts);
-```
-
----
-
 ## 5. Output Paths from TexNode
 
 Once `doc_model_to_texnode()` is implemented, all fixed-layout outputs use the same TexNode tree:
@@ -325,9 +310,44 @@ These files have been removed from the codebase:
 
 ---
 
-## 8. Testing
+## 8. Hybrid HTML Output Format
 
-### 8.1 Running Tests
+Lambda's HTML output follows a **hybrid approach** combining the best of latex.js (typography, compactness) and LaTeXML (semantic structure). The output uses semantic HTML5 tags where appropriate.
+
+### 8.1 Design Principles
+
+- **Semantic HTML5**: Use `<strong>`, `<em>`, `<code>` instead of `<span class="bf">`
+- **Compact structure**: Avoid excessive nesting (`<p>` not `<div class="para"><p>`)
+- **Meaningful classes**: `class="itemize"` not `class="ltx_itemize"`
+- **Proper typography**: Ligatures (`ﬁ`), proper dashes (`–`, `—`), Unicode quotes
+- **Working cross-refs**: `<a href="#sec-1">` links that actually navigate
+
+### 8.2 Output Examples
+
+| LaTeX Input | Lambda HTML Output |
+|-------------|-------------------|
+| Document wrapper | `<article class="latex-document">...</article>` |
+| `\textbf{bold}` | `<strong>bold</strong>` |
+| `\textit{italic}` | `<em>italic</em>` |
+| `\texttt{code}` | `<code>code</code>` |
+| `\section{Title}` | `<section class="section"><h2><span class="section-number">1</span> Title</h2>` |
+| `\begin{itemize}` | `<ul class="itemize">` |
+| `\item text` | `<li><p>text</p></li>` |
+| `\begin{quote}` | `<blockquote class="quote">` |
+| `\ref{foo}` | `<a href="#foo">1</a>` |
+| `--` (en-dash) | `–` (U+2013) |
+| `fi` ligature | `ﬁ` (U+FB01) |
+
+### 8.3 Complete Reference
+
+For the full mapping of all LaTeX commands to HTML output, see:
+**[Latex_Html_Mapping.md](Latex_Html_Mapping.md)** — comprehensive tables covering document structure, formatting, lists, typography, diacritics, and special characters.
+
+---
+
+## 9. Testing
+
+### 9.1 Running Tests
 
 ```bash
 # Build all test executables
@@ -379,7 +399,7 @@ static const std::set<std::string> BASELINE_FIXTURES = {
 
 ---
 
-## 9. Debugging
+## 10. Debugging
 
 ### 9.1 Manual conversion testing
 
@@ -392,8 +412,8 @@ static const std::set<std::string> BASELINE_FIXTURES = {
 ```
 ### 9.2 Output parsed AST
 
-```
-# Output parsed AST in Mark format (useful for debugging parser output)
+Output parsed AST in Mark format (useful for debugging parser output)
+```bash
 ./lambda.exe convert input.tex -f latex -t mark -o /tmp/ast.mark
 cat /tmp/ast.mark
 ```
@@ -436,7 +456,7 @@ cat log.txt | grep "your_prefix"
 
 ---
 
-## 10. Outstanding Issues
+## 11. Outstanding Issues
 
 ### 10.1 Extended Test Categories (Not Yet Passing)
 
@@ -470,7 +490,7 @@ cat log.txt | grep "your_prefix"
 
 ---
 
-## 11. Summary
+## 12. Summary
 
 ### Architecture Decisions
 
