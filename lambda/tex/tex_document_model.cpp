@@ -5,6 +5,8 @@
 
 #include "tex_document_model.hpp"
 #include "tex_math_ts.hpp"
+#include "tex_linebreak.hpp"
+#include "tex_pagebreak.hpp"
 #include "lib/log.h"
 #include <cstring>
 #include <cstdio>
@@ -7849,20 +7851,641 @@ TexDocumentModel* doc_model_from_string(const char* latex, size_t len, Arena* ar
 #endif // DOC_MODEL_MINIMAL
 
 // ============================================================================
-// Placeholder for TexNode conversion
-// (To be implemented in Phase B)
+// DocElement to TexNode Conversion (Unified Pipeline)
 // ============================================================================
 
+#ifndef DOC_MODEL_MINIMAL
+
+// Forward declarations for conversion helpers
+static TexNode* convert_text_run(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_text_span(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_paragraph(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_heading(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_list(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_list_item(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_math(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+static TexNode* convert_space(DocElement* elem, Arena* arena, LaTeXContext& ctx);
+
+// Get font spec from DocTextStyle
+static FontSpec doc_style_to_font(const DocTextStyle& style, float base_size_pt, LaTeXContext& ctx) {
+    (void)ctx;  // May be used for font lookup later
+    FontSpec font;
+    
+    // Determine font name based on style flags
+    const char* font_name = "cmr10";  // default roman
+    if (style.has(DocTextStyle::MONOSPACE)) {
+        font_name = "cmtt10";  // typewriter
+    } else if (style.has(DocTextStyle::SANS_SERIF)) {
+        font_name = "cmss10";  // sans-serif
+    } else if (style.has(DocTextStyle::ITALIC) || style.has(DocTextStyle::SLANTED)) {
+        if (style.has(DocTextStyle::BOLD)) {
+            font_name = "cmbx10";  // bold extended (no bold italic in CM)
+        } else {
+            font_name = "cmti10";  // text italic
+        }
+    } else if (style.has(DocTextStyle::BOLD)) {
+        font_name = "cmbx10";  // bold extended
+    } else if (style.has(DocTextStyle::SMALLCAPS)) {
+        font_name = "cmcsc10";  // small caps
+    }
+    
+    // Determine size
+    float size_pt = base_size_pt;
+    if (style.font_size_pt > 0) {
+        size_pt = style.font_size_pt;
+    } else {
+        // Map named sizes to points (based on 10pt base)
+        switch (style.font_size_name) {
+            case FontSizeName::FONT_TINY:         size_pt = 5.0f; break;
+            case FontSizeName::FONT_SCRIPTSIZE:   size_pt = 7.0f; break;
+            case FontSizeName::FONT_FOOTNOTESIZE: size_pt = 8.0f; break;
+            case FontSizeName::FONT_SMALL:        size_pt = 9.0f; break;
+            case FontSizeName::FONT_NORMALSIZE:   size_pt = 10.0f; break;
+            case FontSizeName::FONT_LARGE:        size_pt = 12.0f; break;
+            case FontSizeName::FONT_LARGE2:       size_pt = 14.4f; break;
+            case FontSizeName::FONT_LARGE3:       size_pt = 17.28f; break;
+            case FontSizeName::FONT_HUGE:         size_pt = 20.74f; break;
+            case FontSizeName::FONT_HUGE2:        size_pt = 24.88f; break;
+            default: break;
+        }
+    }
+    
+    font.name = font_name;
+    font.size_pt = size_pt;
+    font.face = nullptr;  // Will be set by TFM lookup
+    font.tfm_index = 0;
+    
+    return font;
+}
+
+// Create a character node with metrics from TFM
+static TexNode* make_text_char(Arena* arena, int32_t codepoint, const FontSpec& font, 
+                                TFMFontManager* fonts) {
+    TexNode* node = make_char(arena, codepoint, font);
+    
+    // Get metrics from TFM if available
+    if (fonts) {
+        TFMFont* tfm = fonts->get_font(font.name);
+        if (tfm && codepoint >= 0 && codepoint <= 127) {
+            float scale = font.size_pt / tfm->design_size;
+            node->width = tfm->char_width(codepoint) * scale;
+            node->height = tfm->char_height(codepoint) * scale;
+            node->depth = tfm->char_depth(codepoint) * scale;
+            node->italic = tfm->char_italic(codepoint) * scale;
+        } else {
+            // Fallback metrics
+            node->width = font.size_pt * 0.5f;
+            node->height = font.size_pt * 0.7f;
+            node->depth = 0;
+            node->italic = 0;
+        }
+    }
+    
+    return node;
+}
+
+// Create interword glue
+static TexNode* make_text_space(Arena* arena, const FontSpec& font, TFMFontManager* fonts) {
+    float space = font.size_pt / 3.0f;       // 1/3 em
+    float stretch = font.size_pt / 6.0f;     // 1/6 em stretch
+    float shrink = font.size_pt / 9.0f;      // 1/9 em shrink
+    
+    if (fonts) {
+        TFMFont* tfm = fonts->get_font(font.name);
+        if (tfm) {
+            float scale = font.size_pt / tfm->design_size;
+            space = tfm->space * scale;
+            stretch = tfm->space_stretch * scale;
+            shrink = tfm->space_shrink * scale;
+        }
+    }
+    
+    Glue g = Glue::flexible(space, stretch, shrink);
+    return make_glue(arena, g, "interword");
+}
+
+// Convert TEXT_RUN to character nodes
+static TexNode* convert_text_run(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem || elem->type != DocElemType::TEXT_RUN) return nullptr;
+    
+    const char* text = elem->text.text;
+    size_t len = elem->text.text_len;
+    if (!text || len == 0) return nullptr;
+    
+    FontSpec font = doc_style_to_font(elem->text.style, 10.0f, ctx);
+    TFMFontManager* fonts = ctx.doc_ctx.fonts;
+    
+    // Create HList to hold characters
+    TexNode* hlist = make_hlist(arena);
+    
+    for (size_t i = 0; i < len; i++) {
+        int32_t cp = (unsigned char)text[i];
+        
+        if (cp == ' ' || cp == '\t') {
+            // Interword space
+            TexNode* space = make_text_space(arena, font, fonts);
+            hlist->append_child(space);
+        } else if (cp == '\n') {
+            // Line break in source - treat as space
+            TexNode* space = make_text_space(arena, font, fonts);
+            hlist->append_child(space);
+        } else {
+            // Regular character
+            TexNode* ch = make_text_char(arena, cp, font, fonts);
+            hlist->append_child(ch);
+        }
+    }
+    
+    return hlist;
+}
+
+// Convert TEXT_SPAN (styled text) to HList
+static TexNode* convert_text_span(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem || elem->type != DocElemType::TEXT_SPAN) return nullptr;
+    
+    // Get font from style
+    FontSpec font = doc_style_to_font(elem->text.style, 10.0f, ctx);
+    
+    // Create HList for span
+    TexNode* hlist = make_hlist(arena);
+    
+    // If there's direct text content
+    if (elem->text.text && elem->text.text_len > 0) {
+        const char* text = elem->text.text;
+        size_t len = elem->text.text_len;
+        TFMFontManager* fonts = ctx.doc_ctx.fonts;
+        
+        for (size_t i = 0; i < len; i++) {
+            int32_t cp = (unsigned char)text[i];
+            if (cp == ' ' || cp == '\t' || cp == '\n') {
+                hlist->append_child(make_text_space(arena, font, fonts));
+            } else {
+                hlist->append_child(make_text_char(arena, cp, font, fonts));
+            }
+        }
+    }
+    
+    // Process children
+    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+        TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+        if (child_node) {
+            hlist->append_child(child_node);
+        }
+    }
+    
+    return hlist;
+}
+
+// Convert PARAGRAPH to HList (before line breaking)
+static TexNode* convert_paragraph(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem || elem->type != DocElemType::PARAGRAPH) return nullptr;
+    
+    // Create HList for paragraph content
+    TexNode* hlist = make_hlist(arena);
+    
+    // Add paragraph indentation unless FLAG_NOINDENT
+    if (!(elem->flags & DocElement::FLAG_NOINDENT)) {
+        float parindent = 20.0f;  // ~1.5em at 10pt
+        TexNode* indent = make_kern(arena, parindent);
+        hlist->append_child(indent);
+    }
+    
+    // Process children (text runs, spans, inline math)
+    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+        TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+        if (child_node) {
+            hlist->append_child(child_node);
+        }
+    }
+    
+    // Add parfillskip (stretchable glue to fill last line)
+    Glue parfillskip = Glue::flexible(0, 1, 0);
+    parfillskip.stretch_order = GlueOrder::Fil;
+    hlist->append_child(make_glue(arena, parfillskip, "parfillskip"));
+    
+    return hlist;
+}
+
+// Convert HEADING to VList with title
+static TexNode* convert_heading(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem || elem->type != DocElemType::HEADING) return nullptr;
+    
+    int level = elem->heading.level;
+    const char* title = elem->heading.title;
+    const char* number = elem->heading.number;
+    
+    // Determine font size based on level
+    float size_pt = 10.0f;
+    switch (level) {
+        case 0: size_pt = 24.88f; break;  // \part
+        case 1: size_pt = 20.74f; break;  // \chapter
+        case 2: size_pt = 14.4f; break;   // \section
+        case 3: size_pt = 12.0f; break;   // \subsection
+        case 4: size_pt = 10.0f; break;   // \subsubsection
+        default: size_pt = 10.0f; break;
+    }
+    
+    // Create font spec for heading (bold)
+    DocTextStyle style = DocTextStyle::plain();
+    style.set(DocTextStyle::BOLD);
+    style.font_size_pt = size_pt;
+    FontSpec font = doc_style_to_font(style, size_pt, ctx);
+    
+    TFMFontManager* fonts = ctx.doc_ctx.fonts;
+    
+    // Create HList for heading text
+    TexNode* hlist = make_hlist(arena);
+    
+    // Add section number if present
+    if (number && !(elem->flags & DocElement::FLAG_STARRED)) {
+        for (const char* p = number; *p; p++) {
+            hlist->append_child(make_text_char(arena, *p, font, fonts));
+        }
+        // Quad space after number
+        Glue quad = Glue::fixed(size_pt);
+        hlist->append_child(make_glue(arena, quad, "quad"));
+    }
+    
+    // Add title text
+    if (title) {
+        for (const char* p = title; *p; p++) {
+            if (*p == ' ') {
+                hlist->append_child(make_text_space(arena, font, fonts));
+            } else {
+                hlist->append_child(make_text_char(arena, *p, font, fonts));
+            }
+        }
+    }
+    
+    // Wrap in VList with spacing
+    TexNode* vlist = make_vlist(arena);
+    
+    // Add space before heading
+    float above_skip = size_pt * 2.0f;  // 2em above
+    vlist->append_child(make_glue(arena, Glue::flexible(above_skip, above_skip/3, 0), "abovesectionskip"));
+    
+    // Add the heading line
+    vlist->append_child(hlist);
+    
+    // Add space after heading
+    float below_skip = size_pt * 1.0f;  // 1em below
+    vlist->append_child(make_glue(arena, Glue::flexible(below_skip, 0, 0), "belowsectionskip"));
+    
+    return vlist;
+}
+
+// Convert LIST to VList
+static TexNode* convert_list(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem || elem->type != DocElemType::LIST) return nullptr;
+    
+    TexNode* vlist = make_vlist(arena);
+    
+    // Add some vertical space before list
+    vlist->append_child(make_glue(arena, Glue::flexible(6.0f, 2.0f, 1.0f), "listskip"));
+    
+    // Process list items
+    int item_num = elem->list.start_num;
+    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->type == DocElemType::LIST_ITEM) {
+            // Set item number for enumerate
+            if (elem->list.list_type == ListType::ENUMERATE) {
+                child->list_item.item_number = item_num++;
+            }
+            
+            TexNode* item_node = convert_list_item(child, arena, ctx);
+            if (item_node) {
+                vlist->append_child(item_node);
+            }
+        }
+    }
+    
+    // Add some vertical space after list
+    vlist->append_child(make_glue(arena, Glue::flexible(6.0f, 2.0f, 1.0f), "listskip"));
+    
+    return vlist;
+}
+
+// Convert LIST_ITEM to HList with label
+static TexNode* convert_list_item(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem || elem->type != DocElemType::LIST_ITEM) return nullptr;
+    
+    TexNode* hlist = make_hlist(arena);
+    FontSpec font = doc_style_to_font(DocTextStyle::plain(), 10.0f, ctx);
+    TFMFontManager* fonts = ctx.doc_ctx.fonts;
+    
+    // Add left margin indent
+    float indent = 20.0f + (elem->parent ? elem->parent->list.nesting_level * 15.0f : 0);
+    hlist->append_child(make_kern(arena, indent));
+    
+    // Add item label
+    if (elem->list_item.has_custom_label && elem->list_item.label) {
+        // Custom label text
+        for (const char* p = elem->list_item.label; *p; p++) {
+            hlist->append_child(make_text_char(arena, *p, font, fonts));
+        }
+    } else if (elem->parent && elem->parent->list.list_type == ListType::ENUMERATE) {
+        // Numbered item
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d.", elem->list_item.item_number);
+        for (const char* p = buf; *p; p++) {
+            hlist->append_child(make_text_char(arena, *p, font, fonts));
+        }
+    } else {
+        // Bullet (use bullet character or dash)
+        hlist->append_child(make_text_char(arena, 0x2022, font, fonts)); // bullet
+    }
+    
+    // Space after label
+    hlist->append_child(make_glue(arena, Glue::fixed(6.0f), "labelsep"));
+    
+    // Process item content
+    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+        TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+        if (child_node) {
+            hlist->append_child(child_node);
+        }
+    }
+    
+    return hlist;
+}
+
+// Convert MATH_* - pass through existing TexNode
+static TexNode* convert_math(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    (void)arena; (void)ctx;
+    if (!elem) return nullptr;
+    
+    // Math elements already have a pre-typeset TexNode
+    if (elem->math.node) {
+        return elem->math.node;
+    }
+    
+    log_debug("doc_model: math element has no pre-typeset node");
+    return nullptr;
+}
+
+// Convert SPACE elements
+static TexNode* convert_space(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    (void)ctx;
+    if (!elem || elem->type != DocElemType::SPACE) return nullptr;
+    
+    if (elem->space.is_linebreak) {
+        // Line break - force break penalty
+        return make_penalty(arena, PENALTY_FORCE_BREAK);
+    }
+    
+    if (elem->space.vspace > 0) {
+        // Vertical space
+        return make_glue(arena, Glue::fixed(elem->space.vspace), "vspace");
+    }
+    
+    if (elem->space.hspace > 0) {
+        // Horizontal space
+        return make_glue(arena, Glue::fixed(elem->space.hspace), "hspace");
+    }
+    
+    // Default space
+    return make_glue(arena, Glue::fixed(3.0f), "space");
+}
+
+// Main dispatcher for doc_element_to_texnode
+TexNode* doc_element_to_texnode(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
+    if (!elem) return nullptr;
+    
+    switch (elem->type) {
+        case DocElemType::TEXT_RUN:
+            return convert_text_run(elem, arena, ctx);
+            
+        case DocElemType::TEXT_SPAN:
+            return convert_text_span(elem, arena, ctx);
+            
+        case DocElemType::PARAGRAPH:
+            return convert_paragraph(elem, arena, ctx);
+            
+        case DocElemType::HEADING:
+            return convert_heading(elem, arena, ctx);
+            
+        case DocElemType::LIST:
+            return convert_list(elem, arena, ctx);
+            
+        case DocElemType::LIST_ITEM:
+            return convert_list_item(elem, arena, ctx);
+            
+        case DocElemType::MATH_INLINE:
+        case DocElemType::MATH_DISPLAY:
+        case DocElemType::MATH_EQUATION:
+        case DocElemType::MATH_ALIGN:
+            return convert_math(elem, arena, ctx);
+            
+        case DocElemType::SPACE:
+            return convert_space(elem, arena, ctx);
+            
+        case DocElemType::DOCUMENT:
+        case DocElemType::SECTION: {
+            // Container types - create VList of children
+            TexNode* vlist = make_vlist(arena);
+            for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+                TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+                if (child_node) {
+                    vlist->append_child(child_node);
+                    
+                    // Add paragraph skip between block elements
+                    if (child->type == DocElemType::PARAGRAPH && 
+                        child->next_sibling && 
+                        child->next_sibling->type == DocElemType::PARAGRAPH) {
+                        Glue parskip = Glue::flexible(6.0f, 3.0f, 1.0f);
+                        vlist->append_child(make_glue(arena, parskip, "parskip"));
+                    }
+                }
+            }
+            return vlist;
+        }
+        
+        case DocElemType::BLOCKQUOTE:
+        case DocElemType::ALIGNMENT: {
+            // Block with indentation
+            TexNode* vlist = make_vlist(arena);
+            
+            // Add left margin
+            float margin = 20.0f;
+            vlist->append_child(make_kern(arena, margin));
+            
+            for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+                TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+                if (child_node) {
+                    vlist->append_child(child_node);
+                }
+            }
+            
+            return vlist;
+        }
+        
+        case DocElemType::FOOTNOTE:
+        case DocElemType::CITATION:
+        case DocElemType::CROSS_REF:
+        case DocElemType::LINK:
+            // Inline references - create simple text
+            // TODO: Implement proper formatting
+            return nullptr;
+            
+        case DocElemType::TABLE:
+        case DocElemType::TABLE_ROW:
+        case DocElemType::TABLE_CELL:
+        case DocElemType::FIGURE:
+        case DocElemType::IMAGE:
+        case DocElemType::CODE_BLOCK:
+        case DocElemType::ABSTRACT:
+        case DocElemType::TITLE_BLOCK:
+            // Complex elements - TODO: implement
+            log_debug("doc_element_to_texnode: %s not yet implemented", 
+                     doc_elem_type_name(elem->type));
+            return nullptr;
+            
+        case DocElemType::RAW_HTML:
+        case DocElemType::RAW_LATEX:
+        case DocElemType::ERROR:
+            // Skip these
+            return nullptr;
+    }
+    
+    return nullptr;
+}
+
+// Main entry point: convert entire document model to TexNode tree
 TexNode* doc_model_to_texnode(TexDocumentModel* doc, Arena* arena, LaTeXContext& ctx) {
-    // TODO: Implement document model to TexNode conversion
-    log_debug("doc_model_to_texnode: not yet implemented");
+    if (!doc || !doc->root) {
+        log_error("doc_model_to_texnode: no document or root element");
+        return nullptr;
+    }
+    
+    log_debug("doc_model_to_texnode: converting document model to TexNode");
+    
+    TexNode* result = doc_element_to_texnode(doc->root, arena, ctx);
+    
+    if (result) {
+        log_debug("doc_model_to_texnode: created TexNode tree");
+    } else {
+        log_error("doc_model_to_texnode: conversion failed");
+    }
+    
+    return result;
+}
+
+// Apply line breaking to all paragraphs in a VList
+static void apply_line_breaking_recursive(TexNode* node, Arena* arena, 
+                                           const LineBreakParams& params,
+                                           float baseline_skip) {
+    if (!node) return;
+    
+    // Process children
+    for (TexNode* child = node->first_child; child; ) {
+        TexNode* next = child->next_sibling;
+        
+        // If this child is an HList that looks like a paragraph content,
+        // apply line breaking to it
+        if (child->node_class == NodeClass::HList && child->first_child) {
+            // Check if it has text/glue content (paragraph content)
+            bool has_chars = false;
+            for (TexNode* n = child->first_child; n; n = n->next_sibling) {
+                if (n->node_class == NodeClass::Char || 
+                    n->node_class == NodeClass::Glue ||
+                    n->node_class == NodeClass::Ligature) {
+                    has_chars = true;
+                    break;
+                }
+            }
+            
+            if (has_chars) {
+                // This looks like paragraph content - apply line breaking
+                TexNode* typeset_para = typeset_paragraph(child, params, baseline_skip, arena);
+                if (typeset_para) {
+                    // Replace the HList with the typeset VList
+                    // Insert the new content before the child
+                    if (child->prev_sibling) {
+                        child->prev_sibling->next_sibling = typeset_para;
+                        typeset_para->prev_sibling = child->prev_sibling;
+                    } else {
+                        node->first_child = typeset_para;
+                    }
+                    
+                    if (child->next_sibling) {
+                        child->next_sibling->prev_sibling = typeset_para;
+                        typeset_para->next_sibling = child->next_sibling;
+                    } else {
+                        node->last_child = typeset_para;
+                    }
+                    
+                    typeset_para->parent = node;
+                }
+            } else {
+                // Recurse into non-paragraph HLists
+                apply_line_breaking_recursive(child, arena, params, baseline_skip);
+            }
+        } else if (child->node_class == NodeClass::VList || 
+                   child->node_class == NodeClass::VBox) {
+            // Recurse into VLists
+            apply_line_breaking_recursive(child, arena, params, baseline_skip);
+        }
+        
+        child = next;
+    }
+}
+
+// Typeset a document with line breaking and page breaking
+TexNode* doc_model_typeset(TexDocumentModel* doc, Arena* arena, LaTeXContext& ctx,
+                           const LineBreakParams& line_params,
+                           const PageBreakParams& page_params) {
+    if (!doc || !doc->root) {
+        log_error("doc_model_typeset: no document or root element");
+        return nullptr;
+    }
+    
+    log_debug("doc_model_typeset: converting and typesetting document");
+    
+    // Step 1: Convert DocElement tree to TexNode tree (without line breaking)
+    TexNode* vlist = doc_element_to_texnode(doc->root, arena, ctx);
+    if (!vlist) {
+        log_error("doc_model_typeset: conversion failed");
+        return nullptr;
+    }
+    
+    // Step 2: Apply line breaking to paragraphs
+    float baseline_skip = ctx.doc_ctx.baseline_skip();
+    apply_line_breaking_recursive(vlist, arena, line_params, baseline_skip);
+    
+    log_debug("doc_model_typeset: line breaking complete");
+    
+    // Step 3: Apply page breaking (optional - only if page_height > 0)
+    if (page_params.page_height > 0) {
+        int page_count = 0;
+        PageContent* pages = paginate(vlist, page_params, &page_count, arena);
+        
+        if (pages && page_count > 0) {
+            log_debug("doc_model_typeset: page breaking complete, %d pages", page_count);
+            
+            // For now, return the first page's content
+            // TODO: Return full page array or wrap in document structure
+            return pages[0].vlist;
+        }
+    }
+    
+    return vlist;
+}
+
+#else // DOC_MODEL_MINIMAL
+
+// Stub implementations when Lambda runtime is not available
+TexNode* doc_model_to_texnode(TexDocumentModel* doc, Arena* arena, LaTeXContext& ctx) {
+    (void)doc; (void)arena; (void)ctx;
+    log_debug("doc_model_to_texnode: minimal stub (DOC_MODEL_MINIMAL defined)");
     return nullptr;
 }
 
 TexNode* doc_element_to_texnode(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
-    // TODO: Implement element to TexNode conversion
-    log_debug("doc_element_to_texnode: not yet implemented");
+    (void)elem; (void)arena; (void)ctx;
+    log_debug("doc_element_to_texnode: minimal stub (DOC_MODEL_MINIMAL defined)");
     return nullptr;
 }
+
+#endif // DOC_MODEL_MINIMAL
 
 } // namespace tex

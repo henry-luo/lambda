@@ -601,6 +601,31 @@ TexNode* doc_element_to_texnode(
     LaTeXContext& ctx
 );
 
+#ifndef DOC_MODEL_MINIMAL
+// Forward declarations for typesetting parameters
+struct LineBreakParams;
+struct PageBreakParams;
+
+/**
+ * Convert document model to fully typeset TexNode tree.
+ * Applies line breaking (Knuth-Plass) and optional page breaking.
+ *
+ * @param doc Document model to typeset
+ * @param arena Arena for TexNode allocation
+ * @param ctx LaTeX context with fonts
+ * @param line_params Line breaking parameters
+ * @param page_params Page breaking parameters (page_height=0 to skip)
+ * @return Root TexNode (VList or array of Page nodes)
+ */
+TexNode* doc_model_typeset(
+    TexDocumentModel* doc,
+    Arena* arena,
+    LaTeXContext& ctx,
+    const LineBreakParams& line_params,
+    const PageBreakParams& page_params
+);
+#endif
+
 // ============================================================================
 // HTML Utilities
 // ============================================================================
