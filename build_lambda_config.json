@@ -2681,6 +2681,8 @@
                             "lambda/tex/tex_lambda_bridge.cpp",
                             "lambda/tex/tex_latex_bridge.cpp",
                             "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_doc_model_text.cpp",
+                            "lambda/tex/tex_doc_model_html.cpp",
                             "lambda/tex/tex_dvi_out.cpp",
                             "lambda/tex/tex_svg_out.cpp",
                             "lambda/tex/tex_font_adapter.cpp",
@@ -2805,6 +2807,8 @@
                         "binary": "test_tex_document_model_gtest.exe",
                         "additional_sources": [
                             "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_doc_model_text.cpp",
+                            "lambda/tex/tex_doc_model_html.cpp",
                             "lib/arena.c",
                             "lib/mempool.c",
                             "lib/log.c",
@@ -2837,6 +2841,8 @@
                         "binary": "test_latexml_compare_gtest.exe",
                         "additional_sources": [
                             "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_doc_model_text.cpp",
+                            "lambda/tex/tex_doc_model_html.cpp",
                             "lambda/tex/tex_latex_bridge.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp",
                             "lambda/tex/tex_node.cpp",
