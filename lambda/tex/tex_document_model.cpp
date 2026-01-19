@@ -598,6 +598,16 @@ void doc_model_dump(TexDocumentModel* doc, StrBuf* out) {
 
 // Forward declarations for recursive builders
 // Non-static: build_doc_element is used by tex_doc_model_commands.cpp
+
+// Forward declarations for command registry integration
+static DocElement* build_from_pattern(const CommandDef* def, 
+                                       const ElementReader& elem,
+                                       Arena* arena, 
+                                       TexDocumentModel* doc);
+static DocElement* expand_macro_and_build(const CommandDef* def,
+                                           const ElementReader& elem,
+                                           Arena* arena,
+                                           TexDocumentModel* doc);
 DocElement* build_doc_element(const ItemReader& item, Arena* arena, 
                                TexDocumentModel* doc);
 // Forward declaration for build_inline_content - defined later
@@ -3669,6 +3679,137 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
     }
 }
 
+// ============================================================================
+// Command Registry Pattern Expansion
+// ============================================================================
+
+// Extract argument children from an element by index
+// Arguments are numbered 1-based (matching LaTeX #1, #2, etc.)
+static ItemReader get_argument(const ElementReader& elem, int arg_num) {
+    auto iter = elem.children();
+    ItemReader child;
+    int count = 0;
+    while (iter.next(&child)) {
+        count++;
+        if (count == arg_num) {
+            return child;
+        }
+    }
+    return ItemReader();  // invalid reader for missing args
+}
+
+// Build element from CONSTRUCTOR pattern
+// Pattern format: output text with #1, #2, etc. substituted
+// For now, we handle simple text patterns; complex ones need more work
+static DocElement* build_from_pattern(const CommandDef* def,
+                                       const ElementReader& elem,
+                                       Arena* arena,
+                                       TexDocumentModel* doc) {
+    if (!def->pattern || def->pattern[0] == '\0') {
+        // No pattern - just process children normally
+        DocElement* span = doc_alloc_element(arena, DocElemType::TEXT_SPAN);
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            DocElement* child_elem = build_doc_element(child, arena, doc);
+            if (child_elem && child_elem != PARBREAK_MARKER) {
+                doc_append_child(span, child_elem);
+            }
+        }
+        return span->first_child ? span : nullptr;
+    }
+    
+    const char* pattern = def->pattern;
+    size_t pattern_len = strlen(pattern);
+    
+    // Build output by scanning pattern and substituting #N with arguments
+    StrBuf* out = strbuf_new_cap(pattern_len * 2);
+    
+    for (size_t i = 0; i < pattern_len; i++) {
+        if (pattern[i] == '#' && i + 1 < pattern_len && 
+            pattern[i + 1] >= '1' && pattern[i + 1] <= '9') {
+            // Argument substitution
+            int arg_num = pattern[i + 1] - '0';
+            i++;  // skip the digit
+            
+            // Get the argument
+            ItemReader arg = get_argument(elem, arg_num);
+            if (arg.isString()) {
+                const char* arg_text = arg.cstring();
+                if (arg_text) {
+                    strbuf_append_str(out, arg_text);
+                }
+            } else if (arg.isElement()) {
+                // For element arguments, we need to render recursively
+                // For now, just skip - more complex handling needed
+                // TODO: Render element to text or handle properly
+            }
+        } else {
+            strbuf_append_char(out, pattern[i]);
+        }
+    }
+    
+    // Create text run from the expanded pattern
+    char* text_copy = (char*)arena_alloc(arena, out->length + 1);
+    memcpy(text_copy, out->str, out->length + 1);
+    strbuf_free(out);
+    
+    if (text_copy[0] == '\0') {
+        return nullptr;
+    }
+    
+    return doc_create_text_cstr(arena, text_copy, DocTextStyle::plain());
+}
+
+// Expand MACRO and rebuild
+// Replacement text has #1, #2, etc. substituted with arguments
+static DocElement* expand_macro_and_build(const CommandDef* def,
+                                           const ElementReader& elem,
+                                           Arena* arena,
+                                           TexDocumentModel* doc) {
+    if (!def->replacement || def->replacement[0] == '\0') {
+        // No replacement text - return empty
+        return nullptr;
+    }
+    
+    const char* replacement = def->replacement;
+    size_t repl_len = strlen(replacement);
+    
+    // Simple text macros: just expand and create text
+    StrBuf* out = strbuf_new_cap(repl_len * 2);
+    
+    for (size_t i = 0; i < repl_len; i++) {
+        if (replacement[i] == '#' && i + 1 < repl_len && 
+            replacement[i + 1] >= '1' && replacement[i + 1] <= '9') {
+            // Argument substitution
+            int arg_num = replacement[i + 1] - '0';
+            i++;  // skip the digit
+            
+            // Get the argument
+            ItemReader arg = get_argument(elem, arg_num);
+            if (arg.isString()) {
+                const char* arg_text = arg.cstring();
+                if (arg_text) {
+                    strbuf_append_str(out, arg_text);
+                }
+            }
+            // For element args, more complex handling needed
+        } else {
+            strbuf_append_char(out, replacement[i]);
+        }
+    }
+    
+    char* text_copy = (char*)arena_alloc(arena, out->length + 1);
+    memcpy(text_copy, out->str, out->length + 1);
+    strbuf_free(out);
+    
+    if (text_copy[0] == '\0') {
+        return nullptr;
+    }
+    
+    return doc_create_text_cstr(arena, text_copy, DocTextStyle::plain());
+}
+
 // Main builder - converts LaTeX AST item to DocElement
 // Non-static: used by tex_doc_model_commands.cpp
 DocElement* build_doc_element(const ItemReader& item, Arena* arena,
@@ -3702,6 +3843,38 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     const char* tag = elem.tagName();
     
     if (!tag) return nullptr;
+    
+    // Check command registry first (if available)
+    // This allows package-defined commands to override hardcoded handlers
+    if (doc->registry) {
+        const CommandDef* def = doc->registry->lookup(tag);
+        if (def) {
+            switch (def->type) {
+            case CommandType::CALLBACK:
+                // Use C++ callback function
+                if (def->callback) {
+                    return def->callback(elem, arena, doc);
+                }
+                break;
+            case CommandType::CONSTRUCTOR:
+                // CONSTRUCTOR commands with patterns describe intermediate format
+                // Fall through to hardcoded handlers for proper DocElement creation
+                // TODO: Implement pattern-based DocElement generation
+                break;
+            case CommandType::MACRO:
+                // Simple macro expansion (text replacement only)
+                // TODO: Full macro expansion with re-parsing
+                break;
+            case CommandType::PRIMITIVE:
+                // Side-effect only commands - handled elsewhere
+                break;
+            case CommandType::ENVIRONMENT:
+            case CommandType::MATH:
+                // Environments and math handled separately
+                break;
+            }
+        }
+    }
     
     // Helper lambda to check if element has paragraph children (indicates environment usage)
     auto has_paragraph_children = [&elem]() -> bool {
