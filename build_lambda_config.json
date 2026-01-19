@@ -24,8 +24,7 @@
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
         "radiant/radiant.cpp",
-        "lambda/format/format_latex_html_v2.cpp",
-        "lambda/tex/tex_package_json.cpp"
+        "lambda/format/format_latex_html_v2.cpp"
     ],
     "includes": [
         ".",
@@ -2690,7 +2689,9 @@
                             "lambda/tex/tex_dvi_out.cpp",
                             "lambda/tex/tex_svg_out.cpp",
                             "lambda/tex/tex_font_adapter.cpp",
-                            "lambda/tex/dvi_parser.cpp"
+                            "lambda/tex/dvi_parser.cpp",
+                            "lambda/tex/tex_command_registry.cpp",
+                            "lambda/tex/tex_package_loader.cpp"
                         ],
                         "includes": [
                             "."
@@ -2870,7 +2871,9 @@
                             "lambda/tex/tex_svg_out.cpp",
                             "lambda/tex/tex_font_adapter.cpp",
                             "lambda/tex/tex_event.cpp",
-                            "lambda/tex/tex_align.cpp"
+                            "lambda/tex/tex_align.cpp",
+                            "lambda/tex/tex_command_registry.cpp",
+                            "lambda/tex/tex_package_loader.cpp"
                         ],
                         "includes": [
                             "."
