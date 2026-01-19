@@ -121,19 +121,21 @@ void TexDocumentModel::add_label_with_id(const char* label, const char* ref_id, 
 const char* TexDocumentModel::resolve_ref(const char* label) const {
     for (int i = 0; i < label_count; i++) {
         if (strcmp(labels[i].label, label) == 0) {
-            return labels[i].ref_text ? labels[i].ref_text : "??";
+            // Label found - return ref_text (may be null/empty for labels without context)
+            return labels[i].ref_text ? labels[i].ref_text : "";
         }
     }
-    return nullptr;  // Unresolved - caller decides what to show
+    return nullptr;  // Label not found at all - caller shows "??"
 }
 
 const char* TexDocumentModel::resolve_ref_id(const char* label) const {
     for (int i = 0; i < label_count; i++) {
         if (strcmp(labels[i].label, label) == 0) {
-            return labels[i].ref_id;
+            // Label found - return ref_id (may be null/empty for labels without context)
+            return labels[i].ref_id ? labels[i].ref_id : "";
         }
     }
-    return nullptr;  // Unresolved
+    return nullptr;  // Label not found at all
 }
 
 void TexDocumentModel::add_pending_ref(DocElement* elem) {
@@ -170,6 +172,198 @@ void TexDocumentModel::resolve_pending_refs() {
             }
         }
     }
+}
+
+// ============================================================================
+// Counter Methods
+// ============================================================================
+
+void TexDocumentModel::define_counter(const char* name, const char* parent) {
+    if (!name) return;
+    
+    // Check if counter already exists
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            return;  // Already defined
+        }
+    }
+    
+    // Expand capacity if needed
+    if (user_counter_count >= user_counter_capacity) {
+        int new_capacity = user_counter_capacity == 0 ? 16 : user_counter_capacity * 2;
+        CounterDef* new_counters = (CounterDef*)arena_alloc(arena, new_capacity * sizeof(CounterDef));
+        if (user_counters) {
+            memcpy(new_counters, user_counters, user_counter_count * sizeof(CounterDef));
+        }
+        user_counters = new_counters;
+        user_counter_capacity = new_capacity;
+    }
+    
+    user_counters[user_counter_count].name = arena_strdup(arena, name);
+    user_counters[user_counter_count].value = 0;
+    user_counters[user_counter_count].parent = parent ? arena_strdup(arena, parent) : nullptr;
+    user_counter_count++;
+}
+
+void TexDocumentModel::step_counter(const char* name) {
+    if (!name) return;
+    
+    // Find the counter
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            user_counters[i].value++;
+            // Reset all child counters
+            reset_counter_recursive(name);
+            return;
+        }
+    }
+    
+    // Counter not found - auto-define it (LaTeX behavior)
+    define_counter(name);
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            user_counters[i].value = 1;
+            return;
+        }
+    }
+}
+
+void TexDocumentModel::set_counter(const char* name, int value) {
+    if (!name) return;
+    
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            user_counters[i].value = value;
+            return;
+        }
+    }
+    
+    // Counter not found - auto-define and set
+    define_counter(name);
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            user_counters[i].value = value;
+            return;
+        }
+    }
+}
+
+void TexDocumentModel::add_to_counter(const char* name, int delta) {
+    if (!name) return;
+    
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            user_counters[i].value += delta;
+            return;
+        }
+    }
+}
+
+void TexDocumentModel::reset_counter_recursive(const char* name) {
+    if (!name) return;
+    
+    // Reset all counters that have this counter as parent
+    for (int i = 0; i < user_counter_count; i++) {
+        if (user_counters[i].parent && strcmp(user_counters[i].parent, name) == 0) {
+            user_counters[i].value = 0;
+            reset_counter_recursive(user_counters[i].name);  // Reset children recursively
+        }
+    }
+}
+
+int TexDocumentModel::get_counter(const char* name) const {
+    if (!name) return 0;
+    
+    for (int i = 0; i < user_counter_count; i++) {
+        if (strcmp(user_counters[i].name, name) == 0) {
+            return user_counters[i].value;
+        }
+    }
+    return 0;  // Counter not found
+}
+
+const char* TexDocumentModel::format_counter_arabic(const char* name) const {
+    int value = get_counter(name);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", value);
+    // Use arena to return stable string
+    char* result = (char*)arena_alloc(arena, strlen(buf) + 1);
+    strcpy(result, buf);
+    return result;
+}
+
+const char* TexDocumentModel::format_counter_roman(const char* name) const {
+    int value = get_counter(name);
+    // Lowercase roman numerals (simplified for common values)
+    static const char* const ones[] = {"", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"};
+    static const char* const tens[] = {"", "x", "xx", "xxx", "xl", "l", "lx", "lxx", "lxxx", "xc"};
+    static const char* const hunds[] = {"", "c", "cc", "ccc", "cd", "d", "dc", "dcc", "dccc", "cm"};
+    
+    if (value <= 0 || value >= 1000) {
+        return format_counter_arabic(name);
+    }
+    
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%s%s%s", hunds[value/100], tens[(value/10)%10], ones[value%10]);
+    char* result = (char*)arena_alloc(arena, strlen(buf) + 1);
+    strcpy(result, buf);
+    return result;
+}
+
+const char* TexDocumentModel::format_counter_Roman(const char* name) const {
+    int value = get_counter(name);
+    // Uppercase roman numerals
+    static const char* const ones[] = {"", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"};
+    static const char* const tens[] = {"", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC"};
+    static const char* const hunds[] = {"", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM"};
+    
+    if (value <= 0 || value >= 1000) {
+        return format_counter_arabic(name);
+    }
+    
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%s%s%s", hunds[value/100], tens[(value/10)%10], ones[value%10]);
+    char* result = (char*)arena_alloc(arena, strlen(buf) + 1);
+    strcpy(result, buf);
+    return result;
+}
+
+const char* TexDocumentModel::format_counter_alph(const char* name) const {
+    int value = get_counter(name);
+    if (value <= 0 || value > 26) {
+        return format_counter_arabic(name);
+    }
+    char buf[2] = { (char)('a' + value - 1), '\0' };
+    char* result = (char*)arena_alloc(arena, 2);
+    strcpy(result, buf);
+    return result;
+}
+
+const char* TexDocumentModel::format_counter_Alph(const char* name) const {
+    int value = get_counter(name);
+    if (value <= 0 || value > 26) {
+        return format_counter_arabic(name);
+    }
+    char buf[2] = { (char)('A' + value - 1), '\0' };
+    char* result = (char*)arena_alloc(arena, 2);
+    strcpy(result, buf);
+    return result;
+}
+
+const char* TexDocumentModel::format_counter_fnsymbol(const char* name) const {
+    int value = get_counter(name);
+    // Footnote symbols: *, †, ‡, §, ¶, ‖, **, ††, ‡‡
+    static const char* const symbols[] = {
+        "", "*", "\xE2\x80\xA0", "\xE2\x80\xA1", "\xC2\xA7", "\xC2\xB6",
+        "\xE2\x80\x96", "**", "\xE2\x80\xA0\xE2\x80\xA0", "\xE2\x80\xA1\xE2\x80\xA1"
+    };
+    if (value <= 0 || value >= 10) {
+        return format_counter_arabic(name);
+    }
+    const char* sym = symbols[value];
+    char* result = (char*)arena_alloc(arena, strlen(sym) + 1);
+    strcpy(result, sym);
+    return result;
 }
 
 
@@ -4443,6 +4637,57 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             }
         }
         return nullptr;  // No visible output
+    }
+    
+    // Counter commands - these execute side-effects but produce no visible output
+    // \newcounter{name} - defines a new counter initialized to 0
+    if (tag_eq(tag, "newcounter")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            doc->define_counter(counter_name);
+        }
+        return nullptr;  // No visible output
+    }
+    
+    // \stepcounter{name} - increments counter, does NOT update current_ref
+    if (tag_eq(tag, "stepcounter")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            doc->step_counter(counter_name);
+        }
+        return nullptr;  // No visible output
+    }
+    
+    // \refstepcounter{name} - increments counter AND updates current_ref for \label
+    // Also generates an anchor point <a id="name-N"></a> at the position
+    if (tag_eq(tag, "refstepcounter")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            doc->step_counter(counter_name);
+            
+            // Create an anchor id like "c-1" for counter "c" with value 1
+            int counter_value = doc->get_counter(counter_name);
+            char ref_id_buf[128];
+            snprintf(ref_id_buf, sizeof(ref_id_buf), "%s-%d", counter_name, counter_value);
+            char* ref_id = (char*)arena_alloc(arena, strlen(ref_id_buf) + 1);
+            strcpy(ref_id, ref_id_buf);
+            
+            // Format counter value as arabic numeral
+            char ref_text_buf[32];
+            snprintf(ref_text_buf, sizeof(ref_text_buf), "%d", counter_value);
+            char* ref_text = (char*)arena_alloc(arena, strlen(ref_text_buf) + 1);
+            strcpy(ref_text, ref_text_buf);
+            
+            // Update current referable context
+            doc->current_ref_id = ref_id;
+            doc->current_ref_text = ref_text;
+            
+            // Return an anchor element <a id="c-1"></a> at this position
+            char anchor_buf[256];
+            snprintf(anchor_buf, sizeof(anchor_buf), "<a id=\"%s\"></a>", ref_id);
+            return doc_create_raw_html_cstr(arena, anchor_buf);
+        }
+        return nullptr;  // No visible output if counter name extraction failed
     }
     
     // Other preamble commands - ignored in output
