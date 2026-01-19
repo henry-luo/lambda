@@ -378,18 +378,7 @@ struct TexDocumentModel {
     int bib_count;
     int bib_capacity;
     
-    // User-defined macros (simple substitution only)
-    struct MacroDef {
-        const char* name;
-        int num_args;
-        int num_optional;               // Number of optional arguments (0 or 1)
-        const char* replacement;
-        const char* params;             // Parameter format string e.g. "[]{}[]"
-        const char* default_value;      // Default value for optional argument
-    };
-    MacroDef* macros;
-    int macro_count;
-    int macro_capacity;
+    // Note: Macros are now handled by the package/command registry system
     
     // User-defined counters (flexible counter system)
     struct CounterDef {
@@ -447,8 +436,7 @@ struct TexDocumentModel {
     const char* resolve_ref_id(const char* label) const;  // Get the anchor id for a label
     void add_pending_ref(DocElement* elem);
     void resolve_pending_refs();
-    void add_macro(const char* name, int num_args, const char* replacement, const char* params = nullptr);
-    const MacroDef* find_macro(const char* name) const;
+
     void add_bib_entry(const char* key, const char* formatted);
     const char* resolve_cite(const char* key) const;
     
