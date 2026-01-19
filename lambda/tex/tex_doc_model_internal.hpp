@@ -36,6 +36,13 @@ bool is_diacritic_tag(const char* tag);
 // Get UTF-8 character length from first byte
 int utf8_char_len(unsigned char first_byte);
 
+// ============================================================================
+// HTML Utilities (from tex_doc_model_html.cpp)
+// ============================================================================
+
+// Check if an element is inline content (used by both HTML rendering and model building)
+bool is_inline_element(DocElement* elem);
+
 } // namespace tex
 
 #endif // TEX_DOC_MODEL_INTERNAL_HPP
