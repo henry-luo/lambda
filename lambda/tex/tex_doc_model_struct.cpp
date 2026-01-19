@@ -155,9 +155,12 @@ static void finalize_item_paragraph(DocElement* item, DocElement** current_para,
 }
 
 // Helper to ensure we have a current paragraph for content
-static DocElement* ensure_item_paragraph(DocElement** current_para, Arena* arena) {
+static DocElement* ensure_item_paragraph(DocElement** current_para, Arena* arena, bool is_centered = false) {
     if (!*current_para) {
         *current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+        if (is_centered) {
+            (*current_para)->flags |= DocElement::FLAG_CENTERED;
+        }
     }
     return *current_para;
 }
@@ -168,6 +171,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
     DocElement* current_item = nullptr;
     DocElement* current_para = nullptr;  // Current paragraph within item
     int item_number = 0;
+    bool is_centered = false;  // Track centering state from \centering command
     
     auto iter = elem.children();
     ItemReader child;
@@ -177,6 +181,13 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
             const char* child_tag = child_elem.tagName();
             
             if (child_tag) {
+                // Check for \centering command - applies to all following content
+                if (tag_eq(child_tag, "centering")) {
+                    is_centered = true;
+                    list->flags |= DocElement::FLAG_CENTERED;
+                    continue;
+                }
+                
                 // \item command starts a new list item
                 if (tag_eq(child_tag, "item") || tag_eq(child_tag, "item_command")) {
                     // Finalize previous item's paragraph and item itself
@@ -193,6 +204,9 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     current_item->list_item.html_label = nullptr;
                     current_item->list_item.item_number = 0;
                     current_item->list_item.has_custom_label = false;
+                    if (is_centered) {
+                        current_item->flags |= DocElement::FLAG_CENTERED;
+                    }
                     current_para = nullptr;  // Reset paragraph
                     
                     if (list_type == ListType::ENUMERATE) {
@@ -252,6 +266,13 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                             ElementReader pc_elem = para_child.asElement();
                             const char* pc_tag = pc_elem.tagName();
                             
+                            // Check for \centering inside paragraph
+                            if (pc_tag && tag_eq(pc_tag, "centering")) {
+                                is_centered = true;
+                                list->flags |= DocElement::FLAG_CENTERED;
+                                continue;
+                            }
+                            
                             // Check for \item inside paragraph
                             if (pc_tag && (tag_eq(pc_tag, "item") || tag_eq(pc_tag, "item_command"))) {
                                 // Finalize previous item
@@ -268,6 +289,9 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 current_item->list_item.html_label = nullptr;
                                 current_item->list_item.item_number = 0;
                                 current_item->list_item.has_custom_label = false;
+                                if (is_centered) {
+                                    current_item->flags |= DocElement::FLAG_CENTERED;
+                                }
                                 current_para = nullptr;  // Reset paragraph
                                 
                                 if (list_type == ListType::ENUMERATE) {
@@ -321,11 +345,11 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 // Paragraph break - finalize current paragraph, start new one
                                 finalize_item_paragraph(current_item, &current_para, arena);
                             } else if (content && content != LINEBREAK_MARKER && content != NOINDENT_MARKER) {
-                                DocElement* para = ensure_item_paragraph(&current_para, arena);
+                                DocElement* para = ensure_item_paragraph(&current_para, arena, is_centered);
                                 doc_append_child(para, content);
                             } else if (content == LINEBREAK_MARKER) {
                                 // Line break within paragraph - add as SPACE element
-                                DocElement* para = ensure_item_paragraph(&current_para, arena);
+                                DocElement* para = ensure_item_paragraph(&current_para, arena, is_centered);
                                 DocElement* br = doc_alloc_element(arena, DocElemType::SPACE);
                                 br->space.is_linebreak = true;
                                 doc_append_child(para, br);
@@ -341,10 +365,10 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     if (content == PARBREAK_MARKER) {
                         finalize_item_paragraph(current_item, &current_para, arena);
                     } else if (content && content != LINEBREAK_MARKER && content != NOINDENT_MARKER) {
-                        DocElement* para = ensure_item_paragraph(&current_para, arena);
+                        DocElement* para = ensure_item_paragraph(&current_para, arena, is_centered);
                         doc_append_child(para, content);
                     } else if (content == LINEBREAK_MARKER) {
-                        DocElement* para = ensure_item_paragraph(&current_para, arena);
+                        DocElement* para = ensure_item_paragraph(&current_para, arena, is_centered);
                         DocElement* br = doc_alloc_element(arena, DocElemType::SPACE);
                         br->space.is_linebreak = true;
                         doc_append_child(para, br);
@@ -366,7 +390,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                 if (has_content) {
                     DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
                     if (text_elem) {
-                        DocElement* para = ensure_item_paragraph(&current_para, arena);
+                        DocElement* para = ensure_item_paragraph(&current_para, arena, is_centered);
                         doc_append_child(para, text_elem);
                     }
                 }
