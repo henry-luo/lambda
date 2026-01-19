@@ -722,7 +722,22 @@ static void render_figure_html(DocElement* elem, StrBuf* out,
 static void render_blockquote_html(DocElement* elem, StrBuf* out,
                                     const HtmlOutputOptions& opts, int depth) {
     if (opts.pretty_print) html_indent(out, depth);
-    strbuf_append_format(out, "<blockquote class=\"%sblockquote\">", opts.css_class_prefix);
+    
+    // Get the environment name for the class (quote, quotation, verse)
+    const char* env_name = elem->alignment.env_name;
+    if (opts.css_class_prefix && opts.css_class_prefix[0]) {
+        // Mode with prefix: class="latex-blockquote" or specific name
+        strbuf_append_format(out, "<blockquote class=\"%sblockquote\">", opts.css_class_prefix);
+    } else {
+        // Hybrid mode: use specific class name (quote, quotation, verse)
+        if (env_name && (strcmp(env_name, "quote") == 0 || 
+                         strcmp(env_name, "quotation") == 0 ||
+                         strcmp(env_name, "verse") == 0)) {
+            strbuf_append_format(out, "<blockquote class=\"%s\">", env_name);
+        } else {
+            strbuf_append_str(out, "<blockquote class=\"quote\">");
+        }
+    }
     if (opts.pretty_print) strbuf_append_str(out, "\n");
     
     render_children_html(elem, out, opts, depth + 1);
