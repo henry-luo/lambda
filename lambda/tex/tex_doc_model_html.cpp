@@ -894,8 +894,13 @@ static void doc_element_to_html_with_context(DocElement* elem, StrBuf* out,
         
     case DocElemType::TEXT_RUN:
         if (elem->text.text && elem->text.text_len > 0) {
-            bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
-            html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
+            // VERBATIM flag skips typographic transformations (for macro output, counter output, etc.)
+            if (elem->text.style.has(DocTextStyle::VERBATIM)) {
+                html_escape_append(out, elem->text.text, elem->text.text_len);
+            } else {
+                bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
+                html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
+            }
         }
         break;
         
@@ -921,9 +926,14 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
         
     case DocElemType::TEXT_RUN:
         if (elem->text.text && elem->text.text_len > 0) {
-            // Check if we're in monospace context (texttt style)
-            bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
-            html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
+            // VERBATIM flag skips typographic transformations (for macro output, counter output, etc.)
+            if (elem->text.style.has(DocTextStyle::VERBATIM)) {
+                html_escape_append(out, elem->text.text, elem->text.text_len);
+            } else {
+                // Check if we're in monospace context (texttt style)
+                bool in_monospace = elem->text.style.has(DocTextStyle::MONOSPACE);
+                html_escape_append_transformed(out, elem->text.text, elem->text.text_len, in_monospace);
+            }
         }
         break;
         
