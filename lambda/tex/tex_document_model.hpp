@@ -326,8 +326,16 @@ struct DocElement {
 // Document Model
 // ============================================================================
 
+// Forward declarations for package system
+class CommandRegistry;
+class PackageLoader;
+
 struct TexDocumentModel {
     Arena* arena;
+    
+    // Package system (new - JSON-based package loading)
+    CommandRegistry* registry;      // Command registry from packages
+    PackageLoader* pkg_loader;      // Package loader instance
     
     // Document metadata
     const char* document_class;     // "article", "report", "book"
@@ -443,6 +451,10 @@ struct TexDocumentModel {
     const MacroDef* find_macro(const char* name) const;
     void add_bib_entry(const char* key, const char* formatted);
     const char* resolve_cite(const char* key) const;
+    
+    // Package system methods
+    bool require_package(const char* pkg_name, const char* options = nullptr);
+    bool is_package_loaded(const char* pkg_name) const;
 };
 
 // ============================================================================
