@@ -5,6 +5,10 @@
 
 #include "tex_document_model.hpp"
 #include "tex_doc_model_internal.hpp"
+#ifndef DOC_MODEL_MINIMAL
+#include "tex_command_registry.hpp"
+#include "tex_package_loader.hpp"
+#endif
 #include "tex_math_ts.hpp"
 #include "tex_linebreak.hpp"
 #include "tex_pagebreak.hpp"
@@ -195,6 +199,26 @@ const TexDocumentModel::MacroDef* TexDocumentModel::find_macro(const char* name)
     return nullptr;
 }
 
+#ifndef DOC_MODEL_MINIMAL
+bool TexDocumentModel::require_package(const char* pkg_name, const char* options) {
+    if (!pkg_loader || !pkg_name) return false;
+    return pkg_loader->require_package(pkg_name, options);
+}
+
+bool TexDocumentModel::is_package_loaded(const char* pkg_name) const {
+    if (!pkg_loader || !pkg_name) return false;
+    return pkg_loader->is_loaded(pkg_name);
+}
+#else
+bool TexDocumentModel::require_package(const char* /*pkg_name*/, const char* /*options*/) {
+    return false;
+}
+
+bool TexDocumentModel::is_package_loaded(const char* /*pkg_name*/) const {
+    return false;
+}
+#endif
+
 // Helper to parse params string and count mandatory args
 // params format: [] = optional, {} = mandatory
 // Example: "[]{}[]" = 3 args (opt, mand, opt)
@@ -346,6 +370,19 @@ TexDocumentModel* doc_model_create(Arena* arena) {
     memset(doc, 0, sizeof(TexDocumentModel));
     doc->arena = arena;
     doc->document_class = "article";  // Default
+    
+#ifndef DOC_MODEL_MINIMAL
+    // Initialize package system (requires input system for JSON parsing)
+    doc->registry = new (arena_alloc(arena, sizeof(CommandRegistry))) CommandRegistry(arena);
+    doc->pkg_loader = new (arena_alloc(arena, sizeof(PackageLoader))) PackageLoader(doc->registry, arena);
+    
+    // Load base packages
+    doc->pkg_loader->load_base_packages();
+#else
+    doc->registry = nullptr;
+    doc->pkg_loader = nullptr;
+#endif
+    
     return doc;
 }
 
@@ -4489,7 +4526,13 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
             }
         }
         if (pkg_name && strlen(pkg_name) > 0) {
-            load_package_macros(doc, pkg_name);
+            // Use new package system if available
+            if (doc->pkg_loader) {
+                doc->require_package(pkg_name);
+            } else {
+                // Fallback to old system
+                load_package_macros(doc, pkg_name);
+            }
         }
         return nullptr;  // No visible output
     }
