@@ -3,7 +3,6 @@
 // Loads .pkg.json files and registers commands with the CommandRegistry.
 
 #include "tex_package_json.hpp"
-#include "tex_digester.hpp"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
