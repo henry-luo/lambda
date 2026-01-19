@@ -3488,7 +3488,9 @@ static DocElement* build_from_pattern(const CommandDef* def,
         return nullptr;
     }
     
-    return doc_create_text_cstr(arena, text_copy, DocTextStyle::plain());
+    // Use VERBATIM style to preserve ASCII characters (no typographic transformations)
+    // This ensures macro pattern output like "-text-" stays as ASCII hyphens
+    return doc_create_text_cstr(arena, text_copy, DocTextStyle::verbatim());
 }
 
 // Expand MACRO and rebuild
@@ -3537,7 +3539,9 @@ static DocElement* expand_macro_and_build(const CommandDef* def,
         return nullptr;
     }
     
-    return doc_create_text_cstr(arena, text_copy, DocTextStyle::plain());
+    // Use VERBATIM style to preserve ASCII characters (no typographic transformations)
+    // This ensures macro output like "-text-" stays as ASCII hyphens, not typographic hyphens
+    return doc_create_text_cstr(arena, text_copy, DocTextStyle::verbatim());
 }
 
 // Main builder - converts LaTeX AST item to DocElement
