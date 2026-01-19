@@ -15,6 +15,27 @@ namespace tex {
 #ifndef DOC_MODEL_MINIMAL
 
 // ============================================================================
+// Local Helper Functions
+// ============================================================================
+
+// Check if an item is a line break command (\\, \newline)
+static bool is_linebreak_item(const ItemReader& item) {
+    if (!item.isElement()) return false;
+    
+    ElementReader elem = item.asElement();
+    const char* tag = elem.tagName();
+    if (!tag) return false;
+    
+    // linebreak_command tag from \\
+    if (tag_eq(tag, "linebreak_command")) return true;
+    
+    // \newline command
+    if (tag_eq(tag, "newline")) return true;
+    
+    return false;
+}
+
+// ============================================================================
 // Section Builders
 // ============================================================================
 
@@ -124,10 +145,28 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
 // List Builders
 // ============================================================================
 
+// Helper to finalize current paragraph and add to list item
+static void finalize_item_paragraph(DocElement* item, DocElement** current_para, Arena* arena) {
+    if (*current_para && (*current_para)->first_child) {
+        trim_paragraph_whitespace(*current_para, arena);
+        doc_append_child(item, *current_para);
+    }
+    *current_para = nullptr;
+}
+
+// Helper to ensure we have a current paragraph for content
+static DocElement* ensure_item_paragraph(DocElement** current_para, Arena* arena) {
+    if (!*current_para) {
+        *current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+    }
+    return *current_para;
+}
+
 // Helper to process list content and build list items
 static void process_list_content(DocElement* list, const ElementReader& elem,
                                   Arena* arena, TexDocumentModel* doc, ListType list_type) {
     DocElement* current_item = nullptr;
+    DocElement* current_para = nullptr;  // Current paragraph within item
     int item_number = 0;
     
     auto iter = elem.children();
@@ -140,10 +179,12 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
             if (child_tag) {
                 // \item command starts a new list item
                 if (tag_eq(child_tag, "item") || tag_eq(child_tag, "item_command")) {
-                    // Finalize previous item
-                    if (current_item && current_item->first_child) {
-                        trim_paragraph_whitespace(current_item, arena);
-                        doc_append_child(list, current_item);
+                    // Finalize previous item's paragraph and item itself
+                    if (current_item) {
+                        finalize_item_paragraph(current_item, &current_para, arena);
+                        if (current_item->first_child) {
+                            doc_append_child(list, current_item);
+                        }
                     }
                     
                     // Create new item
@@ -152,6 +193,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     current_item->list_item.html_label = nullptr;
                     current_item->list_item.item_number = 0;
                     current_item->list_item.has_custom_label = false;
+                    current_para = nullptr;  // Reset paragraph
                     
                     if (list_type == ListType::ENUMERATE) {
                         item_number++;
@@ -178,12 +220,13 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     continue;
                 }
                 
-                // Nested list
+                // Nested list - finalize current paragraph, add list directly to item
                 if (tag_eq(child_tag, "itemize") || tag_eq(child_tag, "enumerate") ||
                     tag_eq(child_tag, "description")) {
                     DocElement* nested = build_list_environment(child_tag, child_elem, arena, doc);
                     if (nested) {
                         if (current_item) {
+                            finalize_item_paragraph(current_item, &current_para, arena);
                             doc_append_child(current_item, nested);
                         } else {
                             // List started without \item - create one
@@ -212,9 +255,11 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                             // Check for \item inside paragraph
                             if (pc_tag && (tag_eq(pc_tag, "item") || tag_eq(pc_tag, "item_command"))) {
                                 // Finalize previous item
-                                if (current_item && current_item->first_child) {
-                                    trim_paragraph_whitespace(current_item, arena);
-                                    doc_append_child(list, current_item);
+                                if (current_item) {
+                                    finalize_item_paragraph(current_item, &current_para, arena);
+                                    if (current_item->first_child) {
+                                        doc_append_child(list, current_item);
+                                    }
                                 }
                                 
                                 // Create new item
@@ -223,6 +268,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 current_item->list_item.html_label = nullptr;
                                 current_item->list_item.item_number = 0;
                                 current_item->list_item.has_custom_label = false;
+                                current_para = nullptr;  // Reset paragraph
                                 
                                 if (list_type == ListType::ENUMERATE) {
                                     item_number++;
@@ -253,6 +299,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 DocElement* nested = build_list_environment(pc_tag, pc_elem, arena, doc);
                                 if (nested) {
                                     if (current_item) {
+                                        finalize_item_paragraph(current_item, &current_para, arena);
                                         doc_append_child(current_item, nested);
                                     } else {
                                         current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
@@ -267,22 +314,40 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                             }
                         }
                         
-                        // Other content in paragraph goes to current item
+                        // Other content in paragraph goes to current item's current paragraph
                         if (current_item) {
                             DocElement* content = build_doc_element(para_child, arena, doc);
-                            if (content && content != PARBREAK_MARKER) {
-                                doc_append_child(current_item, content);
+                            if (content == PARBREAK_MARKER) {
+                                // Paragraph break - finalize current paragraph, start new one
+                                finalize_item_paragraph(current_item, &current_para, arena);
+                            } else if (content && content != LINEBREAK_MARKER && content != NOINDENT_MARKER) {
+                                DocElement* para = ensure_item_paragraph(&current_para, arena);
+                                doc_append_child(para, content);
+                            } else if (content == LINEBREAK_MARKER) {
+                                // Line break within paragraph - add as SPACE element
+                                DocElement* para = ensure_item_paragraph(&current_para, arena);
+                                DocElement* br = doc_alloc_element(arena, DocElemType::SPACE);
+                                br->space.is_linebreak = true;
+                                doc_append_child(para, br);
                             }
                         }
                     }
                     continue;
                 }
                 
-                // Other content goes into current item
+                // Other element content goes into current item's paragraph
                 if (current_item) {
                     DocElement* content = build_doc_element(child, arena, doc);
-                    if (content && content != PARBREAK_MARKER) {
-                        doc_append_child(current_item, content);
+                    if (content == PARBREAK_MARKER) {
+                        finalize_item_paragraph(current_item, &current_para, arena);
+                    } else if (content && content != LINEBREAK_MARKER && content != NOINDENT_MARKER) {
+                        DocElement* para = ensure_item_paragraph(&current_para, arena);
+                        doc_append_child(para, content);
+                    } else if (content == LINEBREAK_MARKER) {
+                        DocElement* para = ensure_item_paragraph(&current_para, arena);
+                        DocElement* br = doc_alloc_element(arena, DocElemType::SPACE);
+                        br->space.is_linebreak = true;
+                        doc_append_child(para, br);
                     }
                 }
             }
@@ -301,7 +366,8 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                 if (has_content) {
                     DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
                     if (text_elem) {
-                        doc_append_child(current_item, text_elem);
+                        DocElement* para = ensure_item_paragraph(&current_para, arena);
+                        doc_append_child(para, text_elem);
                     }
                 }
             }
@@ -309,9 +375,11 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
     }
     
     // Finalize last item
-    if (current_item && current_item->first_child) {
-        trim_paragraph_whitespace(current_item, arena);
-        doc_append_child(list, current_item);
+    if (current_item) {
+        finalize_item_paragraph(current_item, &current_para, arena);
+        if (current_item->first_child) {
+            doc_append_child(list, current_item);
+        }
     }
 }
 
@@ -593,7 +661,7 @@ DocElement* build_blockquote_environment(const ElementReader& elem,
 DocElement* build_alignment_environment(const char* env_name, const ElementReader& elem,
                                          Arena* arena, TexDocumentModel* doc) {
     // Determine element type and alignment
-    DocElemType elem_type = DocElemType::PARAGRAPH;
+    DocElemType elem_type = DocElemType::ALIGNMENT;
     bool is_quote = false;
     
     if (tag_eq(env_name, "quote") || tag_eq(env_name, "quotation") || tag_eq(env_name, "verse")) {
@@ -602,6 +670,9 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
     }
     
     DocElement* container = doc_alloc_element(arena, elem_type);
+    
+    // Store environment name for proper HTML class output
+    container->alignment.env_name = env_name;
     
     // Set alignment for paragraph-based environments using flags
     if (!is_quote) {
@@ -614,14 +685,87 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
         }
     }
     
-    // Process content
+    // Process content with proper paragraph grouping
+    // Helper lambda to process items and add to current paragraph
+    DocElement* current_para = nullptr;
+    
+    // Verse environment preserves leading whitespace after linebreaks
+    bool preserve_ws = tag_eq(env_name, "verse");
+    
+    auto process_item = [&](const ItemReader& item) {
+        // Check for parbreak symbol
+        if (is_parbreak_item(item)) {
+            // Finalize current paragraph
+            if (current_para && current_para->first_child) {
+                trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
+                doc_append_child(container, current_para);
+            }
+            current_para = nullptr;
+            return;
+        }
+        
+        // Check for linebreak command
+        if (is_linebreak_item(item)) {
+            // Line break within paragraph
+            if (!current_para) {
+                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+            }
+            DocElement* br = doc_alloc_element(arena, DocElemType::SPACE);
+            br->space.is_linebreak = true;
+            doc_append_child(current_para, br);
+            return;
+        }
+        
+        DocElement* content = build_doc_element(item, arena, doc);
+        if (content == PARBREAK_MARKER) {
+            // Finalize current paragraph
+            if (current_para && current_para->first_child) {
+                trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
+                doc_append_child(container, current_para);
+            }
+            current_para = nullptr;
+        } else if (content == LINEBREAK_MARKER) {
+            // Line break within paragraph
+            if (!current_para) {
+                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+            }
+            DocElement* br = doc_alloc_element(arena, DocElemType::SPACE);
+            br->space.is_linebreak = true;
+            doc_append_child(current_para, br);
+        } else if (content && !is_special_marker(content)) {
+            // Regular content - add to current paragraph
+            if (!current_para) {
+                current_para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
+            }
+            doc_append_child(current_para, content);
+        }
+    };
+    
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
-        DocElement* content = build_doc_element(child, arena, doc);
-        if (content && content != PARBREAK_MARKER) {
-            doc_append_child(container, content);
+        // Check if this is a paragraph wrapper (common in LaTeX AST)
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* child_tag = child_elem.tagName();
+            if (child_tag && (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "par"))) {
+                // Process the paragraph's children directly
+                auto para_iter = child_elem.children();
+                ItemReader para_child;
+                while (para_iter.next(&para_child)) {
+                    process_item(para_child);
+                }
+                continue;
+            }
         }
+        // Process non-paragraph children directly
+        process_item(child);
+    }
+    
+    // Finalize last paragraph
+    if (current_para && current_para->first_child) {
+        trim_paragraph_whitespace_ex(current_para, arena, preserve_ws);
+        doc_append_child(container, current_para);
     }
     
     return container;
