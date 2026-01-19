@@ -72,13 +72,17 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
     // Check for starred variant (unnumbered)
     bool is_starred = false;
     
+    // Collect label names found inside the section for later registration
+    const char* found_labels[16];  // Up to 16 labels (should be enough)
+    int found_label_count = 0;
+    
     // First check for title as an attribute (new AST format)
     ItemReader title_attr = elem.get_attr("title");
     if (!title_attr.isNull()) {
         heading->heading.title = render_brack_group_to_html(title_attr, arena, doc);
     }
     
-    // Process children to find title (old AST format) and star
+    // Process children to find title (old AST format), labels, and star
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -102,6 +106,29 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
                 // Check for star
                 if (tag_eq(child_tag, "star")) {
                     is_starred = true;
+                }
+                // Collect label elements for later registration
+                if (tag_eq(child_tag, "label") && found_label_count < 16) {
+                    // Extract label name from label element
+                    auto label_iter = child_elem.children();
+                    ItemReader label_child;
+                    while (label_iter.next(&label_child)) {
+                        if (label_child.isString()) {
+                            const char* label_name = label_child.cstring();
+                            if (label_name && label_name[0]) {
+                                found_labels[found_label_count++] = arena_strdup(arena, label_name);
+                            }
+                        } else if (label_child.isElement()) {
+                            ElementReader lc = label_child.asElement();
+                            const char* lc_tag = lc.tagName();
+                            if (lc_tag && (tag_eq(lc_tag, "curly_group") || tag_eq(lc_tag, "arg"))) {
+                                const char* label_name = extract_text_content(label_child, arena);
+                                if (label_name && label_name[0]) {
+                                    found_labels[found_label_count++] = label_name;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         } else if (child.isString()) {
@@ -223,6 +250,13 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
         // Register with document for cross-referencing
         doc->current_ref_id = heading->heading.label;
         doc->current_ref_text = heading->heading.number;
+        
+        // Now register any labels that were found inside this section
+        for (int i = 0; i < found_label_count; i++) {
+            log_debug("build_section_command: registering label '%s' -> ref_id='%s', ref_text='%s'",
+                      found_labels[i], heading->heading.label, heading->heading.number);
+            doc->add_label_with_id(found_labels[i], heading->heading.label, heading->heading.number);
+        }
     }
     
     return heading;
@@ -299,6 +333,16 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     if (list_type == ListType::ENUMERATE) {
                         item_number++;
                         current_item->list_item.item_number = item_number;
+                        
+                        // Update current referable context for \label commands in this item
+                        // Format: ref_id = "item-N", ref_text = "N"
+                        char ref_id_buf[64];
+                        snprintf(ref_id_buf, sizeof(ref_id_buf), "item-%d", item_number);
+                        doc->current_ref_id = arena_strdup(arena, ref_id_buf);
+                        
+                        char ref_text_buf[32];
+                        snprintf(ref_text_buf, sizeof(ref_text_buf), "%d", item_number);
+                        doc->current_ref_text = arena_strdup(arena, ref_text_buf);
                     }
                     
                     // Check for optional label [...]
@@ -384,6 +428,16 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 if (list_type == ListType::ENUMERATE) {
                                     item_number++;
                                     current_item->list_item.item_number = item_number;
+                                    
+                                    // Update current referable context for \label commands in this item
+                                    // Format: ref_id = "item-N", ref_text = "N"
+                                    char ref_id_buf[64];
+                                    snprintf(ref_id_buf, sizeof(ref_id_buf), "item-%d", item_number);
+                                    doc->current_ref_id = arena_strdup(arena, ref_id_buf);
+                                    
+                                    char ref_text_buf[32];
+                                    snprintf(ref_text_buf, sizeof(ref_text_buf), "%d", item_number);
+                                    doc->current_ref_text = arena_strdup(arena, ref_text_buf);
                                 }
                                 
                                 // Check for optional label [...]
