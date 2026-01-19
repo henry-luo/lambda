@@ -147,6 +147,7 @@ struct DocTextStyle {
         SLANTED     = 0x0400,   // \slshape - slanted text
         UPRIGHT     = 0x0800,   // \upshape - upright (non-italic) text
         EMPHASIS    = 0x1000,   // \emph - toggles between italic/upright based on context
+        VERBATIM    = 0x2000,   // Skip typographic transformations (for counter output, etc.)
     };
     
     uint16_t flags;
@@ -164,6 +165,13 @@ struct DocTextStyle {
         s.font_size_pt = 0;
         s.color = 0;
         s.background = 0;
+        return s;
+    }
+    
+    // Verbatim style - skip typographic transformations (for counter output, etc.)
+    static DocTextStyle verbatim() {
+        DocTextStyle s = plain();
+        s.flags = VERBATIM;
         return s;
     }
     
@@ -366,14 +374,40 @@ struct TexDocumentModel {
     struct MacroDef {
         const char* name;
         int num_args;
+        int num_optional;               // Number of optional arguments (0 or 1)
         const char* replacement;
-        const char* params;  // Parameter format string e.g. "[]{}[]"
+        const char* params;             // Parameter format string e.g. "[]{}[]"
+        const char* default_value;      // Default value for optional argument
     };
     MacroDef* macros;
     int macro_count;
     int macro_capacity;
     
-    // Counters
+    // User-defined counters (flexible counter system)
+    struct CounterDef {
+        const char* name;           // Counter name (e.g., "mycounter")
+        int value;                  // Current value
+        const char* parent;         // Parent counter name (resets when parent steps), null if none
+    };
+    CounterDef* user_counters;
+    int user_counter_count;
+    int user_counter_capacity;
+    
+    // Counter methods
+    void define_counter(const char* name, const char* parent = nullptr);
+    void set_counter(const char* name, int value);
+    void step_counter(const char* name);
+    void add_to_counter(const char* name, int delta);
+    void reset_counter_recursive(const char* name);  // Reset counter and all descendants
+    int get_counter(const char* name) const;
+    const char* format_counter_arabic(const char* name) const;
+    const char* format_counter_roman(const char* name) const;
+    const char* format_counter_Roman(const char* name) const;
+    const char* format_counter_alph(const char* name) const;
+    const char* format_counter_Alph(const char* name) const;
+    const char* format_counter_fnsymbol(const char* name) const;
+    
+    // Built-in counters (for backward compatibility)
     int chapter_num;
     int section_num;
     int subsection_num;
