@@ -155,6 +155,17 @@ static std::string normalize_for_hybrid(const std::string& s) {
             i += 2;  // skip the 3-byte sequence
             continue;
         }
+        // Treat EM SPACE (U+2003) - E2 80 83 - as regular space
+        if ((unsigned char)c == 0xE2 && i + 2 < s.size() &&
+            (unsigned char)s[i+1] == 0x80 && (unsigned char)s[i+2] == 0x83) {
+            i += 2;  // skip the rest of the 3-byte sequence
+            // Treat as whitespace
+            if (!in_whitespace && !result.empty()) {
+                result += ' ';
+                in_whitespace = true;
+            }
+            continue;
+        }
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
             if (!in_whitespace && !result.empty()) {
                 result += ' ';

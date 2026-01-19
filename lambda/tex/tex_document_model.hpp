@@ -543,6 +543,7 @@ struct HtmlOutputOptions {
     bool include_css;           // Include default CSS styles
     const char* css_class_prefix; // Prefix for CSS classes (default "latex-")
     const char* lang;           // Language code (default "en")
+    const char* document_class; // Document class (article, book, report) for heading level adjustment
     
     // Full standalone mode with fonts and CSS
     static HtmlOutputOptions defaults() {
@@ -555,6 +556,7 @@ struct HtmlOutputOptions {
         o.include_css = true;
         o.css_class_prefix = "latex-";
         o.lang = "en";
+        o.document_class = "article";
         return o;
     }
     
@@ -570,6 +572,7 @@ struct HtmlOutputOptions {
         o.include_css = false;
         o.css_class_prefix = "";  // No prefix for clean output
         o.lang = "en";
+        o.document_class = "article";
         return o;
     }
 };

@@ -54,6 +54,12 @@ static int get_doc_section_level(const char* cmd_name) {
     return 2;  // default
 }
 
+// Helper to check if document class supports chapters
+static bool doc_class_has_chapters(const char* doc_class) {
+    if (!doc_class) return false;
+    return strcmp(doc_class, "book") == 0 || strcmp(doc_class, "report") == 0;
+}
+
 // Build section command (\section, \subsection, etc.)
 DocElement* build_section_command(const char* cmd_name, const ElementReader& elem,
                                    Arena* arena, TexDocumentModel* doc) {
@@ -66,7 +72,13 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
     // Check for starred variant (unnumbered)
     bool is_starred = false;
     
-    // Process children to find title
+    // First check for title as an attribute (new AST format)
+    ItemReader title_attr = elem.get_attr("title");
+    if (!title_attr.isNull()) {
+        heading->heading.title = render_brack_group_to_html(title_attr, arena, doc);
+    }
+    
+    // Process children to find title (old AST format) and star
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -80,9 +92,10 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
                     // Short title for TOC - we ignore this for now
                     continue;
                 }
-                // Required argument (title)
-                if (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg") ||
-                    tag_eq(child_tag, "title")) {
+                // Required argument (title) - only if not already found via attribute
+                if (!heading->heading.title &&
+                    (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "arg") ||
+                     tag_eq(child_tag, "title"))) {
                     // Render title content to HTML
                     heading->heading.title = render_brack_group_to_html(child, arena, doc);
                 }
@@ -97,38 +110,112 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
             if (text && strchr(text, '*')) {
                 is_starred = true;
             }
+            // If we haven't found a title yet and this is non-trivial text, use it as title
+            else if (!heading->heading.title && text && text[0] != '\0') {
+                // Skip whitespace-only strings
+                bool has_content = false;
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        has_content = true;
+                        break;
+                    }
+                }
+                if (has_content) {
+                    heading->heading.title = arena_strdup(arena, text);
+                }
+            }
         }
     }
     
     // Assign section number if not starred
     if (!is_starred && doc) {
-        static int section_counters[7] = {0, 0, 0, 0, 0, 0, 0};
         int level = heading->heading.level;
+        bool has_chapters = doc_class_has_chapters(doc->document_class);
         
         // Increment counter at this level, reset deeper levels
-        section_counters[level]++;
-        for (int i = level + 1; i < 7; i++) {
-            section_counters[i] = 0;
+        // Use document model counters instead of static variables
+        switch (level) {
+            case 0:  // part - not commonly numbered in same way
+                break;
+            case 1:  // chapter
+                doc->chapter_num++;
+                doc->section_num = 0;
+                doc->subsection_num = 0;
+                doc->subsubsection_num = 0;
+                doc->paragraph_num = 0;
+                break;
+            case 2:  // section
+                doc->section_num++;
+                doc->subsection_num = 0;
+                doc->subsubsection_num = 0;
+                doc->paragraph_num = 0;
+                break;
+            case 3:  // subsection
+                doc->subsection_num++;
+                doc->subsubsection_num = 0;
+                doc->paragraph_num = 0;
+                break;
+            case 4:  // subsubsection
+                doc->subsubsection_num++;
+                doc->paragraph_num = 0;
+                break;
+            case 5:  // paragraph
+                doc->paragraph_num++;
+                break;
+            default:
+                break;
         }
         
-        // Build number string
+        // Build number string based on document class
         StrBuf* num_buf = strbuf_new_cap(32);
-        for (int i = 0; i <= level; i++) {
-            if (i > 0) strbuf_append_char(num_buf, '.');
-            char digit[16];
-            snprintf(digit, sizeof(digit), "%d", section_counters[i]);
-            strbuf_append_str(num_buf, digit);
+        
+        if (has_chapters) {
+            // book/report class: chapter.section.subsection...
+            switch (level) {
+                case 1:  // chapter
+                    strbuf_append_format(num_buf, "%d", doc->chapter_num);
+                    break;
+                case 2:  // section
+                    strbuf_append_format(num_buf, "%d.%d", doc->chapter_num, doc->section_num);
+                    break;
+                case 3:  // subsection
+                    strbuf_append_format(num_buf, "%d.%d.%d", doc->chapter_num, doc->section_num, doc->subsection_num);
+                    break;
+                case 4:  // subsubsection
+                    strbuf_append_format(num_buf, "%d.%d.%d.%d", doc->chapter_num, doc->section_num, doc->subsection_num, doc->subsubsection_num);
+                    break;
+                default:
+                    break;
+            }
+        } else {
+            // article class: section.subsection.subsubsection...
+            switch (level) {
+                case 2:  // section
+                    strbuf_append_format(num_buf, "%d", doc->section_num);
+                    break;
+                case 3:  // subsection
+                    strbuf_append_format(num_buf, "%d.%d", doc->section_num, doc->subsection_num);
+                    break;
+                case 4:  // subsubsection
+                    strbuf_append_format(num_buf, "%d.%d.%d", doc->section_num, doc->subsection_num, doc->subsubsection_num);
+                    break;
+                default:
+                    break;
+            }
         }
         
-        // Copy to arena
-        char* num_str = (char*)arena_alloc(arena, num_buf->length + 1);
-        memcpy(num_str, num_buf->str, num_buf->length + 1);
-        heading->heading.number = num_str;
+        // Copy number to arena
+        if (num_buf->length > 0) {
+            char* num_str = (char*)arena_alloc(arena, num_buf->length + 1);
+            memcpy(num_str, num_buf->str, num_buf->length + 1);
+            heading->heading.number = num_str;
+        }
         strbuf_free(num_buf);
         
-        // Create label for cross-references
+        // Create sequential label for cross-references (sec-1, sec-2, etc.)
+        doc->section_id_counter++;
         char label_buf[64];
-        snprintf(label_buf, sizeof(label_buf), "sec-%s", num_str);
+        snprintf(label_buf, sizeof(label_buf), "sec-%d", doc->section_id_counter);
         char* label_str = (char*)arena_alloc(arena, strlen(label_buf) + 1);
         strcpy(label_str, label_buf);
         heading->heading.label = label_str;
