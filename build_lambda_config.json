@@ -2667,6 +2667,7 @@
                             "lambda/tex/tex_dvi_out.cpp",
                             "lambda/tex/tex_svg_out.cpp",
                             "lambda/tex/tex_font_adapter.cpp",
+                            "lambda/tex/tex_html_render.cpp",
                             "lambda/tex/dvi_parser.cpp",
                             "lambda/tex/tex_command_registry.cpp",
                             "lambda/tex/tex_package_loader.cpp"
@@ -2728,6 +2729,55 @@
                             "."
                         ],
                         "icon": "\ud83c\udf10"
+                    },
+                    {
+                        "source": "test/test_latex_html_compare_gtest.cpp",
+                        "name": "TeX HTML Compare Tests",
+                        "description": "Parallel HTML output tests for the same LaTeX files used by DVI compare tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex",
+                            "tree-sitter-latex-math"
+                        ],
+                        "binary": "test_latex_html_compare_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_math_ast_builder.cpp",
+                            "lambda/tex/tex_math_ast_typeset.cpp",
+                            "lambda/tex/tex_html_render.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_doc_model_html.cpp",
+                            "lambda/tex/tex_doc_model_text.cpp",
+                            "lambda/tex/tex_doc_model_builder.cpp",
+                            "lambda/tex/tex_doc_model_struct.cpp",
+                            "lambda/tex/tex_doc_model_inline.cpp",
+                            "lambda/tex/tex_doc_model_commands.cpp",
+                            "lambda/tex/tex_command_registry.cpp",
+                            "lambda/tex/tex_package_loader.cpp",
+                            "lambda/tex/tex_latex_bridge.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp",
+                            "lambda/tex/tex_font_adapter.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "📄"
                     },
                     {
                         "source": "test/test_tex_pagebreak_gtest.cpp",
@@ -2883,6 +2933,7 @@
                             "lambda/tex/tex_math_ast_builder.cpp",
                             "lambda/tex/tex_math_ast_typeset.cpp",
                             "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_html_render.cpp",
                             "lambda/tex/tex_font_adapter.cpp",
                             "lambda/tex/tex_event.cpp",
                             "lambda/tex/tex_align.cpp",

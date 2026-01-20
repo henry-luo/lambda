@@ -5,7 +5,9 @@
 
 #include "tex_document_model.hpp"
 #include "tex_doc_model_internal.hpp"
+#ifndef DOC_MODEL_MINIMAL
 #include "tex_html_render.hpp"
+#endif
 #include "lib/log.h"
 #include <cstring>
 #include <cstdio>
@@ -30,6 +32,25 @@ struct SVGParams {
     bool indent;
     static SVGParams defaults() { return {false}; }
 };
+#endif
+
+// ============================================================================
+// HTML Math Render Stub (when minimal mode is defined)
+// ============================================================================
+
+#ifdef DOC_MODEL_MINIMAL
+// Stub types and functions when math rendering is not linked
+struct HtmlRenderOptions {
+    float base_font_size_px;
+    const char* class_prefix;
+    bool include_styles;
+};
+static const char* render_texnode_to_html(TexNode*, Arena*, HtmlRenderOptions const&) {
+    return nullptr;
+}
+static const char* get_math_css_stylesheet() {
+    return "/* Math CSS not available in minimal build */\n";
+}
 #endif
 
 // ============================================================================
@@ -1191,11 +1212,13 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     HtmlOutputOptions local_opts = opts;
     local_opts.document_class = doc->document_class;
     
+#ifndef DOC_MODEL_MINIMAL
     // Pre-typeset all math if HTML+CSS mode is requested
     // This populates elem->math.node for all math elements
     if (local_opts.math_mode == MathRenderMode::HTML_CSS && doc->fonts) {
         doc->typeset_all_math();
     }
+#endif
     
     // HTML header
     if (local_opts.standalone) {
