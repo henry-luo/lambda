@@ -72,6 +72,9 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file);
 // Math formula rendering function (quick testing of single formulas)
 int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump_ast, bool dump_boxes);
 
+// Math formula HTML rendering function
+int render_math_to_html(const char* math_formula, const char* html_file, bool standalone);
+
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
 
@@ -940,12 +943,16 @@ int main(int argc, char *argv[]) {
             printf("  Quickly test and debug individual LaTeX math formulas without creating\n");
             printf("  a full .tex file. Useful for development and debugging the math typesetter.\n");
             printf("\nOptions:\n");
-            printf("  -o, --output FILE    Output DVI file (default: /tmp/lambda_math.dvi)\n");
+            printf("  -o, --output FILE    Output file (default: /tmp/lambda_math.dvi)\n");
+            printf("  --html               Output HTML instead of DVI\n");
+            printf("  --standalone         Include full HTML document with CSS (requires --html)\n");
             printf("  --dump-ast           Dump Math AST to stderr (Phase A output)\n");
             printf("  --dump-boxes         Dump TexNode box structure to stderr (Phase B output)\n");
             printf("  -h, --help           Show this help message\n");
             printf("\nExamples:\n");
-            printf("  %s math \"\\\\frac{a}{b}\"                  # Simple fraction\n", argv[0]);
+            printf("  %s math \"\\\\frac{a}{b}\"                  # Simple fraction to DVI\n", argv[0]);
+            printf("  %s math \"\\\\frac{a}{b}\" --html           # Output HTML snippet\n", argv[0]);
+            printf("  %s math \"\\\\frac{a}{b}\" --html --standalone -o out.html  # Full HTML\n", argv[0]);
             printf("  %s math \"\\\\sum_{i=1}^n x_i\" --dump-ast  # Show AST structure\n", argv[0]);
             printf("  %s math \"\\\\sqrt{x^2+y^2}\" --dump-boxes  # Show box layout\n", argv[0]);
             printf("  %s math \"\\\\int_0^1 f(x) dx\" -o out.dvi  # Custom output file\n", argv[0]);
@@ -959,9 +966,11 @@ int main(int argc, char *argv[]) {
 
         // Parse arguments
         const char* formula = NULL;
-        const char* output_file = "/tmp/lambda_math.dvi";
+        const char* output_file = NULL;
         bool dump_ast = false;
         bool dump_boxes = false;
+        bool output_html = false;
+        bool standalone_html = false;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -972,6 +981,10 @@ int main(int argc, char *argv[]) {
                     log_finish();
                     return 1;
                 }
+            } else if (strcmp(argv[i], "--html") == 0) {
+                output_html = true;
+            } else if (strcmp(argv[i], "--standalone") == 0) {
+                standalone_html = true;
             } else if (strcmp(argv[i], "--dump-ast") == 0) {
                 dump_ast = true;
             } else if (strcmp(argv[i], "--dump-boxes") == 0) {
@@ -994,16 +1007,30 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // If only dumping and no output file specified, pass NULL
-        const char* dvi_out = (dump_ast || dump_boxes) && strcmp(output_file, "/tmp/lambda_math.dvi") == 0 
-                              ? NULL : output_file;
-        
-        // If neither dump option and default output, still write DVI
-        if (!dump_ast && !dump_boxes) {
-            dvi_out = output_file;
-        }
+        int exit_code = 0;
 
-        int exit_code = render_math_to_dvi(formula, dvi_out, dump_ast, dump_boxes);
+        if (output_html) {
+            // HTML output mode
+            const char* html_out = output_file ? output_file : "/tmp/lambda_math.html";
+            exit_code = render_math_to_html(formula, html_out, standalone_html);
+            if (exit_code == 0) {
+                fprintf(stderr, "Math formula rendered to: %s\n", html_out);
+            }
+        } else {
+            // DVI output mode (original behavior)
+            const char* default_dvi = "/tmp/lambda_math.dvi";
+            
+            // If only dumping and no output file specified, pass NULL
+            const char* dvi_out = (dump_ast || dump_boxes) && !output_file 
+                                  ? NULL : (output_file ? output_file : default_dvi);
+            
+            // If neither dump option and default output, still write DVI
+            if (!dump_ast && !dump_boxes && !output_file) {
+                dvi_out = default_dvi;
+            }
+
+            exit_code = render_math_to_dvi(formula, dvi_out, dump_ast, dump_boxes);
+        }
 
         log_debug("math command completed with result: %d", exit_code);
         log_finish();

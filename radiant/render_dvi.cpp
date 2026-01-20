@@ -322,3 +322,129 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
     
     return 0;
 }
+#include "../lambda/tex/tex_html_render.hpp"
+
+/**
+ * Render a math formula to HTML format
+ *
+ * @param math_formula LaTeX math formula string
+ * @param html_file Path to output HTML file
+ * @param standalone If true, output full HTML document with CSS
+ * @return 0 on success, non-zero on error
+ */
+int render_math_to_html(const char* math_formula, const char* html_file, bool standalone) {
+    log_info("[MATH_HTML] render_math_to_html: formula='%s', html='%s', standalone=%d",
+             math_formula, html_file ? html_file : "(stdout)", standalone);
+
+    // Create memory pool and arena
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("[MATH_HTML] Failed to create memory pool");
+        return 1;
+    }
+
+    Arena* arena = arena_create_default(pool);
+    if (!arena) {
+        log_error("[MATH_HTML] Failed to create arena");
+        pool_destroy(pool);
+        return 1;
+    }
+
+    // Create font manager
+    tex::TFMFontManager* fonts = tex::create_font_manager(arena);
+    if (!fonts) {
+        log_error("[MATH_HTML] Failed to create font manager");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+
+    // Step 1: Parse math formula to AST
+    log_info("[MATH_HTML] Phase A: Parsing formula to AST...");
+    tex::MathASTNode* ast = tex::parse_math_string_to_ast(math_formula, strlen(math_formula), arena);
+    if (!ast) {
+        log_error("[MATH_HTML] Failed to parse math formula: %s", math_formula);
+        fprintf(stderr, "Error: Failed to parse math formula\n");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+    log_info("[MATH_HTML] Phase A complete: AST node type=%s", tex::math_node_type_name(ast->type));
+
+    // Step 2: Typeset AST to TexNode
+    log_info("[MATH_HTML] Phase B: Typesetting AST to TexNode...");
+    
+    tex::MathContext math_ctx = tex::MathContext::create(arena, fonts, 10.0f);
+    math_ctx.style = tex::MathStyle::Display;
+    
+    tex::TexNode* tex_node = tex::typeset_math_ast(ast, math_ctx);
+    if (!tex_node) {
+        log_error("[MATH_HTML] Failed to typeset math formula");
+        fprintf(stderr, "Error: Failed to typeset math formula\n");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+    log_info("[MATH_HTML] Phase B complete: TexNode width=%.2fpx, height=%.2fpx, depth=%.2fpx",
+             tex_node->width, tex_node->height, tex_node->depth);
+
+    // Step 3: Render TexNode to HTML
+    log_info("[MATH_HTML] Phase C: Rendering to HTML...");
+    
+    tex::HtmlRenderOptions opts;
+    opts.base_font_size_px = 16.0f;
+    opts.include_styles = true;
+    opts.standalone = standalone;
+    
+    const char* html;
+    if (standalone) {
+        html = tex::render_texnode_to_html_document(tex_node, arena, opts);
+    } else {
+        html = tex::render_texnode_to_html(tex_node, arena, opts);
+    }
+    
+    if (!html) {
+        log_error("[MATH_HTML] Failed to render HTML");
+        fprintf(stderr, "Error: Failed to render HTML\n");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+    
+    log_info("[MATH_HTML] Phase C complete: HTML length=%zu", strlen(html));
+
+    // Step 4: Write to file or stdout
+    if (html_file) {
+        FILE* f = fopen(html_file, "w");
+        if (!f) {
+            log_error("[MATH_HTML] Failed to open output file: %s", html_file);
+            fprintf(stderr, "Error: Failed to open output file: %s\n", html_file);
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 1;
+        }
+        
+        size_t len = strlen(html);
+        size_t written = fwrite(html, 1, len, f);
+        fclose(f);
+        
+        if (written != len) {
+            log_error("[MATH_HTML] Failed to write HTML file");
+            fprintf(stderr, "Error: Failed to write HTML file\n");
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 1;
+        }
+        
+        log_info("[MATH_HTML] Successfully wrote HTML: %s", html_file);
+    } else {
+        // Output to stdout
+        printf("%s\n", html);
+    }
+
+    // Cleanup
+    arena_destroy(arena);
+    pool_destroy(pool);
+    
+    return 0;
+}
