@@ -90,18 +90,20 @@ static void append_codepoint(StrBuf* out, int32_t cp) {
     }
 }
 
-// get CSS class for atom type
+// get CSS class for atom type - MathLive compatible
 static const char* atom_type_class(AtomType type) {
     switch (type) {
-        case AtomType::Ord: return "ord";
-        case AtomType::Op: return "op";
-        case AtomType::Bin: return "bin";
-        case AtomType::Rel: return "rel";
-        case AtomType::Open: return "open";
-        case AtomType::Close: return "close";
-        case AtomType::Punct: return "punct";
-        case AtomType::Inner: return "inner";
-        default: return "ord";
+        // MathLive uses ML__mathit for ordinary math variables
+        case AtomType::Ord: return "mathit";
+        // operators use Computer Modern Roman
+        case AtomType::Op: return "cmr";
+        case AtomType::Bin: return "cmr";
+        case AtomType::Rel: return "cmr";
+        case AtomType::Open: return "cmr";
+        case AtomType::Close: return "cmr";
+        case AtomType::Punct: return "cmr";
+        case AtomType::Inner: return "mathit";
+        default: return "mathit";
     }
 }
 
@@ -144,10 +146,10 @@ static void render_kern(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
     
     float em = pt_to_em(node->width, opts.base_font_size_px);
     
-    // use a span with margin for spacing
-    strbuf_append_str(out, "<span style=\"margin-left:");
+    // use a span with inline-block width for spacing (MathLive compatible)
+    strbuf_append_str(out, "<span style=\"display:inline-block;width:");
     char buf[32];
-    snprintf(buf, sizeof(buf), "%.3fem", round3(em));
+    snprintf(buf, sizeof(buf), "%.2fem", round3(em));
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 }
@@ -159,10 +161,10 @@ static void render_glue(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
     float em = pt_to_em(node->content.glue.spec.space, opts.base_font_size_px);
     if (em == 0.0f) return;
     
-    // use a span with margin for spacing
-    strbuf_append_str(out, "<span style=\"margin-left:");
+    // use a span with inline-block width for spacing (MathLive compatible)
+    strbuf_append_str(out, "<span style=\"display:inline-block;width:");
     char buf[32];
-    snprintf(buf, sizeof(buf), "%.3fem", round3(em));
+    snprintf(buf, sizeof(buf), "%.2fem", round3(em));
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 }
@@ -198,7 +200,8 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
     if (!node) return;
     
     char class_buf[64];
-    snprintf(class_buf, sizeof(class_buf), "%s__hlist", opts.class_prefix);
+    // use ML__base for MathLive compatibility
+    snprintf(class_buf, sizeof(class_buf), "%s__base", opts.class_prefix);
     
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
@@ -555,8 +558,8 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
     
-    // bottom strut
-    snprintf(class_buf, sizeof(class_buf), "%s__strut %s__bottom", opts.class_prefix, opts.class_prefix);
+    // bottom strut - use MathLive-compatible class name
+    snprintf(class_buf, sizeof(class_buf), "%s__strut--bottom", opts.class_prefix);
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
     strbuf_append_str(out, "\" style=\"display:inline-block;height:");
@@ -695,14 +698,11 @@ const char* get_math_css_stylesheet() {
     display: inline-block;
     background: currentColor;
 }
-.ML__ord { }
-.ML__op { }
-.ML__bin { margin: 0 0.22em; }
-.ML__rel { margin: 0 0.28em; }
-.ML__open { }
-.ML__close { }
-.ML__punct { margin-right: 0.17em; }
-.ML__inner { }
+/* MathLive compatible class names */
+.ML__mathit { font-style: italic; }
+.ML__cmr { font-style: normal; }
+.ML__base { display: inline-block; }
+.ML__strut--bottom { display: inline-block; }
 )CSS";
 }
 
