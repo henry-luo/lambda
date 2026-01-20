@@ -139,6 +139,7 @@ static int32_t unicode_to_cmsy(int32_t cp) {
     if (cp == 0x21D1) return 42;  // Uparrow (* position)
     if (cp == 0x21D3) return 43;  // Downarrow (+ position)
     if (cp == 0x21D4) return 44;  // Leftrightarrow (, position)
+    if (cp == 0x21CC) return 29;  // rightleftharpoons
     
     // Infinity
     if (cp == 0x221E) return 49;  // infinity (1 position)

@@ -182,6 +182,9 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"Uparrow", 42, AtomType::Rel, SymFont::CMSY}, {"Downarrow", 43, AtomType::Rel, SymFont::CMSY},
     {"mapsto", 55, AtomType::Rel, SymFont::CMSY}, {"nearrow", 37, AtomType::Rel, SymFont::CMSY},
     {"searrow", 38, AtomType::Rel, SymFont::CMSY},
+    {"rightharpoonup", 42, AtomType::Rel, SymFont::CMMI}, {"rightharpoondown", 43, AtomType::Rel, SymFont::CMMI},
+    {"leftharpoonup", 40, AtomType::Rel, SymFont::CMMI}, {"leftharpoondown", 41, AtomType::Rel, SymFont::CMMI},
+    {"rightleftharpoons", 29, AtomType::Rel, SymFont::CMSY},
     // Binary operators (cmsy10)
     {"pm", 6, AtomType::Bin, SymFont::CMSY}, {"mp", 7, AtomType::Bin, SymFont::CMSY},
     {"times", 2, AtomType::Bin, SymFont::CMSY}, {"div", 4, AtomType::Bin, SymFont::CMSY},

@@ -353,7 +353,7 @@ clean-tree-sitter-minimal:
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-reference test-extended test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
 	    lambda format lint check docs intellisense analyze-size \
 	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
@@ -412,7 +412,9 @@ help:
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
-	@echo "  test-tex-dvi  - Run TeX DVI comparison tests against reference"
+	@echo "  test-tex-dvi  - Run TeX DVI comparison tests against reference (all tests)"
+	@echo "  test-tex-dvi-baseline - Run TeX DVI comparison BASELINE tests (stable, must pass)"
+	@echo "  test-tex-dvi-extended - Run TeX DVI comparison EXTENDED tests (work-in-progress)"
 	@echo "  test-tex-reference - Generate reference DVI files from test/*.tex"
 	@echo "  test-pdf      - Run PDF rendering test suite (compare vs pdf.js)"
 	@echo "  test-pdf-export - Export pdf.js operator lists as JSON references"
@@ -809,10 +811,20 @@ test-tex-baseline: build-test
 	@./test/test_tex_box_gtest.exe 2>/dev/null || true
 
 test-tex-dvi: build
-	@echo "Running TeX DVI comparison tests..."
+	@echo "Running TeX DVI comparison tests (ALL)..."
 	@echo "=============================================================="
 	@chmod +x test/latex/run_tex_tests.sh
 	@./test/latex/run_tex_tests.sh
+
+test-tex-dvi-baseline: build build-test
+	@echo "Running TeX DVI comparison BASELINE tests..."
+	@echo "=============================================================="
+	@./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareBaselineTest.*"
+
+test-tex-dvi-extended: build build-test
+	@echo "Running TeX DVI comparison EXTENDED tests..."
+	@echo "=============================================================="
+	@./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareExtendedTest.*"
 
 test-tex-reference:
 	@echo "Generating TeX reference DVI files..."

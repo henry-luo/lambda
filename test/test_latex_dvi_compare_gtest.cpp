@@ -384,10 +384,20 @@ protected:
 };
 
 // ============================================================================
-// Normalization Unit Tests
+// Derived Test Fixtures for Baseline and Extended Tests
 // ============================================================================
 
-TEST_F(DVICompareTest, NormalizationIgnoresComment) {
+// Baseline tests - these are stable and should always pass
+class DVICompareBaselineTest : public DVICompareTest {};
+
+// Extended tests - these are work-in-progress and may fail
+class DVICompareExtendedTest : public DVICompareTest {};
+
+// ============================================================================
+// Baseline: Normalization Unit Tests
+// ============================================================================
+
+TEST_F(DVICompareBaselineTest, NormalizationIgnoresComment) {
     // Parse a reference DVI file
     const char* ref_path = "test/latex/reference/test_simple_text.dvi";
     if (!file_exists(ref_path)) {
@@ -406,7 +416,7 @@ TEST_F(DVICompareTest, NormalizationIgnoresComment) {
     EXPECT_GE(norm.page_count, 1);
 }
 
-TEST_F(DVICompareTest, ExtractTextContent) {
+TEST_F(DVICompareBaselineTest, ExtractTextContent) {
     const char* ref_path = "test/latex/reference/test_simple_text.dvi";
     if (!file_exists(ref_path)) {
         GTEST_SKIP() << "Reference DVI not found: " << ref_path;
@@ -425,10 +435,10 @@ TEST_F(DVICompareTest, ExtractTextContent) {
 }
 
 // ============================================================================
-// DVI Comparison Tests
+// Baseline: DVI Comparison Tests (Passing)
 // ============================================================================
 
-TEST_F(DVICompareTest, SimpleText) {
+TEST_F(DVICompareBaselineTest, SimpleText) {
     // Generate the DVI and save to a known location for debugging
     char out_dvi_path[512];
     snprintf(out_dvi_path, sizeof(out_dvi_path), "/tmp/lambda_test_simple_text.dvi");
@@ -438,135 +448,55 @@ TEST_F(DVICompareTest, SimpleText) {
     EXPECT_TRUE(test_latex_file("test_simple_text"));
 }
 
-// Additional test cases - these may be skipped if reference files don't exist
-// or if the typesetter doesn't yet support all features
-
-TEST_F(DVICompareTest, SimpleMath) {
-    // Math typesetting comparison
+TEST_F(DVICompareBaselineTest, SimpleMath) {
     EXPECT_TRUE(test_latex_file("test_simple_math"));
 }
 
-TEST_F(DVICompareTest, Fraction) {
+TEST_F(DVICompareBaselineTest, Fraction) {
     EXPECT_TRUE(test_latex_file("test_fraction"));
 }
 
-TEST_F(DVICompareTest, Greek) {
+TEST_F(DVICompareBaselineTest, Greek) {
     EXPECT_TRUE(test_latex_file("test_greek"));
 }
 
-TEST_F(DVICompareTest, Sqrt) {
+TEST_F(DVICompareBaselineTest, Sqrt) {
     EXPECT_TRUE(test_latex_file("test_sqrt"));
 }
 
-TEST_F(DVICompareTest, SubscriptSuperscript) {
+TEST_F(DVICompareBaselineTest, SubscriptSuperscript) {
     EXPECT_TRUE(test_latex_file("test_subscript_superscript"));
 }
 
-TEST_F(DVICompareTest, Delimiters) {
+TEST_F(DVICompareBaselineTest, Delimiters) {
     EXPECT_TRUE(test_latex_file("test_delimiters"));
 }
 
-TEST_F(DVICompareTest, SumIntegral) {
+TEST_F(DVICompareBaselineTest, SumIntegral) {
     EXPECT_TRUE(test_latex_file("test_sum_integral"));
 }
 
-TEST_F(DVICompareTest, Matrix) {
+TEST_F(DVICompareBaselineTest, Matrix) {
     EXPECT_TRUE(test_latex_file("test_matrix"));
 }
 
-TEST_F(DVICompareTest, ComplexFormula) {
+TEST_F(DVICompareBaselineTest, ComplexFormula) {
     EXPECT_TRUE(test_latex_file("test_complex_formula"));
 }
 
-// ============================================================================
-// Sophisticated Math Tests
-// ============================================================================
-
-TEST_F(DVICompareTest, Calculus) {
+TEST_F(DVICompareBaselineTest, Calculus) {
     EXPECT_TRUE(test_latex_file("test_calculus"));
 }
 
-TEST_F(DVICompareTest, LinearAlgebra) {
-    EXPECT_TRUE(test_latex_file("test_linear_algebra"));
-}
-
-TEST_F(DVICompareTest, Physics) {
-    EXPECT_TRUE(test_latex_file("test_physics"));
-}
-
-TEST_F(DVICompareTest, NumberTheory) {
-    EXPECT_TRUE(test_latex_file("test_number_theory"));
-}
-
-TEST_F(DVICompareTest, Probability) {
-    EXPECT_TRUE(test_latex_file("test_probability"));
-}
-
-TEST_F(DVICompareTest, SetTheory) {
+TEST_F(DVICompareBaselineTest, SetTheory) {
     EXPECT_TRUE(test_latex_file("test_set_theory"));
 }
 
-TEST_F(DVICompareTest, Combinatorics) {
-    EXPECT_TRUE(test_latex_file("test_combinatorics"));
-}
-
-TEST_F(DVICompareTest, AbstractAlgebra) {
-    EXPECT_TRUE(test_latex_file("test_abstract_algebra"));
-}
-
-TEST_F(DVICompareTest, DifferentialEquations) {
-    EXPECT_TRUE(test_latex_file("test_differential_equations"));
-}
-
-TEST_F(DVICompareTest, ComplexAnalysis) {
-    EXPECT_TRUE(test_latex_file("test_complex_analysis"));
-}
-
-TEST_F(DVICompareTest, Topology) {
-    EXPECT_TRUE(test_latex_file("test_topology"));
-}
-
 // ============================================================================
-// Structure and Syntax Tests
+// Baseline: Self-Consistency Tests
 // ============================================================================
 
-TEST_F(DVICompareTest, NestedStructures) {
-    EXPECT_TRUE(test_latex_file("test_nested_structures"));
-}
-
-TEST_F(DVICompareTest, EdgeCases) {
-    EXPECT_TRUE(test_latex_file("test_edge_cases"));
-}
-
-TEST_F(DVICompareTest, AllGreek) {
-    EXPECT_TRUE(test_latex_file("test_all_greek"));
-}
-
-TEST_F(DVICompareTest, AllOperators) {
-    EXPECT_TRUE(test_latex_file("test_all_operators"));
-}
-
-TEST_F(DVICompareTest, AlignmentAdvanced) {
-    EXPECT_TRUE(test_latex_file("test_alignment_advanced"));
-}
-
-TEST_F(DVICompareTest, Chemistry) {
-    EXPECT_TRUE(test_latex_file("test_chemistry"));
-}
-
-TEST_F(DVICompareTest, FontStyles) {
-    EXPECT_TRUE(test_latex_file("test_font_styles"));
-}
-
-TEST_F(DVICompareTest, Tables) {
-    EXPECT_TRUE(test_latex_file("test_tables"));
-}
-
-// ============================================================================
-// Self-Consistency Tests
-// ============================================================================
-
-TEST_F(DVICompareTest, SelfConsistency) {
+TEST_F(DVICompareBaselineTest, SelfConsistency) {
     // Render the same file twice and verify outputs match
     const char* latex_path = "test/latex/test_simple_text.tex";
     if (!file_exists(latex_path)) {
@@ -593,4 +523,80 @@ TEST_F(DVICompareTest, SelfConsistency) {
     char error_msg[1024];
     EXPECT_TRUE(compare_dvi_text(norm1, norm2, error_msg, sizeof(error_msg)))
         << error_msg;
+}
+
+// ============================================================================
+// Extended: Sophisticated Math Tests (Work in Progress)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, LinearAlgebra) {
+    EXPECT_TRUE(test_latex_file("test_linear_algebra"));
+}
+
+TEST_F(DVICompareExtendedTest, Physics) {
+    EXPECT_TRUE(test_latex_file("test_physics"));
+}
+
+TEST_F(DVICompareExtendedTest, NumberTheory) {
+    EXPECT_TRUE(test_latex_file("test_number_theory"));
+}
+
+TEST_F(DVICompareExtendedTest, Probability) {
+    EXPECT_TRUE(test_latex_file("test_probability"));
+}
+
+TEST_F(DVICompareExtendedTest, Combinatorics) {
+    EXPECT_TRUE(test_latex_file("test_combinatorics"));
+}
+
+TEST_F(DVICompareExtendedTest, AbstractAlgebra) {
+    EXPECT_TRUE(test_latex_file("test_abstract_algebra"));
+}
+
+TEST_F(DVICompareExtendedTest, DifferentialEquations) {
+    EXPECT_TRUE(test_latex_file("test_differential_equations"));
+}
+
+TEST_F(DVICompareExtendedTest, ComplexAnalysis) {
+    EXPECT_TRUE(test_latex_file("test_complex_analysis"));
+}
+
+TEST_F(DVICompareExtendedTest, Topology) {
+    EXPECT_TRUE(test_latex_file("test_topology"));
+}
+
+// ============================================================================
+// Extended: Structure and Syntax Tests (Work in Progress)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, NestedStructures) {
+    EXPECT_TRUE(test_latex_file("test_nested_structures"));
+}
+
+TEST_F(DVICompareExtendedTest, EdgeCases) {
+    EXPECT_TRUE(test_latex_file("test_edge_cases"));
+}
+
+TEST_F(DVICompareExtendedTest, AllGreek) {
+    EXPECT_TRUE(test_latex_file("test_all_greek"));
+}
+
+TEST_F(DVICompareExtendedTest, AllOperators) {
+    EXPECT_TRUE(test_latex_file("test_all_operators"));
+}
+
+TEST_F(DVICompareExtendedTest, AlignmentAdvanced) {
+    EXPECT_TRUE(test_latex_file("test_alignment_advanced"));
+}
+
+TEST_F(DVICompareExtendedTest, Chemistry) {
+    EXPECT_TRUE(test_latex_file("test_chemistry"));
+}
+
+TEST_F(DVICompareExtendedTest, FontStyles) {
+    EXPECT_TRUE(test_latex_file("test_font_styles"));
+}
+
+TEST_F(DVICompareExtendedTest, Tables) {
+    EXPECT_TRUE(test_latex_file("test_tables"));
 }
