@@ -550,6 +550,10 @@ TEST_F(DVICompareBaselineTest, SetTheory) {
     EXPECT_TRUE(test_latex_file("test_set_theory"));
 }
 
+TEST_F(DVICompareBaselineTest, LinearAlgebra2_Eigenvalues) {
+    EXPECT_TRUE(test_latex_file("test_linear_algebra2"));
+}
+
 // ============================================================================
 // Baseline: Self-Consistency Tests
 // ============================================================================
@@ -584,16 +588,44 @@ TEST_F(DVICompareBaselineTest, SelfConsistency) {
 }
 
 // ============================================================================
-// Extended: Sophisticated Math Tests (Work in Progress)
+// Extended: Linear Algebra (split into smaller tests)
 // ============================================================================
 
-TEST_F(DVICompareExtendedTest, LinearAlgebra) {
-    EXPECT_TRUE(test_latex_file("test_linear_algebra"));
+TEST_F(DVICompareExtendedTest, LinearAlgebra1_Matrix) {
+    EXPECT_TRUE(test_latex_file("test_linear_algebra1"));
 }
 
-TEST_F(DVICompareExtendedTest, Physics) {
-    EXPECT_TRUE(test_latex_file("test_physics"));
+TEST_F(DVICompareExtendedTest, LinearAlgebra3_SpecialMatrices) {
+    EXPECT_TRUE(test_latex_file("test_linear_algebra3"));
 }
+
+// ============================================================================
+// Extended: Physics (split into smaller tests)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, Physics1_Mechanics) {
+    EXPECT_TRUE(test_latex_file("test_physics1"));
+}
+
+TEST_F(DVICompareExtendedTest, Physics2_Quantum) {
+    EXPECT_TRUE(test_latex_file("test_physics2"));
+}
+
+// ============================================================================
+// Extended: Nested Structures (split into smaller tests)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, Nested1_Fractions) {
+    EXPECT_TRUE(test_latex_file("test_nested1"));
+}
+
+TEST_F(DVICompareExtendedTest, Nested2_Scripts) {
+    EXPECT_TRUE(test_latex_file("test_nested2"));
+}
+
+// ============================================================================
+// Extended: Sophisticated Math Tests (Work in Progress)
+// ============================================================================
 
 TEST_F(DVICompareExtendedTest, NumberTheory) {
     EXPECT_TRUE(test_latex_file("test_number_theory"));
@@ -626,10 +658,6 @@ TEST_F(DVICompareExtendedTest, Topology) {
 // ============================================================================
 // Extended: Structure and Syntax Tests (Work in Progress)
 // ============================================================================
-
-TEST_F(DVICompareExtendedTest, NestedStructures) {
-    EXPECT_TRUE(test_latex_file("test_nested_structures"));
-}
 
 TEST_F(DVICompareExtendedTest, EdgeCases) {
     EXPECT_TRUE(test_latex_file("test_edge_cases"));
