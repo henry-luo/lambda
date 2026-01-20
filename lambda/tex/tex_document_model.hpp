@@ -334,6 +334,10 @@ class PackageLoader;
 struct TexDocumentModel {
     Arena* arena;
     
+    // Font manager for math typesetting (stored for lazy typesetting)
+    TFMFontManager* fonts;
+    float base_size_pt;             // Base font size in points (default 10pt)
+    
     // Package system (new - JSON-based package loading)
     CommandRegistry* registry;      // Command registry from packages
     PackageLoader* pkg_loader;      // Package loader instance
@@ -444,6 +448,10 @@ struct TexDocumentModel {
     // Package system methods
     bool require_package(const char* pkg_name, const char* options = nullptr);
     bool is_package_loaded(const char* pkg_name) const;
+    
+    // Math typesetting - populate math.node for all math elements
+    // Call this before HTML output if you want HTML+CSS math rendering
+    void typeset_all_math();
 };
 
 // ============================================================================
@@ -528,6 +536,13 @@ DocElement* doc_create_text_cstr(Arena* arena, const char* text, DocTextStyle st
 // Output Renderers
 // ============================================================================
 
+// Math rendering mode for HTML output
+enum class MathRenderMode {
+    HTML_CSS,   // Native HTML+CSS (MathLive-style) - best for selection/copy
+    SVG,        // SVG graphics - best for precise rendering
+    FALLBACK    // Escaped LaTeX source (minimal)
+};
+
 // HTML output options
 struct HtmlOutputOptions {
     enum FontMode {
@@ -537,7 +552,8 @@ struct HtmlOutputOptions {
     };
     
     FontMode font_mode;
-    bool math_as_svg;           // true = SVG, false = MathML
+    MathRenderMode math_mode;   // Math rendering mode (default: HTML_CSS)
+    bool math_as_svg;           // DEPRECATED: use math_mode instead
     bool typeset_paragraphs;    // true = Knuth-Plass, false = browser CSS
     bool standalone;            // Include <!DOCTYPE>, <html> wrapper
     bool pretty_print;          // Indent output
@@ -550,7 +566,8 @@ struct HtmlOutputOptions {
     static HtmlOutputOptions defaults() {
         HtmlOutputOptions o = {};
         o.font_mode = FONT_WEBFONT;
-        o.math_as_svg = true;
+        o.math_mode = MathRenderMode::HTML_CSS;  // Native HTML+CSS (new default)
+        o.math_as_svg = false;  // Deprecated
         o.typeset_paragraphs = false;
         o.standalone = true;
         o.pretty_print = true;
@@ -561,11 +578,20 @@ struct HtmlOutputOptions {
         return o;
     }
     
+    // SVG mode - for high-fidelity rendering
+    static HtmlOutputOptions svg_mode() {
+        HtmlOutputOptions o = defaults();
+        o.math_mode = MathRenderMode::SVG;
+        o.math_as_svg = true;
+        return o;
+    }
+    
     // Hybrid mode: semantic HTML5 tags with minimal classes
     // Clean output without CSS prefix, suitable for embedding
     static HtmlOutputOptions hybrid() {
         HtmlOutputOptions o = {};
         o.font_mode = FONT_SYSTEM;
+        o.math_mode = MathRenderMode::FALLBACK;
         o.math_as_svg = false;
         o.typeset_paragraphs = false;
         o.standalone = false;
