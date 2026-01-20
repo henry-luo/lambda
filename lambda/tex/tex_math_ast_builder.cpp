@@ -1270,9 +1270,19 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
 // ============================================================================
 
 MathASTNode* parse_math_string_to_ast(const char* latex_src, size_t len, Arena* arena) {
-    log_debug("tex_math_ast: parse_math_string_to_ast len=%zu src='%.*s'", len, (int)(len > 80 ? 80 : len), latex_src);
+    log_info("[PARSE] parse_math_string_to_ast: BEGIN len=%zu src='%.*s'", 
+             len, (int)(len > 80 ? 80 : len), latex_src);
+    
     MathASTBuilder builder(arena, latex_src, len);
-    return builder.build();
+    MathASTNode* result = builder.build();
+    
+    if (result) {
+        log_info("[PARSE] parse_math_string_to_ast: END ast_type=%s", math_node_type_name(result->type));
+    } else {
+        log_info("[PARSE] parse_math_string_to_ast: END (null result)");
+    }
+    
+    return result;
 }
 
 MathASTNode* parse_math_to_ast(const ::ItemReader& math_elem, Arena* arena) {

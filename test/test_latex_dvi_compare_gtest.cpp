@@ -11,6 +11,7 @@
 #include "lib/arena.h"
 #include "lib/mempool.h"
 #include "lib/log.h"
+#include <algorithm>
 #include <cstring>
 #include <cstdio>
 #include <unistd.h>
@@ -206,6 +207,25 @@ static bool compare_dvi_glyphs(const NormalizedDVI& ref, const NormalizedDVI& ou
 }
 
 // ============================================================================
+// Verbose Mode Flag (controlled via environment variable or --verbose flag)
+// ============================================================================
+
+static bool g_verbose_mode = false;
+
+// Check if verbose mode is enabled (via DVI_TEST_VERBOSE env var or --verbose argument)
+static bool is_verbose() {
+    static bool checked = false;
+    if (!checked) {
+        const char* env = getenv("DVI_TEST_VERBOSE");
+        if (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0)) {
+            g_verbose_mode = true;
+        }
+        checked = true;
+    }
+    return g_verbose_mode;
+}
+
+// ============================================================================
 // Test Fixture
 // ============================================================================
 
@@ -307,30 +327,68 @@ protected:
                 << " (" << out_parser.error() << ")";
         }
 
-        // Debug: show glyph counts
-        fprintf(stderr, "[DEBUG] ref_parser: %d pages\n", ref_parser.page_count());
-        fprintf(stderr, "[DEBUG] out_parser: %d pages\n", out_parser.page_count());
-        if (ref_parser.page_count() > 0) {
-            const DVIPage* p = ref_parser.page(0);
-            fprintf(stderr, "[DEBUG] ref page 0: %d glyphs\n", p->glyph_count);
-            fprintf(stderr, "[DEBUG] Reference glyphs:\n");
-            for (int i = 0; i < p->glyph_count && i < 30; i++) {
-                const DVIFont* f = ref_parser.font(p->glyphs[i].font_num);
-                fprintf(stderr, "[DEBUG]   ref glyph %d: codepoint=%d '%c' font=%s\n",
-                        i, p->glyphs[i].codepoint,
-                        (p->glyphs[i].codepoint >= 32 && p->glyphs[i].codepoint < 127)
-                            ? (char)p->glyphs[i].codepoint : '?',
-                        f ? f->name : "?");
+        // Basic info (always show)
+        fprintf(stderr, "[INFO] ref: %d pages, out: %d pages\n", 
+                ref_parser.page_count(), out_parser.page_count());
+        
+        // Show side-by-side diff of first mismatches
+        if (ref_parser.page_count() > 0 && out_parser.page_count() > 0) {
+            const DVIPage* ref_page = ref_parser.page(0);
+            const DVIPage* out_page = out_parser.page(0);
+            int max_glyphs = std::min(ref_page->glyph_count, out_page->glyph_count);
+            int diff_count = 0;
+            
+            fprintf(stderr, "[INFO] ref page 0: %d glyphs, out page 0: %d glyphs\n", 
+                    ref_page->glyph_count, out_page->glyph_count);
+            
+            // In verbose mode, dump all glyphs; otherwise just show first 5 diffs
+            if (is_verbose()) {
+                fprintf(stderr, "[VERBOSE] === Reference Glyphs ===\n");
+                for (int i = 0; i < ref_page->glyph_count && i < 50; i++) {
+                    const DVIFont* f = ref_parser.font(ref_page->glyphs[i].font_num);
+                    int cp = ref_page->glyphs[i].codepoint;
+                    char ch = (cp >= 32 && cp < 127) ? (char)cp : '?';
+                    fprintf(stderr, "  [%3d] cp=%3d '%c' font=%s\n", i, cp, ch, f ? f->name : "?");
+                }
+                fprintf(stderr, "[VERBOSE] === Output Glyphs ===\n");
+                for (int i = 0; i < out_page->glyph_count && i < 50; i++) {
+                    const DVIFont* f = out_parser.font(out_page->glyphs[i].font_num);
+                    int cp = out_page->glyphs[i].codepoint;
+                    char ch = (cp >= 32 && cp < 127) ? (char)cp : '?';
+                    fprintf(stderr, "  [%3d] cp=%3d '%c' font=%s\n", i, cp, ch, f ? f->name : "?");
+                }
             }
-        }
-        if (out_parser.page_count() > 0) {
-            const DVIPage* p = out_parser.page(0);
-            fprintf(stderr, "[DEBUG] out page 0: %d glyphs\n", p->glyph_count);
-            for (int i = 0; i < p->glyph_count && i < 20; i++) {
-                fprintf(stderr, "[DEBUG]   glyph %d: codepoint=%d '%c'\n",
-                        i, p->glyphs[i].codepoint,
-                        (p->glyphs[i].codepoint >= 32 && p->glyphs[i].codepoint < 127)
-                            ? (char)p->glyphs[i].codepoint : '?');
+            
+            // Show first 5 differences (or all in verbose mode)
+            int max_diffs = is_verbose() ? 20 : 5;
+            for (int i = 0; i < max_glyphs && diff_count < max_diffs; i++) {
+                int ref_cp = ref_page->glyphs[i].codepoint;
+                int out_cp = out_page->glyphs[i].codepoint;
+                const DVIFont* ref_font = ref_parser.font(ref_page->glyphs[i].font_num);
+                const DVIFont* out_font = out_parser.font(out_page->glyphs[i].font_num);
+                const char* ref_name = ref_font ? ref_font->name : "?";
+                const char* out_name = out_font ? out_font->name : "?";
+                
+                if (ref_cp != out_cp || strcmp(ref_name, out_name) != 0) {
+                    char ref_char = (ref_cp >= 32 && ref_cp < 127) ? (char)ref_cp : '?';
+                    char out_char = (out_cp >= 32 && out_cp < 127) ? (char)out_cp : '?';
+                    fprintf(stderr, "[DIFF] glyph %d: ref=%d '%c' (%s) vs out=%d '%c' (%s)\n",
+                            i, ref_cp, ref_char, ref_name, out_cp, out_char, out_name);
+                    diff_count++;
+                }
+            }
+            
+            // Show extra glyphs if counts differ
+            if (ref_page->glyph_count > out_page->glyph_count) {
+                fprintf(stderr, "[DIFF] ref has %d extra glyphs starting at index %d\n",
+                        ref_page->glyph_count - out_page->glyph_count, out_page->glyph_count);
+            } else if (out_page->glyph_count > ref_page->glyph_count) {
+                fprintf(stderr, "[DIFF] out has %d extra glyphs starting at index %d\n",
+                        out_page->glyph_count - ref_page->glyph_count, ref_page->glyph_count);
+            }
+            
+            if (diff_count == 0 && ref_page->glyph_count == out_page->glyph_count) {
+                fprintf(stderr, "[INFO] All %d glyphs match!\n", max_glyphs);
             }
         }
 
