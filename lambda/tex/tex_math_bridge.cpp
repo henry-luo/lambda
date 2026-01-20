@@ -606,22 +606,34 @@ TexNode* typeset_root(TexNode* degree, TexNode* radicand, MathContext& ctx) {
     TexNode* radical = typeset_sqrt(radicand, ctx);
 
     if (degree) {
-        // Position degree above and to the left
+        // Position degree above and to the left of the radical sign
+        // In TeX, the root index appears BEFORE the radical sign
         radical->content.radical.degree = degree;
 
-        // Degree is scriptscript style
-        float deg_shift_x = 2.0f;
-        float deg_shift_y = radical->height * 0.6f;
+        // Degree is scriptscript style - it's smaller
+        // Place degree so it overlaps with the radical sign's left side
+        // Using negative x to indicate it's to the left of the radical origin
+        float deg_width = degree->width;
+        float deg_shift_y = radical->height * 0.6f;  // Raise it up
 
-        degree->x = deg_shift_x;
+        // Expand the radical's width to include the degree area on the left
+        float extra_left = deg_width;
+        radical->width += extra_left;
+        
+        // Shift radicand's x position to account for the degree width
+        if (radical->content.radical.radicand) {
+            radical->content.radical.radicand->x += extra_left;
+        }
+        
+        // Degree is at the left edge (x=0), radical sign is after it
+        degree->x = 0;
         degree->y = deg_shift_y;
         degree->parent = radical;
-
-        // Adjust total width
-        float extra_width = degree->x + degree->width - 6.0f;
-        if (extra_width > 0) {
-            radical->width += extra_width;
-        }
+        
+        log_debug("typeset_root: degree x=%.1f width=%.1f, radicand x=%.1f, total width=%.1f",
+                  degree->x, degree->width,
+                  radical->content.radical.radicand ? radical->content.radical.radicand->x : 0.0f,
+                  radical->width);
     }
 
     return radical;

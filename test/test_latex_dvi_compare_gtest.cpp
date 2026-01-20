@@ -313,6 +313,15 @@ protected:
         if (ref_parser.page_count() > 0) {
             const DVIPage* p = ref_parser.page(0);
             fprintf(stderr, "[DEBUG] ref page 0: %d glyphs\n", p->glyph_count);
+            fprintf(stderr, "[DEBUG] Reference glyphs:\n");
+            for (int i = 0; i < p->glyph_count && i < 30; i++) {
+                const DVIFont* f = ref_parser.font(p->glyphs[i].font_num);
+                fprintf(stderr, "[DEBUG]   ref glyph %d: codepoint=%d '%c' font=%s\n",
+                        i, p->glyphs[i].codepoint,
+                        (p->glyphs[i].codepoint >= 32 && p->glyphs[i].codepoint < 127)
+                            ? (char)p->glyphs[i].codepoint : '?',
+                        f ? f->name : "?");
+            }
         }
         if (out_parser.page_count() > 0) {
             const DVIPage* p = out_parser.page(0);

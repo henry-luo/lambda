@@ -331,6 +331,18 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"ll", 30, AtomType::Rel}, {"gg", 31, AtomType::Rel},
     {"perp", 63, AtomType::Rel}, {"mid", 106, AtomType::Rel},
     {"parallel", 107, AtomType::Rel},
+    // Arrows (cmsy10 positions)
+    {"to", 33, AtomType::Rel}, {"rightarrow", 33, AtomType::Rel},
+    {"leftarrow", 32, AtomType::Rel}, {"gets", 32, AtomType::Rel},
+    {"leftrightarrow", 36, AtomType::Rel},
+    {"uparrow", 34, AtomType::Rel}, {"downarrow", 35, AtomType::Rel},
+    {"Rightarrow", 41, AtomType::Rel}, {"Leftarrow", 40, AtomType::Rel},
+    {"Leftrightarrow", 44, AtomType::Rel}, {"iff", 44, AtomType::Rel},
+    {"Uparrow", 42, AtomType::Rel}, {"Downarrow", 43, AtomType::Rel},
+    {"mapsto", 55, AtomType::Rel}, {"hookleftarrow", 45, AtomType::Rel},
+    {"hookrightarrow", 44, AtomType::Rel}, {"nearrow", 37, AtomType::Rel},
+    {"searrow", 38, AtomType::Rel}, {"swarrow", 46, AtomType::Rel},
+    {"nwarrow", 47, AtomType::Rel},
     // Binary operators
     {"pm", 6, AtomType::Bin}, {"mp", 7, AtomType::Bin},
     {"times", 2, AtomType::Bin}, {"div", 4, AtomType::Bin},
@@ -382,6 +394,7 @@ static const BigOpEntry BIG_OP_TABLE[] = {
     {"bigodot", 74, 75, true},
     {"biguplus", 85, 93, true},
     {"bigsqcup", 70, 71, true},
+    // Limit-style operators
     {"lim", 0, 0, true},
     {"liminf", 0, 0, true},
     {"limsup", 0, 0, true},
@@ -389,6 +402,31 @@ static const BigOpEntry BIG_OP_TABLE[] = {
     {"min", 0, 0, true},
     {"sup", 0, 0, true},
     {"inf", 0, 0, true},
+    // Trig and log operators
+    {"sin", 0, 0, false},
+    {"cos", 0, 0, false},
+    {"tan", 0, 0, false},
+    {"cot", 0, 0, false},
+    {"sec", 0, 0, false},
+    {"csc", 0, 0, false},
+    {"sinh", 0, 0, false},
+    {"cosh", 0, 0, false},
+    {"tanh", 0, 0, false},
+    {"coth", 0, 0, false},
+    {"arcsin", 0, 0, false},
+    {"arccos", 0, 0, false},
+    {"arctan", 0, 0, false},
+    {"log", 0, 0, false},
+    {"ln", 0, 0, false},
+    {"exp", 0, 0, false},
+    {"det", 0, 0, true},
+    {"dim", 0, 0, false},
+    {"ker", 0, 0, false},
+    {"hom", 0, 0, false},
+    {"arg", 0, 0, false},
+    {"deg", 0, 0, false},
+    {"gcd", 0, 0, true},
+    {"Pr", 0, 0, true},
     {nullptr, 0, 0, false}
 };
 
@@ -500,6 +538,8 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (ts_node_is_null(node)) return nullptr;
 
     const char* type = ts_node_type(node);
+    
+    log_debug("tex_math_ast_builder: build_ts_node type=%s", type);
 
     if (strcmp(type, "math") == 0) return build_math(node);
     if (strcmp(type, "group") == 0) return build_group(node);
@@ -521,6 +561,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
 
     // Unknown - try children
     uint32_t child_count = ts_node_named_child_count(node);
+    log_debug("tex_math_ast_builder: unhandled type=%s with %d children", type, child_count);
     if (child_count == 1) {
         return build_ts_node(ts_node_named_child(node, 0));
     }
@@ -678,33 +719,23 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_subsup(TSNode node) {
-    uint32_t child_count = ts_node_named_child_count(node);
-    if (child_count < 2) return nullptr;
+    // subsup has fields: base, sub, sup
+    // Use ts_node_child_by_field_name to get them
+    
+    TSNode base_node = ts_node_child_by_field_name(node, "base", 4);
+    TSNode sub_node = ts_node_child_by_field_name(node, "sub", 3);
+    TSNode sup_node = ts_node_child_by_field_name(node, "sup", 3);
+    
+    log_debug("tex_math_ast_builder: build_subsup base=%d sub=%d sup=%d",
+              !ts_node_is_null(base_node), !ts_node_is_null(sub_node), !ts_node_is_null(sup_node));
 
-    // First child is the base
-    MathASTNode* base = build_ts_node(ts_node_named_child(node, 0));
+    MathASTNode* base = ts_node_is_null(base_node) ? nullptr : build_ts_node(base_node);
+    if (!base) return nullptr;
+    
+    MathASTNode* super = ts_node_is_null(sup_node) ? nullptr : build_ts_node(sup_node);
+    MathASTNode* sub = ts_node_is_null(sub_node) ? nullptr : build_ts_node(sub_node);
 
-    MathASTNode* super = nullptr;
-    MathASTNode* sub = nullptr;
-
-    // Look for superscript and subscript children
-    for (uint32_t i = 1; i < child_count; i++) {
-        TSNode child = ts_node_named_child(node, i);
-        const char* type = ts_node_type(child);
-
-        if (strcmp(type, "superscript") == 0) {
-            // Superscript has its content as first named child
-            uint32_t sup_children = ts_node_named_child_count(child);
-            if (sup_children > 0) {
-                super = build_ts_node(ts_node_named_child(child, 0));
-            }
-        } else if (strcmp(type, "subscript") == 0) {
-            uint32_t sub_children = ts_node_named_child_count(child);
-            if (sub_children > 0) {
-                sub = build_ts_node(ts_node_named_child(child, 0));
-            }
-        }
-    }
+    log_debug("tex_math_ast_builder: build_subsup result super=%p sub=%p", (void*)super, (void*)sub);
 
     if (!super && !sub) {
         return base;
@@ -731,20 +762,31 @@ MathASTNode* MathASTBuilder::build_radical(TSNode node) {
     MathASTNode* radicand = nullptr;
     MathASTNode* index = nullptr;
 
+    log_debug("tex_math_ast_builder: build_radical with %d children", child_count);
+
     // Look for radicand and optional index
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         const char* type = ts_node_type(child);
+        
+        log_debug("tex_math_ast_builder: radical child %d: type=%s", i, type);
 
-        if (strcmp(type, "index") == 0) {
+        if (strcmp(type, "index") == 0 || strcmp(type, "brack_group") == 0) {
+            // Handle both "index" (some grammars) and "brack_group" (tree-sitter-latex)
             uint32_t idx_children = ts_node_named_child_count(child);
+            log_debug("tex_math_ast_builder: found index/brack_group with %d children", idx_children);
             if (idx_children > 0) {
                 index = build_ts_node(ts_node_named_child(child, 0));
+            } else {
+                // Try to get content directly
+                index = build_ts_node(child);
             }
         } else if (!radicand) {
             radicand = build_ts_node(child);
         }
     }
+
+    log_debug("tex_math_ast_builder: radical has index=%p, radicand=%p", (void*)index, (void*)radicand);
 
     if (!radicand) {
         radicand = make_math_row(arena);
@@ -757,32 +799,69 @@ MathASTNode* MathASTBuilder::build_delimiter_group(TSNode node) {
     int32_t left_delim = '(';
     int32_t right_delim = ')';
 
-    // Get delimiters from child nodes
-    uint32_t child_count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        TSNode child = ts_node_child(node, i);
-        const char* type = ts_node_type(child);
-
-        if (strcmp(type, "left_delim") == 0) {
-            int len;
-            const char* text = node_text(child, &len);
-            if (len > 0) left_delim = text[len - 1];  // Get last char (after \left)
-        } else if (strcmp(type, "right_delim") == 0) {
-            int len;
-            const char* text = node_text(child, &len);
-            if (len > 0) right_delim = text[len - 1];
+    // Get delimiters from field nodes using field names
+    TSNode left_node = ts_node_child_by_field_name(node, "left_delim", 10);
+    TSNode right_node = ts_node_child_by_field_name(node, "right_delim", 11);
+    
+    if (!ts_node_is_null(left_node)) {
+        int len;
+        const char* text = node_text(left_node, &len);
+        log_debug("tex_math_ast: left_delim field text='%.*s' len=%d", len, text, len);
+        // The delimiter text could be like "\left(" or "\left[" or "\left\{"
+        // Get the last character(s) after \left
+        if (len > 0) {
+            // Check for escaped delimiters like \{ or \}
+            if (len >= 2 && text[len-2] == '\\') {
+                // Escaped delimiter: \{, \}, \|
+                left_delim = text[len-1];
+            } else {
+                left_delim = text[len - 1];
+            }
         }
     }
+    
+    if (!ts_node_is_null(right_node)) {
+        int len;
+        const char* text = node_text(right_node, &len);
+        log_debug("tex_math_ast: right_delim field text='%.*s' len=%d", len, text, len);
+        if (len > 0) {
+            // Check for escaped delimiters
+            if (len >= 2 && text[len-2] == '\\') {
+                right_delim = text[len-1];
+            } else {
+                right_delim = text[len - 1];
+            }
+        }
+    }
+    
+    log_debug("tex_math_ast: delimiter_group left=%d '%c' right=%d '%c'", 
+              left_delim, left_delim, right_delim, right_delim);
 
-    // Build content
+    // Build content from the body children
     MathASTNode* content = nullptr;
     uint32_t named_count = ts_node_named_child_count(node);
-    if (named_count > 0) {
-        if (named_count == 1) {
-            content = build_ts_node(ts_node_named_child(node, 0));
-        } else {
-            content = build_math(node);
+    
+    // Skip the left_delim and right_delim nodes when counting content
+    // Build from all named children except the delimiter nodes
+    MathASTNode* row = make_math_row(arena);
+    for (uint32_t i = 0; i < named_count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        const char* type = ts_node_type(child);
+        // Skip delimiter nodes
+        if (strcmp(type, "delimiter") == 0) continue;
+        
+        MathASTNode* child_node = build_ts_node(child);
+        if (child_node) {
+            math_row_append(row, child_node);
         }
+    }
+    
+    // Unwrap single-element rows
+    int count = math_row_count(row);
+    if (count == 1) {
+        content = row->body;
+    } else if (count > 1) {
+        content = row;
     }
 
     return make_math_delimited(arena, left_delim, content, right_delim);
@@ -824,42 +903,45 @@ MathASTNode* MathASTBuilder::build_accent(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_big_operator(TSNode node) {
-    // Similar to build_subsup but for operators with limits
-    uint32_t child_count = ts_node_named_child_count(node);
-    if (child_count < 1) return nullptr;
+    // big_operator has fields: op, lower, upper
+    // Use ts_node_child_by_field_name to get them
+    
+    TSNode op_node = ts_node_child_by_field_name(node, "op", 2);
+    TSNode lower_node = ts_node_child_by_field_name(node, "lower", 5);
+    TSNode upper_node = ts_node_child_by_field_name(node, "upper", 5);
+    
+    log_debug("tex_math_ast_builder: build_big_operator op=%d lower=%d upper=%d",
+              !ts_node_is_null(op_node), !ts_node_is_null(lower_node), !ts_node_is_null(upper_node));
 
-    MathASTNode* op = build_ts_node(ts_node_named_child(node, 0));
-
-    MathASTNode* super = nullptr;
-    MathASTNode* sub = nullptr;
-
-    for (uint32_t i = 1; i < child_count; i++) {
-        TSNode child = ts_node_named_child(node, i);
-        const char* type = ts_node_type(child);
-
-        if (strcmp(type, "superscript") == 0) {
-            uint32_t sup_children = ts_node_named_child_count(child);
-            if (sup_children > 0) {
-                super = build_ts_node(ts_node_named_child(child, 0));
-            }
-        } else if (strcmp(type, "subscript") == 0) {
-            uint32_t sub_children = ts_node_named_child_count(child);
-            if (sub_children > 0) {
-                sub = build_ts_node(ts_node_named_child(child, 0));
-            }
-        }
+    if (ts_node_is_null(op_node)) return nullptr;
+    
+    // Build the operator node from the command text
+    int len;
+    const char* op_text = node_text(op_node, &len);
+    
+    // Create an OP node for the big operator
+    MathASTNode* op = alloc_math_node(arena, MathNodeType::OP);
+    if (op_text && len > 1 && op_text[0] == '\\') {
+        // Store the command name without backslash
+        op->atom.command = arena_copy_str(op_text + 1, len - 1);
+    } else {
+        op->atom.command = op_text ? arena_copy_str(op_text, len) : "sum";
     }
+    op->atom.codepoint = 0;  // Will be set during typesetting based on command
+    op->atom.atom_class = (uint8_t)AtomType::Op;
+    op->flags = MathASTNode::FLAG_LIMITS;  // Big operators use limits by default
+    
+    log_debug("tex_math_ast_builder: big_operator command='%s'", op->atom.command);
+
+    MathASTNode* super = ts_node_is_null(upper_node) ? nullptr : build_ts_node(upper_node);
+    MathASTNode* sub = ts_node_is_null(lower_node) ? nullptr : build_ts_node(lower_node);
 
     if (!super && !sub) {
         return op;
     }
 
-    // For big operators, use OVERUNDER with limits flag
-    if (op && op->type == MathNodeType::OP && (op->flags & MathASTNode::FLAG_LIMITS)) {
-        return make_math_overunder(arena, op, super, sub, op->atom.command);
-    }
-
-    return make_math_scripts(arena, op, super, sub);
+    // For big operators with limits, use OVERUNDER
+    return make_math_overunder(arena, op, super, sub, op->atom.command);
 }
 
 MathASTNode* MathASTBuilder::build_environment(TSNode node) {
