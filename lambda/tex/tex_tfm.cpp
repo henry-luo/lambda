@@ -317,7 +317,9 @@ TFMFont* load_tfm_by_name(const char* name, Arena* arena) {
     }
 
     // Try texmf paths (common on TeX installations)
+    // Search both CM fonts and AMS fonts
     const char* search_paths[] = {
+        // Computer Modern fonts
         "/usr/share/texmf/fonts/tfm/public/cm",
         "/usr/share/texlive/texmf-dist/fonts/tfm/public/cm",
         "/opt/homebrew/share/texmf-dist/fonts/tfm/public/cm",
@@ -326,6 +328,15 @@ TFMFont* load_tfm_by_name(const char* name, Arena* arena) {
         "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/cm",
         "/usr/local/texlive/2023/texmf-dist/fonts/tfm/public/cm",
         "~/.texlive/texmf-dist/fonts/tfm/public/cm",
+        // AMS fonts (msbm10, msam10, etc.)
+        "/usr/share/texmf/fonts/tfm/public/amsfonts/symbols",
+        "/usr/share/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        "/opt/homebrew/share/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        "/usr/local/texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        "/usr/local/texlive/2023/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        "~/.texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols",
         nullptr
     };
 

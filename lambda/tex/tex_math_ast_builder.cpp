@@ -229,6 +229,29 @@ MathASTNode* make_math_space(Arena* arena, float width_mu) {
     return node;
 }
 
+// ============================================================================
+// Array/Matrix Node Constructors
+// ============================================================================
+
+MathASTNode* make_math_array(Arena* arena, const char* col_spec, int num_cols) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::ARRAY);
+    node->array.col_spec = col_spec;
+    node->array.num_cols = num_cols;
+    node->array.num_rows = 0;
+    return node;
+}
+
+MathASTNode* make_math_array_row(Arena* arena) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::ARRAY_ROW);
+    return node;
+}
+
+MathASTNode* make_math_array_cell(Arena* arena, MathASTNode* content) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::ARRAY_CELL);
+    node->body = content;
+    return node;
+}
+
 MathASTNode* make_math_error(Arena* arena, const char* message) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::ERROR);
     node->text.text = message;
@@ -241,7 +264,12 @@ MathASTNode* make_math_error(Arena* arena, const char* message) {
 // ============================================================================
 
 void math_row_append(MathASTNode* row, MathASTNode* child) {
-    if (!row || !child || row->type != MathNodeType::ROW) return;
+    if (!row || !child) return;
+    
+    // Accept ROW, ARRAY, and ARRAY_ROW types
+    if (row->type != MathNodeType::ROW && 
+        row->type != MathNodeType::ARRAY && 
+        row->type != MathNodeType::ARRAY_ROW) return;
 
     if (!row->body) {
         // First child
@@ -262,7 +290,10 @@ void math_row_append(MathASTNode* row, MathASTNode* child) {
 }
 
 int math_row_count(MathASTNode* row) {
-    if (!row || row->type != MathNodeType::ROW) return 0;
+    if (!row) return 0;
+    if (row->type != MathNodeType::ROW && 
+        row->type != MathNodeType::ARRAY && 
+        row->type != MathNodeType::ARRAY_ROW) return 0;
     return row->row.child_count;
 }
 
@@ -550,6 +581,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "relation") == 0) return build_relation(node);
     if (strcmp(type, "punctuation") == 0) return build_punctuation(node);
     if (strcmp(type, "command") == 0) return build_command(node);
+    if (strcmp(type, "symbol_command") == 0) return build_command(node);  // Handle symbol_command like command
     if (strcmp(type, "subsup") == 0) return build_subsup(node);
     if (strcmp(type, "fraction") == 0) return build_fraction(node);
     if (strcmp(type, "radical") == 0) return build_radical(node);
@@ -1075,6 +1107,7 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     // Determine delimiter characters based on environment type
     int32_t left_delim = 0;
     int32_t right_delim = 0;
+    bool is_cases = false;
     
     if (env_name) {
         if (strncmp(env_name, "pmatrix", 7) == 0) {
@@ -1090,49 +1123,101 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
             left_delim = '|';
             right_delim = '|';
         } else if (strncmp(env_name, "Vmatrix", 7) == 0) {
-            // Double vertical bar - use single for now
-            left_delim = '|';
+            left_delim = '|';  // Double bar represented as single for now
             right_delim = '|';
+        } else if (strncmp(env_name, "cases", 5) == 0) {
+            left_delim = '{';
+            right_delim = 0;  // cases has left brace only
+            is_cases = true;
+        } else if (strncmp(env_name, "rcases", 6) == 0) {
+            left_delim = 0;
+            right_delim = '}';  // rcases has right brace only
+            is_cases = true;
         }
-        // matrix environment has no delimiters
+        // matrix and smallmatrix have no delimiters
     }
     
     // Get body content
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
-    MathASTNode* content = nullptr;
+    
+    // Build ARRAY node to hold the matrix structure
+    MathASTNode* array_node = make_math_array(arena, "c", 0);  // Default column spec
     
     if (!ts_node_is_null(body_node)) {
-        // Parse the body - contains rows separated by \\, cells separated by &
-        MathASTNode* rows = make_math_row(arena);
-        
+        // Parse the body - contains expressions, row_sep (\\), and col_sep (&)
         uint32_t child_count = ts_node_named_child_count(body_node);
-        MathASTNode* current_row = make_math_row(arena);
+        
+        // Current row and cell being built
+        MathASTNode* current_row = make_math_array_row(arena);
+        MathASTNode* current_cell_content = make_math_row(arena);
+        int num_cols = 0;
+        int max_cols = 0;
+        int num_rows = 0;
         
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_named_child(body_node, i);
             const char* type = ts_node_type(child);
             
-            // Check for row separator (usually handled implicitly)
-            MathASTNode* cell_content = build_ts_node(child);
-            if (cell_content) {
-                math_row_append(current_row, cell_content);
+            log_debug("tex_math_ast: env body child %d: type=%s", i, type);
+            
+            if (strcmp(type, "row_sep") == 0) {
+                // End current cell and row
+                MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
+                math_row_append(current_row, cell);
+                num_cols++;
+                if (num_cols > max_cols) max_cols = num_cols;
+                
+                // Add completed row to array
+                math_row_append(array_node, current_row);
+                num_rows++;
+                
+                // Start new row and cell
+                current_row = make_math_array_row(arena);
+                current_cell_content = make_math_row(arena);
+                num_cols = 0;
+            } else if (strcmp(type, "col_sep") == 0) {
+                // End current cell, start new cell in same row
+                MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
+                math_row_append(current_row, cell);
+                num_cols++;
+                
+                // Start new cell
+                current_cell_content = make_math_row(arena);
+            } else {
+                // Regular expression - add to current cell
+                MathASTNode* expr = build_ts_node(child);
+                if (expr) {
+                    math_row_append(current_cell_content, expr);
+                }
             }
         }
         
-        // Add final row
-        if (math_row_count(current_row) > 0) {
-            math_row_append(rows, current_row);
+        // Don't forget the last cell and row (no trailing \\)
+        if (math_row_count(current_cell_content) > 0 || num_cols > 0) {
+            MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
+            math_row_append(current_row, cell);
+            num_cols++;
+            if (num_cols > max_cols) max_cols = num_cols;
         }
         
-        content = rows;
+        if (math_row_count(current_row) > 0) {
+            math_row_append(array_node, current_row);
+            num_rows++;
+        }
+        
+        // Update array metadata
+        array_node->array.num_cols = max_cols;
+        array_node->array.num_rows = num_rows;
+        
+        log_debug("tex_math_ast: built array with %d rows, %d cols", num_rows, max_cols);
     }
     
     // Wrap in delimiters if needed
-    if (left_delim != 0 && content) {
-        return make_math_delimited(arena, left_delim, content, right_delim);
+    if (left_delim != 0 || right_delim != 0) {
+        return make_math_delimited(arena, left_delim, array_node, right_delim);
     }
     
-    return content ? content : make_math_row(arena);
+    return array_node;
 }
 
 MathASTNode* MathASTBuilder::build_text_command(TSNode node) {
@@ -1185,6 +1270,7 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
 // ============================================================================
 
 MathASTNode* parse_math_string_to_ast(const char* latex_src, size_t len, Arena* arena) {
+    log_debug("tex_math_ast: parse_math_string_to_ast len=%zu src='%.*s'", len, (int)(len > 80 ? 80 : len), latex_src);
     MathASTBuilder builder(arena, latex_src, len);
     return builder.build();
 }

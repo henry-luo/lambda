@@ -1,6 +1,7 @@
 {
   "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
   "name": "latex_math",
+  "word": "command_name",
   "rules": {
     "math": {
       "type": "REPEAT",
@@ -71,6 +72,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "symbol_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "big_operator"
         },
         {
@@ -92,6 +97,19 @@
         {
           "type": "SYMBOL",
           "name": "command"
+        }
+      ]
+    },
+    "symbol_command": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\infty"
+        },
+        {
+          "type": "STRING",
+          "value": "\\infinity"
         }
       ]
     },
@@ -1028,7 +1046,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": "\\lim"
+                  "value": "\\liminf"
                 },
                 {
                   "type": "STRING",
@@ -1036,7 +1054,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": "\\liminf"
+                  "value": "\\lim"
                 },
                 {
                   "type": "STRING",
@@ -1173,8 +1191,8 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "\\begin"
+          "type": "SYMBOL",
+          "name": "begin_cmd"
         },
         {
           "type": "STRING",
@@ -1217,8 +1235,8 @@
           }
         },
         {
-          "type": "STRING",
-          "value": "\\end"
+          "type": "SYMBOL",
+          "name": "end_cmd"
         },
         {
           "type": "STRING",
@@ -1237,6 +1255,14 @@
           "value": "}"
         }
       ]
+    },
+    "begin_cmd": {
+      "type": "STRING",
+      "value": "\\begin"
+    },
+    "end_cmd": {
+      "type": "STRING",
+      "value": "\\end"
     },
     "env_name": {
       "type": "CHOICE",

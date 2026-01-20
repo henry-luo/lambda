@@ -545,6 +545,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "math_environment"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
@@ -747,6 +751,14 @@
         {
           "type": "SYMBOL",
           "name": "superscript"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "linebreak_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "math_environment"
         },
         {
           "type": "PATTERN",

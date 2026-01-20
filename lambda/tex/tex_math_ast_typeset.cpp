@@ -31,6 +31,7 @@ static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx);
 static TexNode* typeset_overunder_node(MathASTNode* node, MathContext& ctx);
 static TexNode* typeset_text_node(MathASTNode* node, MathContext& ctx);
 static TexNode* typeset_space_node(MathASTNode* node, MathContext& ctx);
+static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx);
 
 // ============================================================================
 // Greek Letter Table (cmmi10 positions)
@@ -343,12 +344,14 @@ struct TypesetContext {
     TFMFont* italic_tfm;
     TFMFont* symbol_tfm;
     TFMFont* extension_tfm;
+    TFMFont* msbm_tfm;  // AMS symbol font (msbm10)
 
     TypesetContext(MathContext& ctx) : math_ctx(ctx) {
         roman_tfm = ctx.fonts ? ctx.fonts->get_font("cmr10") : nullptr;
         italic_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi10") : nullptr;
         symbol_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy10") : nullptr;
         extension_tfm = ctx.fonts ? ctx.fonts->get_font("cmex10") : nullptr;
+        msbm_tfm = ctx.fonts ? ctx.fonts->get_font("msbm10") : nullptr;
     }
 
     float font_size() const { return math_ctx.font_size(); }
@@ -418,8 +421,10 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
         case MathNodeType::SPACE:
             return typeset_space_node(node, ctx);
 
-        case MathNodeType::INNER:
         case MathNodeType::ARRAY:
+            return typeset_array_node(node, ctx);
+
+        case MathNodeType::INNER:
         case MathNodeType::ARRAY_ROW:
         case MathNodeType::ARRAY_CELL:
         case MathNodeType::ERROR:
@@ -618,10 +623,11 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                     tfm = tc.extension_tfm;
                     break;
                 case SymFont::MSBM:
-                    // AMS symbols not yet supported - use symbol font with '?' placeholder
-                    font = ctx.roman_font;
-                    tfm = tc.roman_tfm;
-                    return make_char_with_metrics(tc.arena(), '?', atom, font, tfm, size);
+                    // AMS symbols from msbm10 font
+                    font.name = "msbm10";
+                    font.size_pt = size;
+                    tfm = tc.msbm_tfm;
+                    break;
             }
             font.size_pt = size;
             return make_char_with_metrics(tc.arena(), sym->code, atom, font, tfm, size);
@@ -1016,6 +1022,186 @@ static TexNode* typeset_space_node(MathASTNode* node, MathContext& ctx) {
     }
 
     return make_glue(ctx.arena, Glue::fixed(width_pt), "mathspace");
+}
+
+// ============================================================================
+// Array/Matrix Typesetting
+// ============================================================================
+
+static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
+    TypesetContext tc(ctx);
+    Arena* arena = tc.arena();
+    float size = tc.font_size();
+    
+    // Array node contains ARRAY_ROW children, each containing ARRAY_CELL children
+    int num_rows = node->array.num_rows;
+    int num_cols = node->array.num_cols;
+    
+    log_debug("tex_math_ast_typeset: array %d rows x %d cols", num_rows, num_cols);
+    
+    if (num_rows == 0) {
+        return make_hbox(arena);
+    }
+    
+    // Spacing parameters (TeXBook values)
+    float col_sep = size * 0.8f;     // Column separation (about 1em)
+    float row_sep = size * 0.3f;     // Row separation (baseline skip adjustment)
+    float baseline_skip = size * 1.2f;  // Base line spacing
+    
+    // First pass: typeset all cells and measure column widths
+    // Build a 2D array of typeset cells
+    struct CellInfo {
+        TexNode* node;
+        float width;
+        float height;
+        float depth;
+    };
+    
+    // Allocate cell info array
+    CellInfo* cells = (CellInfo*)arena_alloc(arena, num_rows * num_cols * sizeof(CellInfo));
+    memset(cells, 0, num_rows * num_cols * sizeof(CellInfo));
+    
+    // Track column widths and row heights
+    float* col_widths = (float*)arena_alloc(arena, num_cols * sizeof(float));
+    float* row_heights = (float*)arena_alloc(arena, num_rows * sizeof(float));
+    float* row_depths = (float*)arena_alloc(arena, num_rows * sizeof(float));
+    memset(col_widths, 0, num_cols * sizeof(float));
+    memset(row_heights, 0, num_rows * sizeof(float));
+    memset(row_depths, 0, num_rows * sizeof(float));
+    
+    // Iterate through rows
+    int row_idx = 0;
+    for (MathASTNode* row = node->body; row && row_idx < num_rows; row = row->next_sibling) {
+        if (row->type != MathNodeType::ARRAY_ROW) continue;
+        
+        // Iterate through cells in this row
+        int col_idx = 0;
+        for (MathASTNode* cell = row->body; cell && col_idx < num_cols; cell = cell->next_sibling) {
+            if (cell->type != MathNodeType::ARRAY_CELL) continue;
+            
+            // Typeset cell content
+            TexNode* cell_content = cell->body ? typeset_node(cell->body, ctx) : make_hbox(arena);
+            
+            CellInfo& info = cells[row_idx * num_cols + col_idx];
+            info.node = cell_content;
+            info.width = cell_content ? cell_content->width : 0;
+            info.height = cell_content ? cell_content->height : 0;
+            info.depth = cell_content ? cell_content->depth : 0;
+            
+            // Update column width
+            if (info.width > col_widths[col_idx]) {
+                col_widths[col_idx] = info.width;
+            }
+            
+            // Update row height/depth
+            if (info.height > row_heights[row_idx]) {
+                row_heights[row_idx] = info.height;
+            }
+            if (info.depth > row_depths[row_idx]) {
+                row_depths[row_idx] = info.depth;
+            }
+            
+            col_idx++;
+        }
+        row_idx++;
+    }
+    
+    // Calculate total dimensions
+    float total_width = 0;
+    for (int c = 0; c < num_cols; c++) {
+        total_width += col_widths[c];
+        if (c < num_cols - 1) total_width += col_sep;
+    }
+    
+    float total_height = 0;
+    for (int r = 0; r < num_rows; r++) {
+        total_height += row_heights[r] + row_depths[r];
+        if (r < num_rows - 1) total_height += row_sep;
+    }
+    
+    // Build the VBox containing all rows
+    // Each row is an HBox of cells
+    TexNode* vbox_first = nullptr;
+    TexNode* vbox_last = nullptr;
+    
+    float y_pos = 0;  // Track vertical position from top
+    
+    for (int r = 0; r < num_rows; r++) {
+        // Build this row's HBox
+        TexNode* hbox_first = nullptr;
+        TexNode* hbox_last = nullptr;
+        float x_pos = 0;
+        
+        for (int c = 0; c < num_cols; c++) {
+            CellInfo& info = cells[r * num_cols + c];
+            TexNode* cell_node = info.node ? info.node : make_hbox(arena);
+            
+            // Center cell horizontally within column
+            float cell_width = info.width;
+            float padding = (col_widths[c] - cell_width) / 2.0f;
+            
+            if (padding > 0) {
+                TexNode* pre_kern = make_kern(arena, padding);
+                link_node(hbox_first, hbox_last, pre_kern);
+            }
+            
+            cell_node->x = x_pos + padding;
+            link_node(hbox_first, hbox_last, cell_node);
+            
+            if (padding > 0) {
+                TexNode* post_kern = make_kern(arena, padding);
+                link_node(hbox_first, hbox_last, post_kern);
+            }
+            
+            x_pos += col_widths[c];
+            
+            // Add column separator glue (except after last column)
+            if (c < num_cols - 1) {
+                TexNode* sep = make_glue(arena, Glue::fixed(col_sep), "arraycolsep");
+                link_node(hbox_first, hbox_last, sep);
+                x_pos += col_sep;
+            }
+        }
+        
+        // Create HBox for this row
+        TexNode* row_hbox = wrap_hbox(arena, hbox_first, hbox_last);
+        row_hbox->width = total_width;
+        row_hbox->height = row_heights[r];
+        row_hbox->depth = row_depths[r];
+        row_hbox->y = y_pos;
+        
+        link_node(vbox_first, vbox_last, row_hbox);
+        
+        y_pos += row_heights[r] + row_depths[r];
+        
+        // Add row separator (except after last row)
+        if (r < num_rows - 1) {
+            TexNode* row_glue = make_glue(arena, Glue::fixed(row_sep), "arrayrowsep");
+            link_node(vbox_first, vbox_last, row_glue);
+            y_pos += row_sep;
+        }
+    }
+    
+    // Create the containing VBox
+    TexNode* result = (TexNode*)arena_alloc(arena, sizeof(TexNode));
+    new (result) TexNode(NodeClass::VBox);
+    result->width = total_width;
+    
+    // Center the array vertically around the math axis
+    float axis_height = size * 0.25f;  // Approximate math axis height
+    float half_height = total_height / 2.0f;
+    result->height = half_height + axis_height;
+    result->depth = half_height - axis_height;
+    
+    result->first_child = vbox_first;
+    result->last_child = vbox_last;
+    
+    // Set parent pointers
+    for (TexNode* child = vbox_first; child; child = child->next_sibling) {
+        child->parent = result;
+    }
+    
+    return result;
 }
 
 } // namespace tex
