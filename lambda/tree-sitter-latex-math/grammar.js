@@ -94,14 +94,16 @@ module.exports = grammar({
     ),
 
     // Punctuation (including standalone delimiters)
-    punctuation: $ => choice(
+    // Lower precedence than brack_group so optional args parse correctly
+    punctuation: $ => prec(-1, choice(
       ',', ';', ':', '.', '?',
       '(', ')',                    // Parentheses
+      '[', ']',                    // Square brackets
       '|',                         // Vertical bar (absolute value, divides)
       '\\{', '\\}',                // Escaped braces
       '\\lbrace', '\\rbrace',      // Alternative brace commands
       '\'',                        // Prime (for derivatives like f')
-    ),
+    )),
 
     // ========================================================================
     // Groups

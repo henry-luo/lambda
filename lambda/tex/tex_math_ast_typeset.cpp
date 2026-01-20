@@ -145,50 +145,98 @@ static const BigOpEntry* lookup_big_op(const char* name) {
 }
 
 // ============================================================================
-// Symbol Table (cmsy10 positions)
+// Symbol Table with Font Information
 // ============================================================================
+
+enum class SymFont : uint8_t {
+    CMSY,   // cmsy10 - symbol font
+    CMMI,   // cmmi10 - italic font
+    CMR,    // cmr10 - roman font
+    CMEX,   // cmex10 - extension font
+    MSBM    // msbm10 - AMS symbols (not yet supported, falls back to ?)
+};
 
 struct SymbolEntry {
     const char* name;
     int code;
     AtomType atom;
+    SymFont font;
 };
 
 static const SymbolEntry SYMBOL_TABLE[] = {
-    // Relations
-    {"leq", 20, AtomType::Rel}, {"le", 20, AtomType::Rel},
-    {"geq", 21, AtomType::Rel}, {"ge", 21, AtomType::Rel},
-    {"equiv", 17, AtomType::Rel}, {"sim", 24, AtomType::Rel},
-    {"approx", 25, AtomType::Rel}, {"neq", 54, AtomType::Rel},
-    {"in", 50, AtomType::Rel}, {"subset", 26, AtomType::Rel},
-    {"supset", 27, AtomType::Rel},
-    // Arrows (cmsy10 positions)
-    {"to", 33, AtomType::Rel}, {"rightarrow", 33, AtomType::Rel},
-    {"leftarrow", 32, AtomType::Rel}, {"gets", 32, AtomType::Rel},
-    {"leftrightarrow", 36, AtomType::Rel},
-    {"uparrow", 34, AtomType::Rel}, {"downarrow", 35, AtomType::Rel},
-    {"Rightarrow", 41, AtomType::Rel}, {"Leftarrow", 40, AtomType::Rel},
-    {"Leftrightarrow", 44, AtomType::Rel}, {"iff", 44, AtomType::Rel},
-    {"Uparrow", 42, AtomType::Rel}, {"Downarrow", 43, AtomType::Rel},
-    {"mapsto", 55, AtomType::Rel}, {"nearrow", 37, AtomType::Rel},
-    {"searrow", 38, AtomType::Rel},
-    // Binary operators
-    {"pm", 6, AtomType::Bin}, {"mp", 7, AtomType::Bin},
-    {"times", 2, AtomType::Bin}, {"div", 4, AtomType::Bin},
-    {"cdot", 1, AtomType::Bin}, {"ast", 3, AtomType::Bin},
-    {"star", 5, AtomType::Bin}, {"circ", 14, AtomType::Bin},
-    {"bullet", 15, AtomType::Bin},
-    {"cap", 92, AtomType::Bin}, {"cup", 91, AtomType::Bin},
-    {"vee", 95, AtomType::Bin}, {"wedge", 94, AtomType::Bin},
-    {"oplus", 8, AtomType::Bin}, {"otimes", 10, AtomType::Bin},
-    // Misc
-    {"infty", 49, AtomType::Ord},
-    {"nabla", 114, AtomType::Ord},
-    {"forall", 56, AtomType::Ord},
-    {"exists", 57, AtomType::Ord},
-    {"neg", 58, AtomType::Ord},
-    {"partial", 64, AtomType::Ord},
-    {nullptr, 0, AtomType::Ord}
+    // Relations (cmsy10)
+    {"leq", 20, AtomType::Rel, SymFont::CMSY}, {"le", 20, AtomType::Rel, SymFont::CMSY},
+    {"geq", 21, AtomType::Rel, SymFont::CMSY}, {"ge", 21, AtomType::Rel, SymFont::CMSY},
+    {"equiv", 17, AtomType::Rel, SymFont::CMSY}, {"sim", 24, AtomType::Rel, SymFont::CMSY},
+    {"approx", 25, AtomType::Rel, SymFont::CMSY}, {"neq", 54, AtomType::Rel, SymFont::CMSY},
+    {"in", 50, AtomType::Rel, SymFont::CMSY}, {"subset", 26, AtomType::Rel, SymFont::CMSY},
+    {"supset", 27, AtomType::Rel, SymFont::CMSY},
+    // Arrows (cmsy10)
+    {"to", 33, AtomType::Rel, SymFont::CMSY}, {"rightarrow", 33, AtomType::Rel, SymFont::CMSY},
+    {"leftarrow", 32, AtomType::Rel, SymFont::CMSY}, {"gets", 32, AtomType::Rel, SymFont::CMSY},
+    {"leftrightarrow", 36, AtomType::Rel, SymFont::CMSY},
+    {"uparrow", 34, AtomType::Rel, SymFont::CMSY}, {"downarrow", 35, AtomType::Rel, SymFont::CMSY},
+    {"Rightarrow", 41, AtomType::Rel, SymFont::CMSY}, {"Leftarrow", 40, AtomType::Rel, SymFont::CMSY},
+    {"Leftrightarrow", 44, AtomType::Rel, SymFont::CMSY}, {"iff", 44, AtomType::Rel, SymFont::CMSY},
+    {"Uparrow", 42, AtomType::Rel, SymFont::CMSY}, {"Downarrow", 43, AtomType::Rel, SymFont::CMSY},
+    {"mapsto", 55, AtomType::Rel, SymFont::CMSY}, {"nearrow", 37, AtomType::Rel, SymFont::CMSY},
+    {"searrow", 38, AtomType::Rel, SymFont::CMSY},
+    // Binary operators (cmsy10)
+    {"pm", 6, AtomType::Bin, SymFont::CMSY}, {"mp", 7, AtomType::Bin, SymFont::CMSY},
+    {"times", 2, AtomType::Bin, SymFont::CMSY}, {"div", 4, AtomType::Bin, SymFont::CMSY},
+    {"cdot", 1, AtomType::Bin, SymFont::CMSY}, {"ast", 3, AtomType::Bin, SymFont::CMSY},
+    {"star", 5, AtomType::Bin, SymFont::CMSY}, {"circ", 14, AtomType::Bin, SymFont::CMSY},
+    {"bullet", 15, AtomType::Bin, SymFont::CMSY},
+    {"cap", 92, AtomType::Bin, SymFont::CMSY}, {"cup", 91, AtomType::Bin, SymFont::CMSY},
+    {"vee", 95, AtomType::Bin, SymFont::CMSY}, {"wedge", 94, AtomType::Bin, SymFont::CMSY},
+    {"land", 94, AtomType::Bin, SymFont::CMSY}, {"lor", 95, AtomType::Bin, SymFont::CMSY},
+    {"oplus", 8, AtomType::Bin, SymFont::CMSY}, {"otimes", 10, AtomType::Bin, SymFont::CMSY},
+    {"ominus", 9, AtomType::Bin, SymFont::CMSY}, {"oslash", 11, AtomType::Bin, SymFont::CMSY},
+    {"odot", 12, AtomType::Bin, SymFont::CMSY},
+    {"setminus", 110, AtomType::Bin, SymFont::CMSY},
+    {"sqcap", 117, AtomType::Bin, SymFont::CMSY}, {"sqcup", 116, AtomType::Bin, SymFont::CMSY},
+    {"diamond", 5, AtomType::Bin, SymFont::CMSY},
+    // Misc (cmsy10)
+    {"infty", 49, AtomType::Ord, SymFont::CMSY},
+    {"nabla", 114, AtomType::Ord, SymFont::CMSY},
+    {"forall", 56, AtomType::Ord, SymFont::CMSY},
+    {"exists", 57, AtomType::Ord, SymFont::CMSY},
+    {"neg", 58, AtomType::Ord, SymFont::CMSY}, {"lnot", 58, AtomType::Ord, SymFont::CMSY},
+    {"emptyset", 59, AtomType::Ord, SymFont::CMSY},
+    {"wp", 125, AtomType::Ord, SymFont::CMMI}, {"Re", 60, AtomType::Ord, SymFont::CMSY},
+    {"Im", 61, AtomType::Ord, SymFont::CMSY},
+    {"aleph", 64, AtomType::Ord, SymFont::CMSY},
+    {"angle", 54, AtomType::Ord, SymFont::CMSY}, {"triangle", 52, AtomType::Ord, SymFont::CMSY},
+    {"prime", 48, AtomType::Ord, SymFont::CMSY},
+    {"clubsuit", 124, AtomType::Ord, SymFont::CMSY}, {"diamondsuit", 125, AtomType::Ord, SymFont::CMSY},
+    {"heartsuit", 126, AtomType::Ord, SymFont::CMSY}, {"spadesuit", 127, AtomType::Ord, SymFont::CMSY},
+    // Relations (cmsy10 continued)
+    {"ni", 51, AtomType::Rel, SymFont::CMSY}, {"owns", 51, AtomType::Rel, SymFont::CMSY},
+    {"notin", 54, AtomType::Rel, SymFont::CMSY},
+    {"subseteq", 18, AtomType::Rel, SymFont::CMSY}, {"supseteq", 19, AtomType::Rel, SymFont::CMSY},
+    {"ll", 28, AtomType::Rel, SymFont::CMSY}, {"gg", 29, AtomType::Rel, SymFont::CMSY},
+    {"prec", 31, AtomType::Rel, SymFont::CMSY}, {"succ", 30, AtomType::Rel, SymFont::CMSY},
+    {"preceq", 22, AtomType::Rel, SymFont::CMSY}, {"succeq", 23, AtomType::Rel, SymFont::CMSY},
+    {"simeq", 39, AtomType::Rel, SymFont::CMSY}, {"cong", 25, AtomType::Rel, SymFont::CMSY},
+    {"propto", 47, AtomType::Rel, SymFont::CMSY},
+    {"perp", 63, AtomType::Rel, SymFont::CMSY}, {"parallel", 107, AtomType::Rel, SymFont::CMSY},
+    {"mid", 106, AtomType::Rel, SymFont::CMSY},
+    // Symbols in cmmi10
+    {"partial", 64, AtomType::Ord, SymFont::CMMI},
+    {"ell", 96, AtomType::Ord, SymFont::CMMI},
+    {"imath", 123, AtomType::Ord, SymFont::CMMI}, {"jmath", 124, AtomType::Ord, SymFont::CMMI},
+    {"hbar", 125, AtomType::Ord, SymFont::CMMI},
+    // Delimiters (cmsy10)
+    {"lbrace", 102, AtomType::Open, SymFont::CMSY}, {"rbrace", 103, AtomType::Close, SymFont::CMSY},
+    {"langle", 104, AtomType::Open, SymFont::CMSY}, {"rangle", 105, AtomType::Close, SymFont::CMSY},
+    {"lfloor", 98, AtomType::Open, SymFont::CMSY}, {"rfloor", 99, AtomType::Close, SymFont::CMSY},
+    {"lceil", 100, AtomType::Open, SymFont::CMSY}, {"rceil", 101, AtomType::Close, SymFont::CMSY},
+    {"vert", 106, AtomType::Ord, SymFont::CMSY}, {"Vert", 107, AtomType::Ord, SymFont::CMSY},
+    {"backslash", 110, AtomType::Ord, SymFont::CMSY},
+    // AMS symbols (msbm10) - not yet supported
+    {"varkappa", 123, AtomType::Ord, SymFont::MSBM},
+    {"varnothing", 59, AtomType::Ord, SymFont::CMSY},
+    {nullptr, 0, AtomType::Ord, SymFont::CMSY}
 };
 
 static const SymbolEntry* lookup_symbol(const char* name) {
@@ -222,6 +270,28 @@ static TexNode* make_char_with_metrics(Arena* arena, int32_t cp, AtomType atom,
         node->width = 5.0f * size / 10.0f;
         node->height = 7.0f * size / 10.0f;
         node->depth = 0;
+        node->italic = 0;
+    }
+
+    return node;
+}
+
+// Create a MathOp node with TFM metrics
+static TexNode* make_op_with_metrics(Arena* arena, int32_t cp, bool limits,
+                                      FontSpec font, TFMFont* tfm, float size) {
+    TexNode* node = make_math_op(arena, cp, limits, font);
+
+    if (tfm && cp >= 0 && cp < 256) {
+        float scale = size / tfm->design_size;
+        node->width = tfm->char_width(cp) * scale;
+        node->height = tfm->char_height(cp) * scale;
+        node->depth = tfm->char_depth(cp) * scale;
+        node->italic = tfm->char_italic(cp) * scale;
+    } else {
+        // Fallback metrics for big operators
+        node->width = 8.0f * size / 10.0f;
+        node->height = 10.0f * size / 10.0f;
+        node->depth = 2.0f * size / 10.0f;
         node->italic = 0;
     }
 
@@ -437,13 +507,155 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
             return make_char_with_metrics(tc.arena(), cp, atom, font, tfm, size);
         }
 
+        // Dots commands: \ldots, \cdots, \vdots, \ddots
+        size_t cmd_len = strlen(cmd);
+        if ((cmd_len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
+            (cmd_len == 5 && strncmp(cmd, "cdots", 5) == 0) ||
+            (cmd_len == 5 && strncmp(cmd, "vdots", 5) == 0) ||
+            (cmd_len == 5 && strncmp(cmd, "ddots", 5) == 0) ||
+            (cmd_len == 4 && strncmp(cmd, "dots", 4) == 0)) {
+            // ldots: 3× period(59) from cmmi10 with thin space kerns
+            // cdots: 3× cdot(1) from cmsy10 with thin space kerns
+            // vdots: single char(62) from cmsy10
+            // ddots: single char(63) from cmsy10
+            bool is_ldots = (cmd_len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
+                           (cmd_len == 4 && strncmp(cmd, "dots", 4) == 0);
+            bool is_cdots = (cmd_len == 5 && strncmp(cmd, "cdots", 5) == 0);
+            bool is_vdots = (cmd_len == 5 && strncmp(cmd, "vdots", 5) == 0);
+            // bool is_ddots = (cmd_len == 5 && strncmp(cmd, "ddots", 5) == 0);
+            
+            if (is_vdots) {
+                // Single vertical dots character from cmsy10
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                return make_char_with_metrics(tc.arena(), 62, AtomType::Ord, font, tc.symbol_tfm, size);
+            } else if (!is_ldots && !is_cdots) {
+                // ddots: diagonal dots from cmsy10 at position 63
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                return make_char_with_metrics(tc.arena(), 63, AtomType::Ord, font, tc.symbol_tfm, size);
+            } else {
+                // ldots or cdots: 3 dots with thin space kerns
+                if (is_ldots) {
+                    // ldots uses cmmi10 period (position 59)
+                    font = ctx.italic_font;
+                    font.size_pt = size;
+                    tfm = tc.italic_tfm;
+                    cp = 59;  // period in cmmi10
+                } else {
+                    // cdots uses cmsy10 cdot (position 1)
+                    font = ctx.symbol_font;
+                    font.size_pt = size;
+                    tfm = tc.symbol_tfm;
+                    cp = 1;  // cdot in cmsy10
+                }
+                
+                float thin_space = size * 0.166f;  // thin space ~ mu/18
+                
+                TexNode* first_n = nullptr;
+                TexNode* last_n = nullptr;
+                
+                for (int i = 0; i < 3; i++) {
+                    TexNode* dot = make_char_with_metrics(tc.arena(), cp, AtomType::Ord, font, tfm, size);
+                    link_node(first_n, last_n, dot);
+                    
+                    if (i < 2) {
+                        TexNode* kern = make_kern(tc.arena(), thin_space);
+                        link_node(first_n, last_n, kern);
+                    }
+                }
+                return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+        }
+
         // Symbols (binary, relation, etc.)
         const SymbolEntry* sym = lookup_symbol(cmd);
         if (sym) {
-            font = ctx.symbol_font;
+            // Handle composite symbols that require multiple characters
+            // \notin = \not\in where \not is the negation slash overlaid with \in
+            size_t sym_len = strlen(cmd);
+            if (sym_len == 5 && strncmp(cmd, "notin", 5) == 0) {
+                font = ctx.symbol_font;
+                font.size_pt = size;
+                tfm = tc.symbol_tfm;
+                
+                TexNode* first_n = nullptr;
+                TexNode* last_n = nullptr;
+                
+                // NOT slash (cmsy10 position 61, same as \neq which shows as '=')
+                // Note: TeX uses 61 for the negation stroke, not 54
+                TexNode* not_char = make_char_with_metrics(tc.arena(), 61, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, not_char);
+                
+                // Negative kern to overlap the characters
+                float kern_amount = -0.55f * size / 10.0f;
+                TexNode* kern = make_kern(tc.arena(), kern_amount);
+                link_node(first_n, last_n, kern);
+                
+                // IN symbol (cmsy10 position 50)
+                TexNode* in_char = make_char_with_metrics(tc.arena(), 50, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, in_char);
+                
+                return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+            
+            // Select font based on symbol's font type
+            switch (sym->font) {
+                case SymFont::CMSY:
+                    font = ctx.symbol_font;
+                    tfm = tc.symbol_tfm;
+                    break;
+                case SymFont::CMMI:
+                    font = ctx.italic_font;
+                    tfm = tc.italic_tfm;
+                    break;
+                case SymFont::CMR:
+                    font = ctx.roman_font;
+                    tfm = tc.roman_tfm;
+                    break;
+                case SymFont::CMEX:
+                    font = ctx.extension_font;
+                    tfm = tc.extension_tfm;
+                    break;
+                case SymFont::MSBM:
+                    // AMS symbols not yet supported - use symbol font with '?' placeholder
+                    font = ctx.roman_font;
+                    tfm = tc.roman_tfm;
+                    return make_char_with_metrics(tc.arena(), '?', atom, font, tfm, size);
+            }
             font.size_pt = size;
-            tfm = tc.symbol_tfm;
             return make_char_with_metrics(tc.arena(), sym->code, atom, font, tfm, size);
+        }
+
+        // Special handling for multiple integrals (\iint, \iiint)
+        // These output multiple integral symbols
+        // Note: cmd_len already defined above for dots handling
+        if ((cmd_len == 4 && strncmp(cmd, "iint", 4) == 0) ||
+            (cmd_len == 5 && strncmp(cmd, "iiint", 5) == 0)) {
+            bool is_display = (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime);
+            int int_count = (cmd_len == 4) ? 2 : 3;  // iint=2, iiint=3
+            
+            font = ctx.extension_font;
+            font.size_pt = size;
+            tfm = tc.extension_tfm;
+            int32_t int_code = is_display ? 90 : 82;  // large/small integral
+            
+            // Build HBox with multiple integral symbols
+            TexNode* first_n = nullptr;
+            TexNode* last_n = nullptr;
+            for (int i = 0; i < int_count; i++) {
+                // Use make_op_with_metrics for the first one (for limits check)
+                // and make_char_with_metrics for subsequent ones
+                TexNode* int_node;
+                if (i == 0) {
+                    int_node = make_op_with_metrics(tc.arena(), int_code, false, font, tfm, size);
+                } else {
+                    int_node = make_char_with_metrics(tc.arena(), int_code, AtomType::Op, font, tfm, size);
+                }
+                link_node(first_n, last_n, int_node);
+            }
+            TexNode* result = wrap_hbox(tc.arena(), first_n, last_n);
+            return result;
         }
 
         // Big operators
@@ -469,11 +681,13 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                 // Mark as Op type for spacing
                 return result;
             } else {
+                // Symbol-based big operators (integral, sum, etc.)
+                // Use MathOp node so limits checking works
                 font = ctx.extension_font;
                 font.size_pt = size;
                 tfm = tc.extension_tfm;
                 cp = is_display ? bigop->large_code : bigop->small_code;
-                return make_char_with_metrics(tc.arena(), cp, AtomType::Op, font, tfm, size);
+                return make_op_with_metrics(tc.arena(), cp, bigop->uses_limits, font, tfm, size);
             }
         }
 
@@ -486,8 +700,14 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
     // Character-based atom
     switch (node->type) {
         case MathNodeType::ORD:
-            // Variables use italic, digits use roman
-            if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) {
+            // Special handling for vertical bars (absolute value/cardinality)
+            if (cp == '|') {
+                // Use cmsy10 vertical bar at position 106
+                font = ctx.symbol_font;
+                tfm = tc.symbol_tfm;
+                cp = 106;  // cmsy10 vert
+            } else if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) {
+                // Variables use italic
                 font = ctx.italic_font;
                 tfm = tc.italic_tfm;
             } else {
@@ -531,9 +751,33 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
 
         case MathNodeType::OPEN:
         case MathNodeType::CLOSE:
+            // Curly braces use symbol font
+            if (cp == '{') {
+                font = ctx.symbol_font;
+                tfm = tc.symbol_tfm;
+                cp = 102;  // cmsy10 lbrace
+            } else if (cp == '}') {
+                font = ctx.symbol_font;
+                tfm = tc.symbol_tfm;
+                cp = 103;  // cmsy10 rbrace
+            } else {
+                font = ctx.roman_font;
+                tfm = tc.roman_tfm;
+            }
+            break;
+
         case MathNodeType::PUNCT:
-            font = ctx.roman_font;
-            tfm = tc.roman_tfm;
+            // TeX uses cmmi (math italic) for comma, cmr (roman) for semicolon/colon
+            // In cmmi10: position 59 is comma glyph
+            // In cmr10: comma at 44, semicolon at 59
+            if (cp == ',') {
+                font = ctx.italic_font;
+                tfm = tc.italic_tfm;
+                cp = 59;  // cmmi10 comma at position 59
+            } else {
+                font = ctx.roman_font;
+                tfm = tc.roman_tfm;
+            }
             break;
 
         default:
@@ -634,6 +878,10 @@ static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx) {
     // Get accent character
     int32_t accent_cp = node->accent.accent_char;
     
+    // Default to symbol font for most accents
+    FontSpec accent_font = ctx.symbol_font;
+    TFMFont* accent_tfm = tc.symbol_tfm;
+    
     // Lookup accent code if command given
     if (node->accent.command) {
         const char* cmd = node->accent.command;
@@ -642,14 +890,23 @@ static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx) {
         // Map command to cmmi10/cmsy10 accent codes
         if (len == 3 && strncmp(cmd, "hat", 3) == 0) accent_cp = 94;
         else if (len == 3 && strncmp(cmd, "bar", 3) == 0) accent_cp = 22;
-        else if (len == 5 && strncmp(cmd, "tilde", 5) == 0) accent_cp = 126;
-        else if (len == 3 && strncmp(cmd, "vec", 3) == 0) accent_cp = 126;
+        else if (len == 5 && strncmp(cmd, "tilde", 5) == 0) {
+            accent_cp = 126;
+            accent_font = ctx.italic_font;  // tilde uses cmmi10
+            accent_tfm = tc.italic_tfm;
+        }
+        else if (len == 3 && strncmp(cmd, "vec", 3) == 0) {
+            accent_cp = 126;
+            accent_font = ctx.italic_font;  // vec uses cmmi10 (vector arrow)
+            accent_tfm = tc.italic_tfm;
+        }
         else if (len == 3 && strncmp(cmd, "dot", 3) == 0) accent_cp = 95;
         else if (len == 4 && strncmp(cmd, "ddot", 4) == 0) accent_cp = 127;
+        else if (len == 8 && strncmp(cmd, "overline", 8) == 0) accent_cp = 22;  // macron/bar
+        else if (len == 9 && strncmp(cmd, "underline", 9) == 0) accent_cp = 22;  // treated same
     }
 
     float size = tc.font_size();
-    FontSpec accent_font = ctx.symbol_font;
     accent_font.size_pt = size;
 
     // Build accent node - stack accent over base
@@ -661,14 +918,13 @@ static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx) {
     result->content.accent.accent_char = accent_cp;
     result->content.accent.font = accent_font;
 
-    // Get accent metrics
-    TFMFont* tfm = tc.symbol_tfm;
+    // Get accent metrics using the correct TFM font
     float accent_width = 5.0f * size / 10.0f;
     float accent_height = 3.0f * size / 10.0f;
-    if (tfm && accent_cp >= 0 && accent_cp < 256) {
-        float scale = size / tfm->design_size;
-        accent_width = tfm->char_width(accent_cp) * scale;
-        accent_height = tfm->char_height(accent_cp) * scale;
+    if (accent_tfm && accent_cp >= 0 && accent_cp < 256) {
+        float scale = size / accent_tfm->design_size;
+        accent_width = accent_tfm->char_width(accent_cp) * scale;
+        accent_height = accent_tfm->char_height(accent_cp) * scale;
     }
 
     // Dimensions - accent sits above base
