@@ -185,6 +185,7 @@ void TexDocumentModel::resolve_pending_refs() {
 // Math Typesetting
 // ============================================================================
 
+#ifndef DOC_MODEL_MINIMAL
 // Helper: recursively typeset all math elements in a subtree
 static void typeset_math_recursive(DocElement* elem, Arena* arena, TFMFontManager* fonts, float base_size_pt) {
     if (!elem) return;
@@ -240,6 +241,13 @@ void TexDocumentModel::typeset_all_math() {
     typeset_math_recursive(root, arena, fonts, base_size_pt);
     log_debug("typeset_all_math: completed");
 }
+#else
+// Stub for minimal mode
+void TexDocumentModel::typeset_all_math() {
+    // Math typesetting not available in minimal build
+    log_debug("typeset_all_math: minimal build, skipping");
+}
+#endif
 
 // ============================================================================
 // Counter Methods
