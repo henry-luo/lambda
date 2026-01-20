@@ -126,6 +126,23 @@ static int32_t unicode_to_cmsy(int32_t cp) {
     if (cp == '-') return 0;    // minus sign at position 0
     if (cp == 0x2212) return 0; // Unicode minus
     
+    // Arrows
+    if (cp == 0x2190) return 32;  // leftarrow (space position)
+    if (cp == 0x2192) return 33;  // rightarrow/to (! position)
+    if (cp == 0x2191) return 34;  // uparrow (double quote position)
+    if (cp == 0x2193) return 35;  // downarrow (# position)
+    if (cp == 0x2194) return 36;  // leftrightarrow ($ position)
+    if (cp == 0x2197) return 37;  // nearrow (% position)
+    if (cp == 0x2198) return 38;  // searrow (& position)
+    if (cp == 0x21D0) return 40;  // Leftarrow (( position)
+    if (cp == 0x21D2) return 41;  // Rightarrow () position)
+    if (cp == 0x21D1) return 42;  // Uparrow (* position)
+    if (cp == 0x21D3) return 43;  // Downarrow (+ position)
+    if (cp == 0x21D4) return 44;  // Leftrightarrow (, position)
+    
+    // Infinity
+    if (cp == 0x221E) return 49;  // infinity (1 position)
+    
     // Delimiters - cmsy uses different positions than ASCII
     if (cp == '{') return 102;  // left brace at 102 (shows as 'f')
     if (cp == '}') return 103;  // right brace at 103 (shows as 'g')
@@ -729,7 +746,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             // Scripts node contains nucleus, subscript, superscript as children
             // Each child has x,y offsets relative to the scripts node origin
             // Output each child at its positioned location
+            int child_count = 0;
             for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+                child_count++;
                 // Save position
                 int32_t save_h = writer.h;
                 int32_t save_v = writer.v;
@@ -738,6 +757,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 writer.h = save_h + pt_to_sp(child->x);
                 writer.v = save_v - pt_to_sp(child->y);  // DVI y increases downward
 
+                log_debug("tex_dvi_out: Scripts child %d: class=%d x=%.1f y=%.1f",
+                         child_count, (int)child->node_class, child->x, child->y);
+
                 // Output child
                 dvi_output_node(writer, child, fonts);
 
@@ -745,51 +767,76 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 writer.h = save_h;
                 writer.v = save_v;
             }
+            log_debug("tex_dvi_out: Scripts node with %d children, width=%.1f",
+                     child_count, node->width);
             // Advance by total width
             writer.h += pt_to_sp(node->width);
             break;
         }
 
         case NodeClass::Radical: {
-            // Radical node: output sqrt sign + radicand + optional degree
+            // Radical node: output degree (if any) + sqrt sign + radicand
+            // TeX outputs in order: degree, radical sign, radicand
             // The radical sign is character 112 ('p') in cmsy10
             int32_t save_h = writer.h;
             int32_t save_v = writer.v;
 
-            // First output the degree (root index) if present
+            log_debug("tex_dvi_out: Radical node width=%.1f, has_degree=%d, has_radicand=%d",
+                     node->width,
+                     node->content.radical.degree ? 1 : 0,
+                     node->content.radical.radicand ? 1 : 0);
+
+            // Determine radical sign position
+            // If degree is present, radical sign comes after the degree
             TexNode* degree = node->content.radical.degree;
+            float rad_sign_offset = 0.0f;
+            
+            // First output the degree (root index) if present
+            // The degree appears BEFORE the radical sign in TeX's glyph order
             if (degree) {
                 int32_t deg_h = save_h + pt_to_sp(degree->x);
                 int32_t deg_v = save_v - pt_to_sp(degree->y);
+
+                log_debug("tex_dvi_out: Radical degree x=%.1f y=%.1f width=%.1f",
+                         degree->x, degree->y, degree->width);
 
                 writer.h = deg_h;
                 writer.v = deg_v;
                 dvi_output_node(writer, degree, fonts);
 
+                // Radical sign comes after the degree
+                rad_sign_offset = degree->x + degree->width;
+                
+                log_debug("tex_dvi_out: Radical rad_sign_offset=%.1f", rad_sign_offset);
+                
                 // Restore position
                 writer.h = save_h;
                 writer.v = save_v;
             }
 
-            // Output the radical sign from cmsy font
-            // Use cmsy10 at appropriate size
+            // Output the radical sign from cmsy font at offset position
             float size = node->height * 10.0f;  // Approximate size
             if (size < 5.0f) size = 10.0f;  // Default to 10pt
 
             uint32_t font_num = dvi_define_font(writer, "cmsy10", size);
             dvi_select_font(writer, font_num);
 
+            // Move to radical sign position
+            writer.h = save_h + pt_to_sp(rad_sign_offset);
+            
+            log_debug("tex_dvi_out: Outputting radical sign at offset=%.1f", rad_sign_offset);
+            
             // Output radical sign character (p = 112 in cmsy)
             dvi_set_char(writer, 112);
 
-            // Advance by radical sign width (approximate)
-            writer.h += pt_to_sp(8.0f * size / 10.0f);
-
-            // Output radicand at its position
+            // Output radicand
             TexNode* radicand = node->content.radical.radicand;
             if (radicand) {
+                // Position radicand at its x position from the radical node origin
                 int32_t rad_h = save_h + pt_to_sp(radicand->x);
-                int32_t rad_v = writer.v - pt_to_sp(radicand->y);
+                int32_t rad_v = save_v - pt_to_sp(radicand->y);
+
+                log_debug("tex_dvi_out: Radicand x=%.1f y=%.1f", radicand->x, radicand->y);
 
                 writer.h = rad_h;
                 writer.v = rad_v;
@@ -801,12 +848,74 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             break;
         }
 
+        case NodeClass::Delimiter: {
+            // Output a delimiter character
+            // Use appropriate font based on delimiter type and size
+            int32_t cp = node->content.delim.codepoint;
+            float target_size = node->content.delim.target_size;
+            
+            log_debug("tex_dvi_out: Delimiter codepoint=%d '%c' size=%.1f", cp, cp, target_size);
+            
+            float font_size = 10.0f;
+            const char* font_name = "cmr10";
+            int32_t output_cp = cp;
+            
+            if (target_size > 10.0f) {
+                // Select font and codepoint based on delimiter type
+                switch (cp) {
+                    case '(':
+                        font_name = "cmex10";
+                        output_cp = 0;  // cmex10 left paren (size 1)
+                        break;
+                    case ')':
+                        font_name = "cmex10";
+                        output_cp = 1;  // cmex10 right paren (size 1)
+                        break;
+                    case '[':
+                        font_name = "cmex10";
+                        // For medium size, use 104 'h' (extension piece visible)
+                        // For smaller, use 2
+                        output_cp = (target_size > 12.0f) ? 104 : 2;
+                        break;
+                    case ']':
+                        font_name = "cmex10";
+                        // For medium size, use 105 'i'
+                        output_cp = (target_size > 12.0f) ? 105 : 3;
+                        break;
+                    case '{':
+                        // Braces use cmsy10 for printable output
+                        font_name = "cmsy10";
+                        output_cp = 102;  // cmsy10 left brace 'f'
+                        break;
+                    case '}':
+                        font_name = "cmsy10";
+                        output_cp = 103;  // cmsy10 right brace 'g'
+                        break;
+                    case '|':
+                        font_name = "cmex10";
+                        output_cp = 12;   // cmex10 vertical bar
+                        break;
+                    default:
+                        output_cp = cp;
+                        break;
+                }
+            }
+            
+            uint32_t font_num = dvi_define_font(writer, font_name, font_size);
+            dvi_select_font(writer, font_num);
+            dvi_set_char(writer, output_cp);
+            
+            writer.h += pt_to_sp(node->width);
+            break;
+        }
+
         case NodeClass::Penalty:
             // Penalties are invisible
             break;
 
         default:
             // Skip other node types for now
+            log_debug("tex_dvi_out: unhandled node class %d", (int)node->node_class);
             break;
     }
 }
