@@ -1,4 +1,4 @@
-// test_unified_dvi_gtest.cpp - Test unified pipeline DVI output
+// test_tex_dvi_generation_gtest.cpp - Test LaTeX to DVI generation pipeline
 //
 // Tests the doc_model_to_texnode -> DVI output path to verify the
 // unified pipeline produces valid DVI output.
