@@ -1012,7 +1012,7 @@
         "test_suites": [
             {
                 "suite": "library",
-                "name": "📚 Library Tests",
+                "name": "\ud83d\udcda Library Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -1026,7 +1026,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_strbuf_gtest.exe",
-                        "icon": "📝"
+                        "icon": "\ud83d\udcdd"
                     },
                     {
                         "source": "test_stringbuf_gtest.cpp",
@@ -1040,7 +1040,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_stringbuf_gtest.exe",
-                        "icon": "🧵"
+                        "icon": "\ud83e\uddf5"
                     },
                     {
                         "source": "test_strview_gtest.cpp",
@@ -1053,7 +1053,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_strview_gtest.exe",
-                        "icon": "👀"
+                        "icon": "\ud83d\udc40"
                     },
                     {
                         "source": "test_num_stack_gtest.cpp",
@@ -1066,7 +1066,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_num_stack_gtest.exe",
-                        "icon": "🔢"
+                        "icon": "\ud83d\udd22"
                     },
                     {
                         "source": "test_datetime_gtest.cpp",
@@ -1080,7 +1080,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_datetime_gtest.exe",
-                        "icon": "📅"
+                        "icon": "\ud83d\udcc5"
                     },
                     {
                         "source": "test_font_config_gtest.cpp",
@@ -1100,7 +1100,7 @@
                             "lib/hashmap.c"
                         ],
                         "binary": "test_font_config_gtest.exe",
-                        "icon": "🔤"
+                        "icon": "\ud83d\udd24"
                     },
                     {
                         "source": "test_url_gtest.cpp",
@@ -1113,7 +1113,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_url_gtest.exe",
-                        "icon": "🔗"
+                        "icon": "\ud83d\udd17"
                     },
                     {
                         "source": "test_url_extra_gtest.cpp",
@@ -1126,7 +1126,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_url_extra_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_cmdedit_gtest.cpp",
@@ -1141,7 +1141,7 @@
                         ],
                         "binary": "test_cmdedit_gtest.exe",
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
-                        "icon": "⌨️"
+                        "icon": "\u2328\ufe0f"
                     },
                     {
                         "source": "test_basic_gtest.cpp",
@@ -1152,7 +1152,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_basic_gtest.exe",
-                        "icon": "🧪"
+                        "icon": "\ud83e\uddea"
                     },
                     {
                         "source": "test_mempool_gtest.cpp",
@@ -1168,7 +1168,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_mempool_gtest.exe",
-                        "icon": "🚀"
+                        "icon": "\ud83d\ude80"
                     },
                     {
                         "source": "test_memtrack_gtest.cpp",
@@ -1187,7 +1187,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_memtrack_gtest.exe",
-                        "icon": "🔍"
+                        "icon": "\ud83d\udd0d"
                     },
                     {
                         "source": "test_avl_tree.cpp",
@@ -1204,7 +1204,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree.exe",
-                        "icon": "🌲"
+                        "icon": "\ud83c\udf32"
                     },
                     {
                         "source": "test_arena_gtest.cpp",
@@ -1218,7 +1218,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_arena_gtest.exe",
-                        "icon": "🏟️"
+                        "icon": "\ud83c\udfdf\ufe0f"
                     },
                     {
                         "source": "test_pdf_writer_gtest.cpp",
@@ -1232,7 +1232,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_pdf_writer_gtest.exe",
-                        "icon": "📄"
+                        "icon": "\ud83d\udcc4"
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",
@@ -1249,14 +1249,14 @@
                             "lib/log.c"
                         ],
                         "binary": "test_avl_tree_perf.exe",
-                        "icon": "⚡"
+                        "icon": "\u26a1"
                     }
                 ],
                 "type": "library"
             },
             {
                 "suite": "input",
-                "name": "📄 Input Processing Tests",
+                "name": "\ud83d\udcc4 Input Processing Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -1270,7 +1270,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_mime_detect_gtest.exe",
-                        "icon": "📎"
+                        "icon": "\ud83d\udcce"
                     },
                     {
                         "source": "test_mark_builder_gtest.cpp",
@@ -1284,7 +1284,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_builder_gtest.exe",
-                        "icon": "🏗️"
+                        "icon": "\ud83c\udfd7\ufe0f"
                     },
                     {
                         "source": "test_mark_builder_deepcopy_gtest.cpp",
@@ -1298,7 +1298,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_builder_deepcopy_gtest.exe",
-                        "icon": "🔄"
+                        "icon": "\ud83d\udd04"
                     },
                     {
                         "source": "test_mark_editor_gtest.cpp",
@@ -1312,7 +1312,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_editor_gtest.exe",
-                        "icon": "✏️"
+                        "icon": "\u270f\ufe0f"
                     },
                     {
                         "source": "test_name_pool_gtest.cpp",
@@ -1326,7 +1326,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_name_pool_gtest.exe",
-                        "icon": "🔤"
+                        "icon": "\ud83d\udd24"
                     },
                     {
                         "source": "test_mark_reader_gtest.cpp",
@@ -1340,7 +1340,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_reader_gtest.exe",
-                        "icon": "📖"
+                        "icon": "\ud83d\udcd6"
                     },
                     {
                         "source": "test_error_tracking.cpp",
@@ -1354,7 +1354,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_error_tracking.exe",
-                        "icon": "🛡️"
+                        "icon": "\ud83d\udee1\ufe0f"
                     },
                     {
                         "source": "test_math_gtest.cpp",
@@ -1368,7 +1368,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_math_gtest.exe",
-                        "icon": "🔢"
+                        "icon": "\ud83d\udd22"
                     },
                     {
                         "source": "test_math_ascii_gtest.cpp",
@@ -1382,7 +1382,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_math_ascii_gtest.exe",
-                        "icon": "🔤"
+                        "icon": "\ud83d\udd24"
                     },
                     {
                         "source": "test_markup_roundtrip_gtest.cpp",
@@ -1396,7 +1396,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_markup_roundtrip_gtest.exe",
-                        "icon": "📝"
+                        "icon": "\ud83d\udcdd"
                     },
                     {
                         "source": "test_entity_emoji_gtest.cpp",
@@ -1410,7 +1410,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_entity_emoji_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_input_roundtrip_gtest.cpp",
@@ -1424,7 +1424,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_input_roundtrip_gtest.exe",
-                        "icon": "🔄"
+                        "icon": "\ud83d\udd04"
                     },
                     {
                         "source": "test_wpt_html_parser_gtest.cpp",
@@ -1438,7 +1438,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_wpt_html_parser_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_latex_ts_gtest.cpp",
@@ -1453,7 +1453,7 @@
                             "tree-sitter-latex"
                         ],
                         "binary": "test_latex_ts_gtest.exe",
-                        "icon": "📝"
+                        "icon": "\ud83d\udcdd"
                     },
                     {
                         "source": "test_html_roundtrip_gtest.cpp",
@@ -1467,7 +1467,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_html_roundtrip_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_html_gtest.cpp",
@@ -1481,7 +1481,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_html_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_html_negative_gtest.cpp",
@@ -1495,7 +1495,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_html_negative_gtest.exe",
-                        "icon": "🚨"
+                        "icon": "\ud83d\udea8"
                     },
                     {
                         "source": "test_lambda_domnode_gtest.cpp",
@@ -1517,7 +1517,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_lambda_domnode_gtest.exe",
-                        "icon": "🔗"
+                        "icon": "\ud83d\udd17"
                     },
                     {
                         "source": "test_dir_gtest.cpp",
@@ -1530,7 +1530,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_dir_gtest.exe",
-                        "icon": "📁"
+                        "icon": "\ud83d\udcc1"
                     },
                     {
                         "source": "test_graph_parser_gtest.cpp",
@@ -1544,7 +1544,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_graph_parser_gtest.exe",
-                        "icon": "📊"
+                        "icon": "\ud83d\udcca"
                     },
                     {
                         "source": "test_validator_input_gtest.cpp",
@@ -1558,7 +1558,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_input_gtest.exe",
-                        "icon": "✅"
+                        "icon": "\u2705"
                     },
                     {
                         "source": "test_validator_features_gtest.cpp",
@@ -1572,7 +1572,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_features_gtest.exe",
-                        "icon": "🛠️"
+                        "icon": "\ud83d\udee0\ufe0f"
                     },
                     {
                         "source": "test_null_vs_missing_gtest.cpp",
@@ -1586,7 +1586,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_null_vs_missing_gtest.exe",
-                        "icon": "✅"
+                        "icon": "\u2705"
                     },
                     {
                         "source": "test_enhanced_errors.cpp",
@@ -1600,7 +1600,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_enhanced_errors.exe",
-                        "icon": "✨"
+                        "icon": "\u2728"
                     },
                     {
                         "source": "test_validation_options.cpp",
@@ -1614,7 +1614,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validation_options.exe",
-                        "icon": "⚙️"
+                        "icon": "\u2699\ufe0f"
                     },
                     {
                         "source": "test_format_validation.cpp",
@@ -1628,7 +1628,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_format_validation.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_validator_integration.cpp",
@@ -1642,7 +1642,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_integration.exe",
-                        "icon": "🧪"
+                        "icon": "\ud83e\uddea"
                     },
                     {
                         "source": "test_type_references_simple.cpp",
@@ -1656,7 +1656,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_type_references_simple.exe",
-                        "icon": "🔗"
+                        "icon": "\ud83d\udd17"
                     },
                     {
                         "source": "test_graph_formatter_gtest.cpp",
@@ -1670,7 +1670,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_graph_formatter_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/test_sysinfo_gtest.cpp",
@@ -1684,7 +1684,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_sysinfo_gtest.exe",
-                        "icon": "🖥️"
+                        "icon": "\ud83d\udda5\ufe0f"
                     },
                     {
                         "source": "test/test_jsx_roundtrip_new_gtest.cpp",
@@ -1698,7 +1698,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_jsx_roundtrip_new_gtest.exe",
-                        "icon": "🔢"
+                        "icon": "\ud83d\udd22"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_new_gtest.cpp",
@@ -1711,7 +1711,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_mdx_roundtrip_new_gtest.exe",
-                        "icon": "📝"
+                        "icon": "\ud83d\udcdd"
                     },
                     {
                         "source": "test/css/test_css_style_node.cpp",
@@ -1734,7 +1734,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_css_style_node.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_system.cpp",
@@ -1758,7 +1758,7 @@
                             "lib/log.c"
                         ],
                         "binary": "test_css_system.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_dom_integration.cpp",
@@ -1786,7 +1786,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_dom_integration.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test/css/test_css_dom_crud.cpp",
@@ -1814,7 +1814,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_dom_crud.exe",
-                        "icon": "✏️"
+                        "icon": "\u270f\ufe0f"
                     },
                     {
                         "source": "test/css/test_css_style_application_gtest.cpp",
@@ -1842,7 +1842,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_css_style_application_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test_html_css_gtest.cpp",
@@ -1863,7 +1863,7 @@
                             "radiant/layout_counters.cpp"
                         ],
                         "binary": "test_html_css_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test/css/test_css_tokenizer_gtest.cpp",
@@ -1877,7 +1877,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_tokenizer_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_tokenizer_unit.cpp",
@@ -1891,7 +1891,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_tokenizer_unit.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_parser_unit.cpp",
@@ -1905,7 +1905,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_parser_unit.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_engine_unit.cpp",
@@ -1919,7 +1919,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_engine_unit.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_engine_negative.cpp",
@@ -1933,7 +1933,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_engine_negative.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_dom_element_print.cpp",
@@ -1961,7 +1961,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_dom_element_print.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_formatter_unit.cpp",
@@ -1975,11 +1975,11 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_formatter_unit.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_roundtrip_unit.cpp",
-                        "name": "CSS Roundtrip Unit Tests (Parse→Format→Parse)",
+                        "name": "CSS Roundtrip Unit Tests (Parse\u2192Format\u2192Parse)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1989,7 +1989,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_roundtrip_unit.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_compound_descendant_selectors.cpp",
@@ -2003,7 +2003,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_compound_descendant_selectors.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_selector_groups.cpp",
@@ -2017,7 +2017,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_selector_groups.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_parser_gtest.cpp",
@@ -2031,7 +2031,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_parser_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_integration_gtest.cpp",
@@ -2045,7 +2045,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_integration_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_files_safe_gtest.cpp",
@@ -2059,7 +2059,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_files_safe_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_frameworks_gtest.cpp",
@@ -2073,7 +2073,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_frameworks_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/css/test_css_to_mark_gtest.cpp",
@@ -2087,7 +2087,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_to_mark_gtest.exe",
-                        "icon": "🎨"
+                        "icon": "\ud83c\udfa8"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_gtest.cpp",
@@ -2100,7 +2100,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_mdx_roundtrip_gtest.exe",
-                        "icon": "📄"
+                        "icon": "\ud83d\udcc4"
                     },
                     {
                         "source": "test/test_jsx_roundtrip_gtest.cpp",
@@ -2113,7 +2113,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_jsx_roundtrip_gtest.exe",
-                        "icon": "⚛️"
+                        "icon": "\u269b\ufe0f"
                     },
                     {
                         "source": "test/test_latex_parser_gtest.cpp",
@@ -2126,7 +2126,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_latex_parser_gtest.exe",
-                        "icon": "📄"
+                        "icon": "\ud83d\udcc4"
                     },
                     {
                         "source": "test/test_latex_treesitter.cpp",
@@ -2139,7 +2139,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_latex_treesitter.exe",
-                        "icon": "🌲"
+                        "icon": "\ud83c\udf32"
                     },
                     {
                         "source": "test/test_html_encoder_gtest.cpp",
@@ -2153,7 +2153,7 @@
                         "additional_sources": [
                             "lambda/format/html_encoder.cpp"
                         ],
-                        "icon": "🔒"
+                        "icon": "\ud83d\udd12"
                     }
                 ],
                 "type": "input",
@@ -2161,7 +2161,7 @@
             },
             {
                 "suite": "validator",
-                "name": "🔍 Validator Tests",
+                "name": "\ud83d\udd0d Validator Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -2176,7 +2176,7 @@
                         ],
                         "binary": "test_validator_gtest.exe",
                         "disabled": false,
-                        "icon": "🔍"
+                        "icon": "\ud83d\udd0d"
                     },
                     {
                         "source": "test/test_ast_validator_gtest.cpp",
@@ -2191,7 +2191,7 @@
                         ],
                         "binary": "test_ast_validator_gtest.exe",
                         "disabled": false,
-                        "icon": "🔍"
+                        "icon": "\ud83d\udd0d"
                     },
                     {
                         "source": "test/test_validator_path_reporting.cpp",
@@ -2206,7 +2206,7 @@
                         ],
                         "binary": "test_validator_path_reporting.exe",
                         "disabled": false,
-                        "icon": "📍"
+                        "icon": "\ud83d\udccd"
                     }
                 ],
                 "type": "validator",
@@ -2221,7 +2221,7 @@
             },
             {
                 "suite": "lambda",
-                "name": "🐑 Lambda Runtime Tests",
+                "name": "\ud83d\udc11 Lambda Runtime Tests",
                 "category": "baseline",
                 "tests": [
                     {
@@ -2233,7 +2233,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "🐑"
+                        "icon": "\ud83d\udc11"
                     },
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",
@@ -2244,7 +2244,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "🎮"
+                        "icon": "\ud83c\udfae"
                     },
                     {
                         "source": "test/test_lambda_proc_gtest.cpp",
@@ -2255,7 +2255,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "🐑"
+                        "icon": "\ud83d\udc11"
                     },
                     {
                         "source": "test/test_js_gtest.cpp",
@@ -2266,7 +2266,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "🟨"
+                        "icon": "\ud83d\udfe8"
                     },
                     {
                         "source": "test/test_mir_gtest.cpp",
@@ -2278,7 +2278,7 @@
                             "gtest_main"
                         ],
                         "requires_lambda_exe": true,
-                        "icon": "⚡"
+                        "icon": "\u26a1"
                     },
                     {
                         "source": "test/test_math_parser_gtest.cpp",
@@ -2292,7 +2292,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "icon": "📐"
+                        "icon": "\ud83d\udcd0"
                     }
                 ],
                 "type": "lambda",
@@ -2302,7 +2302,7 @@
             },
             {
                 "suite": "math",
-                "name": "📐 Math Layout Tests",
+                "name": "\ud83d\udcd0 Math Layout Tests",
                 "category": "extended",
                 "tests": [
                     {
@@ -2337,7 +2337,7 @@
                             "test/math",
                             "."
                         ],
-                        "icon": "📐"
+                        "icon": "\ud83d\udcd0"
                     }
                 ],
                 "type": "math",
@@ -2346,33 +2346,9 @@
             },
             {
                 "suite": "tex",
-                "name": "📝 TeX Typesetting Tests",
+                "name": "\ud83d\udcdd TeX Typesetting Tests",
                 "category": "extended",
                 "tests": [
-                    {
-                        "source": "test/test_tex_dvi_comparison.cpp",
-                        "name": "TeX DVI Comparison Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_tex_dvi_comparison.exe",
-                        "additional_sources": [
-                            "lambda/tex/dvi_parser.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "🔍"
-                    },
                     {
                         "source": "test/test_latex_integration_gtest.cpp",
                         "name": "LaTeX Integration Tests",
@@ -2391,7 +2367,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📝"
+                        "icon": "\ud83d\udcdd"
                     },
                     {
                         "source": "test/test_tex_node_gtest.cpp",
@@ -2418,7 +2394,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📦"
+                        "icon": "\ud83d\udce6"
                     },
                     {
                         "source": "test/test_tex_vlist_gtest.cpp",
@@ -2447,7 +2423,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📄"
+                        "icon": "\ud83d\udcc4"
                     },
                     {
                         "source": "test/test_tex_phase4_gtest.cpp",
@@ -2483,7 +2459,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "🔢"
+                        "icon": "\ud83d\udd22"
                     },
                     {
                         "source": "test/test_tex_phase5_gtest.cpp",
@@ -2523,7 +2499,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📤"
+                        "icon": "\ud83d\udce4"
                     },
                     {
                         "source": "test/test_tex_phase6_gtest.cpp",
@@ -2559,7 +2535,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "🖼️"
+                        "icon": "\ud83d\uddbc\ufe0f"
                     },
                     {
                         "source": "test/test_tex_hyphen_gtest.cpp",
@@ -2585,7 +2561,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "➖"
+                        "icon": "\u2796"
                     },
                     {
                         "source": "test/test_tex_lambda_bridge_gtest.cpp",
@@ -2617,7 +2593,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "🔗"
+                        "icon": "\ud83d\udd17"
                     },
                     {
                         "source": "test/test_tex_latex_bridge_gtest.cpp",
@@ -2650,11 +2626,11 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📝"
+                        "icon": "\ud83d\udcdd"
                     },
                     {
-                        "source": "test/test_unified_dvi_gtest.cpp",
-                        "name": "Unified DVI Pipeline Tests",
+                        "source": "test/test_tex_dvi_generation_gtest.cpp",
+                        "name": "TeX DVI Generation Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2666,7 +2642,7 @@
                             "tree-sitter",
                             "tree-sitter-latex-math"
                         ],
-                        "binary": "test_unified_dvi_gtest.exe",
+                        "binary": "test_tex_dvi_generation_gtest.exe",
                         "additional_sources": [
                             "lambda/tex/tex_node.cpp",
                             "lambda/tex/tex_tfm.cpp",
@@ -2676,6 +2652,8 @@
                             "lambda/tex/tex_pagebreak.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
                             "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_math_ast_builder.cpp",
+                            "lambda/tex/tex_math_ast_typeset.cpp",
                             "lambda/tex/tex_hyphen.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp",
                             "lambda/tex/tex_latex_bridge.cpp",
@@ -2696,7 +2674,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "🔄"
+                        "icon": "\ud83d\udd04"
                     },
                     {
                         "source": "test/test_latex_dvi_compare_gtest.cpp",
@@ -2717,7 +2695,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📊"
+                        "icon": "\ud83d\udcca"
                     },
                     {
                         "source": "test/test_tex_pagebreak_gtest.cpp",
@@ -2743,7 +2721,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📄"
+                        "icon": "\ud83d\udcc4"
                     },
                     {
                         "source": "test/test_tex_math_extended_gtest.cpp",
@@ -2767,12 +2745,14 @@
                             "lambda/tex/tex_vlist.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
                             "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_math_ast_builder.cpp",
+                            "lambda/tex/tex_math_ast_typeset.cpp",
                             "lambda/tex/tex_linebreak.cpp"
                         ],
                         "includes": [
                             "."
                         ],
-                        "icon": "∑"
+                        "icon": "\u2211"
                     },
                     {
                         "source": "test/test_tex_align_gtest.cpp",
@@ -2798,7 +2778,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "📐"
+                        "icon": "\ud83d\udcd0"
                     },
                     {
                         "source": "test/test_tex_document_model_gtest.cpp",
@@ -2832,7 +2812,7 @@
                             "DOC_MODEL_NO_SVG",
                             "DOC_MODEL_MINIMAL"
                         ],
-                        "icon": "📄"
+                        "icon": "\ud83d\udcc4"
                     },
                     {
                         "source": "test/test_latexml_compare_gtest.cpp",
@@ -2868,6 +2848,8 @@
                             "lambda/tex/tex_glue.hpp",
                             "lambda/tex/tex_math_ts.cpp",
                             "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ast_builder.cpp",
+                            "lambda/tex/tex_math_ast_typeset.cpp",
                             "lambda/tex/tex_svg_out.cpp",
                             "lambda/tex/tex_font_adapter.cpp",
                             "lambda/tex/tex_event.cpp",
@@ -2878,7 +2860,7 @@
                         "includes": [
                             "."
                         ],
-                        "icon": "🔬"
+                        "icon": "\ud83d\udd2c"
                     }
                 ],
                 "type": "tex",
@@ -2887,7 +2869,7 @@
             },
             {
                 "suite": "extended",
-                "name": "🧪 Extended Development Tests",
+                "name": "\ud83e\uddea Extended Development Tests",
                 "category": "extended",
                 "tests": [
                     {
@@ -2901,7 +2883,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_http_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test/test_network_layout_gtest.cpp",
@@ -2912,7 +2894,7 @@
                             "gtest_main"
                         ],
                         "binary": "test_network_layout_gtest.exe",
-                        "icon": "🌐"
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test/test_lambda_proc_extended_gtest.cpp",
@@ -2923,7 +2905,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "icon": "🐑"
+                        "icon": "\ud83d\udc11"
                     }
                 ],
                 "type": "extended",

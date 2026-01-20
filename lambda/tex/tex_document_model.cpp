@@ -9,10 +9,17 @@
 #include "tex_command_registry.hpp"
 #include "tex_package_loader.hpp"
 #endif
+#include "tex_math_ast.hpp"
+#include "tex_math_bridge.hpp"
 #include "tex_math_ts.hpp"
 #include "tex_linebreak.hpp"
 #include "tex_pagebreak.hpp"
 #include "lib/log.h"
+
+extern "C" {
+#include "../../lib/strbuf.h"
+}
+
 #include <cstring>
 #include <cstdio>
 
@@ -125,7 +132,7 @@ const char* TexDocumentModel::resolve_ref(const char* label) const {
             return labels[i].ref_text ? labels[i].ref_text : "";
         }
     }
-    return nullptr;  // Label not found at all - caller shows "??"
+    return "??";  // Label not found - return LaTeX-style undefined reference marker
 }
 
 const char* TexDocumentModel::resolve_ref_id(const char* label) const {
@@ -580,51 +587,51 @@ static DocElement* doc_create_text_normalized(Arena* arena, const char* text, Do
 // Debug Output
 // ============================================================================
 
-void doc_element_dump(DocElement* elem, StrBuf* out, int depth) {
+void doc_element_dump(DocElement* elem, ::StrBuf* out, int depth) {
     if (!elem) return;
     
     // Indent
     for (int i = 0; i < depth; i++) {
-        strbuf_append_str(out, "  ");
+        ::strbuf_append_str(out, "  ");
     }
     
     // Type name
-    strbuf_append_format(out, "[%s]", doc_elem_type_name(elem->type));
+    ::strbuf_append_format(out, "[%s]", doc_elem_type_name(elem->type));
     
     // Type-specific info
     switch (elem->type) {
     case DocElemType::TEXT_SPAN:
     case DocElemType::TEXT_RUN:
         if (elem->text.text && elem->text.text_len > 0) {
-            strbuf_append_str(out, " \"");
+            ::strbuf_append_str(out, " \"");
             size_t show_len = elem->text.text_len > 40 ? 40 : elem->text.text_len;
-            strbuf_append_str_n(out, elem->text.text, show_len);
-            if (elem->text.text_len > 40) strbuf_append_str(out, "...");
-            strbuf_append_str(out, "\"");
+            ::strbuf_append_str_n(out, elem->text.text, show_len);
+            if (elem->text.text_len > 40) ::strbuf_append_str(out, "...");
+            ::strbuf_append_str(out, "\"");
         }
         if (elem->text.style.flags != DocTextStyle::NONE) {
-            strbuf_append_format(out, " flags=0x%x", elem->text.style.flags);
+            ::strbuf_append_format(out, " flags=0x%x", elem->text.style.flags);
         }
         break;
         
     case DocElemType::HEADING:
-        strbuf_append_format(out, " level=%d", elem->heading.level);
+        ::strbuf_append_format(out, " level=%d", elem->heading.level);
         if (elem->heading.title) {
-            strbuf_append_format(out, " title=\"%s\"", elem->heading.title);
+            ::strbuf_append_format(out, " title=\"%s\"", elem->heading.title);
         }
         if (elem->heading.number) {
-            strbuf_append_format(out, " number=\"%s\"", elem->heading.number);
+            ::strbuf_append_format(out, " number=\"%s\"", elem->heading.number);
         }
         break;
         
     case DocElemType::LIST:
-        strbuf_append_format(out, " type=%d", (int)elem->list.list_type);
+        ::strbuf_append_format(out, " type=%d", (int)elem->list.list_type);
         break;
         
     case DocElemType::MATH_INLINE:
     case DocElemType::MATH_DISPLAY:
         if (elem->math.latex_src) {
-            strbuf_append_format(out, " src=\"%s\"", elem->math.latex_src);
+            ::strbuf_append_format(out, " src=\"%s\"", elem->math.latex_src);
         }
         break;
         
@@ -632,7 +639,7 @@ void doc_element_dump(DocElement* elem, StrBuf* out, int depth) {
         break;
     }
     
-    strbuf_append_str(out, "\n");
+    ::strbuf_append_str(out, "\n");
     
     // Recurse to children
     for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
@@ -640,23 +647,23 @@ void doc_element_dump(DocElement* elem, StrBuf* out, int depth) {
     }
 }
 
-void doc_model_dump(TexDocumentModel* doc, StrBuf* out) {
+void doc_model_dump(TexDocumentModel* doc, ::StrBuf* out) {
     if (!doc) {
-        strbuf_append_str(out, "(null document)\n");
+        ::strbuf_append_str(out, "(null document)\n");
         return;
     }
     
-    strbuf_append_str(out, "=== Document Model ===\n");
-    strbuf_append_format(out, "Class: %s\n", doc->document_class ? doc->document_class : "(none)");
-    if (doc->title) strbuf_append_format(out, "Title: %s\n", doc->title);
-    if (doc->author) strbuf_append_format(out, "Author: %s\n", doc->author);
-    if (doc->date) strbuf_append_format(out, "Date: %s\n", doc->date);
-    strbuf_append_str(out, "\n--- Tree ---\n");
+    ::strbuf_append_str(out, "=== Document Model ===\n");
+    ::strbuf_append_format(out, "Class: %s\n", doc->document_class ? doc->document_class : "(none)");
+    if (doc->title) ::strbuf_append_format(out, "Title: %s\n", doc->title);
+    if (doc->author) ::strbuf_append_format(out, "Author: %s\n", doc->author);
+    if (doc->date) ::strbuf_append_format(out, "Date: %s\n", doc->date);
+    ::strbuf_append_str(out, "\n--- Tree ---\n");
     
     if (doc->root) {
         doc_element_dump(doc->root, out, 0);
     } else {
-        strbuf_append_str(out, "(no root element)\n");
+        ::strbuf_append_str(out, "(no root element)\n");
     }
 }
 
@@ -2117,7 +2124,13 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_INLINE);
         math->math.latex_src = extract_math_source(elem, arena);
-        math->math.node = nullptr; // Will be populated by typesetter if needed
+        // Phase A: Parse to AST (deferred typesetting to Phase B in convert_math)
+        if (math->math.latex_src) {
+            math->math.ast = parse_math_string_to_ast(math->math.latex_src, strlen(math->math.latex_src), arena);
+        } else {
+            math->math.ast = nullptr;
+        }
+        math->math.node = nullptr; // Populated in Phase B (convert_math)
         return math;
     }
     
@@ -2137,7 +2150,13 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         tag_eq(tag, "equation") || tag_eq(tag, "equation*")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_DISPLAY);
         math->math.latex_src = extract_math_source(elem, arena);
-        math->math.node = nullptr;
+        // Phase A: Parse to AST (deferred typesetting to Phase B in convert_math)
+        if (math->math.latex_src) {
+            math->math.ast = parse_math_string_to_ast(math->math.latex_src, strlen(math->math.latex_src), arena);
+        } else {
+            math->math.ast = nullptr;
+        }
+        math->math.node = nullptr; // Populated in Phase B (convert_math)
         return math;
     }
     
@@ -4547,6 +4566,12 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         tag_eq(tag, "equation*") || tag_eq(tag, "displaymath")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_DISPLAY);
         math->math.latex_src = extract_math_source(elem, arena);
+        // Phase A: Parse to AST
+        if (math->math.latex_src) {
+            math->math.ast = parse_math_string_to_ast(math->math.latex_src, strlen(math->math.latex_src), arena);
+        } else {
+            math->math.ast = nullptr;
+        }
         math->math.node = nullptr;
         return math;
     }
@@ -4555,6 +4580,12 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "inline_math") || tag_eq(tag, "math")) {
         DocElement* math = doc_alloc_element(arena, DocElemType::MATH_INLINE);
         math->math.latex_src = extract_math_source(elem, arena);
+        // Phase A: Parse to AST
+        if (math->math.latex_src) {
+            math->math.ast = parse_math_string_to_ast(math->math.latex_src, strlen(math->math.latex_src), arena);
+        } else {
+            math->math.ast = nullptr;
+        }
         math->math.node = nullptr;
         return math;
     }
@@ -5823,17 +5854,52 @@ static TexNode* convert_list_item(DocElement* elem, Arena* arena, LaTeXContext& 
     return hlist;
 }
 
-// Convert MATH_* - pass through existing TexNode
+// Convert MATH_* - Phase B: typeset MathAST to TexNode
 static TexNode* convert_math(DocElement* elem, Arena* arena, LaTeXContext& ctx) {
-    (void)arena; (void)ctx;
     if (!elem) return nullptr;
     
-    // Math elements already have a pre-typeset TexNode
+    // Check cache first
     if (elem->math.node) {
         return elem->math.node;
     }
     
-    log_debug("doc_model: math element has no pre-typeset node");
+    // Phase B: Typeset the MathAST if present
+    if (elem->math.ast) {
+        // Create MathContext from LaTeXContext
+        MathContext math_ctx = MathContext::create(arena, ctx.doc_ctx.fonts, ctx.doc_ctx.base_size_pt);
+        
+        // Set style based on math type
+        if (elem->type == DocElemType::MATH_DISPLAY ||
+            elem->type == DocElemType::MATH_EQUATION ||
+            elem->type == DocElemType::MATH_ALIGN) {
+            math_ctx.style = MathStyle::Display;
+        } else {
+            math_ctx.style = MathStyle::Text;
+        }
+        
+        TexNode* result = typeset_math_ast(elem->math.ast, math_ctx);
+        elem->math.node = result;  // Cache for future calls
+        return result;
+    }
+    
+    // Fallback: If we have source but no AST, try direct typesetting
+    if (elem->math.latex_src) {
+        MathContext math_ctx = MathContext::create(arena, ctx.doc_ctx.fonts, ctx.doc_ctx.base_size_pt);
+        
+        if (elem->type == DocElemType::MATH_DISPLAY ||
+            elem->type == DocElemType::MATH_EQUATION ||
+            elem->type == DocElemType::MATH_ALIGN) {
+            math_ctx.style = MathStyle::Display;
+        } else {
+            math_ctx.style = MathStyle::Text;
+        }
+        
+        TexNode* result = typeset_latex_math(elem->math.latex_src, strlen(elem->math.latex_src), math_ctx);
+        elem->math.node = result;
+        return result;
+    }
+    
+    log_debug("doc_model: math element has no AST or source");
     return nullptr;
 }
 

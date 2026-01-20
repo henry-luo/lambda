@@ -272,10 +272,11 @@ struct DocElement {
             const char* env_name;   // "center", "quote", etc.
         } alignment;
         
-        // For MATH_* types - pre-typeset TexNode
+        // For MATH_* types - parsed and typeset math
         struct {
-            TexNode* node;          // Typeset math tree
-            const char* latex_src;  // Original LaTeX (for fallback)
+            struct MathASTNode* ast; // Parsed math AST (Phase A: populated by build_doc_element)
+            TexNode* node;          // Typeset math tree (Phase B: populated by convert_math)
+            const char* latex_src;  // Original LaTeX source
             const char* label;      // Equation label
             const char* number;     // Equation number
         } math;

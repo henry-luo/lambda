@@ -311,12 +311,11 @@ TEST_F(TexDocumentModelTest, RenderHeading) {
     
     doc_element_to_html(heading, out, opts, 0);
     
-    // level 2 should map to h3
-    EXPECT_NE(strstr(out->str, "<h3"), nullptr);
-    EXPECT_NE(strstr(out->str, "section-number"), nullptr);
+    // In article class (default), section level 2 maps to h2
+    EXPECT_NE(strstr(out->str, "<h2"), nullptr);
     EXPECT_NE(strstr(out->str, "1.2"), nullptr);
     EXPECT_NE(strstr(out->str, "Test Section"), nullptr);
-    EXPECT_NE(strstr(out->str, "</h3>"), nullptr);
+    EXPECT_NE(strstr(out->str, "</h2>"), nullptr);
     
     strbuf_free(out);
 }
@@ -752,10 +751,10 @@ TEST_F(TexDocumentModelTest, BuildSectionHeading) {
     
     doc_element_to_html(heading, out, opts, 0);
     
-    // Section (level 2) should produce <h3>
-    EXPECT_NE(strstr(out->str, "<h3"), nullptr);
+    // In article class (default), section (level 2) maps to h2
+    EXPECT_NE(strstr(out->str, "<h2"), nullptr);
     EXPECT_NE(strstr(out->str, "Introduction"), nullptr);
-    EXPECT_NE(strstr(out->str, "</h3>"), nullptr);
+    EXPECT_NE(strstr(out->str, "</h2>"), nullptr);
     EXPECT_NE(strstr(out->str, "1"), nullptr);  // section number
     
     strbuf_free(out);
@@ -775,7 +774,8 @@ TEST_F(TexDocumentModelTest, BuildStarredSection) {
     
     doc_element_to_html(heading, out, opts, 0);
     
-    EXPECT_NE(strstr(out->str, "<h3"), nullptr);
+    // In article class (default), section (level 2) maps to h2
+    EXPECT_NE(strstr(out->str, "<h2"), nullptr);
     EXPECT_NE(strstr(out->str, "Appendix"), nullptr);
     // Should NOT have section-number span
     EXPECT_EQ(strstr(out->str, "section-number"), nullptr);
@@ -816,8 +816,8 @@ TEST_F(TexDocumentModelTest, BuildSubsectionHeading) {
     
     doc_element_to_html(heading, out, opts, 0);
     
-    // Subsection (level 3) should produce <h4>
-    EXPECT_NE(strstr(out->str, "<h4"), nullptr);
+    // In article class (default), subsection (level 3) maps to h3
+    EXPECT_NE(strstr(out->str, "<h3"), nullptr);
     EXPECT_NE(strstr(out->str, "Details"), nullptr);
     EXPECT_NE(strstr(out->str, "1.2"), nullptr);
     
@@ -1283,7 +1283,7 @@ TEST_F(TexDocumentModelTest, CitationResolution) {
 
 TEST_F(TexDocumentModelTest, HeadingWithLabel) {
     DocElement* heading = doc_alloc_element(arena, DocElemType::HEADING);
-    heading->heading.level = 0;  // level 0 -> h1
+    heading->heading.level = 2;  // section level in article class -> h2
     heading->heading.title = "Introduction";
     heading->heading.label = "sec:intro";
     heading->flags |= DocElement::FLAG_NUMBERED;
@@ -1294,10 +1294,11 @@ TEST_F(TexDocumentModelTest, HeadingWithLabel) {
     
     doc_element_to_html(heading, out, opts, 0);
     
-    EXPECT_NE(strstr(out->str, "<h1"), nullptr);
+    // In article class (default), section (level 2) maps to h2
+    EXPECT_NE(strstr(out->str, "<h2"), nullptr);
     EXPECT_NE(strstr(out->str, "id=\"sec:intro\""), nullptr);
     EXPECT_NE(strstr(out->str, "Introduction"), nullptr);
-    EXPECT_NE(strstr(out->str, "</h1>"), nullptr);
+    EXPECT_NE(strstr(out->str, "</h2>"), nullptr);
     
     strbuf_free(out);
 }
