@@ -69,6 +69,9 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
 // DVI rendering function for LaTeX files (TeX typesetting pipeline)
 int render_latex_to_dvi(const char* latex_file, const char* dvi_file);
 
+// Math formula rendering function (quick testing of single formulas)
+int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump_ast, bool dump_boxes);
+
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
 
@@ -921,6 +924,89 @@ int main(int argc, char *argv[]) {
 
         log_debug("layout command completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
+        return exit_code;
+    }
+
+    // Handle math command - quick testing of single math formulas
+    log_debug("Checking for math command");
+    if (argc >= 2 && strcmp(argv[1], "math") == 0) {
+        log_debug("Entering math command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Math Formula Renderer v1.0\n\n");
+            printf("Usage: %s math \"<formula>\" [options]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  Quickly test and debug individual LaTeX math formulas without creating\n");
+            printf("  a full .tex file. Useful for development and debugging the math typesetter.\n");
+            printf("\nOptions:\n");
+            printf("  -o, --output FILE    Output DVI file (default: /tmp/lambda_math.dvi)\n");
+            printf("  --dump-ast           Dump Math AST to stderr (Phase A output)\n");
+            printf("  --dump-boxes         Dump TexNode box structure to stderr (Phase B output)\n");
+            printf("  -h, --help           Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s math \"\\\\frac{a}{b}\"                  # Simple fraction\n", argv[0]);
+            printf("  %s math \"\\\\sum_{i=1}^n x_i\" --dump-ast  # Show AST structure\n", argv[0]);
+            printf("  %s math \"\\\\sqrt{x^2+y^2}\" --dump-boxes  # Show box layout\n", argv[0]);
+            printf("  %s math \"\\\\int_0^1 f(x) dx\" -o out.dvi  # Custom output file\n", argv[0]);
+            printf("\nNotes:\n");
+            printf("  - Formulas are rendered in display math style\n");
+            printf("  - Use double backslashes (\\\\\\\\) on command line for LaTeX commands\n");
+            printf("  - Check log.txt for detailed [MATH] tracing output\n");
+            log_finish();
+            return 0;
+        }
+
+        // Parse arguments
+        const char* formula = NULL;
+        const char* output_file = "/tmp/lambda_math.dvi";
+        bool dump_ast = false;
+        bool dump_boxes = false;
+
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
+                if (i + 1 < argc) {
+                    output_file = argv[++i];
+                } else {
+                    printf("Error: -o option requires an output file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--dump-ast") == 0) {
+                dump_ast = true;
+            } else if (strcmp(argv[i], "--dump-boxes") == 0) {
+                dump_boxes = true;
+            } else if (argv[i][0] != '-') {
+                // Positional argument is the formula
+                formula = argv[i];
+            } else {
+                printf("Error: Unknown option '%s'\n", argv[i]);
+                log_finish();
+                return 1;
+            }
+        }
+
+        if (!formula) {
+            printf("Error: No math formula provided\n");
+            printf("Usage: %s math \"<formula>\" [options]\n", argv[0]);
+            printf("Try '%s math --help' for more information.\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        // If only dumping and no output file specified, pass NULL
+        const char* dvi_out = (dump_ast || dump_boxes) && strcmp(output_file, "/tmp/lambda_math.dvi") == 0 
+                              ? NULL : output_file;
+        
+        // If neither dump option and default output, still write DVI
+        if (!dump_ast && !dump_boxes) {
+            dvi_out = output_file;
+        }
+
+        int exit_code = render_math_to_dvi(formula, dvi_out, dump_ast, dump_boxes);
+
+        log_debug("math command completed with result: %d", exit_code);
+        log_finish();
         return exit_code;
     }
 
