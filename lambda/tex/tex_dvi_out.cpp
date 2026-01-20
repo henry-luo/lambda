@@ -861,7 +861,7 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             int32_t output_cp = cp;
             
             if (target_size > 10.0f) {
-                // Select font and codepoint based on delimiter type
+                // Select font and codepoint based on delimiter type (large)
                 switch (cp) {
                     case '(':
                         font_name = "cmex10";
@@ -899,6 +899,25 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                         output_cp = cp;
                         break;
                 }
+            } else {
+                // Small delimiters - map to appropriate fonts
+                switch (cp) {
+                    case '{':
+                        font_name = "cmsy10";
+                        output_cp = 102;  // cmsy10 left brace
+                        break;
+                    case '}':
+                        font_name = "cmsy10";
+                        output_cp = 103;  // cmsy10 right brace
+                        break;
+                    case '|':
+                        font_name = "cmsy10";
+                        output_cp = 106;  // cmsy10 vert 'j'
+                        break;
+                    default:
+                        // Parens, brackets stay in cmr10
+                        break;
+                }
             }
             
             uint32_t font_num = dvi_define_font(writer, font_name, font_size);
@@ -906,6 +925,63 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             dvi_set_char(writer, output_cp);
             
             writer.h += pt_to_sp(node->width);
+            break;
+        }
+
+        case NodeClass::Accent: {
+            // Math accent - output accent first, then base (for correct text extraction order)
+            TexNode* base = node->content.accent.base;
+            int32_t accent_char = node->content.accent.accent_char;
+            FontSpec accent_font = node->content.accent.font;
+            
+            int32_t save_h = writer.h;
+            int32_t save_v = writer.v;
+            
+            // Calculate base metrics
+            float base_width = base ? base->width : 5.0f;
+            float accent_width = 5.0f;  // Approximate accent width
+            
+            // Select accent font (typically cmsy10 or cmmi10)
+            const char* font_name = accent_font.name ? accent_font.name : "cmmi10";
+            float font_size = accent_font.size_pt > 0 ? accent_font.size_pt : 10.0f;
+            
+            uint32_t font_num = dvi_define_font(writer, font_name, font_size);
+            dvi_select_font(writer, font_num);
+            
+            // Map accent character to font encoding
+            int32_t output_cp = accent_char;
+            if (accent_char == 0x2192) {
+                // Vector arrow - use cmmi10 vector accent at position 126
+                output_cp = 126;  // ~
+            } else if (accent_char == '^') {
+                output_cp = 94;   // circumflex/hat
+            } else if (accent_char == '-') {
+                output_cp = 22;   // macron/bar
+            } else if (accent_char == '~') {
+                output_cp = 126;  // tilde
+            } else if (accent_char == '.') {
+                output_cp = 95;   // overdot
+            }
+            
+            // Output accent FIRST (positioned above base)
+            int32_t accent_h = save_h + pt_to_sp((base_width - accent_width) / 2.0f);
+            int32_t accent_v = save_v - pt_to_sp(base ? base->height : 5.0f);
+            
+            writer.h = accent_h;
+            writer.v = accent_v;
+            dvi_set_char(writer, output_cp);
+            
+            // Restore position for base output
+            writer.h = save_h;
+            writer.v = save_v;
+            
+            // Output the base
+            if (base) {
+                dvi_output_node(writer, base, fonts);
+            }
+            
+            // Position after full width
+            writer.h = save_h + pt_to_sp(node->width);
             break;
         }
 

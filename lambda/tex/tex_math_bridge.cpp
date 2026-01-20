@@ -754,19 +754,20 @@ TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* supers
     // Spacing parameters (TeXBook p. 445)
     float big_op_spacing3 = ctx.base_size_pt * 0.2f;  // between op and limits
 
+    // Link children in DVI output order: superscript -> operator (nucleus) -> subscript
+    // This matches TeX reference DVI ordering for display-style limits
+    
     // Position operator at center
     op_node->x = op_offset;
     op_node->y = 0;
     op_node->parent = result;
-
+    
+    // Start with operator dimensions
     float total_height = op_node->height;
     float total_depth = op_node->depth;
-
-    // Link children in DVI output order: superscript (top) -> operator (middle) -> subscript (bottom)
-    // This matches TeX reference DVI ordering
+    
+    // First, position superscript and make it the first child
     TexNode* prev = nullptr;
-
-    // Position superscript above operator (output first in DVI)
     if (superscript) {
         superscript->x = sup_offset;
         superscript->y = op_node->height + big_op_spacing3 + superscript->depth;
@@ -778,14 +779,15 @@ TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* supers
         prev = superscript;
     }
 
-    // Link operator
+    // Link operator after superscript (or as first child if no superscript)
     if (prev) {
         prev->next_sibling = op_node;
         op_node->prev_sibling = prev;
+        result->last_child = op_node;
     } else {
         result->first_child = op_node;
+        result->last_child = op_node;
     }
-    result->last_child = op_node;
     prev = op_node;
 
     // Position and link subscript below operator
@@ -844,6 +846,10 @@ TexNode* typeset_scripts(TexNode* nucleus, TexNode* subscript, TexNode* superscr
     scripts->content.scripts.nucleus = nucleus;
     scripts->content.scripts.subscript = subscript;
     scripts->content.scripts.superscript = superscript;
+
+    // Position nucleus at origin
+    nucleus->x = 0;
+    nucleus->y = 0;
 
     // Start with nucleus dimensions
     float total_width = nucleus->width;
