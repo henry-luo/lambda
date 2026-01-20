@@ -549,9 +549,12 @@ int exec_convert(int argc, char* argv[]) {
                     Pool* doc_pool = pool_create();
                     Arena* doc_arena = arena_create_default(doc_pool);
                     
+                    // Create font manager for math typesetting
+                    tex::TFMFontManager* fonts = tex::create_font_manager(doc_arena);
+                    
                     // Build document model
                     tex::TexDocumentModel* doc = tex::doc_model_from_string(
-                        source_content, strlen(source_content), doc_arena, nullptr);
+                        source_content, strlen(source_content), doc_arena, fonts);
                     
                     free(source_content);
                     
