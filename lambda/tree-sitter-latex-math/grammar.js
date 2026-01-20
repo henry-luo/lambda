@@ -16,6 +16,10 @@ module.exports = grammar({
   // Whitespace is NOT significant in math mode (unlike text mode)
   extras: $ => [/\s+/],
 
+  // The word token - tells tree-sitter that command_name is the keyword token
+  // This allows string literals like '\\begin' to take precedence over command_name regex
+  word: $ => $.command_name,
+
   // Conflicts for ambiguous structures
   conflicts: $ => [
     // subsup can attach to any atom
@@ -56,12 +60,20 @@ module.exports = grammar({
       $.radical,
       $.delimiter_group,
       $.accent,
+      $.symbol_command,  // Symbol commands like \infty - before big_operator
       $.big_operator,
       $.environment,
       $.text_command,
       $.style_command,
       $.space_command,
       $.command,  // Generic fallback for unknown commands
+    ),
+
+    // Symbol commands that could conflict with big operator prefixes
+    // Must be listed before big_operator to take precedence
+    symbol_command: $ => choice(
+      '\\infty',   // Must match before \inf (big_operator)
+      '\\infinity',
     ),
 
     // Single letter variable (a-z, A-Z, Greek via commands)
@@ -224,7 +236,7 @@ module.exports = grammar({
         '\\int', '\\iint', '\\iiint', '\\oint',
         '\\bigcup', '\\bigcap', '\\bigsqcup',
         '\\bigvee', '\\bigwedge', '\\bigoplus', '\\bigotimes',
-        '\\lim', '\\limsup', '\\liminf',
+        '\\liminf', '\\limsup', '\\lim',  // liminf/limsup before lim
         '\\max', '\\min', '\\sup', '\\inf',
         '\\det', '\\gcd', '\\Pr',
       )),
@@ -240,11 +252,14 @@ module.exports = grammar({
     // ========================================================================
 
     environment: $ => seq(
-      '\\begin', '{', field('name', $.env_name), '}',
+      $.begin_cmd, '{', field('name', $.env_name), '}',
       optional(field('columns', $.env_columns)),  // For array: {ccc}
       field('body', $.env_body),
-      '\\end', '{', field('end_name', $.env_name), '}',
+      $.end_cmd, '{', field('end_name', $.env_name), '}',
     ),
+
+    begin_cmd: $ => '\\begin',
+    end_cmd: $ => '\\end',
 
     // Environment name
     env_name: $ => choice(
