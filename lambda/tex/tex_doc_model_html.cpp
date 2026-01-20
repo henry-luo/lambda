@@ -5,6 +5,7 @@
 
 #include "tex_document_model.hpp"
 #include "tex_doc_model_internal.hpp"
+#include "tex_html_render.hpp"
 #include "lib/log.h"
 #include <cstring>
 #include <cstdio>
@@ -620,15 +621,43 @@ static void render_math_html(DocElement* elem, StrBuf* out,
     
     const char* css_class = is_display ? "math-display" : "math-inline";
     
+    // Determine rendering mode
+    MathRenderMode mode = opts.math_mode;
+    // Backward compatibility: check deprecated math_as_svg flag
+    if (opts.math_as_svg && mode == MathRenderMode::HTML_CSS) {
+        mode = MathRenderMode::SVG;
+    }
+    
     // Check if we have a typeset TexNode tree
-    bool has_svg = (opts.math_as_svg && elem->math.node != nullptr);
+    bool has_node = (elem->math.node != nullptr);
     
     if (is_display) {
         if (opts.pretty_print) html_indent(out, depth);
         strbuf_append_format(out, "<div class=\"%s%s\">", opts.css_class_prefix, css_class);
         if (opts.pretty_print) strbuf_append_str(out, "\n");
         
-        if (has_svg) {
+        if (mode == MathRenderMode::HTML_CSS && has_node) {
+            // NEW: Render math as HTML+CSS using tex_html_render
+            if (opts.pretty_print) html_indent(out, depth + 1);
+            
+            Pool* temp_pool = pool_create();
+            Arena* temp_arena = arena_create_default(temp_pool);
+            
+            HtmlRenderOptions html_opts;
+            html_opts.base_font_size_px = 16.0f;
+            html_opts.class_prefix = "ML";  // MathLive-compatible
+            html_opts.include_styles = true;
+            
+            const char* html = render_texnode_to_html(elem->math.node, temp_arena, html_opts);
+            if (html) {
+                strbuf_append_str(out, html);
+            }
+            
+            arena_destroy(temp_arena);
+            pool_destroy(temp_pool);
+            
+            if (opts.pretty_print) strbuf_append_str(out, "\n");
+        } else if (mode == MathRenderMode::SVG && has_node) {
             // Render math as inline SVG
             if (opts.pretty_print) html_indent(out, depth + 1);
             
@@ -649,7 +678,7 @@ static void render_math_html(DocElement* elem, StrBuf* out,
             
             if (opts.pretty_print) strbuf_append_str(out, "\n");
         } else if (elem->math.latex_src) {
-            // Fallback: output LaTeX source in a comment
+            // Fallback: output LaTeX source in a span
             if (opts.pretty_print) html_indent(out, depth + 1);
             strbuf_append_str(out, "<span class=\"");
             strbuf_append_str(out, opts.css_class_prefix);
@@ -674,7 +703,24 @@ static void render_math_html(DocElement* elem, StrBuf* out,
         // Inline math
         strbuf_append_format(out, "<span class=\"%s%s\">", opts.css_class_prefix, css_class);
         
-        if (has_svg) {
+        if (mode == MathRenderMode::HTML_CSS && has_node) {
+            // NEW: Render math as HTML+CSS
+            Pool* temp_pool = pool_create();
+            Arena* temp_arena = arena_create_default(temp_pool);
+            
+            HtmlRenderOptions html_opts;
+            html_opts.base_font_size_px = 16.0f;
+            html_opts.class_prefix = "ML";
+            html_opts.include_styles = true;
+            
+            const char* html = render_texnode_to_html(elem->math.node, temp_arena, html_opts);
+            if (html) {
+                strbuf_append_str(out, html);
+            }
+            
+            arena_destroy(temp_arena);
+            pool_destroy(temp_pool);
+        } else if (mode == MathRenderMode::SVG && has_node) {
             // Render math as inline SVG
             Pool* temp_pool = pool_create();
             Arena* temp_arena = arena_create_default(temp_pool);
@@ -1145,6 +1191,12 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
     HtmlOutputOptions local_opts = opts;
     local_opts.document_class = doc->document_class;
     
+    // Pre-typeset all math if HTML+CSS mode is requested
+    // This populates elem->math.node for all math elements
+    if (local_opts.math_mode == MathRenderMode::HTML_CSS && doc->fonts) {
+        doc->typeset_all_math();
+    }
+    
     // HTML header
     if (local_opts.standalone) {
         strbuf_append_str(output, "<!DOCTYPE html>\n");
@@ -1171,6 +1223,14 @@ bool doc_model_to_html(TexDocumentModel* doc, StrBuf* output, const HtmlOutputOp
         // CSS
         if (local_opts.include_css) {
             html_write_default_css(output, local_opts.css_class_prefix);
+        }
+        
+        // Math CSS for HTML+CSS mode
+        if (local_opts.math_mode == MathRenderMode::HTML_CSS && local_opts.include_css) {
+            strbuf_append_str(output, "  <style>\n");
+            const char* math_css = get_math_css_stylesheet();
+            strbuf_append_str(output, math_css);
+            strbuf_append_str(output, "  </style>\n");
         }
         
         strbuf_append_str(output, "</head>\n");
