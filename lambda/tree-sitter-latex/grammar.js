@@ -249,6 +249,7 @@ module.exports = grammar({
       $.line_comment,     // Comments can appear inside groups (e.g., [% comment\n text])
       $.linebreak_command, // \\ with optional [<length>] - must be before command
       $.verb_command,   // \verb|text| - must be before command to get correct token
+      $.math_environment, // Math environments like \begin{pmatrix}...\end{pmatrix} - must be before command
       $.command,
       $.curly_group,
       $.brack_group,
@@ -291,6 +292,8 @@ module.exports = grammar({
       $.curly_group,
       $.subscript,
       $.superscript,
+      $.linebreak_command, // \\ row separator in matrices
+      $.math_environment,  // Environments like \begin{pmatrix}...\end{pmatrix}
       /[&|]/,  // alignment and other special chars in math
     ),
 

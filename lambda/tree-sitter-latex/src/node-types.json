@@ -81,6 +81,10 @@
           "named": true
         },
         {
+          "type": "math_environment",
+          "named": true
+        },
+        {
           "type": "nbsp",
           "named": true
         },
@@ -197,6 +201,10 @@
           "named": true
         },
         {
+          "type": "math_environment",
+          "named": true
+        },
+        {
           "type": "nbsp",
           "named": true
         },
@@ -241,6 +249,14 @@
         },
         {
           "type": "curly_group",
+          "named": true
+        },
+        {
+          "type": "linebreak_command",
+          "named": true
+        },
+        {
+          "type": "math_environment",
           "named": true
         },
         {
@@ -398,6 +414,14 @@
           "named": true
         },
         {
+          "type": "linebreak_command",
+          "named": true
+        },
+        {
+          "type": "math_environment",
+          "named": true
+        },
+        {
           "type": "math_text",
           "named": true
         },
@@ -446,6 +470,91 @@
         },
         {
           "type": "inline_math",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "math_env_begin",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "env_name",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "math_env_end",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "math_environment",
+    "named": true,
+    "fields": {
+      "begin": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "math_env_begin",
+            "named": true
+          }
+        ]
+      },
+      "end": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "math_env_end",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "control_symbol",
+          "named": true
+        },
+        {
+          "type": "curly_group",
+          "named": true
+        },
+        {
+          "type": "linebreak_command",
+          "named": true
+        },
+        {
+          "type": "math_environment",
+          "named": true
+        },
+        {
+          "type": "math_text",
+          "named": true
+        },
+        {
+          "type": "subscript",
+          "named": true
+        },
+        {
+          "type": "superscript",
           "named": true
         }
       ]
@@ -816,6 +925,10 @@
   },
   {
     "type": "control_symbol",
+    "named": true
+  },
+  {
+    "type": "env_name",
     "named": true
   },
   {

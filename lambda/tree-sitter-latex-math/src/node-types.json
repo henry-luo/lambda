@@ -386,6 +386,10 @@
           "named": true
         },
         {
+          "type": "symbol_command",
+          "named": true
+        },
+        {
           "type": "text_command",
           "named": true
         }
@@ -525,6 +529,10 @@
           "named": true
         },
         {
+          "type": "symbol_command",
+          "named": true
+        },
+        {
           "type": "text_command",
           "named": true
         }
@@ -616,6 +624,10 @@
           "named": true
         },
         {
+          "type": "symbol_command",
+          "named": true
+        },
+        {
           "type": "text_command",
           "named": true
         }
@@ -676,6 +688,20 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "begin_cmd",
+          "named": true
+        },
+        {
+          "type": "end_cmd",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -803,6 +829,10 @@
           "named": true
         },
         {
+          "type": "symbol_command",
+          "named": true
+        },
+        {
           "type": "text_command",
           "named": true
         }
@@ -884,6 +914,10 @@
         },
         {
           "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "symbol_command",
           "named": true
         },
         {
@@ -1086,6 +1120,10 @@
             "named": true
           },
           {
+            "type": "symbol_command",
+            "named": true
+          },
+          {
             "type": "text_command",
             "named": true
           }
@@ -1136,6 +1174,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "symbol_command",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "text_command",
@@ -1323,10 +1366,6 @@
     "named": false
   },
   {
-    "type": "\\begin",
-    "named": false
-  },
-  {
     "type": "\\bigcap",
     "named": false
   },
@@ -1443,10 +1482,6 @@
     "named": false
   },
   {
-    "type": "\\end",
-    "named": false
-  },
-  {
     "type": "\\equiv",
     "named": false
   },
@@ -1508,6 +1543,14 @@
   },
   {
     "type": "\\inf",
+    "named": false
+  },
+  {
+    "type": "\\infinity",
+    "named": false
+  },
+  {
+    "type": "\\infty",
     "named": false
   },
   {
@@ -1947,6 +1990,10 @@
     "named": false
   },
   {
+    "type": "begin_cmd",
+    "named": true
+  },
+  {
     "type": "bmatrix",
     "named": false
   },
@@ -1965,6 +2012,10 @@
   {
     "type": "dcases",
     "named": false
+  },
+  {
+    "type": "end_cmd",
+    "named": true
   },
   {
     "type": "equation",

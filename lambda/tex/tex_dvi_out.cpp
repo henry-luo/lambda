@@ -814,11 +814,45 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 writer.v = save_v;
             }
 
-            // Output the radical sign from cmsy font at offset position
+            // Output the radical sign - select font and glyph based on total radical height
+            // TeX uses cmsy10 position 112 for small radicals
+            // and cmex10 positions 112-118 for larger ones (higher position = larger glyph)
+            // The height includes the radicand plus the rule and clearance above it
+            float total_height = node->height + node->depth;  // Total radical height
+            
+            // Determine font and glyph based on radical size
+            const char* radical_font = "cmsy10";
+            int radical_glyph = 112;  // Default: cmsy10 surd (smallest)
+            
+            // TeX threshold for switching to cmex10 is approximately 8pt total height
+            // The cmex10 radical glyphs scale with the content:
+            // Thresholds tuned to match TeX's glyph selection behavior
+            if (total_height > 8.0f) {
+                radical_font = "cmex10";
+                // Select glyph based on total height (tuned thresholds):
+                // 112 = smallest cmex10 surd (~8-9pt)
+                // 113 = (~9-10pt)
+                // 114 = (~10-11pt)
+                // 115 = (~11-12pt)
+                // 116 = (~12-14pt)
+                // 117 = (~14-16pt)
+                // 118 = (~16pt and above)
+                if (total_height > 16.0f) radical_glyph = 118;
+                else if (total_height > 14.0f) radical_glyph = 117;
+                else if (total_height > 12.0f) radical_glyph = 116;
+                else if (total_height > 11.0f) radical_glyph = 115;
+                else if (total_height > 10.0f) radical_glyph = 114;
+                else if (total_height > 9.0f) radical_glyph = 113;
+                else radical_glyph = 112;
+            }
+            
+            log_debug("tex_dvi_out: Radical total_height=%.1f, font=%s, glyph=%d", 
+                     total_height, radical_font, radical_glyph);
+
             float size = node->height * 10.0f;  // Approximate size
             if (size < 5.0f) size = 10.0f;  // Default to 10pt
 
-            uint32_t font_num = dvi_define_font(writer, "cmsy10", size);
+            uint32_t font_num = dvi_define_font(writer, radical_font, size);
             dvi_select_font(writer, font_num);
 
             // Move to radical sign position
@@ -826,8 +860,8 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             
             log_debug("tex_dvi_out: Outputting radical sign at offset=%.1f", rad_sign_offset);
             
-            // Output radical sign character (p = 112 in cmsy)
-            dvi_set_char(writer, 112);
+            // Output radical sign character
+            dvi_set_char(writer, radical_glyph);
 
             // Output radicand
             TexNode* radicand = node->content.radical.radicand;
@@ -861,26 +895,52 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             int32_t output_cp = cp;
             
             if (target_size > 10.0f) {
-                // Select font and codepoint based on delimiter type (large)
+                // Select font and codepoint based on delimiter type and size
+                // cmex10 layout for delimiters (grouped by size):
+                //   Small (0-15): 0=(, 1=), 2=[, 3=], 4=floor_l, 5=floor_r, ...
+                //   Medium group 1 (16-23): 16/17=(), 18/19=(), 20/21=[], 22/23=[]
+                //   Medium group 2 (24-31): 24/25=(), 26/27=[], 28/29=[], 30/31=[]
+                //   Large brackets: positions 104-107 for very large delimiters
+                
                 switch (cp) {
                     case '(':
                         font_name = "cmex10";
-                        output_cp = 0;  // cmex10 left paren (size 1)
+                        // Paren sizes: 0, 16, 18, 20, 22
+                        if (target_size > 30.0f) output_cp = 22;
+                        else if (target_size > 24.0f) output_cp = 20;
+                        else if (target_size > 18.0f) output_cp = 18;
+                        else if (target_size > 14.0f) output_cp = 16;
+                        else output_cp = 0;
                         break;
                     case ')':
                         font_name = "cmex10";
-                        output_cp = 1;  // cmex10 right paren (size 1)
+                        if (target_size > 30.0f) output_cp = 23;
+                        else if (target_size > 24.0f) output_cp = 21;
+                        else if (target_size > 18.0f) output_cp = 19;
+                        else if (target_size > 14.0f) output_cp = 17;
+                        else output_cp = 1;
                         break;
                     case '[':
                         font_name = "cmex10";
-                        // For medium size, use 104 'h' (extension piece visible)
-                        // For smaller, use 2
-                        output_cp = (target_size > 12.0f) ? 104 : 2;
+                        // Bracket sizes in cmex10: 2(small), 20/22 (medium), 26/28/30 (large)
+                        // Position 104 ('h') for specific medium-small fractions
+                        if (target_size > 30.0f) output_cp = 30;
+                        else if (target_size > 24.0f) output_cp = 28;
+                        else if (target_size > 20.0f) output_cp = 26;
+                        else if (target_size > 16.0f) output_cp = 22;
+                        else if (target_size > 14.0f) output_cp = 20;
+                        else if (target_size > 12.0f) output_cp = 104;  // 'h' - for smaller fractions
+                        else output_cp = 2;  // Smallest
                         break;
                     case ']':
                         font_name = "cmex10";
-                        // For medium size, use 105 'i'
-                        output_cp = (target_size > 12.0f) ? 105 : 3;
+                        if (target_size > 30.0f) output_cp = 31;
+                        else if (target_size > 24.0f) output_cp = 29;
+                        else if (target_size > 20.0f) output_cp = 27;
+                        else if (target_size > 16.0f) output_cp = 23;
+                        else if (target_size > 14.0f) output_cp = 21;
+                        else if (target_size > 12.0f) output_cp = 105;  // 'i' - for smaller fractions
+                        else output_cp = 3;  // Smallest
                         break;
                     case '{':
                         // Braces use cmsy10 for printable output
