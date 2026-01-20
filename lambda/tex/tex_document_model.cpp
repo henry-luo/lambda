@@ -182,6 +182,66 @@ void TexDocumentModel::resolve_pending_refs() {
 }
 
 // ============================================================================
+// Math Typesetting
+// ============================================================================
+
+// Helper: recursively typeset all math elements in a subtree
+static void typeset_math_recursive(DocElement* elem, Arena* arena, TFMFontManager* fonts, float base_size_pt) {
+    if (!elem) return;
+    
+    // Check if this is a math element that needs typesetting
+    if (elem->type == DocElemType::MATH_INLINE ||
+        elem->type == DocElemType::MATH_DISPLAY ||
+        elem->type == DocElemType::MATH_EQUATION ||
+        elem->type == DocElemType::MATH_ALIGN) {
+        
+        // Skip if already typeset
+        if (elem->math.node != nullptr) return;
+        
+        // Create MathContext
+        MathContext math_ctx = MathContext::create(arena, fonts, base_size_pt);
+        
+        // Set style based on math type
+        if (elem->type == DocElemType::MATH_DISPLAY ||
+            elem->type == DocElemType::MATH_EQUATION ||
+            elem->type == DocElemType::MATH_ALIGN) {
+            math_ctx.style = MathStyle::Display;
+        } else {
+            math_ctx.style = MathStyle::Text;
+        }
+        
+        // Typeset from AST if available
+        if (elem->math.ast) {
+            elem->math.node = typeset_math_ast(elem->math.ast, math_ctx);
+            log_debug("typeset_all_math: typeset AST -> node=%p", elem->math.node);
+        }
+        // Fallback: typeset from source string
+        else if (elem->math.latex_src) {
+            elem->math.node = typeset_latex_math(elem->math.latex_src, strlen(elem->math.latex_src), math_ctx);
+            log_debug("typeset_all_math: typeset src '%s' -> node=%p", elem->math.latex_src, elem->math.node);
+        }
+    }
+    
+    // Recurse into children
+    for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+        typeset_math_recursive(child, arena, fonts, base_size_pt);
+    }
+}
+
+void TexDocumentModel::typeset_all_math() {
+    if (!fonts) {
+        log_error("typeset_all_math: no fonts available, call requires fonts to be set");
+        return;
+    }
+    
+    if (!root) return;
+    
+    log_debug("typeset_all_math: starting with base_size=%.1fpt", base_size_pt);
+    typeset_math_recursive(root, arena, fonts, base_size_pt);
+    log_debug("typeset_all_math: completed");
+}
+
+// ============================================================================
 // Counter Methods
 // ============================================================================
 
@@ -449,6 +509,8 @@ TexDocumentModel* doc_model_create(Arena* arena) {
     memset(doc, 0, sizeof(TexDocumentModel));
     doc->arena = arena;
     doc->document_class = "article";  // Default
+    doc->fonts = nullptr;  // Set later if math typesetting is needed
+    doc->base_size_pt = 10.0f;  // Default 10pt
     
 #ifndef DOC_MODEL_MINIMAL
     // Initialize package system (requires input system for JSON parsing)
@@ -5383,6 +5445,10 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
 TexDocumentModel* doc_model_from_latex(Item elem, Arena* arena, LaTeXContext& ctx) {
     TexDocumentModel* doc = doc_model_create(arena);
     
+    // Store fonts for lazy math typesetting during HTML output
+    doc->fonts = ctx.doc_ctx.fonts;
+    doc->base_size_pt = ctx.doc_ctx.base_size_pt;
+    
     // Check for null element
     if (get_type_id(elem) == LMD_TYPE_NULL) {
         log_error("doc_model_from_latex: null element");
@@ -5445,6 +5511,10 @@ TexDocumentModel* doc_model_from_string(const char* latex, size_t len, Arena* ar
     
     // Create document model and build from AST
     TexDocumentModel* doc = doc_model_create(arena);
+    
+    // Store fonts for math typesetting
+    doc->fonts = fonts;
+    doc->base_size_pt = 10.0f;  // Default 10pt
     
     // Use ItemReader to traverse the Lambda Element tree
     ItemReader reader(root.to_const());

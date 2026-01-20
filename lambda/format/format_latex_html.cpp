@@ -5,6 +5,7 @@
 #include "format.h"
 #include "../tex/tex_document_model.hpp"
 #include "../tex/tex_latex_bridge.hpp"
+#include "../tex/tex_tfm.hpp"  // for create_font_manager
 #include "../input/input.hpp"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
@@ -28,8 +29,11 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     
     log_debug("format_latex_html_v2: starting unified pipeline conversion");
     
-    // Create LaTeX context
-    LaTeXContext ctx = LaTeXContext::create(input->arena, nullptr);
+    // Create font manager for math typesetting
+    TFMFontManager* fonts = create_font_manager(input->arena);
+    
+    // Create LaTeX context with fonts
+    LaTeXContext ctx = LaTeXContext::create(input->arena, fonts);
     
     // Build document model from parsed LaTeX tree
     TexDocumentModel* doc = doc_model_from_latex(input->root, input->arena, ctx);
@@ -87,9 +91,12 @@ std::string format_latex_html_v2_document(Input* input, const char* doc_class,
     
     log_debug("format_latex_html_v2_document: generating full document");
     
-    // Create LaTeX context with doc class
+    // Create font manager for math typesetting
+    TFMFontManager* fonts = create_font_manager(input->arena);
+    
+    // Create LaTeX context with doc class and fonts
     const char* actual_class = doc_class ? doc_class : "article";
-    LaTeXContext ctx = LaTeXContext::create(input->arena, nullptr, actual_class);
+    LaTeXContext ctx = LaTeXContext::create(input->arena, fonts, actual_class);
     
     // Build document model
     TexDocumentModel* doc = doc_model_from_latex(input->root, input->arena, ctx);
