@@ -367,8 +367,12 @@ struct TypesetContext {
 
 TexNode* typeset_math_ast(MathASTNode* ast, MathContext& ctx) {
     if (!ast) {
+        log_debug("[TYPESET] typeset_math_ast: null AST, returning empty hbox");
         return make_hbox(ctx.arena);
     }
+
+    log_info("[TYPESET] typeset_math_ast: BEGIN ast_type=%s style=%d", 
+             math_node_type_name(ast->type), (int)ctx.style);
 
     TexNode* result = typeset_node(ast, ctx);
 
@@ -376,7 +380,8 @@ TexNode* typeset_math_ast(MathASTNode* ast, MathContext& ctx) {
         result = make_hbox(ctx.arena);
     }
 
-    log_debug("tex_math_ast_typeset: typeset AST -> width=%.2f", result->width);
+    log_info("[TYPESET] typeset_math_ast: END width=%.2fpt height=%.2fpt depth=%.2fpt", 
+             result->width, result->height, result->depth);
     return result;
 }
 
@@ -386,6 +391,9 @@ TexNode* typeset_math_ast(MathASTNode* ast, MathContext& ctx) {
 
 static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
     if (!node) return nullptr;
+
+    const char* type_name = math_node_type_name(node->type);
+    log_debug("[TYPESET] typeset_node: type=%s", type_name);
 
     switch (node->type) {
         case MathNodeType::ORD:
@@ -432,7 +440,7 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
         case MathNodeType::ARRAY_CELL:
         case MathNodeType::ERROR:
         default:
-            log_debug("tex_math_ast_typeset: unhandled node type %d", (int)node->type);
+            log_debug("[TYPESET] unhandled node type %s (%d)", type_name, (int)node->type);
             return nullptr;
     }
 }
@@ -443,6 +451,8 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
 
 static TexNode* typeset_row(MathASTNode* node, MathContext& ctx) {
     if (!node || !node->body) return make_hbox(ctx.arena);
+
+    log_debug("[TYPESET] typeset_row: BEGIN child_count=%d", node->row.child_count);
 
     TexNode* first = nullptr;
     TexNode* last = nullptr;
@@ -500,6 +510,9 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
     TFMFont* tfm;
     int32_t cp = node->atom.codepoint;
     AtomType atom = (AtomType)node->atom.atom_class;
+
+    log_debug("[TYPESET] typeset_atom: cmd='%s' cp=%d atom_class=%d size=%.1fpt",
+              node->atom.command ? node->atom.command : "(null)", cp, (int)atom, size);
 
     // Check if this is a command-based atom
     if (node->atom.command) {
@@ -804,6 +817,9 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
 // ============================================================================
 
 static TexNode* typeset_frac(MathASTNode* node, MathContext& ctx) {
+    log_debug("[TYPESET] typeset_frac: BEGIN style=%d rule_thickness=%.2f", 
+              (int)ctx.style, node->frac.rule_thickness);
+
     // Typeset numerator and denominator in reduced style
     MathStyle saved_style = ctx.style;
     ctx.style = (ctx.style == MathStyle::Display) ? MathStyle::Text :
@@ -813,6 +829,9 @@ static TexNode* typeset_frac(MathASTNode* node, MathContext& ctx) {
     TexNode* denom = node->below ? typeset_node(node->below, ctx) : make_hbox(ctx.arena);
 
     ctx.style = saved_style;
+
+    log_debug("[TYPESET] typeset_frac: numer w=%.2f h=%.2f, denom w=%.2f h=%.2f",
+              numer->width, numer->height, denom->width, denom->height);
 
     // Use existing typeset_fraction
     float rule = (node->frac.rule_thickness < 0) ? ctx.rule_thickness : node->frac.rule_thickness;
@@ -824,6 +843,8 @@ static TexNode* typeset_frac(MathASTNode* node, MathContext& ctx) {
 // ============================================================================
 
 static TexNode* typeset_sqrt_node(MathASTNode* node, MathContext& ctx) {
+    log_debug("[TYPESET] typeset_sqrt_node: BEGIN has_index=%d", node->sqrt.has_index);
+
     TexNode* radicand = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
 
     if (node->sqrt.has_index && node->above) {
@@ -844,6 +865,9 @@ static TexNode* typeset_sqrt_node(MathASTNode* node, MathContext& ctx) {
 // ============================================================================
 
 static TexNode* typeset_scripts_node(MathASTNode* node, MathContext& ctx) {
+    log_debug("[TYPESET] typeset_scripts_node: BEGIN has_super=%d has_sub=%d",
+              node->superscript != nullptr, node->subscript != nullptr);
+
     TexNode* nucleus = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
 
     MathStyle saved = ctx.style;

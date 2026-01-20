@@ -13,6 +13,7 @@ extern "C" {
 #include "../lib/file.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
+#include "../lib/strbuf.h"
 }
 #include "../lambda/input/input.hpp"
 #include "../lambda/tex/tex_node.hpp"
@@ -22,6 +23,8 @@ extern "C" {
 #include "../lambda/tex/tex_dvi_out.hpp"
 #include "../lambda/tex/tex_latex_bridge.hpp"
 #include "../lambda/tex/tex_document_model.hpp"
+#include "../lambda/tex/tex_math_ast.hpp"
+#include "../lambda/tex/tex_math_bridge.hpp"
 
 /**
  * Render LaTeX file to DVI format using the unified pipeline
@@ -187,5 +190,135 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
              std::chrono::duration<double, std::milli>(total_end - total_start).count());
 
     log_info("Successfully rendered LaTeX to DVI (unified pipeline): %s", dvi_file);
+    return 0;
+}
+
+/**
+ * Render a single math formula to DVI format
+ * 
+ * @param math_formula LaTeX math formula (without $ delimiters)
+ * @param dvi_file Path to output DVI file (NULL for stdout dump)
+ * @param dump_ast If true, dump AST to stderr instead of rendering
+ * @param dump_boxes If true, dump box structure to stderr
+ * @return 0 on success, non-zero on error
+ */
+int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump_ast, bool dump_boxes) {
+    log_info("[MATH] render_math_to_dvi: formula='%s', dvi='%s', dump_ast=%d, dump_boxes=%d",
+             math_formula, dvi_file ? dvi_file : "(null)", dump_ast, dump_boxes);
+
+    // Create memory pool and arena
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("[MATH] Failed to create memory pool");
+        return 1;
+    }
+
+    Arena* arena = arena_create_default(pool);
+    if (!arena) {
+        log_error("[MATH] Failed to create arena");
+        pool_destroy(pool);
+        return 1;
+    }
+
+    // Create font manager
+    tex::TFMFontManager* fonts = tex::create_font_manager(arena);
+    if (!fonts) {
+        log_error("[MATH] Failed to create font manager");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+
+    // Step 1: Parse math formula to AST (Phase A)
+    log_info("[MATH] Phase A: Parsing formula to AST...");
+    tex::MathASTNode* ast = tex::parse_math_string_to_ast(math_formula, strlen(math_formula), arena);
+    if (!ast) {
+        log_error("[MATH] Failed to parse math formula: %s", math_formula);
+        fprintf(stderr, "Error: Failed to parse math formula\n");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+    log_info("[MATH] Phase A complete: AST node type=%s", tex::math_node_type_name(ast->type));
+
+    // Dump AST if requested
+    if (dump_ast) {
+        StrBuf* buf = strbuf_new_cap(256);
+        tex::math_ast_dump(ast, buf, 0);
+        fprintf(stderr, "=== Math AST ===\n%s\n", buf->str);
+        strbuf_free(buf);
+        
+        if (!dvi_file && !dump_boxes) {
+            // Only AST dump was requested, we're done
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 0;
+        }
+    }
+
+    // Step 2: Typeset AST to TexNode (Phase B)
+    log_info("[MATH] Phase B: Typesetting AST to TexNode...");
+    
+    // Create math context using the proper factory method
+    tex::MathContext math_ctx = tex::MathContext::create(arena, fonts, 10.0f);
+    math_ctx.style = tex::MathStyle::Display;  // Display style for standalone formula
+    
+    tex::TexNode* tex_node = tex::typeset_math_ast(ast, math_ctx);
+    if (!tex_node) {
+        log_error("[MATH] Failed to typeset math formula");
+        fprintf(stderr, "Error: Failed to typeset math formula\n");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+    log_info("[MATH] Phase B complete: TexNode width=%.2fpt, height=%.2fpt, depth=%.2fpt",
+             tex_node->width, tex_node->height, tex_node->depth);
+
+    // Dump boxes if requested
+    if (dump_boxes) {
+        fprintf(stderr, "=== TexNode Box Structure ===\n");
+        fprintf(stderr, "Root: node_class=%d, width=%.2fpt, height=%.2fpt, depth=%.2fpt\n",
+                (int)tex_node->node_class, tex_node->width, tex_node->height, tex_node->depth);
+        // TODO: Add recursive box dump
+        
+        if (!dvi_file) {
+            // Only box dump was requested, we're done
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 0;
+        }
+    }
+
+    // Step 3: Write to DVI if output file specified
+    if (dvi_file) {
+        log_info("[MATH] Phase C: Writing DVI to '%s'...", dvi_file);
+        
+        tex::DVIParams dvi_params = tex::DVIParams::defaults();
+        dvi_params.comment = "Lambda Math Formula";
+
+        bool success = tex::write_dvi_page(
+            dvi_file,
+            tex_node,
+            fonts,
+            arena,
+            dvi_params
+        );
+
+        if (!success) {
+            log_error("[MATH] Failed to write DVI file: %s", dvi_file);
+            fprintf(stderr, "Error: Failed to write DVI file\n");
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 1;
+        }
+        
+        log_info("[MATH] Successfully wrote DVI: %s", dvi_file);
+        fprintf(stderr, "Math formula rendered to: %s\n", dvi_file);
+    }
+
+    // Cleanup
+    arena_destroy(arena);
+    pool_destroy(pool);
+    
     return 0;
 }
