@@ -2698,6 +2698,38 @@
                         "icon": "\ud83d\udcca"
                     },
                     {
+                        "source": "test/test_latex_html_gtest.cpp",
+                        "name": "TeX HTML Output Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
+                        ],
+                        "binary": "test_latex_html_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_math_ast_builder.cpp",
+                            "lambda/tex/tex_math_ast_typeset.cpp",
+                            "lambda/tex/tex_html_render.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "\ud83c\udf10"
+                    },
+                    {
                         "source": "test/test_tex_pagebreak_gtest.cpp",
                         "name": "TeX Page Breaking Tests",
                         "dependencies": [
