@@ -14,6 +14,9 @@
 #include "tex_math_ts.hpp"
 #include "tex_linebreak.hpp"
 #include "tex_pagebreak.hpp"
+#include "tex_graphics.hpp"
+#include "tex_graphics_picture.hpp"
+#include "tex_pgf_driver.hpp"
 #include "lib/log.h"
 
 extern "C" {
@@ -2487,7 +2490,8 @@ bool is_block_element_tag(const char* tag) {
     if (!tag) return false;
     return tag_eq(tag, "itemize") || tag_eq(tag, "enumerate") || tag_eq(tag, "description") ||
            tag_eq(tag, "center") || tag_eq(tag, "quote") || tag_eq(tag, "quotation") ||
-           tag_eq(tag, "verse") || tag_eq(tag, "flushleft") || tag_eq(tag, "flushright");
+           tag_eq(tag, "verse") || tag_eq(tag, "flushleft") || tag_eq(tag, "flushright") ||
+           tag_eq(tag, "picture") || tag_eq(tag, "tikzpicture");
 }
 
 // Helper to check if a tag is a document-level block (section, environment, etc.)
@@ -4682,6 +4686,51 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return build_code_block_environment(tag, elem, arena, doc);
     }
     
+    // Graphics environments (picture, tikzpicture)
+    if (tag_eq(tag, "picture")) {
+        log_debug("doc_model: processing picture environment");
+        GraphicsElement* gfx = graphics_build_picture(elem, arena, doc);
+        if (gfx) {
+            DocElement* result = doc_alloc_element(arena, DocElemType::GRAPHICS);
+            result->graphics.root = gfx;
+            result->graphics.svg_cache = nullptr;
+            // Use canvas dimensions for picture environment
+            if (gfx->type == GraphicsType::CANVAS) {
+                result->graphics.width = gfx->canvas.width;
+                result->graphics.height = gfx->canvas.height;
+            } else {
+                BoundingBox bbox = graphics_bounding_box(gfx);
+                result->graphics.width = bbox.max_x - bbox.min_x;
+                result->graphics.height = bbox.max_y - bbox.min_y;
+            }
+            log_debug("doc_model: built picture environment %.1fx%.1f",
+                     result->graphics.width, result->graphics.height);
+            return result;
+        }
+        return nullptr;
+    }
+    if (tag_eq(tag, "tikzpicture")) {
+        GraphicsElement* gfx = graphics_build_tikz(elem, arena, doc);
+        if (gfx) {
+            DocElement* result = doc_alloc_element(arena, DocElemType::GRAPHICS);
+            result->graphics.root = gfx;
+            result->graphics.svg_cache = nullptr;
+            // Use canvas dimensions for tikzpicture
+            if (gfx->type == GraphicsType::CANVAS) {
+                result->graphics.width = gfx->canvas.width;
+                result->graphics.height = gfx->canvas.height;
+            } else {
+                BoundingBox bbox = graphics_bounding_box(gfx);
+                result->graphics.width = bbox.max_x - bbox.min_x;
+                result->graphics.height = bbox.max_y - bbox.min_y;
+            }
+            log_debug("doc_model: built tikzpicture environment %.1fx%.1f",
+                     result->graphics.width, result->graphics.height);
+            return result;
+        }
+        return nullptr;
+    }
+    
     // Alignment environments (center, flushleft, flushright)
     if (tag_eq(tag, "center") || tag_eq(tag, "flushleft") || tag_eq(tag, "flushright")) {
         return build_alignment_environment(tag, elem, arena, doc);
@@ -6095,6 +6144,7 @@ TexNode* doc_element_to_texnode(DocElement* elem, Arena* arena, LaTeXContext& ct
         case DocElemType::CODE_BLOCK:
         case DocElemType::ABSTRACT:
         case DocElemType::TITLE_BLOCK:
+        case DocElemType::GRAPHICS:
             // Complex elements - TODO: implement
             log_debug("doc_element_to_texnode: %s not yet implemented", 
                      doc_elem_type_name(elem->type));
