@@ -172,6 +172,23 @@ LaTeXML outputs graphics as **inline SVG** in HTML:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**Key Stages:**
+
+1. **LaTeX AST → Doc/Graphics Element (IR)**
+   - Tree-sitter parses LaTeX source into a Concrete Syntax Tree (CST)
+   - `tex_latex_bridge` converts CST to Lambda Element tree
+   - `TexDocumentModel::build_doc_element()` processes picture/tikzpicture environments
+   - Graphics commands (`\put`, `\line`, `\circle`, etc.) are converted to `GraphicsElement` nodes
+   - Result: `DocElement` with `type=GRAPHICS` containing a `GraphicsElement*` tree
+
+2. **Doc/Graphics Element (IR) → HTML/SVG**
+   - `doc_model_to_html()` is the entry point for HTML output
+   - `doc_element_to_html()` recursively traverses the `DocElement` tree
+   - When encountering `DocElemType::GRAPHICS`, calls `render_graphics_html()`
+   - `graphics_to_inline_svg()` converts `GraphicsElement` tree to SVG markup
+   - Applies coordinate flip (LaTeX y-axis is bottom-up, SVG is top-down)
+   - SVG is embedded inline within HTML `<span class="graphics">` wrapper
+
 ### 3.2 GraphicsElement Intermediate Representation
 
 ```cpp
@@ -510,10 +527,11 @@ The graphics system inserts into the existing pipeline at multiple layers:
 │       ▼                        ▼                     ▼                      │
 │   ┌──────────────┐      ┌──────────────┐      ┌──────────────┐              │
 │   │ HTML Output  │      │ PDF Output   │      │ PNG Output   │              │
-│   │ emit_html()  │      │ Radiant      │      │ Radiant      │              │
-│   │ ↓            │      │ engine       │      │ engine       │              │
+│   │ doc_element  │      │ Radiant      │      │ Radiant      │              │
+│   │ _to_html()   │      │ engine       │      │ engine       │              │
+│   │ ↓            │      │              │      │              │              │
 │   │ graphics_to_ │      │              │      │              │              │
-│   │ svg()        │      │              │      │              │              │
+│   │ inline_svg() │      │              │      │              │              │
 │   │ ↓            │      │              │      │              │              │
 │   │ Inline SVG   │      │              │      │              │              │
 │   │ in HTML      │      │              │      │              │              │
@@ -612,25 +630,36 @@ DocElement* process_environment(const ElementReader& env, Arena* arena,
 
 ```cpp
 // In tex_doc_model_html.cpp
-void emit_html(DocElement* root, StrBuf* out, HtmlContext* ctx) {
-    switch (root->type) {
+void doc_element_to_html(DocElement* elem, StrBuf* out,
+                          const HtmlOutputOptions& opts, int depth) {
+    switch (elem->type) {
         case DocElemType::PARAGRAPH:
-            emit_paragraph(root, out, ctx);
+            render_paragraph_html(elem, out, opts, depth);
             break;
             
         case DocElemType::MATH_DISPLAY:
-            emit_math_display(root, out, ctx);
+            render_math_html(elem, out, opts, depth);
             break;
             
         case DocElemType::GRAPHICS:
-            // Convert GraphicsElement tree → inline SVG
-            strbuf_append(out, "<span class=\"graphics\">");
-            graphics_to_svg(root->graphics.root, out);
-            strbuf_append(out, "</span>");
+            render_graphics_html(elem, out, opts, depth);
             break;
             
         // ... other types
     }
+}
+
+static void render_graphics_html(DocElement* elem, StrBuf* out,
+                                  const HtmlOutputOptions& opts, int depth) {
+    // Wrap in span with graphics class
+    strbuf_append_format(out, "<span class=\"%sgraphics\">", opts.css_class_prefix);
+    
+    // Convert GraphicsElement tree → inline SVG
+    if (elem->graphics.root) {
+        graphics_to_inline_svg(elem->graphics.root, out);
+    }
+    
+    strbuf_append_str(out, "</span>");
 }
 ```
 
@@ -661,7 +690,7 @@ The data flows as:
        ├── PATH (d="M 0 0 L 28.35 28.35")
        └── TEXT (pos=(14.17, 14.17), content="A")
    ```
-6. **emit_html()** encounters DocElemType::GRAPHICS, calls `graphics_to_svg()`:
+6. **doc_element_to_html()** encounters `DocElemType::GRAPHICS`, calls `render_graphics_html()` → `graphics_to_inline_svg()`:
    ```html
    <span class="graphics">
      <svg xmlns="http://www.w3.org/2000/svg" width="28.35" height="28.35">
@@ -681,7 +710,7 @@ The data flows as:
 | `CommandRegistry` | `tex_command_registry.cpp` | Dispatches `\put`, `\draw`, `\pgfsys@*` |
 | `tex_latex_bridge` | `tex_latex_bridge.cpp` | Parses CST → Element tree (unchanged) |
 | `TexDocumentModel` | `tex_document_model.cpp` | Extends with `DocElemType::GRAPHICS` |
-| `emit_html()` | `tex_doc_model_html.cpp` | Adds graphics → SVG output case |
+| `doc_element_to_html()` | `tex_doc_model_html.cpp` | Adds graphics → SVG output case |
 | `Arena` allocator | `lib/arena.h` | Allocates GraphicsElement nodes |
 
 ### 4.5 New Components Required
@@ -692,7 +721,7 @@ The data flows as:
 | `graphics_build_picture()` | `tex_graphics_picture.cpp` | Build IR from picture environment |
 | `graphics_build_tikz()` | `tex_graphics_tikz.cpp` | Build IR from TikZ via PGF driver |
 | `PgfDriverState` | `tex_pgf_driver.hpp` | State machine for PGF system commands |
-| `graphics_to_svg()` | `tex_graphics_svg.cpp` | Convert IR to SVG output |
+| `graphics_to_inline_svg()` | `tex_graphics.cpp` | Convert IR to inline SVG output |
 | `picture.pkg.json` | `lambda/tex/packages/` | Picture command definitions |
 | `tikz.pkg.json` | `lambda/tex/packages/` | TikZ/PGF command definitions |
 
