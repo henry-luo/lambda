@@ -2670,7 +2670,10 @@
                             "lambda/tex/tex_html_render.cpp",
                             "lambda/tex/dvi_parser.cpp",
                             "lambda/tex/tex_command_registry.cpp",
-                            "lambda/tex/tex_package_loader.cpp"
+                            "lambda/tex/tex_package_loader.cpp",
+                            "lambda/tex/tex_graphics.cpp",
+                            "lambda/tex/tex_graphics_picture.cpp",
+                            "lambda/tex/tex_pgf_driver.cpp"
                         ],
                         "includes": [
                             "."
@@ -2772,7 +2775,10 @@
                             "lambda/tex/tex_package_loader.cpp",
                             "lambda/tex/tex_latex_bridge.cpp",
                             "lambda/tex/tex_lambda_bridge.cpp",
-                            "lambda/tex/tex_font_adapter.cpp"
+                            "lambda/tex/tex_font_adapter.cpp",
+                            "lambda/tex/tex_graphics.cpp",
+                            "lambda/tex/tex_graphics_picture.cpp",
+                            "lambda/tex/tex_pgf_driver.cpp"
                         ],
                         "includes": [
                             "."
@@ -3014,7 +3020,10 @@
                             "lambda/tex/tex_event.cpp",
                             "lambda/tex/tex_align.cpp",
                             "lambda/tex/tex_command_registry.cpp",
-                            "lambda/tex/tex_package_loader.cpp"
+                            "lambda/tex/tex_package_loader.cpp",
+                            "lambda/tex/tex_graphics.cpp",
+                            "lambda/tex/tex_graphics_picture.cpp",
+                            "lambda/tex/tex_pgf_driver.cpp"
                         ],
                         "includes": [
                             "."
