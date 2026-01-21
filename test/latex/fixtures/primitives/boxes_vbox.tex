@@ -1,0 +1,35 @@
+% Test: \vbox and \vtop vertical box primitives
+\documentclass{article}
+\begin{document}
+
+% Basic vbox (baseline at bottom)
+Before \vbox{Line 1\par Line 2} After
+
+% vtop (baseline at top)
+Before \vtop{Line 1\par Line 2} After
+
+% vbox with specific height
+\vbox to 1in{Top\vfil Bottom}
+
+% vtop with specific height
+\vtop to 1in{Top\vfil Bottom}
+
+% vbox spread
+\vbox spread 0.5in{Content}
+
+% Nested vboxes
+\vbox{\vbox{Inner}\vskip 5pt Outer}
+
+% vbox with hrule
+\vbox{\hrule\vskip 3pt Text\vskip 3pt\hrule}
+
+% Comparing vbox and vtop alignment
+Text \vbox{A\par B} vs \vtop{A\par B} text
+
+% Empty vbox
+\vbox{}
+
+% vbox with hbox inside
+\vbox{\hbox{Line 1}\hbox{Line 2}\hbox{Line 3}}
+
+\end{document}
