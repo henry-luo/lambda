@@ -71,6 +71,19 @@ const char* doc_elem_type_name(DocElemType type) {
     case DocElemType::RAW_LATEX:    return "RAW_LATEX";
     case DocElemType::SPACE:        return "SPACE";
     case DocElemType::ERROR:        return "ERROR";
+    // TeX primitives
+    case DocElemType::PRIM_HSKIP:   return "PRIM_HSKIP";
+    case DocElemType::PRIM_VSKIP:   return "PRIM_VSKIP";
+    case DocElemType::PRIM_KERN:    return "PRIM_KERN";
+    case DocElemType::PRIM_HFIL:    return "PRIM_HFIL";
+    case DocElemType::PRIM_VFIL:    return "PRIM_VFIL";
+    case DocElemType::PRIM_HRULE:   return "PRIM_HRULE";
+    case DocElemType::PRIM_VRULE:   return "PRIM_VRULE";
+    case DocElemType::PRIM_PENALTY: return "PRIM_PENALTY";
+    case DocElemType::PRIM_HBOX:    return "PRIM_HBOX";
+    case DocElemType::PRIM_VBOX:    return "PRIM_VBOX";
+    case DocElemType::PRIM_RAISE:   return "PRIM_RAISE";
+    case DocElemType::PRIM_RLAP:    return "PRIM_RLAP";
     default:                        return "UNKNOWN";
     }
 }
@@ -662,6 +675,132 @@ static DocElement* doc_create_text_normalized(Arena* arena, const char* text, Do
     const char* normalized = normalize_latex_whitespace(text, arena);
     if (!normalized) return nullptr;
     return doc_create_text_cstr(arena, normalized, style);
+}
+
+// ============================================================================
+// TeX Primitive Element Constructors
+// ============================================================================
+
+// Create PRIM_HSKIP element (horizontal glue)
+static DocElement* doc_create_prim_hskip(Arena* arena, float amount, float stretch, float shrink,
+                                          uint8_t stretch_order, uint8_t shrink_order) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_HSKIP);
+    elem->prim_skip.amount = amount;
+    elem->prim_skip.stretch = stretch;
+    elem->prim_skip.shrink = shrink;
+    elem->prim_skip.stretch_order = stretch_order;
+    elem->prim_skip.shrink_order = shrink_order;
+    elem->prim_skip.is_vertical = false;
+    return elem;
+}
+
+// Create PRIM_VSKIP element (vertical glue)
+static DocElement* doc_create_prim_vskip(Arena* arena, float amount, float stretch, float shrink,
+                                          uint8_t stretch_order, uint8_t shrink_order) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_VSKIP);
+    elem->prim_skip.amount = amount;
+    elem->prim_skip.stretch = stretch;
+    elem->prim_skip.shrink = shrink;
+    elem->prim_skip.stretch_order = stretch_order;
+    elem->prim_skip.shrink_order = shrink_order;
+    elem->prim_skip.is_vertical = true;
+    return elem;
+}
+
+// Create PRIM_KERN element (fixed horizontal spacing)
+static DocElement* doc_create_prim_kern(Arena* arena, float amount) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_KERN);
+    elem->prim_skip.amount = amount;
+    elem->prim_skip.stretch = 0;
+    elem->prim_skip.shrink = 0;
+    elem->prim_skip.stretch_order = 0;
+    elem->prim_skip.shrink_order = 0;
+    elem->prim_skip.is_vertical = false;
+    return elem;
+}
+
+// Create PRIM_HFIL element (infinite horizontal glue)
+// level: 1=fil, 2=fill, 3=filll
+static DocElement* doc_create_prim_hfil(Arena* arena, uint8_t level, bool has_shrink) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_HFIL);
+    elem->prim_fil.level = level;
+    elem->prim_fil.has_shrink = has_shrink;
+    elem->prim_fil.is_vertical = false;
+    return elem;
+}
+
+// Create PRIM_VFIL element (infinite vertical glue)
+static DocElement* doc_create_prim_vfil(Arena* arena, uint8_t level, bool has_shrink) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_VFIL);
+    elem->prim_fil.level = level;
+    elem->prim_fil.has_shrink = has_shrink;
+    elem->prim_fil.is_vertical = true;
+    return elem;
+}
+
+// Create PRIM_HRULE element (horizontal rule)
+static DocElement* doc_create_prim_hrule(Arena* arena, float width, float height, float depth) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_HRULE);
+    elem->prim_rule.rule_width = width;
+    elem->prim_rule.rule_height = height;
+    elem->prim_rule.rule_depth = depth;
+    elem->prim_rule.is_vertical = false;
+    return elem;
+}
+
+// Create PRIM_VRULE element (vertical rule)
+static DocElement* doc_create_prim_vrule(Arena* arena, float width, float height, float depth) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_VRULE);
+    elem->prim_rule.rule_width = width;
+    elem->prim_rule.rule_height = height;
+    elem->prim_rule.rule_depth = depth;
+    elem->prim_rule.is_vertical = true;
+    return elem;
+}
+
+// Create PRIM_PENALTY element
+static DocElement* doc_create_prim_penalty(Arena* arena, int value) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_PENALTY);
+    elem->prim_penalty.value = value;
+    return elem;
+}
+
+// Create PRIM_HBOX element
+static DocElement* doc_create_prim_hbox(Arena* arena, float target_width) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_HBOX);
+    elem->prim_box.target_width = target_width;
+    elem->prim_box.target_height = -1;
+    elem->prim_box.is_vbox = false;
+    elem->prim_box.is_vtop = false;
+    elem->prim_box.to_spread = nullptr;
+    return elem;
+}
+
+// Create PRIM_VBOX element
+static DocElement* doc_create_prim_vbox(Arena* arena, float target_height, bool is_vtop) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_VBOX);
+    elem->prim_box.target_width = -1;
+    elem->prim_box.target_height = target_height;
+    elem->prim_box.is_vbox = true;
+    elem->prim_box.is_vtop = is_vtop;
+    elem->prim_box.to_spread = nullptr;
+    return elem;
+}
+
+// Create PRIM_RAISE element (raised/lowered box)
+static DocElement* doc_create_prim_raise(Arena* arena, float shift_amount) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_RAISE);
+    elem->prim_raise.shift_amount = shift_amount;
+    return elem;
+}
+
+// Create PRIM_RLAP element (rlap/llap/moveleft/moveright)
+static DocElement* doc_create_prim_rlap(Arena* arena, float move_amount, bool is_left, bool is_lap) {
+    DocElement* elem = doc_alloc_element(arena, DocElemType::PRIM_RLAP);
+    elem->prim_rlap.move_amount = move_amount;
+    elem->prim_rlap.is_left = is_left;
+    elem->prim_rlap.is_lap = is_lap;
+    return elem;
 }
 
 // ============================================================================
@@ -1811,11 +1950,8 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         const char* spec = extract_text_content(item, arena);
         if (spec && strlen(spec) > 0) {
             float width_px = parse_dimension(spec, arena);
-            if (width_px != 0) {
-                char buf[128];
-                snprintf(buf, sizeof(buf), "<span style=\"margin-right:%.3fpx\"></span>", width_px);
-                return doc_create_raw_html_cstr(arena, buf);
-            }
+            // TODO: Parse "plus" and "minus" for stretch/shrink
+            return doc_create_prim_hskip(arena, width_px, 0, 0, 0, 0);
         }
         return nullptr;
     }
@@ -1825,11 +1961,8 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         const char* spec = extract_text_content(item, arena);
         if (spec && strlen(spec) > 0) {
             float height_px = parse_dimension(spec, arena);
-            if (height_px != 0) {
-                char buf[128];
-                snprintf(buf, sizeof(buf), "<div style=\"height:%.3fpx;display:block\"></div>", height_px);
-                return doc_create_raw_html_cstr(arena, buf);
-            }
+            // TODO: Parse "plus" and "minus" for stretch/shrink
+            return doc_create_prim_vskip(arena, height_px, 0, 0, 0, 0);
         }
         return nullptr;
     }
@@ -1839,42 +1972,39 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         const char* spec = extract_text_content(item, arena);
         if (spec && strlen(spec) > 0) {
             float kern_px = parse_dimension(spec, arena);
-            char buf[128];
-            // kern can be negative (overlap)
-            snprintf(buf, sizeof(buf), "<span style=\"margin-right:%.3fpx\"></span>", kern_px);
-            return doc_create_raw_html_cstr(arena, buf);
+            return doc_create_prim_kern(arena, kern_px);
         }
         return nullptr;
     }
     
     // \hfil - horizontal infinite glue (fil level)
     if (tag_eq(tag, "hfil")) {
-        return doc_create_raw_html_cstr(arena, "<span class=\"hfil\"></span>");
+        return doc_create_prim_hfil(arena, 1, false);  // level=1 (fil), no shrink
     }
     
     // \hfill - horizontal infinite glue (fill level, stronger than hfil)
     if (tag_eq(tag, "hfill")) {
-        return doc_create_raw_html_cstr(arena, "<span class=\"hfill\"></span>");
+        return doc_create_prim_hfil(arena, 2, false);  // level=2 (fill), no shrink
     }
     
     // \hss - horizontal glue with infinite stretch AND shrink
     if (tag_eq(tag, "hss")) {
-        return doc_create_raw_html_cstr(arena, "<span class=\"hss\"></span>");
+        return doc_create_prim_hfil(arena, 1, true);   // level=1 (fil), with shrink
     }
     
     // \vfil - vertical infinite glue (fil level)
     if (tag_eq(tag, "vfil")) {
-        return doc_create_raw_html_cstr(arena, "<div class=\"vfil\"></div>");
+        return doc_create_prim_vfil(arena, 1, false);  // level=1 (fil), no shrink
     }
     
     // \vfill - vertical infinite glue (fill level)
     if (tag_eq(tag, "vfill")) {
-        return doc_create_raw_html_cstr(arena, "<div class=\"vfill\"></div>");
+        return doc_create_prim_vfil(arena, 2, false);  // level=2 (fill), no shrink
     }
     
     // \vss - vertical glue with infinite stretch AND shrink
     if (tag_eq(tag, "vss")) {
-        return doc_create_raw_html_cstr(arena, "<div class=\"vss\"></div>");
+        return doc_create_prim_vfil(arena, 1, true);   // level=1 (fil), with shrink
     }
     
     // ============================================================================
@@ -1883,29 +2013,40 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     
     // \hrule [height <dimen>] [depth <dimen>] [width <dimen>] - horizontal rule
     if (tag_eq(tag, "hrule")) {
-        // Default: 0.4pt height, 0pt depth, full width
+        // Default: 0.4pt height, 0pt depth, full width (-1 = running)
         float height_px = 0.4f * 1.333f;  // 0.4pt default
+        float depth_px = 0;
+        float width_px = -1;  // Running width
         const char* spec = extract_text_content(item, arena);
         if (spec && strlen(spec) > 0) {
-            // Try to parse height specification
             const char* h = strstr(spec, "height");
             if (h) {
                 h += 6;
                 while (*h == ' ') h++;
                 height_px = parse_dimension(h, arena);
             }
+            const char* d = strstr(spec, "depth");
+            if (d) {
+                d += 5;
+                while (*d == ' ') d++;
+                depth_px = parse_dimension(d, arena);
+            }
+            const char* w = strstr(spec, "width");
+            if (w) {
+                w += 5;
+                while (*w == ' ') w++;
+                width_px = parse_dimension(w, arena);
+            }
         }
-        char buf[128];
-        snprintf(buf, sizeof(buf), 
-                 "<hr style=\"height:%.3fpx;border:none;background:#000;margin:0\">",
-                 height_px);
-        return doc_create_raw_html_cstr(arena, buf);
+        return doc_create_prim_hrule(arena, width_px, height_px, depth_px);
     }
     
     // \vrule [height <dimen>] [depth <dimen>] [width <dimen>] - vertical rule
     if (tag_eq(tag, "vrule")) {
-        // Default: 0.4pt width, running height
+        // Default: 0.4pt width, running height/depth
         float width_px = 0.4f * 1.333f;  // 0.4pt default
+        float height_px = -1;  // Running height
+        float depth_px = -1;   // Running depth
         const char* spec = extract_text_content(item, arena);
         if (spec && strlen(spec) > 0) {
             const char* w = strstr(spec, "width");
@@ -1914,12 +2055,20 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
                 while (*w == ' ') w++;
                 width_px = parse_dimension(w, arena);
             }
+            const char* h = strstr(spec, "height");
+            if (h) {
+                h += 6;
+                while (*h == ' ') h++;
+                height_px = parse_dimension(h, arena);
+            }
+            const char* d = strstr(spec, "depth");
+            if (d) {
+                d += 5;
+                while (*d == ' ') d++;
+                depth_px = parse_dimension(d, arena);
+            }
         }
-        char buf[128];
-        snprintf(buf, sizeof(buf), 
-                 "<span style=\"display:inline-block;width:%.3fpx;height:1em;background:#000;vertical-align:middle\"></span>",
-                 width_px);
-        return doc_create_raw_html_cstr(arena, buf);
+        return doc_create_prim_vrule(arena, width_px, height_px, depth_px);
     }
     
     // ============================================================================
@@ -1931,32 +2080,24 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         const char* val_str = extract_text_content(item, arena);
         if (val_str) {
             int penalty = atoi(val_str);
-            if (penalty <= -10000) {
-                // Force break
-                return doc_create_raw_html_cstr(arena, "<br class=\"penalty-break\">");
-            } else if (penalty >= 10000) {
-                // Forbid break - word joiner U+2060
-                return doc_create_text_cstr(arena, "\xE2\x81\xA0", DocTextStyle::plain());
-            }
+            return doc_create_prim_penalty(arena, penalty);
         }
         return nullptr;
     }
     
     // \break - equivalent to \penalty -10000 (force break)
     if (tag_eq(tag, "break")) {
-        return doc_create_raw_html_cstr(arena, "<br class=\"penalty-break\">");
+        return doc_create_prim_penalty(arena, -10000);
     }
     
     // \nobreak - equivalent to \penalty 10000 (forbid break)
     if (tag_eq(tag, "nobreak")) {
-        // Word joiner U+2060
-        return doc_create_text_cstr(arena, "\xE2\x81\xA0", DocTextStyle::plain());
+        return doc_create_prim_penalty(arena, 10000);
     }
     
     // \allowbreak - equivalent to \penalty 0 (allows break without forcing)
     if (tag_eq(tag, "allowbreak")) {
-        // Zero-width space U+200B (allows break)
-        return doc_create_text_cstr(arena, "\xE2\x80\x8B", DocTextStyle::plain());
+        return doc_create_prim_penalty(arena, 0);
     }
     
     // ============================================================================
@@ -1965,10 +2106,6 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     
     // \hbox [to <dimen>] [spread <dimen>] {<content>} - horizontal box
     if (tag_eq(tag, "hbox")) {
-        // Extract content and build as inline-flex container
-        DocElement* container = doc_alloc_element(arena, DocElemType::RAW_HTML);
-        StrBuf* out = strbuf_new_cap(256);
-        
         // Check for "to" or "spread" width specification
         float to_width = -1;
         auto iter = elem.children();
@@ -1985,116 +2122,175 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             }
         }
         
-        strbuf_append_str(out, "<span class=\"hbox\"");
-        if (to_width > 0) {
-            char style[64];
-            snprintf(style, sizeof(style), " style=\"width:%.3fpx\"", to_width);
-            strbuf_append_str(out, style);
-        }
-        strbuf_append_str(out, "><span>");
+        DocElement* box = doc_create_prim_hbox(arena, to_width);
         
-        // Process children - recursively build content
+        // Process children and add as box content
         iter = elem.children();
         while (iter.next(&child)) {
             if (child.isString()) {
                 const char* text = child.cstring();
                 if (text && !strstr(text, "to ") && !strstr(text, "spread ")) {
-                    // Escape HTML
-                    for (const char* p = text; *p; p++) {
-                        if (*p == '<') strbuf_append_str(out, "&lt;");
-                        else if (*p == '>') strbuf_append_str(out, "&gt;");
-                        else if (*p == '&') strbuf_append_str(out, "&amp;");
-                        else strbuf_append_char(out, *p);
-                    }
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) doc_append_child(box, text_elem);
                 }
             } else if (child.isElement()) {
                 DocElement* child_elem = build_doc_element(child, arena, doc);
-                if (child_elem && child_elem->type == DocElemType::RAW_HTML) {
-                    strbuf_append_str(out, child_elem->raw.raw_content);
-                } else if (child_elem && child_elem->type == DocElemType::TEXT_RUN) {
-                    strbuf_append_str(out, child_elem->text.text);
-                }
+                if (child_elem) doc_append_child(box, child_elem);
             }
         }
-        
-        strbuf_append_str(out, "</span></span>");
-        char* result = (char*)arena_alloc(arena, out->length + 1);
-        memcpy(result, out->str, out->length + 1);
-        container->raw.raw_content = result;
-        container->raw.raw_len = out->length;
-        strbuf_free(out);
-        return container;
+        return box;
     }
     
     // \vbox [to <dimen>] [spread <dimen>] {<content>} - vertical box (aligned at bottom)
     if (tag_eq(tag, "vbox")) {
-        return doc_create_raw_html_cstr(arena, "<span class=\"vbox\"><span></span></span>");
+        float to_height = -1;
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                if (text) {
+                    const char* to_pos = strstr(text, "to ");
+                    if (to_pos) to_height = parse_dimension(to_pos + 3, arena);
+                }
+            }
+        }
+        
+        DocElement* box = doc_create_prim_vbox(arena, to_height, false);
+        
+        iter = elem.children();
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                if (text && !strstr(text, "to ") && !strstr(text, "spread ")) {
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) doc_append_child(box, text_elem);
+                }
+            } else if (child.isElement()) {
+                DocElement* child_elem = build_doc_element(child, arena, doc);
+                if (child_elem) doc_append_child(box, child_elem);
+            }
+        }
+        return box;
     }
     
     // \vtop [to <dimen>] [spread <dimen>] {<content>} - vertical box (aligned at top)
     if (tag_eq(tag, "vtop")) {
-        return doc_create_raw_html_cstr(arena, "<span class=\"vtop\"><span></span></span>");
+        float to_height = -1;
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                if (text) {
+                    const char* to_pos = strstr(text, "to ");
+                    if (to_pos) to_height = parse_dimension(to_pos + 3, arena);
+                }
+            }
+        }
+        
+        DocElement* box = doc_create_prim_vbox(arena, to_height, true);  // is_vtop=true
+        
+        iter = elem.children();
+        while (iter.next(&child)) {
+            if (child.isString()) {
+                const char* text = child.cstring();
+                if (text && !strstr(text, "to ") && !strstr(text, "spread ")) {
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) doc_append_child(box, text_elem);
+                }
+            } else if (child.isElement()) {
+                DocElement* child_elem = build_doc_element(child, arena, doc);
+                if (child_elem) doc_append_child(box, child_elem);
+            }
+        }
+        return box;
     }
     
     // \raise <dimen> <box> - raise box vertically
     if (tag_eq(tag, "raise")) {
         const char* spec = extract_text_content(item, arena);
+        float shift_px = 0;
         if (spec && strlen(spec) > 0) {
-            float shift_px = parse_dimension(spec, arena);
-            char buf[128];
-            // Negative top = raise up (CSS top is downward)
-            snprintf(buf, sizeof(buf), 
-                     "<span style=\"position:relative;top:%.3fpx\"></span>", -shift_px);
-            return doc_create_raw_html_cstr(arena, buf);
+            shift_px = parse_dimension(spec, arena);
         }
-        return nullptr;
+        DocElement* raise_elem = doc_create_prim_raise(arena, shift_px);
+        
+        // Process children (the box content)
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                DocElement* child_elem = build_doc_element(child, arena, doc);
+                if (child_elem) doc_append_child(raise_elem, child_elem);
+            }
+        }
+        return raise_elem;
     }
     
     // \lower <dimen> <box> - lower box vertically
     if (tag_eq(tag, "lower")) {
         const char* spec = extract_text_content(item, arena);
+        float shift_px = 0;
         if (spec && strlen(spec) > 0) {
-            float shift_px = parse_dimension(spec, arena);
-            char buf[128];
-            // Positive top = lower down
-            snprintf(buf, sizeof(buf), 
-                     "<span style=\"position:relative;top:%.3fpx\"></span>", shift_px);
-            return doc_create_raw_html_cstr(arena, buf);
+            shift_px = -parse_dimension(spec, arena);  // Negative for lowering
         }
-        return nullptr;
+        DocElement* raise_elem = doc_create_prim_raise(arena, shift_px);
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                DocElement* child_elem = build_doc_element(child, arena, doc);
+                if (child_elem) doc_append_child(raise_elem, child_elem);
+            }
+        }
+        return raise_elem;
     }
     
     // \moveleft <dimen> <box> - move box left in vertical mode
     if (tag_eq(tag, "moveleft")) {
         const char* spec = extract_text_content(item, arena);
+        float shift_px = 0;
         if (spec && strlen(spec) > 0) {
-            float shift_px = parse_dimension(spec, arena);
-            char buf[128];
-            snprintf(buf, sizeof(buf), 
-                     "<span style=\"position:relative;left:%.3fpx\"></span>", -shift_px);
-            return doc_create_raw_html_cstr(arena, buf);
+            shift_px = -parse_dimension(spec, arena);  // Negative for left
         }
-        return nullptr;
+        DocElement* rlap_elem = doc_create_prim_rlap(arena, shift_px, true, false);
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                DocElement* child_elem = build_doc_element(child, arena, doc);
+                if (child_elem) doc_append_child(rlap_elem, child_elem);
+            }
+        }
+        return rlap_elem;
     }
     
     // \moveright <dimen> <box> - move box right in vertical mode
     if (tag_eq(tag, "moveright")) {
         const char* spec = extract_text_content(item, arena);
+        float shift_px = 0;
         if (spec && strlen(spec) > 0) {
-            float shift_px = parse_dimension(spec, arena);
-            char buf[128];
-            snprintf(buf, sizeof(buf), 
-                     "<span style=\"position:relative;left:%.3fpx\"></span>", shift_px);
-            return doc_create_raw_html_cstr(arena, buf);
+            shift_px = parse_dimension(spec, arena);
         }
-        return nullptr;
+        DocElement* rlap_elem = doc_create_prim_rlap(arena, shift_px, false, false);
+        
+        auto iter = elem.children();
+        ItemReader child;
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                DocElement* child_elem = build_doc_element(child, arena, doc);
+                if (child_elem) doc_append_child(rlap_elem, child_elem);
+            }
+        }
+        return rlap_elem;
     }
     
     // \rlap{<content>} - zero-width box with content extending to the right
     if (tag_eq(tag, "rlap")) {
-        DocElement* container = doc_alloc_element(arena, DocElemType::RAW_HTML);
-        StrBuf* out = strbuf_new_cap(128);
-        strbuf_append_str(out, "<span class=\"rlap\">");
+        DocElement* rlap_elem = doc_create_prim_rlap(arena, 0, false, true);  // is_lap=true
         
         auto iter = elem.children();
         ItemReader child;
@@ -2102,37 +2298,20 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             if (child.isString()) {
                 const char* text = child.cstring();
                 if (text) {
-                    for (const char* p = text; *p; p++) {
-                        if (*p == '<') strbuf_append_str(out, "&lt;");
-                        else if (*p == '>') strbuf_append_str(out, "&gt;");
-                        else if (*p == '&') strbuf_append_str(out, "&amp;");
-                        else strbuf_append_char(out, *p);
-                    }
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) doc_append_child(rlap_elem, text_elem);
                 }
             } else if (child.isElement()) {
                 DocElement* child_elem = build_doc_element(child, arena, doc);
-                if (child_elem && child_elem->type == DocElemType::RAW_HTML) {
-                    strbuf_append_str(out, child_elem->raw.raw_content);
-                } else if (child_elem && child_elem->type == DocElemType::TEXT_RUN) {
-                    strbuf_append_str(out, child_elem->text.text);
-                }
+                if (child_elem) doc_append_child(rlap_elem, child_elem);
             }
         }
-        
-        strbuf_append_str(out, "</span>");
-        char* result = (char*)arena_alloc(arena, out->length + 1);
-        memcpy(result, out->str, out->length + 1);
-        container->raw.raw_content = result;
-        container->raw.raw_len = out->length;
-        strbuf_free(out);
-        return container;
+        return rlap_elem;
     }
     
     // \llap{<content>} - zero-width box with content extending to the left
     if (tag_eq(tag, "llap")) {
-        DocElement* container = doc_alloc_element(arena, DocElemType::RAW_HTML);
-        StrBuf* out = strbuf_new_cap(128);
-        strbuf_append_str(out, "<span class=\"llap\">");
+        DocElement* llap_elem = doc_create_prim_rlap(arena, 0, true, true);  // is_left=true, is_lap=true
         
         auto iter = elem.children();
         ItemReader child;
@@ -2140,30 +2319,15 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
             if (child.isString()) {
                 const char* text = child.cstring();
                 if (text) {
-                    for (const char* p = text; *p; p++) {
-                        if (*p == '<') strbuf_append_str(out, "&lt;");
-                        else if (*p == '>') strbuf_append_str(out, "&gt;");
-                        else if (*p == '&') strbuf_append_str(out, "&amp;");
-                        else strbuf_append_char(out, *p);
-                    }
+                    DocElement* text_elem = doc_create_text_cstr(arena, text, DocTextStyle::plain());
+                    if (text_elem) doc_append_child(llap_elem, text_elem);
                 }
             } else if (child.isElement()) {
                 DocElement* child_elem = build_doc_element(child, arena, doc);
-                if (child_elem && child_elem->type == DocElemType::RAW_HTML) {
-                    strbuf_append_str(out, child_elem->raw.raw_content);
-                } else if (child_elem && child_elem->type == DocElemType::TEXT_RUN) {
-                    strbuf_append_str(out, child_elem->text.text);
-                }
+                if (child_elem) doc_append_child(llap_elem, child_elem);
             }
         }
-        
-        strbuf_append_str(out, "</span>");
-        char* result = (char*)arena_alloc(arena, out->length + 1);
-        memcpy(result, out->str, out->length + 1);
-        container->raw.raw_content = result;
-        container->raw.raw_len = out->length;
-        strbuf_free(out);
-        return container;
+        return llap_elem;
     }
     
     // \hspace{...} - horizontal space with specified width
@@ -7139,6 +7303,172 @@ TexNode* doc_element_to_texnode(DocElement* elem, Arena* arena, LaTeXContext& ct
             log_debug("doc_element_to_texnode: %s not yet implemented", 
                      doc_elem_type_name(elem->type));
             return nullptr;
+            
+        // ============================================================================
+        // TeX Primitives - convert to TexNode for DVI output
+        // ============================================================================
+        
+        case DocElemType::PRIM_HSKIP: {
+            // Create horizontal glue
+            Glue g;
+            g.space = elem->prim_skip.amount;
+            g.stretch = elem->prim_skip.stretch;
+            g.shrink = elem->prim_skip.shrink;
+            g.stretch_order = static_cast<GlueOrder>(elem->prim_skip.stretch_order);
+            g.shrink_order = static_cast<GlueOrder>(elem->prim_skip.shrink_order);
+            return make_glue(arena, g, "hskip");
+        }
+        
+        case DocElemType::PRIM_VSKIP: {
+            // Create vertical glue (in VList context)
+            Glue g;
+            g.space = elem->prim_skip.amount;
+            g.stretch = elem->prim_skip.stretch;
+            g.shrink = elem->prim_skip.shrink;
+            g.stretch_order = static_cast<GlueOrder>(elem->prim_skip.stretch_order);
+            g.shrink_order = static_cast<GlueOrder>(elem->prim_skip.shrink_order);
+            return make_glue(arena, g, "vskip");
+        }
+        
+        case DocElemType::PRIM_KERN: {
+            // Create fixed horizontal kern
+            return make_kern(arena, elem->prim_skip.amount);
+        }
+        
+        case DocElemType::PRIM_HFIL: {
+            // Create infinite horizontal glue
+            Glue g;
+            g.space = 0;
+            g.stretch = 1.0f;
+            g.stretch_order = static_cast<GlueOrder>(elem->prim_fil.level);
+            if (elem->prim_fil.has_shrink) {
+                g.shrink = 1.0f;
+                g.shrink_order = static_cast<GlueOrder>(elem->prim_fil.level);
+            } else {
+                g.shrink = 0;
+                g.shrink_order = GlueOrder::Normal;
+            }
+            const char* name = elem->prim_fil.level == 1 ? (elem->prim_fil.has_shrink ? "hss" : "hfil") :
+                               elem->prim_fil.level == 2 ? "hfill" : "hfilll";
+            return make_glue(arena, g, name);
+        }
+        
+        case DocElemType::PRIM_VFIL: {
+            // Create infinite vertical glue
+            Glue g;
+            g.space = 0;
+            g.stretch = 1.0f;
+            g.stretch_order = static_cast<GlueOrder>(elem->prim_fil.level);
+            if (elem->prim_fil.has_shrink) {
+                g.shrink = 1.0f;
+                g.shrink_order = static_cast<GlueOrder>(elem->prim_fil.level);
+            } else {
+                g.shrink = 0;
+                g.shrink_order = GlueOrder::Normal;
+            }
+            const char* name = elem->prim_fil.level == 1 ? (elem->prim_fil.has_shrink ? "vss" : "vfil") :
+                               elem->prim_fil.level == 2 ? "vfill" : "vfilll";
+            return make_glue(arena, g, name);
+        }
+        
+        case DocElemType::PRIM_HRULE: {
+            // Create horizontal rule
+            float w = elem->prim_rule.rule_width;
+            float h = elem->prim_rule.rule_height;
+            float d = elem->prim_rule.rule_depth;
+            // -1 means "running" (fill container) - use large value for DVI
+            if (w < 0) w = 10000.0f;  // Will be constrained by container
+            if (h < 0) h = 0.4f * 1.333f;  // Default 0.4pt
+            if (d < 0) d = 0;
+            return make_rule(arena, w, h, d);
+        }
+        
+        case DocElemType::PRIM_VRULE: {
+            // Create vertical rule
+            float w = elem->prim_rule.rule_width;
+            float h = elem->prim_rule.rule_height;
+            float d = elem->prim_rule.rule_depth;
+            // -1 means "running" - use large value for DVI
+            if (w < 0) w = 0.4f * 1.333f;  // Default 0.4pt
+            if (h < 0) h = 10.0f;  // Will be constrained by line height
+            if (d < 0) d = 0;
+            return make_rule(arena, w, h, d);
+        }
+        
+        case DocElemType::PRIM_PENALTY: {
+            return make_penalty(arena, elem->prim_penalty.value);
+        }
+        
+        case DocElemType::PRIM_HBOX: {
+            // Create horizontal box
+            TexNode* hbox = make_hbox(arena, elem->prim_box.target_width);
+            
+            // Convert and add children
+            for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+                TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+                if (child_node) {
+                    hbox->append_child(child_node);
+                }
+            }
+            return hbox;
+        }
+        
+        case DocElemType::PRIM_VBOX: {
+            // Create vertical box
+            TexNode* vbox = make_vbox(arena, elem->prim_box.target_height);
+            
+            // Convert and add children
+            for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+                TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+                if (child_node) {
+                    vbox->append_child(child_node);
+                }
+            }
+            return vbox;
+        }
+        
+        case DocElemType::PRIM_RAISE: {
+            // Create shifted box
+            TexNode* hlist = make_hlist(arena);
+            hlist->shift = elem->prim_raise.shift_amount;
+            
+            // Convert and add children
+            for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+                TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+                if (child_node) {
+                    hlist->append_child(child_node);
+                }
+            }
+            return hlist;
+        }
+        
+        case DocElemType::PRIM_RLAP: {
+            // Create zero-width or shifted box
+            TexNode* hlist = make_hlist(arena);
+            
+            // Convert and add children
+            for (DocElement* child = elem->first_child; child; child = child->next_sibling) {
+                TexNode* child_node = doc_element_to_texnode(child, arena, ctx);
+                if (child_node) {
+                    hlist->append_child(child_node);
+                }
+            }
+            
+            // For rlap/llap, set width to 0
+            if (elem->prim_rlap.is_lap) {
+                hlist->width = 0;
+            }
+            
+            // For moveleft/moveright, apply horizontal shift via kern
+            if (elem->prim_rlap.move_amount != 0) {
+                TexNode* wrapper = make_hlist(arena);
+                wrapper->append_child(make_kern(arena, elem->prim_rlap.move_amount));
+                wrapper->append_child(hlist);
+                return wrapper;
+            }
+            
+            return hlist;
+        }
             
         case DocElemType::RAW_HTML:
         case DocElemType::RAW_LATEX:

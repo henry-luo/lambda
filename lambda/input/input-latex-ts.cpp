@@ -123,6 +123,11 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"control_symbol", NODE_CONTAINER},
     {"linebreak_command", NODE_CONTAINER},  // \\ with optional [<length>]
 
+    // Primitive dimension commands (e.g., \hskip 10pt, \kern-3pt)
+    {"primitive_dimen", NODE_CONTAINER},
+    {"primitive_dimen_name", NODE_LEAF},
+    {"dimension", NODE_TEXT},  // Dimension text is captured as TEXT to extract the value
+
     // Special tokens
     {"nbsp", NODE_LEAF},
     {"alignment_tab", NODE_LEAF},
@@ -1422,6 +1427,41 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
             // NEW: command type in hybrid grammar
             if (strcmp(node_type, "command") == 0) {
                 return convert_command(ctx, node, source);
+            }
+
+            // NEW: primitive_dimen type for \hskip, \vskip, \kern etc. with dimension
+            // Structure: primitive_dimen { name: primitive_dimen_name, dimen: dimension }
+            if (strcmp(node_type, "primitive_dimen") == 0) {
+                MarkBuilder& builder = ctx.builder;
+                
+                // Extract the command name (e.g., \hskip, \vskip, \kern)
+                TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+                String* name_str = ts_node_is_null(name_node) ? nullptr : extract_text(ctx, name_node, source);
+                const char* cmd_name = name_str ? name_str->chars : "hskip";
+                
+                // Skip backslash if present
+                if (cmd_name[0] == '\\') {
+                    cmd_name++;
+                }
+                
+                // Extract the dimension text
+                TSNode dimen_node = ts_node_child_by_field_name(node, "dimen", 5);
+                String* dimen_str = ts_node_is_null(dimen_node) ? nullptr : extract_text(ctx, dimen_node, source);
+                const char* dimen_text = dimen_str ? dimen_str->chars : "";
+                
+                // Create element with command name as tag and dimension as text content
+                ElementBuilder elem = builder.element(cmd_name);
+                
+                // Trim leading whitespace from dimension text
+                while (*dimen_text == ' ' || *dimen_text == '\t') {
+                    dimen_text++;
+                }
+                
+                if (dimen_text[0] != '\0') {
+                    elem.child({.item = s2it(builder.createString(dimen_text, strlen(dimen_text)))});
+                }
+                
+                return elem.final();
             }
 
             // Handle "environment" node - transparent wrapper from grammar choice rule
