@@ -1,0 +1,84 @@
+% Test: Combined usage of TeX primitives for complex layouts
+\documentclass{article}
+\begin{document}
+
+% === Centered title with rules ===
+\hrule height 1pt
+\vskip 6pt
+\hbox to \hsize{\hfil\bf Title\hfil}
+\vskip 6pt
+\hrule height 1pt
+
+\vskip 12pt
+
+% === Two-column simulation ===
+\hbox to \hsize{%
+  \vbox{\hsize=2in
+    Left column content here.
+    \par More text.
+  }%
+  \hfil
+  \vrule width 0.5pt
+  \hfil
+  \vbox{\hsize=2in
+    Right column content here.
+    \par More text.
+  }%
+}
+
+\vskip 12pt
+
+% === Boxed content ===
+\vbox{%
+  \hrule
+  \hbox{\vrule\hskip 3pt
+    \vbox{\vskip 3pt
+      Boxed paragraph content.
+      \vskip 3pt}%
+    \hskip 3pt\vrule}%
+  \hrule
+}
+
+\vskip 12pt
+
+% === Overlapping text effect ===
+\hbox{\rlap{DRAFT }Important Document}
+
+\vskip 12pt
+
+% === Custom fraction-like structure ===
+\hbox{%
+  \vbox{%
+    \hbox to 1in{\hfil numerator\hfil}%
+    \hrule
+    \hbox to 1in{\hfil denominator\hfil}%
+  }%
+}
+
+\vskip 12pt
+
+% === Raised/lowered annotations ===
+Chemical formula: H\lower 3pt\hbox{\small 2}O
+
+Exponent style: x\raise 5pt\hbox{\small 2} + y\raise 5pt\hbox{\small 2}
+
+\vskip 12pt
+
+% === Flexible spacing layout ===
+\hbox to 4in{First\hfil Second\hfil Third\hfil Fourth}
+
+\vskip 6pt
+
+\hbox to 4in{A\hfill B\hfil C}
+
+\vskip 12pt
+
+% === Non-breaking unit ===
+See page\nobreak\hskip 3pt 42 for details.
+
+\vskip 6pt
+
+% === Allow break in compound ===
+super\-cali\-fragil\-istic\allowbreak expiali\-docious
+
+\end{document}

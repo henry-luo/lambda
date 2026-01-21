@@ -1,0 +1,32 @@
+% Test: \hbox horizontal box primitive
+\documentclass{article}
+\begin{document}
+
+% Basic hbox
+\hbox{Simple content}
+
+% hbox prevents line break
+\hbox{This is a single unbreakable unit}
+
+% hbox with specific width
+\hbox to 3in{Left\hfil Right}
+
+% hbox spread
+\hbox spread 1in{Content here}
+
+% Nested hboxes
+\hbox{\hbox{Inner} Outer}
+
+% hbox with math
+\hbox{$x^2 + y^2 = z^2$}
+
+% Empty hbox
+\hbox{}
+
+% hbox with rules
+\hbox{\vrule width 1pt\hskip 5pt Text\hskip 5pt\vrule width 1pt}
+
+% Multiple hboxes in sequence
+\hbox{Box 1}\hbox{Box 2}\hbox{Box 3}
+
+\end{document}

@@ -1,0 +1,38 @@
+% Test: \hrule and \vrule primitives
+\documentclass{article}
+\begin{document}
+
+% Basic hrule (default 0.4pt height, full width)
+Before rule
+
+\hrule
+
+After rule
+
+% hrule with explicit height
+\hrule height 2pt
+
+% hrule with height and depth
+\hrule height 1pt depth 1pt
+
+% hrule with specific width
+\hrule width 2in height 0.5pt
+
+% vrule in horizontal mode
+Text\vrule Text
+
+% vrule with explicit dimensions
+A\vrule width 1pt height 10pt depth 2pt B
+
+% vrule with only width
+C\vrule width 2pt D
+
+% Multiple rules
+\hrule height 1pt
+\vskip 3pt
+\hrule height 1pt
+
+% Vertical rule in hbox
+\hbox{Left\vrule width 0.5pt Right}
+
+\end{document}

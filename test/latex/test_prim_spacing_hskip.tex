@@ -1,0 +1,29 @@
+% Test: \hskip, \kern spacing primitives
+\documentclass{article}
+\begin{document}
+
+% Basic hskip with different units
+A\hskip 10pt B
+
+A\hskip 1cm B
+
+A\hskip 5mm B
+
+A\hskip 0.5in B
+
+A\hskip 2em B
+
+% Kern (non-stretchy spacing)
+A\kern 10pt B
+
+A\kern -3pt B
+
+A\kern 1em B
+
+% Multiple spacing in sequence
+A\hskip 5pt\hskip 5pt B
+
+% Zero spacing
+A\hskip 0pt B
+
+\end{document}
