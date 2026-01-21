@@ -63,6 +63,8 @@ GraphicsElement* graphics_canvas(Arena* arena, float width, float height,
     elem->canvas.origin_y = origin_y;
     elem->canvas.unitlength = unitlength;
     elem->canvas.flip_y = true;  // LaTeX uses bottom-up Y axis
+    elem->canvas.has_embedded_svg = false;
+    elem->canvas.raw_svg = nullptr;
     return elem;
 }
 

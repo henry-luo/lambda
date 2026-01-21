@@ -204,6 +204,8 @@ struct GraphicsElement {
             float origin_y;
             float unitlength;      // Scale factor (default 1pt)
             bool flip_y;           // Flip Y axis (LaTeX uses bottom-up)
+            bool has_embedded_svg; // True if pre-rendered SVG exists (LaTeXML)
+            const char* raw_svg;   // Raw SVG content (for LaTeXML passthrough)
         } canvas;
         
         // LINE - line segment or polyline
