@@ -43,6 +43,7 @@ static const std::set<std::string> BASELINE_GRAPHICS_FIXTURES = {
     "lines_only",      // Lines work correctly
     "circles_only",    // Circles work correctly
     "boxes_only",      // Box commands work
+    "simple_picture",  // Lines, circles, vectors
 };
 
 // Graphics fixtures that are work-in-progress (extended)

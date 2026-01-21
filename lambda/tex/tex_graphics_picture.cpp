@@ -301,6 +301,40 @@ static void process_picture_children(PictureState* state, const ElementReader& e
             GraphicsElement* gfx = create_line_from_slope(state, dx, dy, length);
             if (gfx) graphics_append_child(state->current_group, gfx);
         }
+        else if (strcmp(tag, "vector") == 0) {
+            // \vector(dx,dy){length} - same as line but with arrow
+            int dx = 1, dy = 0;
+            float length = 10.0f;
+            
+            ItemReader next_item;
+            while (iter.next(&next_item)) {
+                if (next_item.isString()) {
+                    const char* text = next_item.cstring();
+                    if (text && text[0] == '(') {
+                        // Parse slope
+                        parse_slope_pair(text, &dx, &dy);
+                    }
+                } else if (next_item.isElement()) {
+                    ElementReader len_elem = next_item.asElement();
+                    const char* len_tag = len_elem.tagName();
+                    if (len_tag && strcmp(len_tag, "curly_group") == 0) {
+                        // Extract length from curly group
+                        const char* len_text = extract_first_text(len_elem);
+                        if (len_text) {
+                            length = (float)atof(len_text);
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            // Create line element with arrow
+            GraphicsElement* gfx = create_line_from_slope(state, dx, dy, length);
+            if (gfx) {
+                gfx->line.has_arrow = true;
+                graphics_append_child(state->current_group, gfx);
+            }
+        }
         else if (strcmp(tag, "circle") == 0 || strcmp(tag, "circle*") == 0) {
             // \circle{diameter} or \circle*{diameter}
             float diameter = 10.0f;
