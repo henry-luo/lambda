@@ -524,6 +524,7 @@ TexDocumentModel* doc_model_create(Arena* arena) {
     doc->document_class = "article";  // Default
     doc->fonts = nullptr;  // Set later if math typesetting is needed
     doc->base_size_pt = 10.0f;  // Default 10pt
+    doc->picture_unitlength = 1.0f;  // Default 1pt for picture environment
     
 #ifndef DOC_MODEL_MINIMAL
     // Initialize package system (requires input system for JSON parsing)
@@ -4932,12 +4933,39 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         tag_eq(tag, "author") || tag_eq(tag, "title") || tag_eq(tag, "date") ||
         tag_eq(tag, "newenvironment") ||
         tag_eq(tag, "renewenvironment") || tag_eq(tag, "newtheorem") ||
-        tag_eq(tag, "DeclareMathOperator") || tag_eq(tag, "setlength") ||
+        tag_eq(tag, "DeclareMathOperator") ||
         tag_eq(tag, "setcounter") || tag_eq(tag, "pagestyle") ||
         tag_eq(tag, "pagenumbering") || tag_eq(tag, "thispagestyle") ||
         tag_eq(tag, "makeatletter") || tag_eq(tag, "makeatother") ||
         tag_eq(tag, "bibliography") || tag_eq(tag, "bibliographystyle") ||
         tag_eq(tag, "graphicspath") || tag_eq(tag, "hypersetup")) {
+        return nullptr;  // No visible output
+    }
+    
+    // \setlength{variable}{value} - handle special case for \unitlength
+    if (tag_eq(tag, "setlength")) {
+        auto iter = elem.children();
+        ItemReader child;
+        bool found_unitlength = false;
+        
+        while (iter.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                const char* child_tag = child_elem.tagName();
+                if (child_tag && strcmp(child_tag, "unitlength") == 0) {
+                    found_unitlength = true;
+                }
+            } else if (found_unitlength && child.isString()) {
+                // This is the value for \unitlength
+                const char* value_str = child.cstring();
+                if (value_str && doc) {
+                    // Parse dimension and store in document
+                    doc->picture_unitlength = parse_picture_dimension(value_str, 1.0f);
+                    log_debug("doc_model: setlength unitlength=%.2fpt", doc->picture_unitlength);
+                }
+                break;
+            }
+        }
         return nullptr;  // No visible output
     }
     

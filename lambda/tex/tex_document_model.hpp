@@ -347,6 +347,9 @@ struct TexDocumentModel {
     TFMFontManager* fonts;
     float base_size_pt;             // Base font size in points (default 10pt)
     
+    // Picture environment state
+    float picture_unitlength;        // Current \unitlength value in pt (default 1pt)
+    
     // Package system (new - JSON-based package loading)
     CommandRegistry* registry;      // Command registry from packages
     PackageLoader* pkg_loader;      // Package loader instance
