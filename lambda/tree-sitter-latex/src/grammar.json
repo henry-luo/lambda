@@ -39,6 +39,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "primitive_dimen"
+        },
+        {
+          "type": "SYMBOL",
           "name": "control_symbol"
         },
         {
@@ -235,6 +239,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "primitive_dimen"
+        },
+        {
+          "type": "SYMBOL",
           "name": "command"
         },
         {
@@ -423,6 +431,122 @@
       "type": "SYMBOL",
       "name": "_caret_char"
     },
+    "primitive_dimen": {
+      "type": "PREC",
+      "value": 2,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "name",
+            "content": {
+              "type": "SYMBOL",
+              "name": "primitive_dimen_name"
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "dimen",
+            "content": {
+              "type": "SYMBOL",
+              "name": "dimension"
+            }
+          }
+        ]
+      }
+    },
+    "primitive_dimen_name": {
+      "type": "PATTERN",
+      "value": "\\\\(hskip|vskip|kern|mkern|mskip|raise|lower|moveleft|moveright)"
+    },
+    "dimension": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "PATTERN",
+              "value": "[ \\t]+"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "PATTERN",
+          "value": "[-+]?(\\d+\\.?\\d*|\\.\\d+)"
+        },
+        {
+          "type": "PATTERN",
+          "value": "[ \\t]*"
+        },
+        {
+          "type": "PATTERN",
+          "value": "pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "PATTERN",
+                  "value": "[ \\t]+plus[ \\t]+"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[-+]?(\\d+\\.?\\d*|\\.\\d+)"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[ \\t]*"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu|fil+"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "PATTERN",
+                  "value": "[ \\t]+minus[ \\t]+"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[-+]?(\\d+\\.?\\d*|\\.\\d+)"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "[ \\t]*"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu|fil+"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
+    },
     "command": {
       "type": "PREC_RIGHT",
       "value": 0,
@@ -546,6 +670,10 @@
         {
           "type": "SYMBOL",
           "name": "math_environment"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "primitive_dimen"
         },
         {
           "type": "SYMBOL",

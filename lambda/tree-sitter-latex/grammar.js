@@ -58,6 +58,7 @@ module.exports = grammar({
       $.char_command,   // \char can appear at top level
       $.caret_char,     // ^^XX or ^^^^XXXX - TeX caret notation
       $.linebreak_command, // \\ with optional [<length>]
+      $.primitive_dimen,  // \hskip, \vskip, \kern etc. with dimension
       $.control_symbol, // Escape sequences like \%, \&
       $.command,        // Commands can appear at top level (e.g., \textellipsis)
       $.curly_group,    // Curly braces can appear at top level
@@ -123,6 +124,7 @@ module.exports = grammar({
       $.char_command,   // \char<number> - must be before command (context-gated)
       $.caret_char,     // ^^XX or ^^^^XXXX - TeX caret notation
       $.linebreak_command, // \\ with optional [<length>]
+      $.primitive_dimen,  // \hskip, \vskip, \kern etc. with dimension - BEFORE command
       $.command,
       $.curly_group,
       $.brack_group,    // Restored: [ ... ] is an optional argument group
@@ -211,6 +213,37 @@ module.exports = grammar({
     // Commands/Macros (matches LaTeX.js: macro, macro_args)
     // ========================================================================
 
+    // TeX primitive commands that take a dimension argument without braces
+    // These must come before generic command to take precedence
+    // Matches: \hskip 10pt, \vskip 1cm plus 2pt minus 1pt, \kern-3pt, etc.
+    primitive_dimen: $ => prec(2, seq(
+      field('name', $.primitive_dimen_name),
+      field('dimen', $.dimension),
+    )),
+
+    primitive_dimen_name: $ => /\\(hskip|vskip|kern|mkern|mskip|raise|lower|moveleft|moveright)/,
+
+    // TeX dimension: optional sign, number, unit, optional plus/minus stretch/shrink
+    // Examples: 10pt, -3pt, 1.5cm, 2em plus 1pt minus 0.5pt
+    dimension: $ => seq(
+      optional(/[ \t]+/),  // optional leading space
+      /[-+]?(\d+\.?\d*|\.\d+)/,  // number (required)
+      /[ \t]*/,  // optional space before unit
+      /pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu/,  // unit (required for these primitives)
+      optional(seq(
+        /[ \t]+plus[ \t]+/,
+        /[-+]?(\d+\.?\d*|\.\d+)/,
+        /[ \t]*/,
+        /pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu|fil+/,
+      )),
+      optional(seq(
+        /[ \t]+minus[ \t]+/,
+        /[-+]?(\d+\.?\d*|\.\d+)/,
+        /[ \t]*/,
+        /pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex|mu|fil+/,
+      )),
+    ),
+
     // Generic command: \name followed by optional arguments
     // LaTeX.js determines argument types dynamically; we parse generically
     command: $ => prec.right(seq(
@@ -250,6 +283,7 @@ module.exports = grammar({
       $.linebreak_command, // \\ with optional [<length>] - must be before command
       $.verb_command,   // \verb|text| - must be before command to get correct token
       $.math_environment, // Math environments like \begin{pmatrix}...\end{pmatrix} - must be before command
+      $.primitive_dimen,  // \hskip, \vskip, \kern etc. with dimension - BEFORE command
       $.command,
       $.curly_group,
       $.brack_group,

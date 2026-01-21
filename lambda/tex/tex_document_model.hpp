@@ -92,6 +92,20 @@ enum class DocElemType : uint8_t {
     RAW_LATEX,          // Unprocessed LaTeX content
     SPACE,              // Whitespace / line break
     ERROR,              // Error recovery node
+    
+    // TeX Primitives (for DVI typesetting)
+    PRIM_HSKIP,         // \hskip - horizontal glue
+    PRIM_VSKIP,         // \vskip - vertical glue
+    PRIM_KERN,          // \kern - fixed horizontal spacing
+    PRIM_HFIL,          // \hfil, \hfill, \hss - infinite horizontal glue
+    PRIM_VFIL,          // \vfil, \vfill, \vss - infinite vertical glue
+    PRIM_HRULE,         // \hrule - horizontal rule
+    PRIM_VRULE,         // \vrule - vertical rule
+    PRIM_PENALTY,       // \penalty, \break, \nobreak, \allowbreak
+    PRIM_HBOX,          // \hbox - horizontal box
+    PRIM_VBOX,          // \vbox, \vtop - vertical box
+    PRIM_RAISE,         // \raise, \lower - shifted boxes
+    PRIM_RLAP,          // \rlap, \llap, \moveleft, \moveright - overlapping boxes
 };
 
 // String name for debugging
@@ -320,6 +334,58 @@ struct DocElement {
             float width;                   // Explicit width (0 = auto)
             float height;                  // Explicit height (0 = auto)
         } graphics;
+        
+        // For PRIM_HSKIP, PRIM_VSKIP, PRIM_KERN (glue/spacing primitives)
+        struct {
+            float amount;           // Base dimension (CSS pixels)
+            float stretch;          // Stretch amount
+            float shrink;           // Shrink amount
+            uint8_t stretch_order;  // GlueOrder: 0=Normal, 1=Fil, 2=Fill, 3=Filll
+            uint8_t shrink_order;   // GlueOrder: 0=Normal, 1=Fil, 2=Fill, 3=Filll
+            bool is_vertical;       // true for vskip, false for hskip/kern
+        } prim_skip;
+        
+        // For PRIM_HFIL, PRIM_VFIL (infinite glue)
+        struct {
+            uint8_t level;          // 1=fil, 2=fill, 3=filll
+            bool has_shrink;        // true for hss/vss
+            bool is_vertical;       // true for vfil/vfill/vss
+        } prim_fil;
+        
+        // For PRIM_HRULE, PRIM_VRULE (rules)
+        struct {
+            float rule_width;       // -1 = running (fill container)
+            float rule_height;      // -1 = running
+            float rule_depth;       // -1 = running
+            bool is_vertical;       // true for vrule, false for hrule
+        } prim_rule;
+        
+        // For PRIM_PENALTY
+        struct {
+            int value;              // -10000 to +10000
+        } prim_penalty;
+        
+        // For PRIM_HBOX, PRIM_VBOX
+        struct {
+            float target_width;     // -1 = natural width
+            float target_height;    // -1 = natural height
+            bool is_vbox;           // true for vbox/vtop
+            bool is_vtop;           // true for vtop (baseline at top)
+            const char* to_spread;  // "to" or "spread" keyword, or null
+        } prim_box;
+        
+        // For PRIM_RAISE (raise/lower)
+        struct {
+            float shift_amount;     // Positive = raise, negative = lower
+            // Content is in children
+        } prim_raise;
+        
+        // For PRIM_RLAP (rlap/llap/moveleft/moveright)
+        struct {
+            float move_amount;      // 0 for rlap/llap, else horizontal shift
+            bool is_left;           // true for llap/moveleft, false for rlap/moveright
+            bool is_lap;            // true for rlap/llap (zero width)
+        } prim_rlap;
     };
     
     // Children (for container types)
