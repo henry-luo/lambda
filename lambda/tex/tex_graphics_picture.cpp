@@ -20,6 +20,7 @@ static const char* extract_first_text(const ElementReader& elem);
 static GraphicsElement* create_line_from_slope(PictureState* state, int dx, int dy, float length);
 static GraphicsElement* create_circle(PictureState* state, float diameter, bool filled);
 static GraphicsElement* process_put_content(PictureState* state, const ElementReader& elem);
+GraphicsElement* picture_cmd_frame(PictureState* state, const ElementReader& elem);
 
 // ============================================================================
 // State Initialization
@@ -375,6 +376,10 @@ static void process_picture_children(PictureState* state, const ElementReader& e
             GraphicsElement* gfx = picture_cmd_dashbox(state, child_elem);
             if (gfx) graphics_append_child(state->current_group, gfx);
         }
+        else if (strcmp(tag, "frame") == 0) {
+            GraphicsElement* gfx = picture_cmd_frame(state, child_elem);
+            if (gfx) graphics_append_child(state->current_group, gfx);
+        }
         else if (strcmp(tag, "thinlines") == 0) {
             state->line_thickness = state->thin_line;
         }
@@ -536,6 +541,9 @@ void picture_cmd_put(PictureState* state, const ElementReader& elem) {
         }
         else if (strcmp(tag, "dashbox") == 0) {
             gfx = picture_cmd_dashbox(state, child_elem);
+        }
+        else if (strcmp(tag, "frame") == 0) {
+            gfx = picture_cmd_frame(state, child_elem);
         }
         else {
             // Possibly text content - treat as text element
@@ -777,14 +785,16 @@ GraphicsElement* picture_cmd_oval(PictureState* state, const ElementReader& elem
     }
     
     // Convert to pt
-    float rx = (width / 2.0f) * state->unitlength;
-    float ry = (height / 2.0f) * state->unitlength;
+    float w = width * state->unitlength;
+    float h = height * state->unitlength;
     
     GraphicsElement* result = nullptr;
     
     if (!portion || strlen(portion) == 0) {
-        // Full oval - use ellipse
-        result = graphics_ellipse(state->arena, 0, 0, rx, ry);
+        // Full oval - use rect with rounded corners (LaTeXML style)
+        // rx = ry = min(width, height) / 2 makes circular ends
+        float corner_radius = (w < h ? w : h) / 2.0f;
+        result = graphics_rect(state->arena, -w/2, -h/2, w, h, corner_radius, corner_radius);
         result->style.stroke_color = state->stroke_color;
         result->style.stroke_width = state->line_thickness;
         result->style.fill_color = "none";
@@ -792,6 +802,10 @@ GraphicsElement* picture_cmd_oval(PictureState* state, const ElementReader& elem
         // Partial oval - draw using path
         // For simplicity, we approximate with quadratic beziers
         StrBuf* path = strbuf_new();
+        
+        // Oval radii for path calculations
+        float rx = w / 2.0f;
+        float ry = h / 2.0f;
         
         // Oval is centered at (0,0), going clockwise from right
         // Top half: from right (+rx, 0) to left (-rx, 0) via top (0, +ry)
@@ -1130,6 +1144,69 @@ GraphicsElement* picture_cmd_dashbox(PictureState* state, const ElementReader& e
     
     log_debug("picture_cmd_dashbox: size=%.1fx%.1f dash=%.1f position=%s", 
               width, height, dash_length, position);
+    
+    return rect;
+}
+
+GraphicsElement* picture_cmd_frame(PictureState* state, const ElementReader& elem) {
+    // \frame{content}
+    // Draws a frame around content, auto-sizing to fit
+    // Unlike framebox, frame doesn't take explicit size - it wraps content tightly
+    
+    // Estimate content size (for now, use a default small size)
+    // In a full implementation, we would measure the content
+    float content_width = 10.0f;  // Approximate width based on content
+    float content_height = 8.0f;  // Approximate height based on content
+    
+    // Try to extract and estimate text content size
+    const char* text_content = nullptr;
+    auto iter = elem.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            text_content = child.cstring();
+            if (text_content) {
+                // Rough estimate: ~6pt per character width, ~10pt height
+                size_t len = strlen(text_content);
+                content_width = (float)(len * 6);
+                content_height = 10.0f;
+            }
+        } else if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                // Extract text from curly group
+                auto group_iter = child_elem.children();
+                ItemReader group_child;
+                while (group_iter.next(&group_child)) {
+                    if (group_child.isString()) {
+                        text_content = group_child.cstring();
+                        if (text_content) {
+                            size_t len = strlen(text_content);
+                            content_width = (float)(len * 6);
+                            content_height = 10.0f;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add small padding
+    float padding = 2.0f;
+    float w = content_width + 2 * padding;
+    float h = content_height + 2 * padding;
+    
+    // Create rectangle at origin (will be positioned by put)
+    GraphicsElement* rect = graphics_rect(state->arena, 0, 0, w, h, 0, 0);
+    rect->style.stroke_color = state->stroke_color;
+    rect->style.stroke_width = state->line_thickness;
+    rect->style.fill_color = "none";
+    
+    log_debug("picture_cmd_frame: estimated size=%.1fx%.1f content='%s'", 
+              w, h, text_content ? text_content : "(none)");
     
     return rect;
 }

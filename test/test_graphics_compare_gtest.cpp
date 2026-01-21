@@ -44,6 +44,7 @@ static const std::set<std::string> BASELINE_GRAPHICS_FIXTURES = {
     "circles_only",    // Circles work correctly
     "boxes_only",      // Box commands work
     "simple_picture",  // Lines, circles, vectors
+    "picture_basic",   // Comprehensive picture tests
 };
 
 // Graphics fixtures that are work-in-progress (extended)
@@ -52,6 +53,7 @@ static const std::set<std::string> EXTENDED_GRAPHICS_FIXTURES = {
     "lines_only",      // Lines only
     "circles_only",    // Circles and ovals
     "boxes_only",      // Box commands
+    "picture_basic",   // Comprehensive picture tests without multirow
     // "picture",      // Full picture environment tests (complex - needs multirow package)
     // "colors",       // Color tests (no SVG output - text colors only)
     // "framed",       // Framed boxes (requires framed package)
