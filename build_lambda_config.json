@@ -2920,6 +2920,59 @@
                         "icon": "\ud83c\udfa8"
                     },
                     {
+                        "source": "test/test_graphics_compare_gtest.cpp",
+                        "name": "TeX Graphics Compare Tests",
+                        "description": "Compare Lambda graphics SVG output against LaTeXML references",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "rpmalloc",
+                            "freetype",
+                            "tree-sitter",
+                            "tree-sitter-latex-math"
+                        ],
+                        "binary": "test_graphics_compare_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_document_model.cpp",
+                            "lambda/tex/tex_doc_model_text.cpp",
+                            "lambda/tex/tex_doc_model_html.cpp",
+                            "lambda/tex/tex_doc_model_builder.cpp",
+                            "lambda/tex/tex_doc_model_struct.cpp",
+                            "lambda/tex/tex_doc_model_inline.cpp",
+                            "lambda/tex/tex_doc_model_commands.cpp",
+                            "lambda/tex/tex_graphics.cpp",
+                            "lambda/tex/tex_graphics_picture.cpp",
+                            "lambda/tex/tex_pgf_driver.cpp",
+                            "lambda/tex/tex_latex_bridge.cpp",
+                            "lambda/tex/tex_lambda_bridge.cpp",
+                            "lambda/tex/tex_node.cpp",
+                            "lambda/tex/tex_tfm.cpp",
+                            "lambda/tex/tex_hlist.cpp",
+                            "lambda/tex/tex_linebreak.cpp",
+                            "lambda/tex/tex_vlist.cpp",
+                            "lambda/tex/tex_pagebreak.cpp",
+                            "lambda/tex/tex_hyphen.cpp",
+                            "lambda/tex/tex_glue.hpp",
+                            "lambda/tex/tex_math_ts.cpp",
+                            "lambda/tex/tex_math_bridge.cpp",
+                            "lambda/tex/tex_math_ast_builder.cpp",
+                            "lambda/tex/tex_math_ast_typeset.cpp",
+                            "lambda/tex/tex_svg_out.cpp",
+                            "lambda/tex/tex_html_render.cpp",
+                            "lambda/tex/tex_font_adapter.cpp",
+                            "lambda/tex/tex_event.cpp",
+                            "lambda/tex/tex_align.cpp",
+                            "lambda/tex/tex_command_registry.cpp",
+                            "lambda/tex/tex_package_loader.cpp"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "\ud83d\uddbc"
+                    },
+                    {
                         "source": "test/test_latexml_compare_gtest.cpp",
                         "name": "LaTeXML Comparison Tests",
                         "dependencies": [

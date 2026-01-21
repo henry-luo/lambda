@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?latexml searchpaths="/Users/henryluo/Projects/Jubily,/Users/henryluo/Projects/Jubily/test/latex/fixtures/graphics"?>
+<?latexml class="article"?>
+<?latexml RelaxNGSchema="LaTeXML"?>
+<document xmlns="http://dlmf.nist.gov/LaTeXML">
+  <resource src="LaTeXML.css" type="text/css"/>
+  <resource src="ltx-article.css" type="text/css"/>
+  <section inlist="toc" xml:id="S1">
+    <tags>
+      <tag>1</tag>
+      <tag role="refnum">1</tag>
+      <tag role="typerefnum">§1</tag>
+    </tags>
+    <title><tag close=" ">1</tag>Framebox</title>
+    <para xml:id="S1.p1">
+      <picture fill="none" height="50.0pt" stroke="none" tex="\begin{picture}(150.0,50.0)\put(0.0,0.0){\framebox(60.0,40.0)[]{Box 1}}&#10;\put(80.0,0.0){\framebox(60.0,40.0)[]{Box 2}}&#10;\end{picture}" unitlength="1.0pt" width="150.0pt" xml:id="S1.p1.pic1">
+        <g innerdepth="0.0pt" innerheight="6.8pt" innerwidth="25.4pt" transform="translate(0,0)">
+          <rect fill="none" height="40.0pt" stroke="#000000" stroke-width="0.4" width="60.0pt" x="0" y="0"/>
+          <g class="makebox" innerdepth="0.0pt" innerheight="6.8pt" innerwidth="25.4pt" transform="translate(23.93,22.95)">
+            <text>Box 1</text>
+          </g>
+        </g>
+        <g innerdepth="0.0pt" innerheight="6.8pt" innerwidth="25.4pt" transform="translate(110.7,0)">
+          <rect fill="none" height="40.0pt" stroke="#000000" stroke-width="0.4" width="60.0pt" x="0" y="0"/>
+          <g class="makebox" innerdepth="0.0pt" innerheight="6.8pt" innerwidth="25.4pt" transform="translate(23.93,22.95)">
+            <text>Box 2</text>
+          </g>
+        </g>
+      </picture>
+    </para>
+  </section>
+  <section inlist="toc" xml:id="S2">
+    <tags>
+      <tag>2</tag>
+      <tag role="refnum">2</tag>
+      <tag role="typerefnum">§2</tag>
+    </tags>
+    <title><tag close=" ">2</tag>Makebox</title>
+    <para xml:id="S2.p1">
+      <picture fill="none" height="50.0pt" stroke="none" tex="\begin{picture}(150.0,50.0)\put(0.0,0.0){\makebox(60.0,40.0)[]{Left}}&#10;\put(80.0,0.0){\makebox(60.0,40.0)[r]{Right}}&#10;\end{picture}" unitlength="1.0pt" width="150.0pt" xml:id="S2.p1.pic1">
+        <g innerdepth="0.0pt" innerheight="6.9pt" innerwidth="17.6pt" transform="translate(0,0)">
+          <g class="makebox" innerdepth="0.0pt" innerheight="6.9pt" innerwidth="17.6pt" transform="translate(29.31,22.87)">
+            <text>Left</text>
+          </g>
+        </g>
+        <g innerdepth="1.9pt" innerheight="6.9pt" innerwidth="24.3pt" transform="translate(110.7,0)">
+          <g class="makebox" innerdepth="1.9pt" innerheight="6.9pt" innerwidth="24.3pt" transform="translate(49.39,21.52)">
+            <text>Right</text>
+          </g>
+        </g>
+      </picture>
+    </para>
+  </section>
+  <section inlist="toc" xml:id="S3">
+    <tags>
+      <tag>3</tag>
+      <tag role="refnum">3</tag>
+      <tag role="typerefnum">§3</tag>
+    </tags>
+    <title><tag close=" ">3</tag>Nested Boxes</title>
+    <para xml:id="S3.p1">
+      <picture fill="none" height="100.0pt" stroke="none" tex="\begin{picture}(100.0,100.0)\put(0.0,0.0){\framebox(100.0,100.0)[]{%&#10;\begin{picture}(80.0,80.0)\put(0.0,0.0){\framebox(80.0,80.0)[]{Inner}}&#10;\end{picture}}}&#10;\end{picture}" unitlength="1.0pt" width="100.0pt" xml:id="S3.p1.pic1">
+        <g innerdepth="0.0pt" innerheight="80.0pt" innerwidth="80.0pt" transform="translate(0,0)">
+          <rect fill="none" height="100.0pt" stroke="#000000" stroke-width="0.4" width="100.0pt" x="0" y="0"/>
+          <g class="makebox" innerdepth="0.0pt" innerheight="80.0pt" innerwidth="80.0pt" transform="translate(13.84,13.84)">
+            <picture fill="none" height="80.0pt" stroke="none" tex="\begin{picture}(80.0,80.0)\put(0.0,0.0){\framebox(80.0,80.0)[]{Inner}}&#10;\end{picture}" unitlength="1.0pt" width="80.0pt" xml:id="S3.p1.pic1.pic1">
+              <g innerdepth="0.0pt" innerheight="6.8pt" innerwidth="23.1pt" transform="translate(0,0)">
+                <rect fill="none" height="80.0pt" stroke="#000000" stroke-width="0.4" width="80.0pt" x="0" y="0"/>
+                <g class="makebox" innerdepth="0.0pt" innerheight="6.8pt" innerwidth="23.1pt" transform="translate(39.38,50.62)">
+                  <text>Inner</text>
+                </g>
+              </g>
+            </picture>
+          </g>
+<!--  %**** boxes˙only.tex Line 25 **** -->        </g>
+      </picture>
+    </para>
+  </section>
+</document>

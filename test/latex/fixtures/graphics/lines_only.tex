@@ -1,0 +1,33 @@
+\documentclass{article}
+\begin{document}
+
+\section{Horizontal and Vertical Lines}
+
+\begin{picture}(100,100)
+\put(0,0){\line(1,0){100}}
+\put(0,50){\line(1,0){100}}
+\put(0,100){\line(1,0){100}}
+\put(0,0){\line(0,1){100}}
+\put(50,0){\line(0,1){100}}
+\put(100,0){\line(0,1){100}}
+\end{picture}
+
+\section{Diagonal Lines}
+
+\begin{picture}(100,100)
+\put(0,0){\line(1,1){100}}
+\put(100,0){\line(-1,1){100}}
+\put(0,50){\line(1,0){100}}
+\end{picture}
+
+\section{Various Slopes}
+
+\begin{picture}(120,80)
+\put(0,0){\line(1,0){120}}
+\put(0,0){\line(2,1){100}}
+\put(0,0){\line(1,1){60}}
+\put(0,0){\line(1,2){30}}
+\put(0,0){\line(0,1){80}}
+\end{picture}
+
+\end{document}
