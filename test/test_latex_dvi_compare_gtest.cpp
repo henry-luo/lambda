@@ -555,6 +555,55 @@ TEST_F(DVICompareBaselineTest, LinearAlgebra2_Eigenvalues) {
 }
 
 // ============================================================================
+// Extended: TeX Primitives (Spacing, Glue, Rules, Boxes)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, TexPrimitives) {
+    EXPECT_TRUE(test_latex_file("test_tex_primitives"));
+}
+
+// Spacing primitives
+TEST_F(DVICompareExtendedTest, PrimSpacingHskip) {
+    EXPECT_TRUE(test_latex_file("test_prim_spacing_hskip"));
+}
+
+TEST_F(DVICompareExtendedTest, PrimSpacingGlue) {
+    EXPECT_TRUE(test_latex_file("test_prim_spacing_glue"));
+}
+
+// Rule primitives
+TEST_F(DVICompareExtendedTest, PrimRulesHruleVrule) {
+    EXPECT_TRUE(test_latex_file("test_prim_rules_hrule_vrule"));
+}
+
+// Penalty primitives
+TEST_F(DVICompareExtendedTest, PrimPenalties) {
+    EXPECT_TRUE(test_latex_file("test_prim_penalties"));
+}
+
+// Box primitives
+TEST_F(DVICompareExtendedTest, PrimBoxesHbox) {
+    EXPECT_TRUE(test_latex_file("test_prim_boxes_hbox"));
+}
+
+TEST_F(DVICompareExtendedTest, PrimBoxesVbox) {
+    EXPECT_TRUE(test_latex_file("test_prim_boxes_vbox"));
+}
+
+TEST_F(DVICompareExtendedTest, PrimBoxesLap) {
+    EXPECT_TRUE(test_latex_file("test_prim_boxes_lap"));
+}
+
+TEST_F(DVICompareExtendedTest, PrimBoxesShift) {
+    EXPECT_TRUE(test_latex_file("test_prim_boxes_shift"));
+}
+
+// Combined layout using multiple primitives
+TEST_F(DVICompareExtendedTest, PrimCombinedLayout) {
+    EXPECT_TRUE(test_latex_file("test_prim_combined_layout"));
+}
+
+// ============================================================================
 // Baseline: Self-Consistency Tests
 // ============================================================================
 

@@ -1,0 +1,32 @@
+% Test: \penalty, \break, \nobreak, \allowbreak primitives
+\documentclass{article}
+\begin{document}
+
+% nobreak - prevent line break
+word1\nobreak word2
+
+% allowbreak - allow break at specific point
+superlongcompoundword\allowbreak continuation
+
+% break - force line break
+First line\break Second line
+
+% penalty values
+% High penalty (discourage break)
+text\penalty 1000 more text
+
+% Low penalty (encourage break)
+text\penalty -100 more text
+
+% Infinite penalty (forbid break)
+never\penalty 10000 break here
+
+% Negative infinite penalty (force break)
+force\penalty -10000 break
+
+% Combining with spacing
+A\nobreak\hskip 5pt B
+
+C\allowbreak\hskip 10pt D
+
+\end{document}

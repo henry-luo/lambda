@@ -217,7 +217,7 @@
             "lang": "c17",
             "includes": [
                 "/opt/homebrew/include",
-                "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include"
+                "/Users/henryluo/Projects/Lambda/mac-deps/rpmalloc-install/include"
             ],
             "sources": [
                 "lib/mempool.c",
@@ -1000,8 +1000,8 @@
                 {
                     "name": "rpmalloc",
                     "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
-                    "include": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
-                    "lib": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+                    "include": "/Users/henryluo/Projects/Lambda/mac-deps/rpmalloc-install/include",
+                    "lib": "/Users/henryluo/Projects/Lambda/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
                     "link": "static"
                 }
             ]

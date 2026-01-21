@@ -1,0 +1,34 @@
+% Test: Infinite glue primitives \hfil, \hfill, \hss, \vfil, \vfill, \vss
+\documentclass{article}
+\begin{document}
+
+% Horizontal infinite glue
+\hbox to 4in{Left\hfil Right}
+
+\hbox to 4in{Left\hfill Right}
+
+\hbox to 4in{Left\hfil Middle\hfil Right}
+
+\hbox to 4in{A\hfil B\hfill C}
+
+% hss - stretch and shrink
+\hbox to 2in{Text\hss}
+
+% Vertical glue in vbox
+\vbox to 1in{Top\vfil Bottom}
+
+\vbox to 1in{Top\vfill Bottom}
+
+\vbox to 1in{Top\vfil Middle\vfil Bottom}
+
+% vss
+\vbox to 0.5in{Content\vss}
+
+% vskip with glue
+Text above
+
+\vskip 12pt plus 2pt minus 1pt
+
+Text below
+
+\end{document}
