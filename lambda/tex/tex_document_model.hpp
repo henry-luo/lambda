@@ -64,6 +64,7 @@ enum class DocElemType : uint8_t {
     BLOCKQUOTE,         // quote/quotation environment
     CODE_BLOCK,         // verbatim environment
     ALIGNMENT,          // center/flushleft/flushright environment
+    GRAPHICS,           // picture/tikzpicture environment (outputs SVG)
     
     // Math elements (always typeset via TexNode)
     MATH_INLINE,        // $...$
@@ -311,6 +312,14 @@ struct DocElement {
             const char* raw_content;
             size_t raw_len;
         } raw;
+        
+        // For GRAPHICS (picture, tikzpicture)
+        struct {
+            struct GraphicsElement* root;  // Graphics IR root
+            const char* svg_cache;         // Pre-rendered SVG (optional)
+            float width;                   // Explicit width (0 = auto)
+            float height;                  // Explicit height (0 = auto)
+        } graphics;
     };
     
     // Children (for container types)

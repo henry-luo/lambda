@@ -173,7 +173,8 @@
       "description": "Picture drawing environment",
       "begin": "<picture size=\"#1\" offset=\"#2\">",
       "end": "</picture>",
-      "params": "()[]"
+      "params": "()[]",
+      "callback": "graphics_build_picture"
     }
   },
   
