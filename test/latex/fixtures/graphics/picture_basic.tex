@@ -1,0 +1,140 @@
+\documentclass{article}
+\usepackage{amsmath}
+\begin{document}
+
+\section{Basic}
+Math: $a=b$
+\begin{picture}(100,100)
+\put(0,0){\line(1,0){100}}
+\end{picture}
+
+\section{Pictures}
+\subsection{Lines:}
+\begin{picture}(100,100)
+\put(0,0){\line(1,0){100}}
+\put(0,0){\line(1,1){50}}
+\put(0,0){\line(0,1){100}}
+\end{picture}
+
+\subsection{Vectors:}
+\begin{picture}(100,100)(-100,-100)
+\put(0,0){\vector(-1, 0){100}}
+\put(0,0){\vector(-1,-1){100}}
+\put(0,0){\vector( 0,-1){100}}
+\end{picture}
+
+\subsection{Boxes:}
+\begin{picture}(100,100)
+\put(0,0){\bf A}
+\put(15,15){\framebox(15,15){A}}
+\put(30,30){\framebox(15,15){\bf A}}
+\put(45,45){\framebox(15,15){A}}
+\end{picture}
+
+\begin{picture}(100,40)
+  \put(0,0){\makebox(10,10){x}}
+  \put(20,0){\framebox(10,10){x}}
+  \put(40,0){\dashbox{2}(10,10){x}}
+  \put(60,0){\frame{x}}
+\end{picture}
+
+\subsection{Circles:}
+\begin{picture}(100,100)
+\put(20,20){\circle{30}\vector(0,1){15}\circle*{5}}
+\put(70,70){\oval(60,30)}
+\put(70,20){\oval(45,30)}
+\end{picture}
+
+\subsection{Curves:}
+\begin{picture}(100,100)
+\qbezier(40,80)(80,120)(100,80)
+\qbezier[50](40,89)(80,129)(100,89)
+\end{picture}
+
+\subsection{Repeats:}
+\begin{picture}(100,100)
+\multiput(0,0)(10,10){11}{a}
+\end{picture}
+
+\subsection{Circles in Boxes:}
+\begin{picture}(100,100)
+\put(10,10){\circle{5}}
+\put(20,20){\framebox(10,10){\circle{5}}}
+\put(30,30){\framebox(10,10)[l]{\circle{5}}}
+\put(40,40){\framebox(10,10)[r]{\circle{5}}}
+\put(50,50){\framebox(10,10)[t]{\circle{5}}}
+\put(60,60){\framebox(10,10)[b]{\circle{5}}}
+\end{picture}
+
+\subsection{User Example:}
+\begin{picture}(100,100)(-30,0)\thicklines
+	\put(11,11){\vector(1,1){33}}
+	\put(44,44){\line(1,1){23.5}}
+	\put(75.5,71){\vector(1,0){24.5}}
+	\put(100,71){\line(1,0){20}}
+	\put(0,0){O}
+	\put(33,43){$\vec{r}$}
+	\put(93,78){$\vec{p}$}
+	\put(71,71){\circle{10}}
+	\put(11,11){\circle*{3}}
+	\put(66.5,68){$\times$}
+	\put(58,75){$\vec{L}$}
+\end{picture}
+
+\subsection{Grid with Box Positioning:}
+\begin{picture}(120,120)
+  \put(  0,  0){\line(1,0){120}}
+  \put(  0, 20){\line(1,0){120}}
+  \put(  0, 40){\line(1,0){120}}
+  \put(  0, 60){\line(1,0){120}}
+  \put(  0, 80){\line(1,0){120}}
+  \put(  0,100){\line(1,0){120}}
+  \put(  0,120){\line(1,0){120}}
+  \put(  0,  0){\line(0,1){120}}
+  \put( 20,  0){\line(0,1){120}}
+  \put( 40,  0){\line(0,1){120}}
+  \put( 60,  0){\line(0,1){120}}
+  \put( 80,  0){\line(0,1){120}}
+  \put(100,  0){\line(0,1){120}}
+  \put(120,  0){\line(0,1){120}}
+  \put(  0, 20){Xg}
+  \put( 60, 20){$Xg$}
+  \put( 40, 20){\makebox(0,0){Xg}}
+  \put(100, 20){\makebox(0,0){$Xg$}}
+  \put(  0, 60){\makebox(20,20)[tl]{Xg}}
+  \put( 20, 60){\makebox(20,20)[t]{Xg}}
+  \put( 40, 60){\makebox(20,20)[tr]{Xg}}
+  \put(  0, 80){\makebox(20,20)[l]{Xg}}
+  \put( 20, 80){\makebox(20,20)[]{Xg}}
+  \put( 40, 80){\makebox(20,20)[r]{Xg}}
+  \put(  0,100){\makebox(20,20)[bl]{Xg}}
+  \put( 20,100){\makebox(20,20)[b]{Xg}}
+  \put( 40,100){\makebox(20,20)[br]{Xg}}
+\end{picture}
+
+\section{DLMF Example}
+\begin{figure}[h]
+  \setlength{\unitlength}{0.035in}
+  \centering
+  \begin{picture}(152,38)(-1,-1)
+    \put(0,31){\makebox(2,6){\small 1}}
+    \put(0,26){\framebox(2,6){$s$}}
+    \put(3,31){\makebox(8,6){\small 8}}
+    \put(3,26){\framebox(8,6){$E$}}
+    \put(12,31){\makebox(23,6){\small 23 bits}}
+    \put(12,26){\framebox(23,6){$f$}}
+    \put(133,31){$N=32$,}
+    \put(135,27){$p=24$}
+    \put(0,18){\makebox(2,6){\small 1}}
+    \put(0,13){\framebox(2,6){$s$}}
+    \put(3,18){\makebox(11,6){\small 11}}
+    \put(3,13){\framebox(11,6){$E$}}
+    \put(15,18){\makebox(52,6){\small 52 bits}}
+    \put(15,13){\framebox(52,6){$f$}}
+    \put(133,17){$N=64$,}
+    \put(135,13){$p=53$}
+  \end{picture}
+\caption{Binary floating-point format representation.}
+\end{figure}
+
+\end{document}
