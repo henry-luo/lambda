@@ -47,6 +47,8 @@ const char* doc_elem_type_name(DocElemType type) {
     case DocElemType::FIGURE:       return "FIGURE";
     case DocElemType::BLOCKQUOTE:   return "BLOCKQUOTE";
     case DocElemType::CODE_BLOCK:   return "CODE_BLOCK";
+    case DocElemType::ALIGNMENT:    return "ALIGNMENT";
+    case DocElemType::GRAPHICS:     return "GRAPHICS";
     case DocElemType::MATH_INLINE:  return "MATH_INLINE";
     case DocElemType::MATH_DISPLAY: return "MATH_DISPLAY";
     case DocElemType::MATH_EQUATION: return "MATH_EQUATION";
