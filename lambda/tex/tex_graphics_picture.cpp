@@ -323,7 +323,78 @@ static void process_picture_children(PictureState* state, const ElementReader& e
             }
         }
         else if (strcmp(tag, "multiput") == 0) {
-            picture_cmd_multiput(state, child_elem);
+            // \multiput(x,y)(dx,dy){n}{content} - next siblings contain coordinates, count, content
+            float x = 0, y = 0;
+            float dx = 0, dy = 0;
+            int n = 1;
+            int coord_index = 0;
+            
+            // Peek next items for coordinates, count, and content
+            ItemReader next_item;
+            while (iter.next(&next_item)) {
+                if (next_item.isString()) {
+                    const char* text = next_item.cstring();
+                    if (text && text[0] == '(') {
+                        // Coordinate pair - could be "(x,y)" or "(x,y)(dx,dy)"
+                        if (coord_index == 0) {
+                            parse_coord_pair(text, &x, &y);
+                            coord_index++;
+                            // Check for second coordinate in same string "(0,0)(1,0)"
+                            const char* p = text;
+                            while (*p && *p != ')') p++;
+                            if (*p == ')') p++;
+                            while (*p == ' ' || *p == '\t') p++;
+                            if (*p == '(') {
+                                parse_coord_pair(p, &dx, &dy);
+                                coord_index++;
+                            }
+                        } else if (coord_index == 1) {
+                            parse_coord_pair(text, &dx, &dy);
+                            coord_index++;
+                        }
+                    }
+                } else if (next_item.isElement()) {
+                    ElementReader elem_reader = next_item.asElement();
+                    const char* elem_tag = elem_reader.tagName();
+                    if (elem_tag && strcmp(elem_tag, "curly_group") == 0) {
+                        // First curly group is the count, second is the content
+                        if (n == 1) {
+                            // Try to parse as count
+                            const char* inner_text = extract_first_text(elem_reader);
+                            if (inner_text) {
+                                int val = atoi(inner_text);
+                                if (val > 0) {
+                                    n = val;
+                                    continue;
+                                }
+                            }
+                        }
+                        // This is the content - process it
+                        if (n > 1000) n = 1000;
+                        if (n < 1) n = 1;
+                        
+                        log_debug("picture_cmd_multiput: start=(%.1f,%.1f) delta=(%.1f,%.1f) n=%d", x, y, dx, dy, n);
+                        
+                        // Generate n copies with translation
+                        for (int i = 0; i < n; i++) {
+                            float curr_x = (x + i * dx) * state->unitlength;
+                            float curr_y = (y + i * dy) * state->unitlength;
+                            
+                            Transform2D trans = Transform2D::translate(curr_x, curr_y);
+                            GraphicsElement* group = graphics_group(state->arena, &trans);
+                            
+                            // Process content
+                            GraphicsElement* content = process_put_content(state, elem_reader);
+                            if (content) {
+                                graphics_append_child(group, content);
+                            }
+                            
+                            graphics_append_child(state->current_group, group);
+                        }
+                        break;
+                    }
+                }
+            }
         }
         else if (strcmp(tag, "line") == 0) {
             // \line(dx,dy){length} - next siblings are slope and length
@@ -411,8 +482,131 @@ static void process_picture_children(PictureState* state, const ElementReader& e
             if (gfx) graphics_append_child(state->current_group, gfx);
         }
         else if (strcmp(tag, "oval") == 0) {
-            GraphicsElement* gfx = picture_cmd_oval(state, child_elem);
-            if (gfx) graphics_append_child(state->current_group, gfx);
+            // \oval(width,height)[portion] - next siblings contain size and optional portion
+            float width = 10.0f;
+            float height = 6.0f;
+            const char* portion = nullptr;
+            char portion_buf[16] = {0};
+            
+            // Consume following siblings for dimensions and portion
+            ItemReader next_item;
+            while (iter.next(&next_item)) {
+                if (next_item.isString()) {
+                    const char* text = next_item.cstring();
+                    if (text && text[0] == '(') {
+                        // Parse size coordinates
+                        parse_coord_pair(text, &width, &height);
+                    } else if (text && text[0] == '[') {
+                        // Parse portion specifier [tl], [b], [r], etc.
+                        const char* p = text + 1;  // Skip '['
+                        size_t i = 0;
+                        while (*p && *p != ']' && i < sizeof(portion_buf) - 1) {
+                            portion_buf[i++] = *p++;
+                        }
+                        portion_buf[i] = '\0';
+                        portion = portion_buf;
+                        break;  // Portion is the last argument
+                    } else {
+                        // If we hit something else, we're done
+                        break;
+                    }
+                } else if (next_item.isElement()) {
+                    ElementReader elem_reader = next_item.asElement();
+                    const char* elem_tag = elem_reader.tagName();
+                    if (elem_tag && strcmp(elem_tag, "brack_group") == 0) {
+                        // Optional portion in brack_group
+                        const char* inner = extract_first_text(elem_reader);
+                        if (inner) {
+                            strncpy(portion_buf, inner, sizeof(portion_buf) - 1);
+                            portion = portion_buf;
+                        }
+                        break;
+                    }
+                    // Hit another element, we're done with oval args
+                    break;
+                }
+            }
+            
+            // Convert to pt
+            float w = width * state->unitlength;
+            float h = height * state->unitlength;
+            
+            GraphicsElement* result = nullptr;
+            
+            if (!portion || strlen(portion) == 0) {
+                // Full oval
+                float corner_radius = (w < h ? w : h) / 2.0f;
+                result = graphics_rect(state->arena, -w/2, -h/2, w, h, corner_radius, corner_radius);
+                result->style.stroke_color = state->stroke_color;
+                result->style.stroke_width = state->line_thickness;
+                result->style.fill_color = "none";
+            } else {
+                // Partial oval - draw using path with bezier curves
+                float rx = w / 2.0f;
+                float ry = h / 2.0f;
+                float kx = rx * 0.5523f;
+                float ky = ry * 0.5523f;
+                
+                StrBuf* path = strbuf_new();
+                bool draw_top = false, draw_bottom = false, draw_left = false, draw_right = false;
+                
+                for (const char* p = portion; *p; p++) {
+                    if (*p == 't') draw_top = true;
+                    if (*p == 'b') draw_bottom = true;
+                    if (*p == 'l') draw_left = true;
+                    if (*p == 'r') draw_right = true;
+                }
+                
+                // Build path for the specified portions
+                bool started = false;
+                
+                if (draw_top && draw_right) {
+                    strbuf_append_format(path, "M %.4f 0 C %.4f %.4f %.4f %.4f 0 %.4f ", rx, rx, ky, kx, ry, ry);
+                    started = true;
+                }
+                if (draw_top && draw_left) {
+                    if (!started) { strbuf_append_format(path, "M 0 %.4f ", ry); started = true; }
+                    strbuf_append_format(path, "C %.4f %.4f %.4f %.4f %.4f 0 ", -kx, ry, -rx, ky, -rx);
+                }
+                if (draw_bottom && draw_left) {
+                    if (!started) { strbuf_append_format(path, "M %.4f 0 ", -rx); started = true; }
+                    strbuf_append_format(path, "C %.4f %.4f %.4f %.4f 0 %.4f ", -rx, -ky, -kx, -ry, -ry);
+                }
+                if (draw_bottom && draw_right) {
+                    if (!started) { strbuf_append_format(path, "M 0 %.4f ", -ry); started = true; }
+                    strbuf_append_format(path, "C %.4f %.4f %.4f %.4f %.4f 0 ", kx, -ry, rx, -ky, rx);
+                }
+                // Handle single-edge portions
+                if (draw_top && !draw_left && !draw_right) {
+                    strbuf_append_format(path, "M %.4f 0 C %.4f %.4f %.4f %.4f 0 %.4f C %.4f %.4f %.4f %.4f %.4f 0 ",
+                                        rx, rx, ky, kx, ry, ry, -kx, ry, -rx, ky, -rx);
+                }
+                if (draw_bottom && !draw_left && !draw_right) {
+                    strbuf_append_format(path, "M %.4f 0 C %.4f %.4f %.4f %.4f 0 %.4f C %.4f %.4f %.4f %.4f %.4f 0 ",
+                                        -rx, -rx, -ky, -kx, -ry, -ry, kx, -ry, rx, -ky, rx);
+                }
+                if (draw_left && !draw_top && !draw_bottom) {
+                    strbuf_append_format(path, "M 0 %.4f C %.4f %.4f %.4f %.4f %.4f 0 C %.4f %.4f %.4f %.4f 0 %.4f ",
+                                        ry, -kx, ry, -rx, ky, -rx, -rx, -ky, -kx, -ry, -ry);
+                }
+                if (draw_right && !draw_top && !draw_bottom) {
+                    strbuf_append_format(path, "M 0 %.4f C %.4f %.4f %.4f %.4f %.4f 0 C %.4f %.4f %.4f %.4f 0 %.4f ",
+                                        -ry, kx, -ry, rx, -ky, rx, rx, ky, kx, ry, ry);
+                }
+                
+                char* path_str = (char*)arena_alloc(state->arena, path->length + 1);
+                memcpy(path_str, path->str, path->length);
+                path_str[path->length] = '\0';
+                strbuf_free(path);
+                
+                result = graphics_path(state->arena, path_str);
+                result->style.stroke_color = state->stroke_color;
+                result->style.stroke_width = state->line_thickness;
+                result->style.fill_color = "none";
+            }
+            
+            log_debug("picture: oval size=%.1fx%.1f portion=%s", width, height, portion ? portion : "full");
+            if (result) graphics_append_child(state->current_group, result);
         }
         else if (strcmp(tag, "qbezier") == 0) {
             GraphicsElement* gfx = picture_cmd_qbezier(state, child_elem);
@@ -441,10 +635,41 @@ static void process_picture_children(PictureState* state, const ElementReader& e
             state->line_thickness = state->thick_line;
         }
         else if (strcmp(tag, "linethickness") == 0) {
-            // \linethickness{dim}
-            const char* dim = child_elem.get_attr_string("dim");
-            if (dim) {
-                state->line_thickness = parse_picture_dimension(dim, state->unitlength);
+            // \linethickness{dim} - dimension is a child of the element
+            // First try children of the linethickness element
+            auto lt_iter = child_elem.children();
+            ItemReader lt_child;
+            bool found = false;
+            while (lt_iter.next(&lt_child)) {
+                if (lt_child.isString()) {
+                    const char* dim_text = lt_child.cstring();
+                    if (dim_text && dim_text[0] != '\0') {
+                        state->line_thickness = parse_picture_dimension(dim_text, state->unitlength);
+                        log_debug("picture: linethickness set to %.3f from child", state->line_thickness);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            // Fallback: check following siblings for curly_group
+            if (!found) {
+                ItemReader next_item;
+                while (iter.next(&next_item)) {
+                    if (next_item.isElement()) {
+                        ElementReader dim_elem = next_item.asElement();
+                        const char* dim_tag = dim_elem.tagName();
+                        if (dim_tag && strcmp(dim_tag, "curly_group") == 0) {
+                            const char* dim_text = extract_first_text(dim_elem);
+                            if (dim_text) {
+                                state->line_thickness = parse_picture_dimension(dim_text, state->unitlength);
+                                log_debug("picture: linethickness set to %.3f from sibling", state->line_thickness);
+                            }
+                            break;
+                        }
+                    } else if (next_item.isString()) {
+                        continue;  // Skip whitespace
+                    }
+                }
             }
         }
         else if (strcmp(tag, "curly_group") == 0) {

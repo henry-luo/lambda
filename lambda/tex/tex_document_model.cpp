@@ -101,6 +101,11 @@ void trim_paragraph_whitespace_ex(DocElement* para, Arena* arena, bool preserve_
 DocElement* build_inline_content(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
 const char* render_brack_group_to_html(const ItemReader& item, Arena* arena, TexDocumentModel* doc);
 
+// Forward declarations for picture command handling helpers
+static bool is_picture_command_tag(const char* tag);
+static bool looks_like_picture_coordinate(const char* text);
+static bool paragraph_contains_picture_commands(const ElementReader& elem);
+
 // ============================================================================
 // Document Model Methods
 // ============================================================================
@@ -1490,6 +1495,11 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (item.isString()) {
         const char* text = item.cstring();
         if (text && strlen(text) > 0) {
+            // Skip coordinate-like strings that escaped from picture environments
+            // These look like "(x,y)" or "(x,y)(dx,dy)" patterns
+            if (looks_like_picture_coordinate(text)) {
+                return nullptr;
+            }
             return doc_create_text_normalized(arena, text, DocTextStyle::plain());
         }
         return nullptr;
@@ -2300,6 +2310,12 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
         return build_doc_element(item, arena, doc);
     }
     
+    // Picture commands should not produce text output - they are processed by graphics_build_picture
+    // Return nullptr so coordinate strings and command content don't become visible text
+    if (is_picture_command_tag(tag)) {
+        return nullptr;
+    }
+    
     // Check command registry for CONSTRUCTOR patterns (new package system)
     if (doc->registry) {
         const CommandDef* def = doc->registry->lookup(tag);
@@ -2405,9 +2421,24 @@ static DocElement* build_paragraph(const ElementReader& elem, Arena* arena,
                                     TexDocumentModel* doc) {
     DocElement* para = doc_alloc_element(arena, DocElemType::PARAGRAPH);
     
+    // Check if this paragraph contains picture commands (broken picture environment parsing)
+    // If so, we'll filter out coordinate-like text strings
+    bool is_picture_context = paragraph_contains_picture_commands(elem);
+    if (is_picture_context) {
+        log_debug("build_paragraph: detected picture context, filtering coordinates");
+    }
+    
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
+        // If we're in a picture context, skip coordinate-like text strings
+        if (is_picture_context && child.isString()) {
+            const char* text = child.cstring();
+            if (text && looks_like_picture_coordinate(text)) {
+                continue;  // Skip coordinate text
+            }
+        }
+        
         // Check if this is a diacritic command element
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
@@ -2513,6 +2544,92 @@ bool is_document_block_tag(const char* tag) {
     }
     // Other block-level
     return is_block_element_tag(tag);
+}
+
+// Helper to check if a tag is a picture environment command (put, line, circle, etc.)
+// These should not produce text output when encountered inside paragraphs
+// The picture environment is processed separately by graphics_build_picture
+static bool is_picture_command_tag(const char* tag) {
+    if (!tag) return false;
+    // Core picture commands
+    if (tag_eq(tag, "put") || tag_eq(tag, "multiput") ||
+        tag_eq(tag, "line") || tag_eq(tag, "vector") ||
+        tag_eq(tag, "circle") || tag_eq(tag, "circle*") ||
+        tag_eq(tag, "oval") || tag_eq(tag, "qbezier") ||
+        tag_eq(tag, "framebox") || tag_eq(tag, "makebox") ||
+        tag_eq(tag, "dashbox") || tag_eq(tag, "frame")) {
+        return true;
+    }
+    // Style commands used in picture environments
+    if (tag_eq(tag, "thinlines") || tag_eq(tag, "thicklines") ||
+        tag_eq(tag, "linethickness")) {
+        return true;
+    }
+    // Also include begin/end commands for picture
+    if (tag_eq(tag, "begin") || tag_eq(tag, "end")) {
+        return true;
+    }
+    return false;
+}
+
+// Helper to check if a string looks like a picture coordinate: (x,y) or (x,y)(x2,y2)
+// Also handles mixed content like "(20,30)1" by checking if the string starts with coordinates
+static bool looks_like_picture_coordinate(const char* text) {
+    if (!text) return false;
+    // Skip leading whitespace and Unicode space characters
+    while (*text == ' ' || *text == '\t' || *text == '\n' || 
+           (unsigned char)*text == 0xE2) {
+        // Check for ZWSP (E2 80 8B) or other Unicode spaces
+        if ((unsigned char)*text == 0xE2 && (unsigned char)text[1] == 0x80) {
+            text += 3;  // skip 3-byte UTF-8 sequence
+            continue;
+        }
+        text++;
+    }
+    // Must start with (
+    if (*text != '(') return false;
+    text++;
+    // Must contain comma-separated numbers with optional negatives and decimals
+    bool has_comma = false;
+    bool has_digits = false;
+    while (*text && *text != ')') {
+        if (*text == ',') has_comma = true;
+        else if ((*text >= '0' && *text <= '9') || *text == '-' || *text == '.') has_digits = true;
+        // Handle Unicode minus/hyphen (U+2010 = E2 80 90, U+2212 = E2 88 92)
+        else if ((unsigned char)*text == 0xE2) {
+            if ((unsigned char)text[1] == 0x80 && (unsigned char)text[2] == 0x90) {
+                text += 2;  // will be incremented by 1 more below
+            } else if ((unsigned char)text[1] == 0x88 && (unsigned char)text[2] == 0x92) {
+                text += 2;
+            }
+        }
+        else if (*text != ' ' && *text != '\t') return false;  // unexpected character
+        text++;
+    }
+    if (!has_comma || !has_digits || *text != ')') return false;
+    text++;
+    // Check for optional trailing content after coordinate pair - this is OK for partial matching
+    // Skip trailing whitespace and check for more coordinates or end of string
+    while (*text == ' ' || *text == '\t' || *text == '\n') text++;
+    // Accept if string ends, has another coordinate, or has trailing content (partial match)
+    // For coordinates in picture environments, any string starting with (x,y) is suspect
+    return true;
+}
+
+// Helper to check if a paragraph contains picture commands (indicating broken picture parsing)
+static bool paragraph_contains_picture_commands(const ElementReader& elem) {
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && is_picture_command_tag(tag)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // Helper function to trim leading/trailing whitespace from a string
@@ -2870,6 +2987,13 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
         if (child_item.isString()) {
             const char* text = child_item.cstring();
             if (text && text[0] != '\0') {
+                // Always filter coordinate-like text strings that escaped from broken picture parsing
+                // This is safer than trying to detect picture context, since parser errors can scatter
+                // coordinates anywhere in the document tree
+                if (looks_like_picture_coordinate(text)) {
+                    continue;  // Skip coordinate text
+                }
+                
                 // Strip leading whitespace if flag is set (after font declaration)
                 if (strip_next_leading_space) {
                     strip_next_leading_space = false;
@@ -2957,10 +3081,22 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
                         if (child_tag && tag_eq(child_tag, "paragraph")) {
                             // Check if this paragraph has parbreaks
                             if (contains_parbreak_markers(child_elem)) {
+                                // Check if this paragraph contains picture commands
+                                bool para_has_picture_cmds = paragraph_contains_picture_commands(child_elem);
+                                
                                 // Process the paragraph's children directly (same as build_body_content_with_paragraphs does)
                                 int64_t para_child_count = child_elem.childCount();
                                 for (int64_t k = 0; k < para_child_count; k++) {
                                     ItemReader para_child_item = child_elem.childAt(k);
+                                    
+                                    // Skip coordinate-like strings in picture context
+                                    if (para_has_picture_cmds && para_child_item.isString()) {
+                                        const char* text = para_child_item.cstring();
+                                        if (text && looks_like_picture_coordinate(text)) {
+                                            continue;
+                                        }
+                                    }
+                                    
                                     DocElement* para_child_elem = build_doc_element(para_child_item, arena, doc);
                                     
                                     if (!para_child_elem) continue;
@@ -3444,11 +3580,23 @@ static void build_body_content_with_paragraphs(DocElement* container, const Elem
             const char* para_tag = para_elem.tagName();
             if (para_tag && tag_eq(para_tag, "paragraph") && 
                 (contains_parbreak_markers(para_elem) || contains_block_elements(para_elem))) {
+                // Check if this paragraph contains picture commands
+                bool para_has_picture_cmds = paragraph_contains_picture_commands(para_elem);
+                
                 // Process the paragraph element's children as if they were direct children here
                 // This handles \par, parbreak markers, and block elements properly
                 int64_t para_child_count = para_elem.childCount();
                 for (int64_t j = 0; j < para_child_count; j++) {
                     ItemReader para_child = para_elem.childAt(j);
+                    
+                    // Skip coordinate-like strings in picture context
+                    if (para_has_picture_cmds && para_child.isString()) {
+                        const char* text = para_child.cstring();
+                        if (text && looks_like_picture_coordinate(text)) {
+                            continue;
+                        }
+                    }
+                    
                     DocElement* para_child_elem = build_doc_element(para_child, arena, doc);
                     
                     if (!para_child_elem) continue;
@@ -3926,6 +4074,11 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (item.isString()) {
         const char* text = item.cstring();
         if (text && strlen(text) > 0) {
+            // Skip coordinate-like strings that escaped from picture environments
+            // These look like "(x,y)" or "(x,y)(dx,dy)" patterns
+            if (looks_like_picture_coordinate(text)) {
+                return nullptr;
+            }
             // Create a text run for bare strings with normalized whitespace
             return doc_create_text_normalized(arena, text, DocTextStyle::plain());
         }

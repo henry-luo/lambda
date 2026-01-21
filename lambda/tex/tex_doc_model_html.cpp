@@ -835,7 +835,11 @@ static void render_graphics_html(DocElement* elem, StrBuf* out,
     }
     // Otherwise, convert GraphicsElement tree to SVG
     else if (elem->graphics.root) {
+#ifndef DOC_MODEL_NO_SVG
         graphics_to_inline_svg(elem->graphics.root, out);
+#else
+        strbuf_append_str(out, "<!-- SVG not available -->");
+#endif
     }
     else {
         // No graphics content - output placeholder
