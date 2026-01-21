@@ -1,0 +1,28 @@
+\documentclass{article}
+\begin{document}
+
+\section{Framebox}
+
+\begin{picture}(150,50)
+\put(0,0){\framebox(60,40){Box 1}}
+\put(80,0){\framebox(60,40){Box 2}}
+\end{picture}
+
+\section{Makebox}
+
+\begin{picture}(150,50)
+\put(0,0){\makebox(60,40){Left}}
+\put(80,0){\makebox(60,40)[r]{Right}}
+\end{picture}
+
+\section{Nested Boxes}
+
+\begin{picture}(100,100)
+\put(0,0){\framebox(100,100){%
+  \begin{picture}(80,80)
+  \put(0,0){\framebox(80,80){Inner}}
+  \end{picture}%
+}}
+\end{picture}
+
+\end{document}
