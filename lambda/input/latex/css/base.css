@@ -665,6 +665,108 @@ h4 + p, h4 + * p:first-child,
     margin-left: -0.16666667em;
 }
 
+/* ============================================================================
+   TeX Primitives: Infinite Glue
+   ============================================================================ */
+
+/* \hfil - horizontal infinite stretch (fil level) */
+.hfil {
+    display: inline-block;
+    flex: 1 0 0;
+    min-width: 0;
+}
+
+/* \hfill - horizontal infinite stretch (fill level, stronger) */
+.hfill {
+    display: inline-block;
+    flex: 2 0 0;
+    min-width: 0;
+}
+
+/* \hss - horizontal stretch and shrink (can have negative width) */
+.hss {
+    display: inline-block;
+    flex: 1 1 0;
+    min-width: -100%;
+}
+
+/* \vfil - vertical infinite stretch (fil level) */
+.vfil {
+    display: block;
+    flex: 1 0 0;
+    min-height: 0;
+}
+
+/* \vfill - vertical infinite stretch (fill level, stronger) */
+.vfill {
+    display: block;
+    flex: 2 0 0;
+    min-height: 0;
+}
+
+/* \vss - vertical stretch and shrink */
+.vss {
+    display: block;
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+/* ============================================================================
+   TeX Primitives: Boxes
+   ============================================================================ */
+
+/* \hbox - horizontal box (inline-flex for flex glue to work) */
+.hbox {
+    display: inline-flex;
+    flex-direction: row;
+    white-space: nowrap;
+    align-items: baseline;
+}
+
+/* \vbox - vertical box aligned at bottom baseline */
+.vbox {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-end;
+    vertical-align: baseline;
+}
+
+/* \vtop - vertical box aligned at top baseline */
+.vtop {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    vertical-align: baseline;
+}
+
+/* \rlap - right lap: zero-width box, content extends to the right */
+.rlap {
+    display: inline-block;
+    width: 0;
+    overflow: visible;
+    white-space: nowrap;
+}
+
+/* \llap - left lap: zero-width box, content extends to the left */
+.llap {
+    display: inline-block;
+    width: 0;
+    overflow: visible;
+    white-space: nowrap;
+    text-align: right;
+    direction: rtl;
+}
+.llap > * {
+    direction: ltr;
+}
+
+/* Penalty break marker */
+.penalty-break {
+    display: block;
+}
+
 
 /* vertical space - insert the actual space (negative or positive) with margin-bottom */
 .vspace {

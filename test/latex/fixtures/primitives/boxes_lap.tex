@@ -1,0 +1,35 @@
+% Test: \rlap and \llap zero-width box primitives
+\documentclass{article}
+\begin{document}
+
+% rlap - zero width, content extends right
+\rlap{XXXXX}YYYYY
+
+% llap - zero width, content extends left
+YYYYY\llap{XXXXX}
+
+% rlap for overlapping text
+\rlap{/}O
+
+% llap for left-extending content
+Number\llap{*}
+
+% Multiple rlaps
+\rlap{A}\rlap{B}C
+
+% rlap with spacing
+Text \rlap{over}under more
+
+% llap in equation-like context
+Result\llap{$=$}
+
+% Empty lap
+\rlap{}Text
+
+% rlap with longer content
+X\rlap{----}X
+
+% Combining rlap and llap
+\llap{<}center\rlap{>}
+
+\end{document}

@@ -1,0 +1,43 @@
+% Test: \raise, \lower, \moveleft, \moveright box shifting primitives
+\documentclass{article}
+\begin{document}
+
+% raise - move box up
+Base\raise 5pt\hbox{raised}base
+
+% lower - move box down
+Base\lower 5pt\hbox{lowered}base
+
+% Various raise amounts
+A\raise 2pt\hbox{2pt}B\raise 4pt\hbox{4pt}C\raise 6pt\hbox{6pt}D
+
+% Various lower amounts
+A\lower 2pt\hbox{2pt}B\lower 4pt\hbox{4pt}C\lower 6pt\hbox{6pt}D
+
+% Negative raise (same as lower)
+Text\raise -3pt\hbox{neg}text
+
+% Negative lower (same as raise)
+Text\lower -3pt\hbox{neg}text
+
+% moveleft in vertical mode
+\vbox{
+\hbox{Normal line}
+\moveleft 20pt\hbox{Moved left}
+\hbox{Normal line}
+}
+
+% moveright in vertical mode
+\vbox{
+\hbox{Normal line}
+\moveright 20pt\hbox{Moved right}
+\hbox{Normal line}
+}
+
+% Combining raise with other boxes
+\noindent Text with \raise 3pt\hbox{raised box}
+
+% Subscript/superscript simulation
+x\raise 5pt\hbox{\small 2}
+
+\end{document}
