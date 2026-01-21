@@ -370,22 +370,48 @@ void graphics_to_svg(const GraphicsElement* root, StrBuf* out) {
         return;
     }
     
-    // SVG header
+    // Calculate actual viewport dimensions
+    // In LaTeX picture environment, (width,height)(xoffset,yoffset)
+    // The offset positions the origin - negative offset extends the picture boundary
+    float viewport_width = root->canvas.width;
+    float viewport_height = root->canvas.height;
+    float shift_x = 0;
+    float shift_y = 0;
+    
+    // Extend viewport to include negative offset regions
+    if (root->canvas.origin_x < 0) {
+        viewport_width += -root->canvas.origin_x;
+        shift_x = -root->canvas.origin_x;
+    } else if (root->canvas.origin_x > 0) {
+        // Positive offset shifts content left within the viewport
+        shift_x = root->canvas.origin_x;
+    }
+    
+    if (root->canvas.origin_y < 0) {
+        viewport_height += -root->canvas.origin_y;
+        shift_y = -root->canvas.origin_y;
+    } else if (root->canvas.origin_y > 0) {
+        // Positive offset shifts content down within the viewport
+        shift_y = root->canvas.origin_y;
+    }
+    
+    // SVG header with adjusted viewport
     strbuf_append_format(out, "<svg xmlns=\"http://www.w3.org/2000/svg\" "
                        "version=\"1.1\" width=\"%.2f\" height=\"%.2f\" "
                        "overflow=\"visible\">\n",
-                  root->canvas.width, root->canvas.height);
+                  viewport_width, viewport_height);
     
     // Arrow definitions
     graphics_emit_arrow_defs(out);
     
     // Transform group for Y-axis flip (LaTeX uses bottom-up)
+    // Shift content into the extended viewport
     if (root->canvas.flip_y) {
         strbuf_append_format(out, "<g transform=\"translate(%.2f,%.2f) scale(1,-1)\">\n",
-                      root->canvas.origin_x, root->canvas.height + root->canvas.origin_y);
-    } else if (root->canvas.origin_x != 0 || root->canvas.origin_y != 0) {
+                      shift_x, viewport_height - shift_y);
+    } else if (shift_x != 0 || shift_y != 0) {
         strbuf_append_format(out, "<g transform=\"translate(%.2f,%.2f)\">\n",
-                      root->canvas.origin_x, root->canvas.origin_y);
+                      shift_x, shift_y);
     } else {
         strbuf_append_str(out, "<g>\n");
     }
