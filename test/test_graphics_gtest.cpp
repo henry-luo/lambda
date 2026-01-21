@@ -353,6 +353,130 @@ TEST_F(GraphicsTest, SVG_ArrowMarker) {
     EXPECT_NE(strstr(svg, "marker-end=\"url(#arrow)\""), nullptr);
 }
 
+// ============================================================================
+// Picture Command Element Tests
+// ============================================================================
+
+TEST_F(GraphicsTest, Alloc_Ellipse) {
+    // Test ellipse (used by \oval command)
+    GraphicsElement* ellipse = graphics_ellipse(arena, 50, 50, 30, 20);
+    
+    ASSERT_NE(ellipse, nullptr);
+    EXPECT_EQ(ellipse->type, GraphicsType::ELLIPSE);
+    EXPECT_FLOAT_EQ(ellipse->ellipse.center.x, 50);
+    EXPECT_FLOAT_EQ(ellipse->ellipse.center.y, 50);
+    EXPECT_FLOAT_EQ(ellipse->ellipse.rx, 30);
+    EXPECT_FLOAT_EQ(ellipse->ellipse.ry, 20);
+}
+
+TEST_F(GraphicsTest, Alloc_Polyline) {
+    // Test polyline with multiple points
+    Point2D points[4] = {
+        Point2D(0, 0),
+        Point2D(50, 100),
+        Point2D(100, 50),
+        Point2D(150, 0)
+    };
+    GraphicsElement* line = graphics_polyline(arena, points, 4);
+    
+    ASSERT_NE(line, nullptr);
+    EXPECT_EQ(line->type, GraphicsType::LINE);
+    EXPECT_EQ(line->line.point_count, 4);
+    ASSERT_NE(line->line.points, nullptr);
+    
+    EXPECT_FLOAT_EQ(line->line.points[2].x, 100);
+    EXPECT_FLOAT_EQ(line->line.points[2].y, 50);
+}
+
+TEST_F(GraphicsTest, Alloc_CubicBezierPath) {
+    // Test cubic bezier (used by \oval partial)
+    GraphicsElement* bezier = graphics_cbezier(arena, 
+                                                0, 0,    // start
+                                                30, 0,   // control 1
+                                                50, 30,  // control 2
+                                                50, 50); // end
+    
+    ASSERT_NE(bezier, nullptr);
+    EXPECT_EQ(bezier->type, GraphicsType::BEZIER);
+    EXPECT_FALSE(bezier->bezier.is_quadratic);  // Cubic bezier
+    EXPECT_FLOAT_EQ(bezier->bezier.p0.x, 0);
+    EXPECT_FLOAT_EQ(bezier->bezier.p0.y, 0);
+    EXPECT_FLOAT_EQ(bezier->bezier.p3.x, 50);
+    EXPECT_FLOAT_EQ(bezier->bezier.p3.y, 50);
+}
+
+TEST_F(GraphicsTest, SVG_Ellipse) {
+    GraphicsElement* canvas = graphics_canvas(arena, 100, 100, 0, 0, 1);
+    GraphicsElement* ellipse = graphics_ellipse(arena, 50, 50, 30, 20);
+    ellipse->style.stroke_color = "#000000";
+    ellipse->style.stroke_width = 1.0f;
+    ellipse->style.fill_color = "none";
+    graphics_append_child(canvas, ellipse);
+    
+    graphics_to_svg(canvas, output);
+    
+    const char* svg = output->str;
+    EXPECT_NE(strstr(svg, "<ellipse"), nullptr);
+    EXPECT_NE(strstr(svg, "rx=\"30"), nullptr);
+    EXPECT_NE(strstr(svg, "ry=\"20"), nullptr);
+}
+
+TEST_F(GraphicsTest, Canvas_EmbeddedSvgFlag) {
+    // Test the has_embedded_svg flag (used for TikZ/LaTeXML passthrough)
+    GraphicsElement* canvas = graphics_canvas(arena, 100, 100, 0, 0, 1);
+    
+    EXPECT_FALSE(canvas->canvas.has_embedded_svg);
+    EXPECT_EQ(canvas->canvas.raw_svg, nullptr);
+    
+    // Set the flag
+    canvas->canvas.has_embedded_svg = true;
+    canvas->canvas.raw_svg = "<g><circle cx=\"50\" cy=\"50\" r=\"25\"/></g>";
+    
+    EXPECT_TRUE(canvas->canvas.has_embedded_svg);
+    EXPECT_NE(canvas->canvas.raw_svg, nullptr);
+}
+
+TEST_F(GraphicsTest, Vector_WithArrow) {
+    // Test vector (line with arrow) - used by \vector command
+    GraphicsElement* canvas = graphics_canvas(arena, 100, 100, 0, 0, 1);
+    GraphicsElement* vector = graphics_line(arena, 0, 0, 100, 50);
+    vector->line.has_arrow = true;
+    vector->style.stroke_color = "#000000";
+    vector->style.stroke_width = 0.4f;
+    graphics_append_child(canvas, vector);
+    
+    graphics_to_svg(canvas, output);
+    
+    const char* svg = output->str;
+    // Should have arrow marker definition and usage
+    EXPECT_NE(strstr(svg, "marker-end=\"url(#arrow)\""), nullptr);
+}
+
+// ============================================================================
+// Transform Tests for Picture Commands
+// ============================================================================
+
+TEST_F(GraphicsTest, Group_WithTransform) {
+    // Test group with transform (used by \multiput)
+    GraphicsElement* canvas = graphics_canvas(arena, 200, 200, 0, 0, 1);
+    
+    // Create a transformed group
+    Transform2D t = Transform2D::translate(100, 100);
+    GraphicsElement* group = graphics_group(arena, &t);
+    
+    // Add a circle inside
+    GraphicsElement* circle = graphics_circle(arena, 0, 0, 10, true);
+    graphics_append_child(group, circle);
+    
+    graphics_append_child(canvas, group);
+    
+    graphics_to_svg(canvas, output);
+    
+    const char* svg = output->str;
+    EXPECT_NE(strstr(svg, "transform=\"matrix("), nullptr);
+    EXPECT_NE(strstr(svg, "<circle"), nullptr);
+}
+
 // NOTE: PGF Driver tests, Picture parsing tests, and PgfColor tests
 // require additional Lambda runtime dependencies and are tested
 // via integration tests in the full test suite.

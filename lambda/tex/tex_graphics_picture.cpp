@@ -520,10 +520,95 @@ void picture_cmd_put(PictureState* state, const ElementReader& elem) {
 }
 
 void picture_cmd_multiput(PictureState* state, const ElementReader& elem) {
-    // TODO: Implement when element traversal is integrated
-    (void)state;
-    (void)elem;
-    log_debug("picture_cmd_multiput: stub");
+    // \multiput(x,y)(dx,dy){n}{content}
+    // Places content n times starting at (x,y), each shifted by (dx,dy)
+    
+    float x = 0, y = 0;
+    float dx = 0, dy = 0;
+    int n = 1;
+    
+    // Parse positions and count from attributes
+    if (elem.has_attr("x")) {
+        x = (float)elem.get_int_attr("x", 0);
+    }
+    if (elem.has_attr("y")) {
+        y = (float)elem.get_int_attr("y", 0);
+    }
+    if (elem.has_attr("dx")) {
+        dx = (float)elem.get_int_attr("dx", 0);
+    }
+    if (elem.has_attr("dy")) {
+        dy = (float)elem.get_int_attr("dy", 0);
+    }
+    if (elem.has_attr("n")) {
+        n = elem.get_int_attr("n", 1);
+    }
+    
+    // Try to parse from children (positions might be text nodes)
+    auto iter = elem.children();
+    ItemReader child;
+    int coord_index = 0;
+    const ElementReader* content_elem = nullptr;
+    
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                // Coordinate pair
+                if (coord_index == 0) {
+                    parse_coord_pair(text, &x, &y);
+                    coord_index++;
+                } else if (coord_index == 1) {
+                    parse_coord_pair(text, &dx, &dy);
+                    coord_index++;
+                }
+            } else if (text) {
+                // Could be the count
+                int val = atoi(text);
+                if (val > 0) n = val;
+            }
+        } else if (child.isElement()) {
+            ElementReader el = child.asElement();
+            const char* tag = el.tagName();
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                // This is either the count or the content
+                const char* inner_text = extract_first_text(el);
+                if (inner_text) {
+                    int val = atoi(inner_text);
+                    if (val > 0 && content_elem == nullptr) {
+                        n = val;
+                    }
+                }
+                // Store as potential content
+                content_elem = &el;
+            }
+        }
+    }
+    
+    // Limit n to prevent runaway
+    if (n > 1000) n = 1000;
+    if (n < 1) n = 1;
+    
+    log_debug("picture_cmd_multiput: start=(%.1f,%.1f) delta=(%.1f,%.1f) n=%d", x, y, dx, dy, n);
+    
+    // Generate n copies with translation
+    for (int i = 0; i < n; i++) {
+        float curr_x = (x + i * dx) * state->unitlength;
+        float curr_y = (y + i * dy) * state->unitlength;
+        
+        Transform2D trans = Transform2D::translate(curr_x, curr_y);
+        GraphicsElement* group = graphics_group(state->arena, &trans);
+        
+        // Process content if we have it
+        if (content_elem) {
+            GraphicsElement* content = process_put_content(state, *content_elem);
+            if (content) {
+                graphics_append_child(group, content);
+            }
+        }
+        
+        graphics_append_child(state->current_group, group);
+    }
 }
 
 GraphicsElement* picture_cmd_line(PictureState* state, const ElementReader& elem) {
@@ -577,10 +662,12 @@ GraphicsElement* picture_cmd_line(PictureState* state, const ElementReader& elem
 }
 
 GraphicsElement* picture_cmd_vector(PictureState* state, const ElementReader& elem) {
-    // Vector is like line but with arrow
+    // Vector is like line but with arrow at the end
+    // Slopes are more restricted than \line: only -4..4
     GraphicsElement* line = picture_cmd_line(state, elem);
     if (line) {
         line->line.has_arrow = true;
+        log_debug("picture_cmd_vector: converted line to vector");
     }
     return line;
 }
@@ -619,74 +706,396 @@ GraphicsElement* picture_cmd_circle(PictureState* state, const ElementReader& el
 }
 
 GraphicsElement* picture_cmd_oval(PictureState* state, const ElementReader& elem) {
-    (void)elem;
+    // \oval(width,height)[portion]
+    // portion is optional: t, b, l, r, tl, tr, bl, br for partial ovals
     
-    // Oval as ellipse
-    float rx = 5.0f * state->unitlength;
-    float ry = 3.0f * state->unitlength;
+    float width = 10.0f;
+    float height = 6.0f;
+    const char* portion = nullptr;
     
-    GraphicsElement* ellipse = graphics_ellipse(state->arena, 0, 0, rx, ry);
-    ellipse->style.stroke_color = state->stroke_color;
-    ellipse->style.stroke_width = state->line_thickness;
+    // Parse width and height from attributes
+    if (elem.has_attr("width")) {
+        width = (float)elem.get_int_attr("width", 10);
+    }
+    if (elem.has_attr("height")) {
+        height = (float)elem.get_int_attr("height", 6);
+    }
     
-    return ellipse;
+    // Try to get size from text children (e.g., "(10,6)")
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                parse_coord_pair(text, &width, &height);
+            } else if (text && (text[0] == '[' || text[0] == 't' || text[0] == 'b' || text[0] == 'l' || text[0] == 'r')) {
+                // This is the portion specifier
+                portion = text;
+                if (portion[0] == '[') portion++;  // Skip bracket
+            }
+        }
+    }
+    
+    // Check for portion attribute
+    if (!portion && elem.has_attr("portion")) {
+        portion = elem.get_attr_string("portion");
+    }
+    
+    // Convert to pt
+    float rx = (width / 2.0f) * state->unitlength;
+    float ry = (height / 2.0f) * state->unitlength;
+    
+    GraphicsElement* result = nullptr;
+    
+    if (!portion || strlen(portion) == 0) {
+        // Full oval - use ellipse
+        result = graphics_ellipse(state->arena, 0, 0, rx, ry);
+        result->style.stroke_color = state->stroke_color;
+        result->style.stroke_width = state->line_thickness;
+        result->style.fill_color = "none";
+    } else {
+        // Partial oval - draw using path
+        // For simplicity, we approximate with quadratic beziers
+        StrBuf* path = strbuf_new();
+        
+        // Oval is centered at (0,0), going clockwise from right
+        // Top half: from right (+rx, 0) to left (-rx, 0) via top (0, +ry)
+        // Bottom half: from left (-rx, 0) to right (+rx, 0) via bottom (0, -ry)
+        
+        bool draw_top = false;
+        bool draw_bottom = false;
+        bool draw_left = false;
+        bool draw_right = false;
+        
+        // Parse portion string
+        for (const char* p = portion; *p; p++) {
+            if (*p == 't') draw_top = true;
+            if (*p == 'b') draw_bottom = true;
+            if (*p == 'l') draw_left = true;
+            if (*p == 'r') draw_right = true;
+        }
+        
+        // If only corners specified, infer the edges
+        if (!draw_top && !draw_bottom && !draw_left && !draw_right) {
+            // Default to full oval if no valid portion
+            draw_top = draw_bottom = draw_left = draw_right = true;
+        }
+        
+        // Build path for the specified portions
+        // Using cubic bezier approximation for quarter circles
+        // For circle: control point distance = radius * 0.5523
+        float kx = rx * 0.5523f;
+        float ky = ry * 0.5523f;
+        
+        bool started = false;
+        
+        // Top-right quarter (from right to top)
+        if ((draw_top && draw_right) || (draw_top || draw_right)) {
+            if (!started) {
+                strbuf_append_format(path, "M %.4f 0 ", rx);
+                started = true;
+            }
+            strbuf_append_format(path, "C %.4f %.4f %.4f %.4f 0 %.4f ", rx, ky, kx, ry, ry);
+        }
+        
+        // Top-left quarter (from top to left)
+        if ((draw_top && draw_left) || (draw_top || draw_left)) {
+            if (!started) {
+                strbuf_append_format(path, "M 0 %.4f ", ry);
+                started = true;
+            }
+            strbuf_append_format(path, "C %.4f %.4f %.4f %.4f %.4f 0 ", -kx, ry, -rx, ky, -rx);
+        }
+        
+        // Bottom-left quarter (from left to bottom)
+        if ((draw_bottom && draw_left) || (draw_bottom || draw_left)) {
+            if (!started) {
+                strbuf_append_format(path, "M %.4f 0 ", -rx);
+                started = true;
+            }
+            strbuf_append_format(path, "C %.4f %.4f %.4f %.4f 0 %.4f ", -rx, -ky, -kx, -ry, -ry);
+        }
+        
+        // Bottom-right quarter (from bottom to right)
+        if ((draw_bottom && draw_right) || (draw_bottom || draw_right)) {
+            if (!started) {
+                strbuf_append_format(path, "M 0 %.4f ", -ry);
+                started = true;
+            }
+            strbuf_append_format(path, "C %.4f %.4f %.4f %.4f %.4f 0 ", kx, -ry, rx, -ky, rx);
+        }
+        
+        // Copy path to arena
+        char* path_str = (char*)arena_alloc(state->arena, path->length + 1);
+        memcpy(path_str, path->str, path->length);
+        path_str[path->length] = '\0';
+        strbuf_free(path);
+        
+        result = graphics_path(state->arena, path_str);
+        result->style.stroke_color = state->stroke_color;
+        result->style.stroke_width = state->line_thickness;
+        result->style.fill_color = "none";
+    }
+    
+    log_debug("picture_cmd_oval: size=%.1fx%.1f portion=%s", width, height, portion ? portion : "full");
+    
+    return result;
 }
 
 GraphicsElement* picture_cmd_qbezier(PictureState* state, const ElementReader& elem) {
-    (void)elem;
+    // \qbezier[n](x0,y0)(x1,y1)(x2,y2)
+    // n is optional: number of points for approximation (ignored in SVG, which has native bezier)
+    // (x0,y0) start point
+    // (x1,y1) control point
+    // (x2,y2) end point
     
-    // Create a simple quadratic bezier as placeholder
     float x0 = 0, y0 = 0;
-    float x1 = 5, y1 = 10;
+    float x1 = 5, y1 = 10;  // Default control point
     float x2 = 10, y2 = 0;
     
+    // Parse from attributes
+    if (elem.has_attr("x0")) {
+        x0 = (float)elem.get_int_attr("x0", 0);
+        y0 = (float)elem.get_int_attr("y0", 0);
+    }
+    if (elem.has_attr("x1")) {
+        x1 = (float)elem.get_int_attr("x1", 5);
+        y1 = (float)elem.get_int_attr("y1", 10);
+    }
+    if (elem.has_attr("x2")) {
+        x2 = (float)elem.get_int_attr("x2", 10);
+        y2 = (float)elem.get_int_attr("y2", 0);
+    }
+    
+    // Try to parse from text children
+    auto iter = elem.children();
+    ItemReader child;
+    int point_index = 0;
+    
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                float px, py;
+                if (parse_coord_pair(text, &px, &py)) {
+                    switch (point_index) {
+                        case 0: x0 = px; y0 = py; break;
+                        case 1: x1 = px; y1 = py; break;
+                        case 2: x2 = px; y2 = py; break;
+                    }
+                    point_index++;
+                }
+            } else if (text && text[0] == '[') {
+                // This is the optional [n] parameter - we ignore it
+            }
+        }
+    }
+    
+    // Convert to pt
     GraphicsElement* bezier = graphics_qbezier(state->arena,
         x0 * state->unitlength, y0 * state->unitlength,
         x1 * state->unitlength, y1 * state->unitlength,
         x2 * state->unitlength, y2 * state->unitlength);
     bezier->style.stroke_color = state->stroke_color;
     bezier->style.stroke_width = state->line_thickness;
+    bezier->style.fill_color = "none";
+    
+    log_debug("picture_cmd_qbezier: (%.1f,%.1f)-(%.1f,%.1f)-(%.1f,%.1f)", x0, y0, x1, y1, x2, y2);
     
     return bezier;
 }
 
 GraphicsElement* picture_cmd_framebox(PictureState* state, const ElementReader& elem) {
-    (void)elem;
+    // \framebox(width,height)[position]{content}
+    // Draws a rectangular frame with optional text content
     
-    float width = 20.0f * state->unitlength;
-    float height = 10.0f * state->unitlength;
+    float width = 20.0f;
+    float height = 10.0f;
+    const char* position = "c";  // Default center
     
-    GraphicsElement* rect = graphics_rect(state->arena, 0, 0, width, height, 0, 0);
+    // Parse dimensions from attributes
+    if (elem.has_attr("width")) {
+        width = (float)elem.get_int_attr("width", 20);
+    }
+    if (elem.has_attr("height")) {
+        height = (float)elem.get_int_attr("height", 10);
+    }
+    if (elem.has_attr("position")) {
+        position = elem.get_attr_string("position");
+    }
+    
+    // Try to parse from children
+    auto iter = elem.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                parse_coord_pair(text, &width, &height);
+            } else if (text && text[0] == '[') {
+                // Position specifier
+                position = text + 1;  // Skip [
+            }
+        }
+    }
+    
+    // Convert to pt
+    float w = width * state->unitlength;
+    float h = height * state->unitlength;
+    
+    // Create the box frame - centered at origin
+    // The position affects where content goes, not the box itself
+    GraphicsElement* rect = graphics_rect(state->arena, -w/2, -h/2, w, h, 0, 0);
     rect->style.stroke_color = state->stroke_color;
     rect->style.stroke_width = state->line_thickness;
     rect->style.fill_color = "none";
+    
+    log_debug("picture_cmd_framebox: size=%.1fx%.1f position=%s", width, height, position);
     
     return rect;
 }
 
 GraphicsElement* picture_cmd_makebox(PictureState* state, const ElementReader& elem) {
-    (void)elem;
+    // \makebox(width,height)[position]{content}
+    // Like framebox but without the frame (invisible box)
+    // Used for positioning text
     
-    // Makebox is like framebox but invisible
+    float width = 20.0f;
+    float height = 10.0f;
+    const char* position = "c";
+    const char* text_content = nullptr;
+    
+    // Parse dimensions
+    if (elem.has_attr("width")) {
+        width = (float)elem.get_int_attr("width", 20);
+    }
+    if (elem.has_attr("height")) {
+        height = (float)elem.get_int_attr("height", 10);
+    }
+    if (elem.has_attr("position")) {
+        position = elem.get_attr_string("position");
+    }
+    
+    // Try to parse from children
+    auto iter = elem.children();
+    ItemReader child;
+    
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                parse_coord_pair(text, &width, &height);
+            } else if (text && text[0] == '[') {
+                position = text + 1;
+            } else if (text && text[0] != '\0') {
+                text_content = text;
+            }
+        } else if (child.isElement()) {
+            ElementReader el = child.asElement();
+            const char* tag = el.tagName();
+            if (tag && strcmp(tag, "curly_group") == 0) {
+                // Extract text content
+                text_content = extract_first_text(el);
+            }
+        }
+    }
+    
+    // Create a group (invisible box)
     GraphicsElement* group = graphics_group(state->arena, nullptr);
     
-    // TODO: Add text content when integration is complete
+    // If there's text content, add it
+    if (text_content && strlen(text_content) > 0) {
+        // Calculate text position based on alignment
+        float tx = 0, ty = 0;
+        const char* anchor = "middle";
+        
+        // Position parsing: l=left, r=right, t=top, b=bottom, c=center
+        for (const char* p = position; p && *p; p++) {
+            switch (*p) {
+                case 'l': anchor = "start"; tx = -width/2 * state->unitlength; break;
+                case 'r': anchor = "end"; tx = width/2 * state->unitlength; break;
+                case 't': ty = height/2 * state->unitlength; break;
+                case 'b': ty = -height/2 * state->unitlength; break;
+            }
+        }
+        
+        GraphicsElement* text = graphics_text(state->arena, tx, ty, text_content);
+        text->text.anchor = anchor;
+        text->style.fill_color = state->stroke_color;
+        graphics_append_child(group, text);
+    }
+    
+    log_debug("picture_cmd_makebox: size=%.1fx%.1f position=%s text=%s", 
+              width, height, position, text_content ? text_content : "(none)");
     
     return group;
 }
 
 GraphicsElement* picture_cmd_dashbox(PictureState* state, const ElementReader& elem) {
-    (void)elem;
+    // \dashbox{dashlength}(width,height)[position]{content}
+    // Like framebox but with dashed lines
     
-    // Dashbox is like framebox but with dashed lines
-    float width = 20.0f * state->unitlength;
-    float height = 10.0f * state->unitlength;
+    float dash_length = 3.0f;  // Default dash length
+    float width = 20.0f;
+    float height = 10.0f;
+    const char* position = "c";
     
-    GraphicsElement* rect = graphics_rect(state->arena, 0, 0, width, height, 0, 0);
+    // Parse attributes
+    if (elem.has_attr("dash")) {
+        dash_length = (float)elem.get_int_attr("dash", 3);
+    }
+    if (elem.has_attr("width")) {
+        width = (float)elem.get_int_attr("width", 20);
+    }
+    if (elem.has_attr("height")) {
+        height = (float)elem.get_int_attr("height", 10);
+    }
+    if (elem.has_attr("position")) {
+        position = elem.get_attr_string("position");
+    }
+    
+    // Try to parse from children
+    auto iter = elem.children();
+    ItemReader child;
+    bool seen_size = false;
+    
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                parse_coord_pair(text, &width, &height);
+                seen_size = true;
+            } else if (text && text[0] == '[') {
+                position = text + 1;
+            } else if (text && text[0] == '{') {
+                // Dash length in first curly group
+                float val;
+                if (sscanf(text, "{%f}", &val) == 1 && !seen_size) {
+                    dash_length = val;
+                }
+            }
+        }
+    }
+    
+    float w = width * state->unitlength;
+    float h = height * state->unitlength;
+    float dl = dash_length * state->unitlength;
+    
+    // Create dashed rectangle
+    GraphicsElement* rect = graphics_rect(state->arena, -w/2, -h/2, w, h, 0, 0);
     rect->style.stroke_color = state->stroke_color;
     rect->style.stroke_width = state->line_thickness;
-    rect->style.stroke_dasharray = "3,2";  // Simple dash pattern
     rect->style.fill_color = "none";
+    
+    // Format dash array
+    char dash_str[32];
+    snprintf(dash_str, sizeof(dash_str), "%.1f,%.1f", dl, dl);
+    rect->style.stroke_dasharray = arena_strdup(state->arena, dash_str);
+    
+    log_debug("picture_cmd_dashbox: size=%.1fx%.1f dash=%.1f position=%s", 
+              width, height, dash_length, position);
     
     return rect;
 }
