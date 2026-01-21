@@ -97,6 +97,10 @@
           "named": true
         },
         {
+          "type": "primitive_dimen",
+          "named": true
+        },
+        {
           "type": "space",
           "named": true
         },
@@ -217,6 +221,10 @@
           "named": true
         },
         {
+          "type": "primitive_dimen",
+          "named": true
+        },
+        {
           "type": "space",
           "named": true
         },
@@ -230,6 +238,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "dimension",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "display_math",
@@ -633,6 +646,10 @@
           "named": true
         },
         {
+          "type": "primitive_dimen",
+          "named": true
+        },
+        {
           "type": "space",
           "named": true
         },
@@ -645,6 +662,32 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "primitive_dimen",
+    "named": true,
+    "fields": {
+      "dimen": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "dimension",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primitive_dimen_name",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -738,6 +781,10 @@
         },
         {
           "type": "paragraph_break",
+          "named": true
+        },
+        {
+          "type": "primitive_dimen",
           "named": true
         },
         {
@@ -953,6 +1000,10 @@
   },
   {
     "type": "placeholder",
+    "named": true
+  },
+  {
+    "type": "primitive_dimen_name",
     "named": true
   },
   {
