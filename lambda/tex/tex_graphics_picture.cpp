@@ -149,11 +149,69 @@ GraphicsElement* graphics_build_picture(const ElementReader& elem,
     PictureState state;
     picture_state_init(&state, arena, doc);
     
+    // Use document's current unitlength if available (set by \setlength{\unitlength}{...})
+    if (doc && doc->picture_unitlength > 0) {
+        state.unitlength = doc->picture_unitlength;
+        log_debug("graphics_build_picture: using document unitlength=%.2fpt", state.unitlength);
+    }
+    
     // Get picture size: default values
     float width = 100.0f;
     float height = 100.0f;
+    float origin_x = 0;
+    float origin_y = 0;
     
-    // Try to get size from element attributes
+    // Try to extract size and offset from first text child: (width,height)(x0,y0)
+    auto iter = elem.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* text = child.cstring();
+            if (text && text[0] == '(') {
+                // Parse (width,height)
+                parse_coord_pair(text, &width, &height);
+                
+                // Look for optional (x0,y0) offset
+                const char* p = text;
+                while (*p && *p != ')') p++;
+                if (*p == ')') p++;
+                p = skip_ws(p);
+                if (*p == '(') {
+                    parse_coord_pair(p, &origin_x, &origin_y);
+                }
+                break;  // Found size info
+            }
+        } else if (child.isElement()) {
+            // Check for nested paragraph that might contain the size
+            ElementReader child_elem = child.asElement();
+            const char* tag = child_elem.tagName();
+            if (tag && strcmp(tag, "paragraph") == 0) {
+                auto iter2 = child_elem.children();
+                ItemReader grandchild;
+                while (iter2.next(&grandchild)) {
+                    if (grandchild.isString()) {
+                        const char* text = grandchild.cstring();
+                        if (text && text[0] == '(') {
+                            parse_coord_pair(text, &width, &height);
+                            
+                            // Look for optional offset
+                            const char* p = text;
+                            while (*p && *p != ')') p++;
+                            if (*p == ')') p++;
+                            p = skip_ws(p);
+                            if (*p == '(') {
+                                parse_coord_pair(p, &origin_x, &origin_y);
+                            }
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    // Try to override from element attributes (if present)
     if (elem.has_attr("width")) {
         width = (float)elem.get_int_attr("width", 100);
     }
@@ -166,22 +224,18 @@ GraphicsElement* graphics_build_picture(const ElementReader& elem,
             parse_coord_pair(size_str, &width, &height);
         }
     }
-    
-    // Convert to pt using unitlength
-    width *= state.unitlength;
-    height *= state.unitlength;
-    
-    // Get optional offset
-    float origin_x = 0;
-    float origin_y = 0;
     if (elem.has_attr("offset")) {
         const char* offset_str = elem.get_attr_string("offset");
         if (offset_str) {
             parse_coord_pair(offset_str, &origin_x, &origin_y);
-            origin_x *= state.unitlength;
-            origin_y *= state.unitlength;
         }
     }
+    
+    // Convert to pt using unitlength
+    width *= state.unitlength;
+    height *= state.unitlength;
+    origin_x *= state.unitlength;
+    origin_y *= state.unitlength;
     
     // Create canvas
     state.canvas = graphics_canvas(arena, width, height, origin_x, origin_y, state.unitlength);

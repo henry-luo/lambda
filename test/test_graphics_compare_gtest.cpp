@@ -45,6 +45,7 @@ static const std::set<std::string> BASELINE_GRAPHICS_FIXTURES = {
     "boxes_only",      // Box commands work
     "simple_picture",  // Lines, circles, vectors
     "picture_basic",   // Comprehensive picture tests
+    "latex_showcase_pictures",  // Pictures from latex-showcase.tex (core commands)
 };
 
 // Graphics fixtures that are work-in-progress (extended)
@@ -54,6 +55,7 @@ static const std::set<std::string> EXTENDED_GRAPHICS_FIXTURES = {
     "circles_only",    // Circles and ovals
     "boxes_only",      // Box commands
     "picture_basic",   // Comprehensive picture tests without multirow
+    "latex_showcase_pictures",  // Pictures from latex-showcase.tex
     // "picture",      // Full picture environment tests (complex - needs multirow package)
     // "colors",       // Color tests (no SVG output - text colors only)
     // "framed",       // Framed boxes (requires framed package)
