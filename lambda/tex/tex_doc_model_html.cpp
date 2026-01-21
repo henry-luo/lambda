@@ -5,6 +5,7 @@
 
 #include "tex_document_model.hpp"
 #include "tex_doc_model_internal.hpp"
+#include "tex_graphics.hpp"
 #ifndef DOC_MODEL_MINIMAL
 #include "tex_html_render.hpp"
 #endif
@@ -821,6 +822,30 @@ static void render_figure_html(DocElement* elem, StrBuf* out,
     if (opts.pretty_print) strbuf_append_str(out, "\n");
 }
 
+static void render_graphics_html(DocElement* elem, StrBuf* out,
+                                  const HtmlOutputOptions& opts, int depth) {
+    if (opts.pretty_print) html_indent(out, depth);
+    
+    // Wrap in span with graphics class
+    strbuf_append_format(out, "<span class=\"%sgraphics\">", opts.css_class_prefix);
+    
+    // If we have pre-cached SVG, use it directly
+    if (elem->graphics.svg_cache) {
+        strbuf_append_str(out, elem->graphics.svg_cache);
+    }
+    // Otherwise, convert GraphicsElement tree to SVG
+    else if (elem->graphics.root) {
+        graphics_to_inline_svg(elem->graphics.root, out);
+    }
+    else {
+        // No graphics content - output placeholder
+        strbuf_append_str(out, "<!-- empty graphics -->");
+    }
+    
+    strbuf_append_str(out, "</span>");
+    if (opts.pretty_print) strbuf_append_str(out, "\n");
+}
+
 static void render_blockquote_html(DocElement* elem, StrBuf* out,
                                     const HtmlOutputOptions& opts, int depth) {
     if (opts.pretty_print) html_indent(out, depth);
@@ -1092,6 +1117,10 @@ void doc_element_to_html(DocElement* elem, StrBuf* out,
         
     case DocElemType::FIGURE:
         render_figure_html(elem, out, opts, depth);
+        break;
+        
+    case DocElemType::GRAPHICS:
+        render_graphics_html(elem, out, opts, depth);
         break;
         
     case DocElemType::BLOCKQUOTE:

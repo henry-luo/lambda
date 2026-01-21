@@ -144,7 +144,8 @@
       "description": "TikZ drawing environment",
       "begin": "<tikzpicture options=\"#1\">",
       "end": "</tikzpicture>",
-      "params": "[]"
+      "params": "[]",
+      "callback": "graphics_build_tikz"
     },
     "scope": {
       "description": "Scoped options",

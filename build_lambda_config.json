@@ -2897,6 +2897,29 @@
                         "icon": "\ud83d\udcc4"
                     },
                     {
+                        "source": "test/test_graphics_gtest.cpp",
+                        "name": "TeX Graphics Tests",
+                        "description": "Tests for LaTeX picture environment and TikZ/PGF graphics support",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_graphics_gtest.exe",
+                        "additional_sources": [
+                            "lambda/tex/tex_graphics.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/strbuf.c"
+                        ],
+                        "includes": [
+                            "."
+                        ],
+                        "icon": "\ud83c\udfa8"
+                    },
+                    {
                         "source": "test/test_latexml_compare_gtest.cpp",
                         "name": "LaTeXML Comparison Tests",
                         "dependencies": [
