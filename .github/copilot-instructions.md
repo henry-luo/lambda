@@ -139,8 +139,6 @@ make generate-grammar   # Regenerate parser from grammar.js
 make clean-grammar      # Remove generated files (parser.c, ts-enum.h)
 ```
 
-**Auto-regeneration**: Makefile tracks `grammar.js` → `parser.c` → `ts-enum.h` → source files. Parser regenerates automatically on grammar changes.
-
 **Tree-sitter integration**:
 - Grammar: `lambda/tree-sitter-lambda/grammar.js`
 - Generated parser: `lambda/tree-sitter-lambda/src/parser.c`
@@ -165,29 +163,6 @@ NEVER use printf/fprintf/std::cout for debugging
 - **Comments**: Start inline comments in lowercase: `// process the next token`
 - **Naming**: `snake_case` for C and C++ methods, `PascalCase` for classes
 - **Error handling**: Return `ItemNull` or `ItemError`, log errors with `log_error()`
-
-### Common Patterns
-
-**Creating a map**:
-```cpp
-MarkBuilder builder(input);
-MapBuilder mb = builder.createMap();
-mb.put("name", builder.createString("Alice"));
-mb.put("age", builder.createInt(30));
-Item map = mb.final();
-```
-
-**Working with Items**:
-```cpp
-TypeId type = get_type_id(item);
-if (type == LMD_TYPE_STRING) {
-    String* str = (String*)item.string_ptr;  // unpack from tagged pointer
-    // Access string data...
-} else if (type == LMD_TYPE_MAP) {
-    Map* map = item.map;
-    // Access map data...
-}
-```
 
 ## File Organization & Key Files
 
@@ -246,21 +221,6 @@ if (type == LMD_TYPE_STRING) {
 - **GLFW**: Window management (Radiant engine)
 - **ThorVG**: Vector graphics rendering (Radiant engine)
 - **GTest**: Unit testing framework (dev dependency)
-
-## Platform-Specific Notes
-
-### Windows/MSYS2
-- **Prefer MINGW64** over CLANG64 to avoid Universal CRT dependencies
-- Use `make build-mingw64` to enforce MINGW64 environment
-- Install dependencies: `./setup-windows-deps.sh`
-
-### macOS
-- Uses Homebrew for dependencies: `./setup-mac-deps.sh`
-- Clang is default compiler
-
-### Linux
-- GCC or Clang supported
-- Install dependencies: `./setup-linux-deps.sh`
 
 ## Integration Points & External Dependencies
 
