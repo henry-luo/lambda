@@ -1,0 +1,12 @@
+% Picture environment - multiput for grids
+% Tests for LaTeX picture environment
+
+\setlength{\unitlength}{2mm}
+\begin{picture}(25,20)
+    \linethickness{0.1mm}
+    \multiput(0,0)(5,0){6}{\line(0,1){20}}
+    \multiput(0,0)(0,5){5}{\line(1,0){25}}
+    \linethickness{0.3mm}
+    \multiput(0,0)(10,0){3}{\line(0,1){20}}
+    \multiput(0,0)(0,10){3}{\line(1,0){25}}
+\end{picture}

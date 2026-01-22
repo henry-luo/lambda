@@ -1,0 +1,15 @@
+% Picture environment - lines and vectors
+% Tests for LaTeX picture environment
+
+\setlength{\unitlength}{1cm}
+\begin{picture}(4,3)
+    \put(0,0){\line(1,0){3}}
+    \put(0,0){\line(0,1){2}}
+    \put(0,0){\line(1,1){2}}
+    \put(0,0){\line(2,1){3}}
+    \thicklines
+    \put(0,2){\vector(1,0){2}}
+    \put(0,2){\vector(1,-1){1}}
+    \thinlines
+    \put(3,0){\vector(0,1){2}}
+\end{picture}
