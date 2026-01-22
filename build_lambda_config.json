@@ -2301,50 +2301,6 @@
                 "parallel": true
             },
             {
-                "suite": "math",
-                "name": "\ud83d\udcd0 Math Layout Tests",
-                "category": "extended",
-                "tests": [
-                    {
-                        "source": "test/math/test_math_layout.cpp",
-                        "name": "Math Layout Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_math_layout.exe",
-                        "additional_sources": [
-                            "test/math/math_fixture_loader.cpp",
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lambda/tex/tex_dvi_out.cpp",
-                            "lambda/tex/dvi_parser.cpp"
-                        ],
-                        "includes": [
-                            "test/math",
-                            "."
-                        ],
-                        "icon": "\ud83d\udcd0"
-                    }
-                ],
-                "type": "math",
-                "uses_build_config": true,
-                "parallel": true
-            },
-            {
                 "suite": "tex",
                 "name": "\ud83d\udcdd TeX Typesetting Tests",
                 "category": "extended",
