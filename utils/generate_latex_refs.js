@@ -38,7 +38,7 @@ const options = {
     clean: args.includes('--clean'),
     dryRun: args.includes('--dry-run'),
     test: null,
-    testDir: 'test/latexml' // default test directory
+    testDir: 'test/latex' // default test directory
 };
 
 // Parse --test=pattern and --test-dir=dir
