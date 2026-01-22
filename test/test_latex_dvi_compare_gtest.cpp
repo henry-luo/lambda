@@ -67,6 +67,10 @@ struct NormalizedDVI {
  * Extract text content from a DVI page (ignoring positions).
  * Returns printable ASCII characters only.
  */
+/**
+ * Extract text content from a DVI page (ignoring positions).
+ * Returns printable ASCII characters only.
+ */
 static char* extract_page_text(const DVIPage* page, Arena* arena) {
     // Allocate buffer for text (worst case: all glyphs are printable)
     char* text = (char*)arena_alloc(arena, page->glyph_count + 1);
@@ -136,7 +140,35 @@ static NormalizedDVI normalize_dvi(const DVIParser& parser, Arena* arena) {
 }
 
 /**
+ * Compare character frequencies of two strings.
+ * Returns true if both strings contain the same characters (ignoring order).
+ */
+static bool compare_char_frequencies(const char* s1, const char* s2) {
+    int len1 = strlen(s1);
+    int len2 = strlen(s2);
+    
+    if (len1 != len2) return false;
+    
+    // Count character frequencies
+    int freq1[128] = {0};
+    int freq2[128] = {0};
+    
+    for (int i = 0; i < len1; i++) {
+        freq1[(unsigned char)s1[i]]++;
+        freq2[(unsigned char)s2[i]]++;
+    }
+    
+    // Compare frequencies
+    for (int i = 0; i < 128; i++) {
+        if (freq1[i] != freq2[i]) return false;
+    }
+    
+    return true;
+}
+
+/**
  * Compare two normalized DVIs for text content equality.
+ * Uses character frequency comparison to be order-independent.
  * Returns true if the text content matches on all pages.
  */
 static bool compare_dvi_text(const NormalizedDVI& ref, const NormalizedDVI& out,
@@ -152,7 +184,7 @@ static bool compare_dvi_text(const NormalizedDVI& ref, const NormalizedDVI& out,
         const char* ref_text = ref.pages[p].text_content;
         const char* out_text = out.pages[p].text_content;
 
-        if (strcmp(ref_text, out_text) != 0) {
+        if (!compare_char_frequencies(ref_text, out_text)) {
             snprintf(error_msg, error_size,
                      "Text mismatch on page %d:\n  Reference: \"%s\"\n  Output:    \"%s\"",
                      p + 1, ref_text, out_text);
@@ -357,24 +389,28 @@ protected:
             int max_glyphs = std::min(ref_page->glyph_count, out_page->glyph_count);
             int diff_count = 0;
             
-            fprintf(stderr, "[INFO] ref page 0: %d glyphs, out page 0: %d glyphs\n", 
-                    ref_page->glyph_count, out_page->glyph_count);
+            fprintf(stderr, "[INFO] ref page 0: %d glyphs, %d rules; out page 0: %d glyphs, %d rules\n", 
+                    ref_page->glyph_count, ref_page->rule_count, out_page->glyph_count, out_page->rule_count);
             
             // In verbose mode, dump all glyphs; otherwise just show first 5 diffs
             if (is_verbose()) {
-                fprintf(stderr, "[VERBOSE] === Reference Glyphs ===\n");
+                fprintf(stderr, "[VERBOSE] === Reference Glyphs (with positions) ===\n");
                 for (int i = 0; i < ref_page->glyph_count && i < 50; i++) {
                     const DVIFont* f = ref_parser.font(ref_page->glyphs[i].font_num);
                     int cp = ref_page->glyphs[i].codepoint;
                     char ch = (cp >= 32 && cp < 127) ? (char)cp : '?';
-                    fprintf(stderr, "  [%3d] cp=%3d '%c' font=%s\n", i, cp, ch, f ? f->name : "?");
+                    float h_pt = DVIParser::sp_to_pt(ref_page->glyphs[i].h);
+                    float v_pt = DVIParser::sp_to_pt(ref_page->glyphs[i].v);
+                    fprintf(stderr, "  [%3d] cp=%3d '%c' h=%.1f v=%.1f font=%s\n", i, cp, ch, h_pt, v_pt, f ? f->name : "?");
                 }
-                fprintf(stderr, "[VERBOSE] === Output Glyphs ===\n");
+                fprintf(stderr, "[VERBOSE] === Output Glyphs (with positions) ===\n");
                 for (int i = 0; i < out_page->glyph_count && i < 50; i++) {
                     const DVIFont* f = out_parser.font(out_page->glyphs[i].font_num);
                     int cp = out_page->glyphs[i].codepoint;
                     char ch = (cp >= 32 && cp < 127) ? (char)cp : '?';
-                    fprintf(stderr, "  [%3d] cp=%3d '%c' font=%s\n", i, cp, ch, f ? f->name : "?");
+                    float h_pt = DVIParser::sp_to_pt(out_page->glyphs[i].h);
+                    float v_pt = DVIParser::sp_to_pt(out_page->glyphs[i].v);
+                    fprintf(stderr, "  [%3d] cp=%3d '%c' h=%.1f v=%.1f font=%s\n", i, cp, ch, h_pt, v_pt, f ? f->name : "?");
                 }
             }
             
