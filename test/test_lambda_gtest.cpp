@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <cerrno>
+#include <string>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -247,6 +248,48 @@ TEST(LambdaTests, test_complex_iot_report) {
 
 TEST(LambdaTests, test_single_let) {
     test_lambda_script_against_file("test/lambda/single_let.ls", "test/lambda/single_let.txt");
+}
+
+// Negative tests - verify transpiler reports errors gracefully without crashing
+// These scripts contain intentional type errors and should fail with proper error messages
+
+// Helper to test that a script reports type errors but doesn't crash
+// Note: Lambda currently exits with code 0 even on type errors (errors are reported to stderr)
+void test_lambda_script_expects_error(const char* script_path) {
+    char command[512];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe \"%s\" 2>&1", script_path);
+#else
+    snprintf(command, sizeof(command), "./lambda.exe \"%s\" 2>&1", script_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    ASSERT_NE(pipe, nullptr) << "Failed to execute command: " << command;
+
+    char buffer[4096];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+
+    int exit_code = pclose(pipe);
+    (void)exit_code;  // exit code may be 0 even with errors
+    
+    // Should contain error messages (type_error or [ERR!])
+    bool has_error_msg = output.find("type_error") != std::string::npos ||
+                         output.find("[ERR!]") != std::string::npos;
+    EXPECT_TRUE(has_error_msg) << "Expected error messages in output for: " << script_path
+                               << "\nOutput was: " << output;
+    
+    // Should NOT contain crash indicators
+    EXPECT_EQ(output.find("Segmentation fault"), std::string::npos) 
+        << "Transpiler crashed on: " << script_path;
+    EXPECT_EQ(output.find("SIGABRT"), std::string::npos) 
+        << "Transpiler aborted on: " << script_path;
+}
+
+TEST(LambdaNegativeTests, test_func_param_type_errors) {
+    test_lambda_script_expects_error("test/lambda/negative/func_param_negative.ls");
 }
 
 int main(int argc, char **argv) {
