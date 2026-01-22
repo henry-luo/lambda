@@ -206,6 +206,10 @@ TEST(LambdaTests, test_func) {
     test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
 }
 
+TEST(LambdaTests, test_func_param) {
+    test_lambda_script_against_file("test/lambda/func_param.ls", "test/lambda/func_param.txt");
+}
+
 TEST(LambdaTests, test_int64) {
     test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
 }

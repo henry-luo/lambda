@@ -34,6 +34,27 @@ Lambda header files defined the runtime data. They are layer one up on the other
 	- Lambda validator, formatter works at this level;
 - *transpiler.hpp*:
 	- the full Lambda transpiler and code runner;
+
+### Function Parameter Handling
+
+#### Parameter Count Mismatch
+- **Missing arguments**: automatically filled with `ITEM_NULL` at transpile time
+- **Extra arguments**: discarded with warning logged at transpile time
+- Enables optional parameter patterns: `if (opt == null) "default" else opt`
+
+#### Type Matching
+- Argument types validated against parameter types during AST building
+- Type errors accumulate (up to 10) before stopping transpilation
+- Compatible types: `int` → `float` (automatic coercion), `ANY` accepts all types
+
+#### Boxing/Unboxing
+Primitive ↔ Item conversions at function boundaries:
+
+| Direction | Functions | Use Case |
+|-----------|-----------|----------|
+| **Boxing** (primitive → Item) | `i2it()`, `l2it()`, `d2it()`, `b2it()`, `s2it()` | Return values from typed functions |
+| **Unboxing** (Item → primitive) | `it2i()`, `it2l()`, `it2d()`, `it2b()` | Pass Item args to typed parameters |
+
 ### String Memory Management
 
 Lambda uses three distinct string allocation strategies optimized for different use cases:
@@ -54,18 +75,6 @@ Lambda uses three distinct string allocation strategies optimized for different 
 - Memory sharing across entire document hierarchy
 - Inherits from parent NamePool (schemas share names with instances)
 
-**Example**:
-```cpp
-// Map keys are structural names
-map.put("name", value);      // "name" is pooled
-map.put("age", value);       // "age" is pooled
-map.put("name", value2);     // Reuses same "name" pointer
-
-// Element construction
-Element* div = builder.createElement("div");  // "div" is pooled
-div->attr("class", "container");             // "class" is pooled
-```
-
 #### 2. Symbols (Short Identifiers)  
 **Function**: `heap_create_symbol(const char* str, size_t len)`
 **Pooling**: Conditionally pooled (only if length ≤ 32 chars)
@@ -79,17 +88,6 @@ div->attr("class", "container");             // "class" is pooled
 - Long symbols fall back to arena allocation (no overhead)
 
 **Size Limit**: `NAME_POOL_SYMBOL_LIMIT = 32` characters
-
-**Example**:
-```cpp
-// Short symbols are pooled
-Item sym1 = heap_create_symbol("ok", 2);      // Pooled
-Item sym2 = heap_create_symbol("error", 5);   // Pooled
-Item sym3 = heap_create_symbol("ok", 2);      // Reuses sym1 pointer
-
-// Long symbols are NOT pooled (arena allocated)
-Item sym4 = heap_create_symbol("very_long_symbol_name_exceeding_limit", 42);  // Arena
-```
 
 #### 3. Strings (Content Data)
 **Function**: `heap_strcpy(const char* str, size_t len)` or `builder.createString()`  
@@ -105,14 +103,6 @@ Item sym4 = heap_create_symbol("very_long_symbol_name_exceeding_limit", 42);  //
 - No memory overhead for unique content
 - Efficient for one-time strings
 
-**Example**:
-```cpp
-// Content strings are NOT pooled
-Item str1 = builder.createString("Hello, World!");     // Arena allocated
-Item str2 = builder.createString("User entered text"); // Arena allocated
-Item str3 = builder.createString("Hello, World!");     // Different pointer from str1
-```
-
 #### API Decision Guide
 
 | String Type | Function | Pooled? | Use When |
@@ -127,17 +117,6 @@ Item str3 = builder.createString("Hello, World!");     // Different pointer from
 
 NamePools support parent-child relationships for schema inheritance:
 
-```cpp
-// Schema NamePool (parent)
-NamePool* schema_pool = name_pool_create(nullptr);
-name_pool_intern_name(schema_pool, "firstName", 9);  // Pooled in schema
-
-// Document NamePool (child inherits from schema)
-NamePool* doc_pool = name_pool_create(schema_pool);
-const char* name = name_pool_intern_name(doc_pool, "firstName", 9);
-// Returns same pointer from parent schema_pool (no duplication)
-```
-
 **Benefits**:
 - Schema definitions share names with document instances
 - No memory duplication for inherited names
@@ -148,3 +127,8 @@ const char* name = name_pool_intern_name(doc_pool, "firstName", 9);
 - **Add debug logging** for development and troubleshooting.
 - **Test with comprehensive nested data structures** and use timeout (default: 5s) to catch hangs early
 - **Back up the file** before major refactoring or rewrite. Remove the backup at the end of successful refactoring or rewrite.
+
+### Debugging Transpiled Code
+- Check `./_transpiled.c` for the generated C code from the last Lambda script execution
+- Useful for debugging type mismatches, boxing/unboxing issues, and function call generation
+- Shows how Lambda expressions map to C runtime calls (e.g., `fn_eq()`, `list_push()`, `i2it()`)

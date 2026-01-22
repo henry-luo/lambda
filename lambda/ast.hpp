@@ -299,7 +299,14 @@ typedef struct Transpiler : Script {
     TSParser* parser;
     StrBuf* code_buf;
     Runtime* runtime;
+    
+    // Error tracking for accumulated type errors
+    int error_count;           // accumulated error count
+    int max_errors;            // threshold (default: 10)
 } Transpiler;
+
+// Helper to check if arg_type is compatible with param_type
+bool types_compatible(Type* arg_type, Type* param_type);
 
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
 void print_root_item(StrBuf *strbuf, Item item, char* indent="  ");
