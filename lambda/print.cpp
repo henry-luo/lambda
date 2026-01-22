@@ -399,8 +399,8 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_str(strbuf, item.bool_val ? "true" : "false");
         break;
     case LMD_TYPE_INT: {
-        int int_val = item.int_val;
-        strbuf_append_format(strbuf, "%d", int_val);
+        int64_t int_val = item.get_int56();
+        strbuf_append_format(strbuf, "%" PRId64, int_val);
         break;
     }
     case LMD_TYPE_INT64: {

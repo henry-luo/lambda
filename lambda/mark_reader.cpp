@@ -123,7 +123,7 @@ String* ItemReader::asSymbol() const {
 
 int64_t ItemReader::asInt() const {
     if (cached_type_ == LMD_TYPE_INT) {
-        return item_.int_val;
+        return item_.get_int56();
     } else if (cached_type_ == LMD_TYPE_INT64) {
         return item_.get_int64();
     }
@@ -132,7 +132,7 @@ int64_t ItemReader::asInt() const {
 
 int32_t ItemReader::asInt32() const {
     if (cached_type_ == LMD_TYPE_INT) {
-        return item_.int_val;
+        return (int32_t)item_.get_int56();  // Truncate to 32-bit
     } else if (cached_type_ == LMD_TYPE_INT64) {
         int64_t val = item_.get_int64();
         return (int32_t)val;  // Truncate to 32-bit

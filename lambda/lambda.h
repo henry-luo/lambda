@@ -37,7 +37,7 @@ enum EnumTypeId {
     LMD_TYPE_ARRAY_INT,
     LMD_TYPE_ARRAY_INT64,
     LMD_TYPE_ARRAY_FLOAT,
-    LMD_TYPE_ARRAY,
+    LMD_TYPE_ARRAY,  // array of Items
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
     LMD_TYPE_TYPE,
@@ -190,7 +190,7 @@ struct Function {
     fn_ptr ptr;
 };
 
-#define INT_ERROR           INT64_MAX
+#define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
 #define ITEM_UNDEFINED      0
@@ -200,14 +200,18 @@ struct Function {
 #define ITEM_TRUE           ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1
 #define ITEM_FALSE          ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0
 
+// int56 limits: signed 56-bit integer range
+#define INT56_MAX  ((int64_t)0x007FFFFFFFFFFFFF)   // +36,028,797,018,963,967
+#define INT56_MIN  ((int64_t)0xFF80000000000000LL) // -36,028,797,018,963,968
+
 inline uint64_t b2it(uint8_t bool_val) {
     return bool_val >= BOOL_ERROR ? ITEM_ERROR : ((((uint64_t)LMD_TYPE_BOOL)<<56) | bool_val);
 }
-// int overflow check and promotion to double
+// int56: check range and pack, return ITEM_ERROR on overflow
 #ifndef __cplusplus
-#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_d(int_val))
+#define i2it(int_val)        (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #else
-#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_d(int_val).item)
+#define i2it(int_val)        (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #endif
 #define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): null)
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): null)
