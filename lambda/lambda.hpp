@@ -156,7 +156,7 @@ struct List : Container {
 };
 
 struct ArrayInt : Container {
-    int* items;  // 32-bit integer items
+    int64_t* items;  // int56 values (stored as int64)
     int64_t length;
     int64_t extra;  // count of extra items
     int64_t capacity;

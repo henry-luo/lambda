@@ -70,7 +70,7 @@ ArrayInt* array_int_new(int length) {
     ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;
     arr->length = length;  arr->capacity = length;
-    arr->items = (int32_t*)malloc(length * sizeof(int32_t));
+    arr->items = (int64_t*)malloc(length * sizeof(int64_t));
     return arr;
 }
 
@@ -78,10 +78,10 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->items = (int32_t*)malloc(count * sizeof(int32_t));
+        arr->items = (int64_t*)malloc(count * sizeof(int64_t));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, int32_t);
+            arr->items[i] = va_arg(args, int64_t);
         }
         va_end(args);
     }
@@ -96,7 +96,7 @@ Item array_int_get(ArrayInt *array, int index) {
         log_warn("array_int_get: index out of bounds: %d", index);
         return ItemNull;  // return null instead of error
     }
-    int val = array->items[index];
+    int64_t val = array->items[index];
     Item item = (Item){.item = i2it(val)};
     log_debug("array_int_get returning: type: %d, int_val: %lld", item._type_id, (long long)item.get_int56());
     return item;
