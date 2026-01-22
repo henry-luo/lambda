@@ -258,7 +258,8 @@ TexNode* typeset_delimited(
     int32_t left_delim,      // '(', '[', '{', '|', or 0 for none
     TexNode* content,
     int32_t right_delim,
-    MathContext& ctx
+    MathContext& ctx,
+    bool extensible = true   // True for \left/\right, false for matrix delimiters
 );
 
 // ============================================================================

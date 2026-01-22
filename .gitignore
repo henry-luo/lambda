@@ -141,3 +141,4 @@ gumbo-parser/
 taffy/
 latex-js/
 mathlive/
+!test/latex/fixtures/math/mathlive/
