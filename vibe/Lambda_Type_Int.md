@@ -564,6 +564,67 @@ type(d)  // → "float"
 
 ---
 
+## ArrayInt Update
+
+### Motivation
+
+With `LMD_TYPE_INT` now representing int56 values (stored/computed as int64), the `ArrayInt` type must be updated for consistency. Previously, `ArrayInt` stored 32-bit integers (`int* items`), but this creates a mismatch with the int56 scalar type.
+
+### Changes
+
+**Before:**
+```cpp
+struct ArrayInt {
+    TypeId type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;
+    int* items;           // 32-bit integers
+    int64_t length;
+    int64_t extra;
+    int64_t capacity;
+};
+```
+
+**After:**
+```cpp
+struct ArrayInt {
+    TypeId type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;
+    int64_t* items;       // 64-bit integers (matches int56 storage)
+    int64_t length;
+    int64_t extra;
+    int64_t capacity;
+};
+```
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| [lambda/lambda.h](lambda/lambda.h#L143-L153) | `int* items` → `int64_t* items` |
+| [lambda/lambda.hpp](lambda/lambda.hpp#L158-L163) | `int* items` → `int64_t* items` |
+| [lambda/lambda-data-runtime.cpp](lambda/lambda-data-runtime.cpp#L61-L102) | Update allocations and accessors |
+| [lambda/mark_builder.cpp](lambda/mark_builder.cpp#L848-L860) | Update deep copy to use `sizeof(int64_t)` |
+
+### Rationale
+
+1. **Type consistency**: `ArrayInt` stores elements of type `LMD_TYPE_INT`, which is now int56
+2. **Storage alignment**: int64_t is the native storage format for int56 values
+3. **Simplified code**: No conversion needed between array elements and scalar ints
+4. **Forward compatibility**: Larger element size matches the expanded integer range
+
+### Note on ArrayInt64
+
+`ArrayInt64` remains unchanged - it already uses `int64_t* items` and represents explicit 64-bit integers. After this change:
+
+- **ArrayInt**: Stores int56 values (packed in int64_t), for `LMD_TYPE_INT` elements
+- **ArrayInt64**: Stores full int64 values, for `LMD_TYPE_INT64` elements
+
+Both now use the same underlying storage (`int64_t*`), but maintain separate type IDs for semantic distinction.
+
+---
+
 ## Migration Strategy
 
 ### Phase 1: Add Infrastructure
