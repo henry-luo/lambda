@@ -6022,6 +6022,56 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
         return nullptr;  // No visible output
     }
     
+    // Counter display commands - format counter value
+    if (tag_eq(tag, "arabic")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            const char* value_str = doc->format_counter_arabic(counter_name);
+            return doc_create_text_cstr(arena, value_str, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    if (tag_eq(tag, "roman")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            const char* value_str = doc->format_counter_roman(counter_name);
+            return doc_create_text_cstr(arena, value_str, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    if (tag_eq(tag, "Roman")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            const char* value_str = doc->format_counter_Roman(counter_name);
+            return doc_create_text_cstr(arena, value_str, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    if (tag_eq(tag, "alph")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            const char* value_str = doc->format_counter_alph(counter_name);
+            return doc_create_text_cstr(arena, value_str, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    if (tag_eq(tag, "Alph")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            const char* value_str = doc->format_counter_Alph(counter_name);
+            return doc_create_text_cstr(arena, value_str, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    if (tag_eq(tag, "fnsymbol")) {
+        const char* counter_name = extract_text_content(item, arena);
+        if (counter_name && strlen(counter_name) > 0) {
+            const char* value_str = doc->format_counter_fnsymbol(counter_name);
+            return doc_create_text_cstr(arena, value_str, DocTextStyle::plain());
+        }
+        return nullptr;
+    }
+    
     // \refstepcounter{name} - increments counter AND updates current_ref for \label
     // Also generates an anchor point <a id="name-N"></a> at the position
     if (tag_eq(tag, "refstepcounter")) {
