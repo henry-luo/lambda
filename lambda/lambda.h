@@ -339,6 +339,24 @@ typedef struct Context {
     Bool fn_is(Item a, Item b);
     Bool fn_in(Item a, Item b);
 
+    // vector arithmetic operations (element-wise)
+    Item vec_add(Item a, Item b);
+    Item vec_sub(Item a, Item b);
+    Item vec_mul(Item a, Item b);
+    Item vec_div(Item a, Item b);
+    Item vec_mod(Item a, Item b);
+    Item vec_pow(Item a, Item b);
+    
+    // vector system functions
+    Item fn_prod(Item a);
+    Item fn_cumsum(Item a);
+    Item fn_cumprod(Item a);
+    Item fn_argmin(Item a);
+    Item fn_argmax(Item a);
+    Item fn_fill(Item n, Item value);
+    Item fn_dot(Item a, Item b);
+    Item fn_norm(Item a);
+
     Range* fn_to(Item a, Item b);
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);

@@ -266,6 +266,15 @@ typedef enum SysFunc {
     SYSFUNC_FORMAT2,
     SYSFUNC_ERROR,
     SYSFUNC_NORMALIZE,
+    // vector functions
+    SYSFUNC_PROD,
+    SYSFUNC_CUMSUM,
+    SYSFUNC_CUMPROD,
+    SYSFUNC_ARGMIN,
+    SYSFUNC_ARGMAX,
+    SYSFUNC_FILL,
+    SYSFUNC_DOT,
+    SYSFUNC_NORM,
     // procedural functions
     SYSPROC_NOW,
     SYSPROC_TODAY,
