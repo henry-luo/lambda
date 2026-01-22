@@ -191,7 +191,7 @@ Item MarkBuilder::createList() {
     return list().final();
 }
 
-Item MarkBuilder::createInt(int32_t value) {
+Item MarkBuilder::createInt(int64_t value) {
     Item item = {.item = i2it(value)};
     return item;
 }

@@ -39,9 +39,9 @@ void format_number(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_INT) {
-        int val = item.int_val;
+        int64_t val = item.get_int56();
         char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%d", val);
+        snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
         stringbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_INT64) {
         int64_t* lptr = (int64_t*)item.int64_ptr;

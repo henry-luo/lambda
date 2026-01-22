@@ -82,6 +82,16 @@ typedef struct Item {
     inline String* get_string() const { return (String*)this->string_ptr; }
     inline String* get_symbol() const { return (String*)this->symbol_ptr; }
     inline String* get_binary() const{ return (String*)this->binary_ptr; }
+
+    // get int56 value sign-extended to int64
+    inline int64_t get_int56() const {
+        uint64_t raw = item & 0x00FFFFFFFFFFFFFFULL;
+        // sign extend from bit 55
+        if (raw & 0x0080000000000000ULL) {
+            return (int64_t)(raw | 0xFF00000000000000ULL);
+        }
+        return (int64_t)raw;
+    }
 } Item;
 
 // const read-only item
