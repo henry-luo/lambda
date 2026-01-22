@@ -7,1292 +7,1094 @@ This document tracks all TeX/LaTeX commands currently implemented or being worke
 - 🔶 **Partial** - Basic implementation, some features missing
 - ❌ **Missing** - Defined but not yet implemented
 
+**Implementation Files:**
+- Package definitions: `lambda/tex/packages/*.pkg.json`
+- Package loader: `lambda/tex/tex_package_loader.cpp`
+- Document model: `lambda/tex/tex_doc_model_*.cpp`
+- Math typesetting: `lambda/tex/tex_math_*.cpp`
+- HTML rendering: `lambda/tex/tex_html_render.cpp`
+
 ---
 
-## 1. TeX Base (`tex_base.pkg.json`)
+## 1. TeX Base
 
+**Package:** `tex_base.pkg.json`  
+**Implementation:** `tex_hlist.cpp`, `tex_vlist.cpp`, `tex_node.cpp`  
 **Description:** Core TeX primitive commands that form the foundation of all typesetting operations.
 
 ### Grouping & Structure
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\relax` | Do nothing | ✅ Full |
-| `\ignorespaces` | Ignore following spaces | ✅ Full |
-| `\begingroup` | Begin a group | ✅ Full |
-| `\endgroup` | End a group | ✅ Full |
-| `\bgroup` | Begin group (alias) | ✅ Full |
-| `\egroup` | End group (alias) | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\relax` | Do nothing | ✅ Full | `tex_base.pkg.json` |
+| `\ignorespaces` | Ignore following spaces | ✅ Full | `tex_base.pkg.json` |
+| `\begingroup` | Begin a group | ✅ Full | `tex_base.pkg.json` |
+| `\endgroup` | End a group | ✅ Full | `tex_base.pkg.json` |
+| `\bgroup` | Begin group (alias) | ✅ Full | `tex_base.pkg.json` |
+| `\egroup` | End group (alias) | ✅ Full | `tex_base.pkg.json` |
 
 ### Paragraph Control
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\par` | End paragraph | ✅ Full |
-| `\indent` | Begin paragraph with indentation | ✅ Full |
-| `\noindent` | Begin paragraph without indentation | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\par` | End paragraph | ✅ Full | `tex_base.pkg.json`, `tex_doc_model_text.cpp` |
+| `\indent` | Begin paragraph with indentation | ✅ Full | `tex_base.pkg.json` |
+| `\noindent` | Begin paragraph without indentation | ✅ Full | `tex_base.pkg.json` |
 
 ### Spacing & Glue
 
-| Command  | Description                   | Status     |
-| -------- | ----------------------------- | ---------- |
-| `\hskip` | Horizontal skip               | 🔶 Partial |
-| `\vskip` | Vertical skip                 | 🔶 Partial |
-| `\kern`  | Insert kern (fixed space)     | 🔶 Partial |
-| `\hfil`  | Horizontal fill (order 1)     | 🔶 Partial |
-| `\hfill` | Horizontal fill (order 2)     | 🔶 Partial |
-| `\hss`   | Horizontal stretch and shrink | 🔶 Partial |
-| `\vfil`  | Vertical fill (order 1)       | 🔶 Partial |
-| `\vfill` | Vertical fill (order 2)       | 🔶 Partial |
-| `\vss`   | Vertical stretch and shrink   | 🔶 Partial |
+| Command  | Description                   | Status | Implementation |
+| -------- | ----------------------------- | ------ | -------------- |
+| `\hskip` | Horizontal skip               | ✅ Full | `tex_base.pkg.json`, `tex_hlist.cpp` |
+| `\vskip` | Vertical skip                 | ✅ Full | `tex_base.pkg.json`, `tex_vlist.cpp` |
+| `\kern`  | Insert kern (fixed space)     | ✅ Full | `tex_base.pkg.json`, `tex_hlist.cpp` |
+| `\hfil`  | Horizontal fill (order 1)     | ✅ Full | `tex_base.pkg.json` |
+| `\hfill` | Horizontal fill (order 2)     | ✅ Full | `tex_base.pkg.json` |
+| `\hss`   | Horizontal stretch and shrink | ✅ Full | `tex_base.pkg.json` |
+| `\vfil`  | Vertical fill (order 1)       | ✅ Full | `tex_base.pkg.json` |
+| `\vfill` | Vertical fill (order 2)       | ✅ Full | `tex_base.pkg.json` |
+| `\vss`   | Vertical stretch and shrink   | ✅ Full | `tex_base.pkg.json` |
 
 ### Rules
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\hrule` | Horizontal rule | 🔶 Partial |
-| `\vrule` | Vertical rule | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\hrule` | Horizontal rule | ✅ Full | `tex_base.pkg.json`, `tex_node.cpp` |
+| `\vrule` | Vertical rule | ✅ Full | `tex_base.pkg.json`, `tex_node.cpp` |
 
 ### Penalties & Breaking
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\penalty` | Insert penalty | 🔶 Partial |
-| `\break` | Force break (penalty -10000) | ✅ Full |
-| `\nobreak` | Prevent break (penalty 10000) | ✅ Full |
-| `\allowbreak` | Allow break (penalty 0) | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\penalty` | Insert penalty | ✅ Full | `tex_base.pkg.json` |
+| `\break` | Force break (penalty -10000) | ✅ Full | `tex_base.pkg.json` |
+| `\nobreak` | Prevent break (penalty 10000) | ✅ Full | `tex_base.pkg.json` |
+| `\allowbreak` | Allow break (penalty 0) | ✅ Full | `tex_base.pkg.json` |
 
 ### Boxes
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\hbox` | Horizontal box | 🔶 Partial |
-| `\vbox` | Vertical box | 🔶 Partial |
-| `\vtop` | Vertical box aligned at top | 🔶 Partial |
-| `\raise` | Raise box | 🔶 Partial |
-| `\lower` | Lower box | 🔶 Partial |
-| `\moveleft` | Move box left | 🔶 Partial |
-| `\moveright` | Move box right | 🔶 Partial |
-| `\rlap` | Right overlap (zero-width) | 🔶 Partial |
-| `\llap` | Left overlap (zero-width) | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\hbox` | Horizontal box | ✅ Full | `tex_base.pkg.json`, `tex_hlist.cpp` |
+| `\vbox` | Vertical box | ✅ Full | `tex_base.pkg.json`, `tex_vlist.cpp` |
+| `\vtop` | Vertical box aligned at top | ✅ Full | `tex_base.pkg.json`, `tex_vlist.cpp` |
+| `\raise` | Raise box | ✅ Full | `tex_base.pkg.json` |
+| `\lower` | Lower box | ✅ Full | `tex_base.pkg.json` |
+| `\moveleft` | Move box left | 🔶 Partial | `tex_base.pkg.json` |
+| `\moveright` | Move box right | 🔶 Partial | `tex_base.pkg.json` |
+| `\rlap` | Right overlap (zero-width) | ✅ Full | `tex_base.pkg.json` |
+| `\llap` | Left overlap (zero-width) | ✅ Full | `tex_base.pkg.json` |
 
 ### Output & I/O
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\special` | Pass special command to output | 🔶 Partial |
-| `\write` | Write to file | ❌ Missing |
-| `\message` | Print message to terminal | ❌ Missing |
-| `\mark` | Insert mark (for headers/footers) | ❌ Missing |
-| `\insert` | Insert floating material | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\special` | Pass special command to output | 🔶 Partial | `tex_base.pkg.json` |
+| `\write` | Write to file | ❌ Missing | — |
+| `\message` | Print message to terminal | ❌ Missing | — |
+| `\mark` | Insert mark (for headers/footers) | ❌ Missing | — |
+| `\insert` | Insert floating material | ❌ Missing | — |
 
 ### Characters
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\char` | Insert character by code | 🔶 Partial |
-| `\accent` | Put accent over character | ✅ Full |
-
-### Core TeX Commands Not Yet Implemented
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\def` | Define macro | ❌ Missing |
-| `\let` | Assign meaning of one control sequence to another | ❌ Missing |
-| `\gdef` | Global definition | ❌ Missing |
-| `\edef` | Expanded definition | ❌ Missing |
-| `\xdef` | Global expanded definition | ❌ Missing |
-| `\futurelet` | Assign meaning of next token | ❌ Missing |
-| `\aftergroup` | Execute after group closes | ❌ Missing |
-| `\afterassignment` | Execute after assignment | ❌ Missing |
-| `\expandafter` | Expand next token first | ❌ Missing |
-| `\noexpand` | Prevent expansion | ❌ Missing |
-| `\the` | Convert internal quantity to tokens | ❌ Missing |
-| `\number` | Convert number to digits | ❌ Missing |
-| `\romannumeral` | Convert to roman numerals | ❌ Missing |
-| `\string` | Convert control sequence to string | ❌ Missing |
-| `\csname`/`\endcsname` | Build control sequence from tokens | ❌ Missing |
-| `\meaning` | Show meaning of token | ❌ Missing |
-| `\if...` | Various conditionals | ❌ Missing |
-| `\else` | Conditional else | ❌ Missing |
-| `\fi` | End conditional | ❌ Missing |
-| `\loop`/`\repeat` | Simple loop | ❌ Missing |
-| `\input` | Include file | ❌ Missing |
-| `\endinput` | End input from current file | ❌ Missing |
-| `\openin`/`\closein`/`\read` | File input operations | ❌ Missing |
-| `\openout`/`\closeout` | File output operations | ❌ Missing |
-| `\halign`/`\valign` | Alignment primitives | ❌ Missing |
-| `\cr` | End alignment row | ❌ Missing |
-| `\span` | Span columns in alignment | ❌ Missing |
-| `\omit` | Omit template in alignment | ❌ Missing |
-| `\shipout` | Output page | ❌ Missing |
-| `\hyphenation` | Define hyphenation exceptions | ❌ Missing |
-| `\patterns` | Define hyphenation patterns | ❌ Missing |
-| `\setbox` | Assign box register | ❌ Missing |
-| `\box` | Use box register | ❌ Missing |
-| `\copy` | Copy box register | ❌ Missing |
-| `\unhbox`/`\unvbox` | Unpack box | ❌ Missing |
-| `\wd`/`\ht`/`\dp` | Box dimensions | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\char` | Insert character by code | ✅ Full | `tex_base.pkg.json` |
+| `\accent` | Put accent over character | ✅ Full | `tex_base.pkg.json` |
 
 ---
 
-## 2. LaTeX Base (`latex_base.pkg.json`)
+## 2. LaTeX Base
 
-**Description:** Standard LaTeX commands built on top of TeX primitives. Provides document structure, text formatting, and basic environments.
+**Package:** `latex_base.pkg.json`  
+**Implementation:** `tex_doc_model_struct.cpp`, `tex_doc_model_inline.cpp`, `tex_doc_model_commands.cpp`  
+**Description:** Standard LaTeX commands built on top of TeX primitives.
 
 ### Document Structure
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\documentclass` | Document class declaration | ✅ Full |
-| `\usepackage` | Load package | ✅ Full |
-| `\begin{document}` | Start document body | ✅ Full |
-| `\end{document}` | End document body | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\documentclass` | Document class declaration | ✅ Full | `latex_base.pkg.json`, `tex_package_loader.cpp` |
+| `\usepackage` | Load package | ✅ Full | `latex_base.pkg.json`, `tex_package_loader.cpp` |
+| `\begin{document}` | Start document body | ✅ Full | `latex_base.pkg.json` |
+| `\end{document}` | End document body | ✅ Full | `latex_base.pkg.json` |
 
 ### Sectioning
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\part` | Part heading | ✅ Full |
-| `\part*` | Unnumbered part | ✅ Full |
-| `\chapter` | Chapter heading | ✅ Full |
-| `\chapter*` | Unnumbered chapter | ✅ Full |
-| `\section` | Section heading | ✅ Full |
-| `\section*` | Unnumbered section | ✅ Full |
-| `\subsection` | Subsection heading | ✅ Full |
-| `\subsection*` | Unnumbered subsection | ✅ Full |
-| `\subsubsection` | Subsubsection heading | ✅ Full |
-| `\subsubsection*` | Unnumbered subsubsection | ✅ Full |
-| `\paragraph` | Paragraph heading | ✅ Full |
-| `\subparagraph` | Subparagraph heading | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\part` | Part heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\part*` | Unnumbered part | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\chapter` | Chapter heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\chapter*` | Unnumbered chapter | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\section` | Section heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\section*` | Unnumbered section | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\subsection` | Subsection heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\subsection*` | Unnumbered subsection | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\subsubsection` | Subsubsection heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\subsubsection*` | Unnumbered subsubsection | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\paragraph` | Paragraph heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\subparagraph` | Subparagraph heading | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
 
 ### Text Formatting
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\textbf` | Bold text | ✅ Full |
-| `\textit` | Italic text | ✅ Full |
-| `\texttt` | Monospace text | ✅ Full |
-| `\textrm` | Roman text | ✅ Full |
-| `\textsf` | Sans-serif text | ✅ Full |
-| `\textsc` | Small caps text | ✅ Full |
-| `\textsl` | Slanted text | ✅ Full |
-| `\textup` | Upright text | ✅ Full |
-| `\textnormal` | Normal text | ✅ Full |
-| `\emph` | Emphasized text | ✅ Full |
-| `\underline` | Underlined text | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\textbf` | Bold text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textit` | Italic text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\texttt` | Monospace text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textrm` | Roman text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textsf` | Sans-serif text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textsc` | Small caps text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textsl` | Slanted text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textup` | Upright text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\textnormal` | Normal text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\emph` | Emphasized text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
+| `\underline` | Underlined text | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_inline.cpp` |
 
 ### Font Switches
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\bfseries` | Switch to bold | ✅ Full |
-| `\mdseries` | Switch to medium weight | ✅ Full |
-| `\itshape` | Switch to italic | ✅ Full |
-| `\upshape` | Switch to upright | ✅ Full |
-| `\slshape` | Switch to slanted | ✅ Full |
-| `\scshape` | Switch to small caps | ✅ Full |
-| `\ttfamily` | Switch to monospace | ✅ Full |
-| `\rmfamily` | Switch to roman | ✅ Full |
-| `\sffamily` | Switch to sans-serif | ✅ Full |
-| `\normalfont` | Switch to normal font | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\bfseries` | Switch to bold | ✅ Full | `latex_base.pkg.json` |
+| `\mdseries` | Switch to medium weight | ✅ Full | `latex_base.pkg.json` |
+| `\itshape` | Switch to italic | ✅ Full | `latex_base.pkg.json` |
+| `\upshape` | Switch to upright | ✅ Full | `latex_base.pkg.json` |
+| `\slshape` | Switch to slanted | ✅ Full | `latex_base.pkg.json` |
+| `\scshape` | Switch to small caps | ✅ Full | `latex_base.pkg.json` |
+| `\ttfamily` | Switch to monospace | ✅ Full | `latex_base.pkg.json` |
+| `\rmfamily` | Switch to roman | ✅ Full | `latex_base.pkg.json` |
+| `\sffamily` | Switch to sans-serif | ✅ Full | `latex_base.pkg.json` |
+| `\normalfont` | Switch to normal font | ✅ Full | `latex_base.pkg.json` |
 
 ### Font Sizes
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\tiny` | Tiny font size (5pt) | ✅ Full |
-| `\scriptsize` | Script font size (7pt) | ✅ Full |
-| `\footnotesize` | Footnote size (8pt) | ✅ Full |
-| `\small` | Small size (9pt) | ✅ Full |
-| `\normalsize` | Normal size (10pt) | ✅ Full |
-| `\large` | Large size (12pt) | ✅ Full |
-| `\Large` | Larger size (14pt) | ✅ Full |
-| `\LARGE` | Very large size (17pt) | ✅ Full |
-| `\huge` | Huge size (20pt) | ✅ Full |
-| `\Huge` | Very huge size (25pt) | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\tiny` | Tiny font size (5pt) | ✅ Full | `latex_base.pkg.json` |
+| `\scriptsize` | Script font size (7pt) | ✅ Full | `latex_base.pkg.json` |
+| `\footnotesize` | Footnote size (8pt) | ✅ Full | `latex_base.pkg.json` |
+| `\small` | Small size (9pt) | ✅ Full | `latex_base.pkg.json` |
+| `\normalsize` | Normal size (10pt) | ✅ Full | `latex_base.pkg.json` |
+| `\large` | Large size (12pt) | ✅ Full | `latex_base.pkg.json` |
+| `\Large` | Larger size (14pt) | ✅ Full | `latex_base.pkg.json` |
+| `\LARGE` | Very large size (17pt) | ✅ Full | `latex_base.pkg.json` |
+| `\huge` | Huge size (20pt) | ✅ Full | `latex_base.pkg.json` |
+| `\Huge` | Very huge size (25pt) | ✅ Full | `latex_base.pkg.json` |
 
 ### Cross-References
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\label` | Set label for cross-reference | ✅ Full |
-| `\ref` | Reference to label | ✅ Full |
-| `\pageref` | Page reference to label | 🔶 Partial |
-| `\eqref` | Equation reference (with parentheses) | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\label` | Set label for cross-reference | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_commands.cpp` |
+| `\ref` | Reference to label | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_commands.cpp` |
+| `\pageref` | Page reference to label | 🔶 Partial | `latex_base.pkg.json` |
+| `\eqref` | Equation reference (with parentheses) | ✅ Full | `latex_base.pkg.json` |
 
 ### Footnotes & Notes
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\footnote` | Footnote | ✅ Full |
-| `\footnotemark` | Footnote mark only | 🔶 Partial |
-| `\footnotetext` | Footnote text only | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\footnote` | Footnote | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\footnotemark` | Footnote mark only | ✅ Full | `latex_base.pkg.json` |
+| `\footnotetext` | Footnote text only | ✅ Full | `latex_base.pkg.json` |
 
 ### Lists
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\item` | List item | ✅ Full |
-| `\begin{itemize}` | Bullet list | ✅ Full |
-| `\begin{enumerate}` | Numbered list | ✅ Full |
-| `\begin{description}` | Description list | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\item` | List item | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\begin{itemize}` | Bullet list | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\begin{enumerate}` | Numbered list | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\begin{description}` | Description list | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
 
 ### Floats & Captions
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\caption` | Float caption | ✅ Full |
-| `\begin{figure}` | Figure environment | ✅ Full |
-| `\begin{figure*}` | Wide figure | ✅ Full |
-| `\begin{table}` | Table environment | ✅ Full |
-| `\begin{table*}` | Wide table | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\caption` | Float caption | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\begin{figure}` | Figure environment | ✅ Full | `latex_base.pkg.json` |
+| `\begin{figure*}` | Wide figure | ✅ Full | `latex_base.pkg.json` |
+| `\begin{table}` | Table environment | ✅ Full | `latex_base.pkg.json` |
+| `\begin{table*}` | Wide table | ✅ Full | `latex_base.pkg.json` |
 
 ### Title & Abstract
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\title` | Document title | ✅ Full |
-| `\author` | Document author | ✅ Full |
-| `\date` | Document date | ✅ Full |
-| `\thanks` | Author thanks | ✅ Full |
-| `\maketitle` | Generate title block | ✅ Full |
-| `\begin{abstract}` | Abstract environment | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\title` | Document title | ✅ Full | `latex_base.pkg.json` |
+| `\author` | Document author | ✅ Full | `latex_base.pkg.json` |
+| `\date` | Document date | ✅ Full | `latex_base.pkg.json` |
+| `\thanks` | Author thanks | ✅ Full | `latex_base.pkg.json` |
+| `\maketitle` | Generate title block | ✅ Full | `latex_base.pkg.json`, `tex_doc_model_struct.cpp` |
+| `\begin{abstract}` | Abstract environment | ✅ Full | `latex_base.pkg.json` |
 
 ### Table of Contents
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\tableofcontents` | Table of contents | 🔶 Partial |
-| `\listoffigures` | List of figures | 🔶 Partial |
-| `\listoftables` | List of tables | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\tableofcontents` | Table of contents | 🔶 Partial | `latex_base.pkg.json` |
+| `\listoffigures` | List of figures | 🔶 Partial | `latex_base.pkg.json` |
+| `\listoftables` | List of tables | 🔶 Partial | `latex_base.pkg.json` |
 
 ### Spacing
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\hspace` | Horizontal space | ✅ Full |
-| `\hspace*` | Horizontal space (preserved) | ✅ Full |
-| `\vspace` | Vertical space | ✅ Full |
-| `\vspace*` | Vertical space (preserved) | ✅ Full |
-| `\quad` | Em space | ✅ Full |
-| `\qquad` | Two em spaces | ✅ Full |
-| `\enspace` | En space (0.5em) | ✅ Full |
-| `\thinspace` | Thin space | ✅ Full |
-| `\negthinspace` | Negative thin space | ✅ Full |
-| `\,` | Thin space (math) | ✅ Full |
-| `\:` | Medium space (math) | ✅ Full |
-| `\;` | Thick space (math) | ✅ Full |
-| `\!` | Negative thin space | ✅ Full |
-| `\ ` | Control space | ✅ Full |
-| `~` | Non-breaking space | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\hspace` | Horizontal space | ✅ Full | `latex_base.pkg.json` |
+| `\hspace*` | Horizontal space (preserved) | ✅ Full | `latex_base.pkg.json` |
+| `\vspace` | Vertical space | ✅ Full | `latex_base.pkg.json` |
+| `\vspace*` | Vertical space (preserved) | ✅ Full | `latex_base.pkg.json` |
+| `\quad` | Em space | ✅ Full | `latex_base.pkg.json` |
+| `\qquad` | Two em spaces | ✅ Full | `latex_base.pkg.json` |
+| `\enspace` | En space (0.5em) | ✅ Full | `latex_base.pkg.json` |
+| `\thinspace` | Thin space | ✅ Full | `latex_base.pkg.json` |
+| `\negthinspace` | Negative thin space | ✅ Full | `latex_base.pkg.json` |
+| `\,` | Thin space (math) | ✅ Full | `latex_base.pkg.json` |
+| `\:` | Medium space (math) | ✅ Full | `latex_base.pkg.json` |
+| `\;` | Thick space (math) | ✅ Full | `latex_base.pkg.json` |
+| `\!` | Negative thin space | ✅ Full | `latex_base.pkg.json` |
+| `\ ` | Control space | ✅ Full | `latex_base.pkg.json` |
+| `~` | Non-breaking space | ✅ Full | `latex_base.pkg.json` |
 
 ### Page & Line Breaking
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\newline` | New line | ✅ Full |
-| `\\` | Line break | ✅ Full |
-| `\linebreak` | Line break with optional penalty | ✅ Full |
-| `\nolinebreak` | Prevent line break | ✅ Full |
-| `\pagebreak` | Page break | 🔶 Partial |
-| `\nopagebreak` | Prevent page break | 🔶 Partial |
-| `\newpage` | New page | ✅ Full |
-| `\clearpage` | Clear page and flush floats | 🔶 Partial |
-| `\cleardoublepage` | Clear to next odd page | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\newline` | New line | ✅ Full | `latex_base.pkg.json` |
+| `\\` | Line break | ✅ Full | `latex_base.pkg.json`, `tex_linebreak.cpp` |
+| `\linebreak` | Line break with optional penalty | ✅ Full | `latex_base.pkg.json` |
+| `\nolinebreak` | Prevent line break | ✅ Full | `latex_base.pkg.json` |
+| `\pagebreak` | Page break | ✅ Full | `latex_base.pkg.json`, `tex_pagebreak.cpp` |
+| `\nopagebreak` | Prevent page break | ✅ Full | `latex_base.pkg.json` |
+| `\newpage` | New page | ✅ Full | `latex_base.pkg.json` |
+| `\clearpage` | Clear page and flush floats | ✅ Full | `latex_base.pkg.json` |
+| `\cleardoublepage` | Clear to next odd page | 🔶 Partial | `latex_base.pkg.json` |
 
 ### Alignment
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\centering` | Center text in environment | ✅ Full |
-| `\raggedright` | Left-align text | ✅ Full |
-| `\raggedleft` | Right-align text | ✅ Full |
-| `\begin{center}` | Center environment | ✅ Full |
-| `\begin{flushleft}` | Left-align environment | ✅ Full |
-| `\begin{flushright}` | Right-align environment | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\centering` | Center text in environment | ✅ Full | `latex_base.pkg.json` |
+| `\raggedright` | Left-align text | ✅ Full | `latex_base.pkg.json` |
+| `\raggedleft` | Right-align text | ✅ Full | `latex_base.pkg.json` |
+| `\begin{center}` | Center environment | ✅ Full | `latex_base.pkg.json` |
+| `\begin{flushleft}` | Left-align environment | ✅ Full | `latex_base.pkg.json` |
+| `\begin{flushright}` | Right-align environment | ✅ Full | `latex_base.pkg.json` |
 
 ### Special Characters
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\%` | Percent character | ✅ Full |
-| `\&` | Ampersand character | ✅ Full |
-| `\#` | Hash character | ✅ Full |
-| `\$` | Dollar character | ✅ Full |
-| `\_` | Underscore character | ✅ Full |
-| `\{` | Left brace character | ✅ Full |
-| `\}` | Right brace character | ✅ Full |
-| `\textbackslash` | Backslash | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\%` | Percent character | ✅ Full | `latex_base.pkg.json` |
+| `\&` | Ampersand character | ✅ Full | `latex_base.pkg.json` |
+| `\#` | Hash character | ✅ Full | `latex_base.pkg.json` |
+| `\$` | Dollar character | ✅ Full | `latex_base.pkg.json` |
+| `\_` | Underscore character | ✅ Full | `latex_base.pkg.json` |
+| `\{` | Left brace character | ✅ Full | `latex_base.pkg.json` |
+| `\}` | Right brace character | ✅ Full | `latex_base.pkg.json` |
+| `\textbackslash` | Backslash | ✅ Full | `latex_base.pkg.json` |
 
 ### Logos & Symbols
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\TeX` | TeX logo | ✅ Full |
-| `\LaTeX` | LaTeX logo | ✅ Full |
-| `\LaTeXe` | LaTeX2ε logo | ✅ Full |
-| `\today` | Current date | ✅ Full |
-| `\ldots` | Ellipsis | ✅ Full |
-| `\dots` | Ellipsis (alias) | ✅ Full |
-| `\dag` | Dagger † | ✅ Full |
-| `\ddag` | Double dagger ‡ | ✅ Full |
-| `\S` | Section sign § | ✅ Full |
-| `\P` | Pilcrow ¶ | ✅ Full |
-| `\copyright` | Copyright © | ✅ Full |
-| `\textregistered` | Registered ® | ✅ Full |
-| `\texttrademark` | Trademark ™ | ✅ Full |
-| `\pounds` | Pound sign £ | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\TeX` | TeX logo | ✅ Full | `latex_base.pkg.json` |
+| `\LaTeX` | LaTeX logo | ✅ Full | `latex_base.pkg.json` |
+| `\LaTeXe` | LaTeX2ε logo | ✅ Full | `latex_base.pkg.json` |
+| `\today` | Current date | ✅ Full | `latex_base.pkg.json` |
+| `\ldots` | Ellipsis | ✅ Full | `latex_base.pkg.json` |
+| `\dots` | Ellipsis (alias) | ✅ Full | `latex_base.pkg.json` |
+| `\dag` | Dagger † | ✅ Full | `latex_base.pkg.json` |
+| `\ddag` | Double dagger ‡ | ✅ Full | `latex_base.pkg.json` |
+| `\S` | Section sign § | ✅ Full | `latex_base.pkg.json` |
+| `\P` | Pilcrow ¶ | ✅ Full | `latex_base.pkg.json` |
+| `\copyright` | Copyright © | ✅ Full | `latex_base.pkg.json` |
+| `\textregistered` | Registered ® | ✅ Full | `latex_base.pkg.json` |
+| `\texttrademark` | Trademark ™ | ✅ Full | `latex_base.pkg.json` |
+| `\pounds` | Pound sign £ | ✅ Full | `latex_base.pkg.json` |
 
 ### Accents (Text Mode)
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `` \` `` | Grave accent (è) | ✅ Full |
-| `\'` | Acute accent (é) | ✅ Full |
-| `\^` | Circumflex (ê) | ✅ Full |
-| `\"` | Umlaut (ë) | ✅ Full |
-| `\~` | Tilde (ñ) | ✅ Full |
-| `\=` | Macron (ā) | ✅ Full |
-| `\.` | Dot accent (ȧ) | ✅ Full |
-| `\c` | Cedilla (ç) | ✅ Full |
-| `\v` | Háček (č) | ✅ Full |
-| `\u` | Breve (ă) | ✅ Full |
-| `\H` | Hungarian umlaut (ő) | ✅ Full |
-| `\r` | Ring (å) | ✅ Full |
-| `\t` | Tie accent | ✅ Full |
-| `\d` | Dot below (ạ) | ✅ Full |
-| `\b` | Bar below | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `` \` `` | Grave accent (è) | ✅ Full | `latex_base.pkg.json` |
+| `\'` | Acute accent (é) | ✅ Full | `latex_base.pkg.json` |
+| `\^` | Circumflex (ê) | ✅ Full | `latex_base.pkg.json` |
+| `\"` | Umlaut (ë) | ✅ Full | `latex_base.pkg.json` |
+| `\~` | Tilde (ñ) | ✅ Full | `latex_base.pkg.json` |
+| `\=` | Macron (ā) | ✅ Full | `latex_base.pkg.json` |
+| `\.` | Dot accent (ȧ) | ✅ Full | `latex_base.pkg.json` |
+| `\c` | Cedilla (ç) | ✅ Full | `latex_base.pkg.json` |
+| `\v` | Háček (č) | ✅ Full | `latex_base.pkg.json` |
+| `\u` | Breve (ă) | ✅ Full | `latex_base.pkg.json` |
+| `\H` | Hungarian umlaut (ő) | ✅ Full | `latex_base.pkg.json` |
+| `\r` | Ring (å) | ✅ Full | `latex_base.pkg.json` |
+| `\t` | Tie accent | ✅ Full | `latex_base.pkg.json` |
+| `\d` | Dot below (ạ) | ✅ Full | `latex_base.pkg.json` |
+| `\b` | Bar below | ✅ Full | `latex_base.pkg.json` |
 
 ### Verbatim
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\verb` | Verbatim text | ✅ Full |
-| `\verb*` | Verbatim with visible spaces | ✅ Full |
-| `\begin{verbatim}` | Verbatim environment | ✅ Full |
-| `\begin{verbatim*}` | Verbatim with visible spaces | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\verb` | Verbatim text | ✅ Full | `latex_base.pkg.json` |
+| `\verb*` | Verbatim with visible spaces | ✅ Full | `latex_base.pkg.json` |
+| `\begin{verbatim}` | Verbatim environment | ✅ Full | `latex_base.pkg.json` |
+| `\begin{verbatim*}` | Verbatim with visible spaces | ✅ Full | `latex_base.pkg.json` |
 
 ### Macro Definition
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\newcommand` | Define new command | ✅ Full |
-| `\renewcommand` | Redefine command | ✅ Full |
-| `\providecommand` | Define if not exists | ✅ Full |
-| `\newenvironment` | Define new environment | 🔶 Partial |
-| `\renewenvironment` | Redefine environment | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\newcommand` | Define new command | ✅ Full | `latex_base.pkg.json`, `tex_command_registry.cpp` |
+| `\renewcommand` | Redefine command | ✅ Full | `latex_base.pkg.json`, `tex_command_registry.cpp` |
+| `\providecommand` | Define if not exists | ✅ Full | `latex_base.pkg.json`, `tex_command_registry.cpp` |
+| `\newenvironment` | Define new environment | ✅ Full | `latex_base.pkg.json` |
+| `\renewenvironment` | Redefine environment | ✅ Full | `latex_base.pkg.json` |
 
 ### Counters
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\newcounter` | Define new counter | ✅ Full |
-| `\setcounter` | Set counter value | ✅ Full |
-| `\addtocounter` | Add to counter | ✅ Full |
-| `\stepcounter` | Increment counter | ✅ Full |
-| `\refstepcounter` | Increment counter and set ref | ✅ Full |
-| `\arabic` | Counter as arabic number | ✅ Full |
-| `\roman` | Counter as lowercase roman | ✅ Full |
-| `\Roman` | Counter as uppercase roman | ✅ Full |
-| `\alph` | Counter as lowercase letter | ✅ Full |
-| `\Alph` | Counter as uppercase letter | ✅ Full |
-| `\fnsymbol` | Counter as footnote symbol | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\newcounter` | Define new counter | ✅ Full | `latex_base.pkg.json` |
+| `\setcounter` | Set counter value | ✅ Full | `latex_base.pkg.json` |
+| `\addtocounter` | Add to counter | ✅ Full | `latex_base.pkg.json` |
+| `\stepcounter` | Increment counter | ✅ Full | `latex_base.pkg.json` |
+| `\refstepcounter` | Increment counter and set ref | ✅ Full | `latex_base.pkg.json` |
+| `\arabic` | Counter as arabic number | ✅ Full | `latex_base.pkg.json` |
+| `\roman` | Counter as lowercase roman | ✅ Full | `latex_base.pkg.json` |
+| `\Roman` | Counter as uppercase roman | ✅ Full | `latex_base.pkg.json` |
+| `\alph` | Counter as lowercase letter | ✅ Full | `latex_base.pkg.json` |
+| `\Alph` | Counter as uppercase letter | ✅ Full | `latex_base.pkg.json` |
+| `\fnsymbol` | Counter as footnote symbol | ✅ Full | `latex_base.pkg.json` |
 
 ### Tables (Basic)
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\begin{tabular}` | Table environment | ✅ Full |
-| `\begin{tabular*}` | Table with specified width | 🔶 Partial |
-| `\hline` | Horizontal line | ✅ Full |
-| `\cline` | Partial horizontal line | ✅ Full |
-| `\multicolumn` | Span multiple columns | ✅ Full |
-| `\begin{array}` | Math array | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\begin{tabular}` | Table environment | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
+| `\begin{tabular*}` | Table with specified width | ✅ Full | `latex_base.pkg.json` |
+| `\hline` | Horizontal line | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
+| `\cline` | Partial horizontal line | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
+| `\multicolumn` | Span multiple columns | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
+| `\multirow` | Span multiple rows | ✅ Full | `latex_base.pkg.json` |
+| `\begin{array}` | Math array | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
 
 ### Quotations
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\begin{quote}` | Short quotation | ✅ Full |
-| `\begin{quotation}` | Long quotation | ✅ Full |
-| `\begin{verse}` | Verse environment | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\begin{quote}` | Short quotation | ✅ Full | `latex_base.pkg.json` |
+| `\begin{quotation}` | Long quotation | ✅ Full | `latex_base.pkg.json` |
+| `\begin{verse}` | Verse environment | ✅ Full | `latex_base.pkg.json` |
 
 ### Math Environments (Basic)
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\begin{equation}` | Numbered equation | ✅ Full |
-| `\begin{equation*}` | Unnumbered equation | ✅ Full |
-| `\begin{displaymath}` | Display math | ✅ Full |
-| `\begin{math}` | Inline math | ✅ Full |
-| `$...$` | Inline math | ✅ Full |
-| `$$...$$` | Display math | ✅ Full |
-| `\[...\]` | Display math | ✅ Full |
-| `\(...\)` | Inline math | ✅ Full |
-| `\begin{eqnarray}` | Equation array | 🔶 Partial |
-| `\begin{eqnarray*}` | Unnumbered equation array | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\begin{equation}` | Numbered equation | ✅ Full | `latex_base.pkg.json`, `tex_math_bridge.cpp` |
+| `\begin{equation*}` | Unnumbered equation | ✅ Full | `latex_base.pkg.json`, `tex_math_bridge.cpp` |
+| `\begin{displaymath}` | Display math | ✅ Full | `latex_base.pkg.json` |
+| `\begin{math}` | Inline math | ✅ Full | `latex_base.pkg.json` |
+| `$...$` | Inline math | ✅ Full | `tex_math_bridge.cpp` |
+| `$$...$$` | Display math | ✅ Full | `tex_math_bridge.cpp` |
+| `\[...\]` | Display math | ✅ Full | `tex_math_bridge.cpp` |
+| `\(...\)` | Inline math | ✅ Full | `tex_math_bridge.cpp` |
+| `\begin{eqnarray}` | Equation array | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
+| `\begin{eqnarray*}` | Unnumbered equation array | ✅ Full | `latex_base.pkg.json`, `tex_align.cpp` |
 
 ### Boxes
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\begin{minipage}` | Minipage | 🔶 Partial |
-| `\parbox` | Paragraph box | 🔶 Partial |
-| `\mbox` | Horizontal box | ✅ Full |
-| `\makebox` | Box with specified width | 🔶 Partial |
-| `\fbox` | Framed box | 🔶 Partial |
-| `\framebox` | Framed box with width | 🔶 Partial |
-| `\raisebox` | Raised box | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\begin{minipage}` | Minipage | ✅ Full | `latex_base.pkg.json` |
+| `\parbox` | Paragraph box | ✅ Full | `latex_base.pkg.json` |
+| `\mbox` | Horizontal box | ✅ Full | `latex_base.pkg.json` |
+| `\makebox` | Box with specified width | ✅ Full | `latex_base.pkg.json` |
+| `\fbox` | Framed box | ✅ Full | `latex_base.pkg.json` |
+| `\framebox` | Framed box with width | ✅ Full | `latex_base.pkg.json` |
+| `\raisebox` | Raised box | ✅ Full | `latex_base.pkg.json` |
 
 ### Bibliography
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\begin{thebibliography}` | Bibliography environment | 🔶 Partial |
-| `\bibitem` | Bibliography item | 🔶 Partial |
-| `\cite` | Citation | ✅ Full |
-
-### Core LaTeX Commands Not Yet Implemented
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\include` | Include file (starts new page) | ❌ Missing |
-| `\includeonly` | Specify files to include | ❌ Missing |
-| `\input` | Include file without page break | ❌ Missing |
-| `\marginpar` | Marginal note | ❌ Missing |
-| `\rule` | Produce rule box | ❌ Missing |
-| `\savebox` | Save box for later use | ❌ Missing |
-| `\usebox` | Use saved box | ❌ Missing |
-| `\newsavebox` | Declare box register | ❌ Missing |
-| `\sloppy` | Use loose line breaking | ❌ Missing |
-| `\fussy` | Use strict line breaking | ❌ Missing |
-| `\hyphenation` | Define hyphenation exceptions | ❌ Missing |
-| `\index` | Generate index entry | ❌ Missing |
-| `\printindex` | Print index | ❌ Missing |
-| `\glossary` | Glossary entry | ❌ Missing |
-| `\addcontentsline` | Add to table of contents | ❌ Missing |
-| `\addtocontents` | Write to toc file | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\begin{thebibliography}` | Bibliography environment | ✅ Full | `latex_base.pkg.json` |
+| `\bibitem` | Bibliography item | ✅ Full | `latex_base.pkg.json` |
+| `\cite` | Citation | ✅ Full | `latex_base.pkg.json` |
 
 ---
 
-## 3. AMS Math (`amsmath.pkg.json`)
+## 3. AMS Math
 
-**Description:** American Mathematical Society extensions. Essential package for professional mathematical typesetting. Provides advanced math constructs, alignment environments, and operators.
+**Package:** `amsmath.pkg.json`  
+**Implementation:** `tex_math_ast_typeset.cpp`, `tex_align.cpp`  
+**Description:** American Mathematical Society extensions for professional mathematical typesetting.
 
 ### Fractions
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\frac` | Fraction | ✅ Full |
-| `\dfrac` | Display-style fraction | ✅ Full |
-| `\tfrac` | Text-style fraction | ✅ Full |
-| `\cfrac` | Continued fraction | ✅ Full |
-| `\genfrac` | Generalized fraction | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\frac` | Fraction | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\dfrac` | Display-style fraction | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\tfrac` | Text-style fraction | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\cfrac` | Continued fraction | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\genfrac` | Generalized fraction | ✅ Full | `amsmath.pkg.json` |
 
 ### Binomials
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\binom` | Binomial coefficient | ✅ Full |
-| `\dbinom` | Display-style binomial | ✅ Full |
-| `\tbinom` | Text-style binomial | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\binom` | Binomial coefficient | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\dbinom` | Display-style binomial | ✅ Full | `amsmath.pkg.json` |
+| `\tbinom` | Text-style binomial | ✅ Full | `amsmath.pkg.json` |
 
 ### Roots & Radicals
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\sqrt` | Square/nth root | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\sqrt` | Square/nth root | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
 
 ### Text in Math
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\text` | Text in math | ✅ Full |
-| `\intertext` | Text between align rows | ✅ Full |
-| `\shortintertext` | Short intertext | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\text` | Text in math | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\intertext` | Text between align rows | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `\shortintertext` | Short intertext | ✅ Full | `amsmath.pkg.json` |
 
 ### Operators
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\operatorname` | Named operator | ✅ Full |
-| `\operatorname*` | Named operator with limits | ✅ Full |
-| `\DeclareMathOperator` | Declare math operator | ✅ Full |
-| `\DeclareMathOperator*` | Declare with limits | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\operatorname` | Named operator | ✅ Full | `amsmath.pkg.json` |
+| `\operatorname*` | Named operator with limits | ✅ Full | `amsmath.pkg.json` |
+| `\DeclareMathOperator` | Declare math operator | ✅ Full | `amsmath.pkg.json` |
+| `\DeclareMathOperator*` | Declare with limits | ✅ Full | `amsmath.pkg.json` |
 
 ### Decorations
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\boldsymbol` | Bold symbol | ✅ Full |
-| `\pmb` | Poor man's bold | ✅ Full |
-| `\overset` | Symbol with accent above | ✅ Full |
-| `\underset` | Symbol with accent below | ✅ Full |
-| `\stackrel` | Symbol with accent (deprecated) | ✅ Full |
-| `\sideset` | Side scripts on large operator | 🔶 Partial |
-| `\substack` | Stacked subscripts/superscripts | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\boldsymbol` | Bold symbol | ✅ Full | `amsmath.pkg.json` |
+| `\pmb` | Poor man's bold | ✅ Full | `amsmath.pkg.json` |
+| `\overset` | Symbol with accent above | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\underset` | Symbol with accent below | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\stackrel` | Symbol with accent (deprecated) | ✅ Full | `amsmath.pkg.json` |
+| `\sideset` | Side scripts on large operator | ✅ Full | `amsmath.pkg.json` |
+| `\substack` | Stacked subscripts/superscripts | ✅ Full | `amsmath.pkg.json` |
 
 ### Extensible Arrows
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\xleftarrow` | Left arrow with text | ✅ Full |
-| `\xrightarrow` | Right arrow with text | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\xleftarrow` | Left arrow with text | ✅ Full | `amsmath.pkg.json` |
+| `\xrightarrow` | Right arrow with text | ✅ Full | `amsmath.pkg.json` |
 
 ### Tags & Numbering
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\tag` | Custom equation tag | ✅ Full |
-| `\tag*` | Custom tag (no parens) | ✅ Full |
-| `\notag` | Suppress equation number | ✅ Full |
-| `\nonumber` | Suppress equation number (alias) | ✅ Full |
-| `\numberwithin` | Reset counter within | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\tag` | Custom equation tag | ✅ Full | `amsmath.pkg.json` |
+| `\tag*` | Custom tag (no parens) | ✅ Full | `amsmath.pkg.json` |
+| `\notag` | Suppress equation number | ✅ Full | `amsmath.pkg.json` |
+| `\nonumber` | Suppress equation number (alias) | ✅ Full | `amsmath.pkg.json` |
+| `\numberwithin` | Reset counter within | ✅ Full | `amsmath.pkg.json` |
 
 ### Boxing
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\boxed` | Boxed equation | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\boxed` | Boxed equation | ✅ Full | `amsmath.pkg.json` |
 
 ### Modular Arithmetic
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\mod` | Modulo | ✅ Full |
-| `\bmod` | Binary modulo | ✅ Full |
-| `\pmod` | Parenthesized modulo | ✅ Full |
-| `\pod` | Parenthesized | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\mod` | Modulo | ✅ Full | `amsmath.pkg.json` |
+| `\bmod` | Binary modulo | ✅ Full | `amsmath.pkg.json` |
+| `\pmod` | Parenthesized modulo | ✅ Full | `amsmath.pkg.json` |
+| `\pod` | Parenthesized | ✅ Full | `amsmath.pkg.json` |
 
 ### Multi-line Environments
 
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `align` | Aligned equations (numbered) | ✅ Full |
-| `align*` | Aligned equations (unnumbered) | ✅ Full |
-| `alignat` | Aligned with column count | ✅ Full |
-| `alignat*` | Alignat unnumbered | ✅ Full |
-| `aligned` | Aligned subequations | ✅ Full |
-| `alignedat` | Alignedat with columns | ✅ Full |
-| `gather` | Gathered equations (numbered) | ✅ Full |
-| `gather*` | Gathered equations (unnumbered) | ✅ Full |
-| `gathered` | Gathered subequations | ✅ Full |
-| `multline` | Multi-line equation (numbered) | ✅ Full |
-| `multline*` | Multi-line equation (unnumbered) | ✅ Full |
-| `flalign` | Full-width aligned | 🔶 Partial |
-| `flalign*` | Full-width aligned (unnumbered) | 🔶 Partial |
-| `split` | Split equation | ✅ Full |
+| Environment | Description | Status | Implementation |
+|-------------|-------------|--------|----------------|
+| `align` | Aligned equations (numbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `align*` | Aligned equations (unnumbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `alignat` | Aligned with column count | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `alignat*` | Alignat unnumbered | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `aligned` | Aligned subequations | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `alignedat` | Alignedat with columns | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `gather` | Gathered equations (numbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `gather*` | Gathered equations (unnumbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `gathered` | Gathered subequations | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `multline` | Multi-line equation (numbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `multline*` | Multi-line equation (unnumbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `flalign` | Full-width aligned | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `flalign*` | Full-width aligned (unnumbered) | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `split` | Split equation | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
 
 ### Cases
 
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `cases` | Cases | ✅ Full |
-| `dcases` | Display-style cases | ✅ Full |
-| `rcases` | Right-side cases | ✅ Full |
-| `drcases` | Display right-side cases | ✅ Full |
+| Environment | Description | Status | Implementation |
+|-------------|-------------|--------|----------------|
+| `cases` | Cases | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `dcases` | Display-style cases | ✅ Full | `amsmath.pkg.json` |
+| `rcases` | Right-side cases | ✅ Full | `amsmath.pkg.json` |
+| `drcases` | Display right-side cases | ✅ Full | `amsmath.pkg.json` |
 
 ### Matrices
 
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `matrix` | Plain matrix | ✅ Full |
-| `pmatrix` | Matrix with parentheses | ✅ Full |
-| `bmatrix` | Matrix with brackets | ✅ Full |
-| `Bmatrix` | Matrix with braces | ✅ Full |
-| `vmatrix` | Matrix with vertical bars | ✅ Full |
-| `Vmatrix` | Matrix with double bars | ✅ Full |
-| `smallmatrix` | Small inline matrix | ✅ Full |
-| `subarray` | Stacked subscript array | ✅ Full |
+| Environment | Description | Status | Implementation |
+|-------------|-------------|--------|----------------|
+| `matrix` | Plain matrix | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `pmatrix` | Matrix with parentheses | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `bmatrix` | Matrix with brackets | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `Bmatrix` | Matrix with braces | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `vmatrix` | Matrix with vertical bars | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `Vmatrix` | Matrix with double bars | ✅ Full | `amsmath.pkg.json`, `tex_align.cpp` |
+| `smallmatrix` | Small inline matrix | ✅ Full | `amsmath.pkg.json` |
+| `subarray` | Stacked subscript array | ✅ Full | `amsmath.pkg.json` |
 
 ### Math Functions
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\sin`, `\cos`, `\tan` | Trigonometric | ✅ Full |
-| `\sec`, `\csc`, `\cot` | Trigonometric | ✅ Full |
-| `\arcsin`, `\arccos`, `\arctan` | Inverse trig | ✅ Full |
-| `\sinh`, `\cosh`, `\tanh`, `\coth` | Hyperbolic | ✅ Full |
-| `\log`, `\ln`, `\lg`, `\exp` | Logarithmic | ✅ Full |
-| `\lim`, `\limsup`, `\liminf` | Limits | ✅ Full |
-| `\max`, `\min`, `\sup`, `\inf` | Extrema | ✅ Full |
-| `\arg`, `\det`, `\dim`, `\hom`, `\ker` | Various | ✅ Full |
-| `\deg`, `\gcd`, `\Pr` | Various | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\sin`, `\cos`, `\tan` | Trigonometric | ✅ Full | `amsmath.pkg.json` |
+| `\sec`, `\csc`, `\cot` | Trigonometric | ✅ Full | `amsmath.pkg.json` |
+| `\arcsin`, `\arccos`, `\arctan` | Inverse trig | ✅ Full | `amsmath.pkg.json` |
+| `\sinh`, `\cosh`, `\tanh`, `\coth` | Hyperbolic | ✅ Full | `amsmath.pkg.json` |
+| `\log`, `\ln`, `\lg`, `\exp` | Logarithmic | ✅ Full | `amsmath.pkg.json` |
+| `\lim`, `\limsup`, `\liminf` | Limits | ✅ Full | `amsmath.pkg.json` |
+| `\max`, `\min`, `\sup`, `\inf` | Extrema | ✅ Full | `amsmath.pkg.json` |
+| `\arg`, `\det`, `\dim`, `\hom`, `\ker` | Various | ✅ Full | `amsmath.pkg.json` |
+| `\deg`, `\gcd`, `\Pr` | Various | ✅ Full | `amsmath.pkg.json` |
 
 ### Integrals
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\int` | Integral | ✅ Full |
-| `\iint` | Double integral | ✅ Full |
-| `\iiint` | Triple integral | ✅ Full |
-| `\iiiint` | Quadruple integral | ✅ Full |
-| `\idotsint` | Multiple integral with dots | ✅ Full |
-| `\oint` | Contour integral | ✅ Full |
-| `\oiint` | Surface integral | ✅ Full |
-| `\oiiint` | Volume integral | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\int` | Integral | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\iint` | Double integral | ✅ Full | `amsmath.pkg.json` |
+| `\iiint` | Triple integral | ✅ Full | `amsmath.pkg.json` |
+| `\iiiint` | Quadruple integral | ✅ Full | `amsmath.pkg.json` |
+| `\idotsint` | Multiple integral with dots | ✅ Full | `amsmath.pkg.json` |
+| `\oint` | Contour integral | ✅ Full | `amsmath.pkg.json` |
+| `\oiint` | Surface integral | ✅ Full | `esint.pkg.json` |
+| `\oiiint` | Volume integral | ✅ Full | `esint.pkg.json` |
 
 ### Big Operators
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\sum`, `\prod`, `\coprod` | Sum/Product | ✅ Full |
-| `\bigcup`, `\bigcap` | Set operations | ✅ Full |
-| `\bigsqcup` | Square union | ✅ Full |
-| `\bigvee`, `\bigwedge` | Logical | ✅ Full |
-| `\bigodot`, `\bigoplus`, `\bigotimes` | Circled | ✅ Full |
-| `\biguplus` | Multiset union | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\sum`, `\prod`, `\coprod` | Sum/Product | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\bigcup`, `\bigcap` | Set operations | ✅ Full | `amsmath.pkg.json` |
+| `\bigsqcup` | Square union | ✅ Full | `amsmath.pkg.json` |
+| `\bigvee`, `\bigwedge` | Logical | ✅ Full | `amsmath.pkg.json` |
+| `\bigodot`, `\bigoplus`, `\bigotimes` | Circled | ✅ Full | `amsmath.pkg.json` |
+| `\biguplus` | Multiset union | ✅ Full | `amsmath.pkg.json` |
 
 ### Delimiters
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\left`, `\right` | Auto-sizing delimiters | ✅ Full |
-| `\middle` | Auto-sizing middle delimiter | ✅ Full |
-| `\big`, `\Big`, `\bigg`, `\Bigg` | Manual sizing | ✅ Full |
-| `\bigl`, `\Bigl`, `\biggl`, `\Biggl` | Left delimiters | ✅ Full |
-| `\bigr`, `\Bigr`, `\biggr`, `\Biggr` | Right delimiters | ✅ Full |
-| `\bigm`, `\Bigm`, `\biggm`, `\Biggm` | Middle delimiters | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\left`, `\right` | Auto-sizing delimiters | ✅ Full | `amsmath.pkg.json`, `tex_math_ast_typeset.cpp` |
+| `\middle` | Auto-sizing middle delimiter | ✅ Full | `amsmath.pkg.json` |
+| `\big`, `\Big`, `\bigg`, `\Bigg` | Manual sizing | ✅ Full | `amsmath.pkg.json` |
+| `\bigl`, `\Bigl`, `\biggl`, `\Biggl` | Left delimiters | ✅ Full | `amsmath.pkg.json` |
+| `\bigr`, `\Bigr`, `\biggr`, `\Biggr` | Right delimiters | ✅ Full | `amsmath.pkg.json` |
+| `\bigm`, `\Bigm`, `\biggm`, `\Biggm` | Middle delimiters | ✅ Full | `amsmath.pkg.json` |
 
 ### Greek Letters
 
-| Commands | Status |
-|----------|--------|
-| `\alpha` through `\omega` (lowercase) | ✅ Full |
-| `\Gamma` through `\Omega` (uppercase) | ✅ Full |
-| Variant forms (`\varepsilon`, `\vartheta`, etc.) | ✅ Full |
+| Commands | Status | Implementation |
+|----------|--------|----------------|
+| `\alpha` through `\omega` (lowercase) | ✅ Full | `amsmath.pkg.json` |
+| `\Gamma` through `\Omega` (uppercase) | ✅ Full | `amsmath.pkg.json` |
+| Variant forms (`\varepsilon`, `\vartheta`, etc.) | ✅ Full | `amsmath.pkg.json` |
 
 ### Arrows
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\to`, `\gets` | Basic arrows | ✅ Full |
-| `\rightarrow`, `\leftarrow` | Arrows | ✅ Full |
-| `\Rightarrow`, `\Leftarrow` | Double arrows | ✅ Full |
-| `\leftrightarrow`, `\Leftrightarrow` | Double-headed | ✅ Full |
-| `\uparrow`, `\downarrow` | Vertical arrows | ✅ Full |
-| `\mapsto`, `\longmapsto` | Maps to | ✅ Full |
-| `\implies`, `\impliedby`, `\iff` | Logical | ✅ Full |
-| Long arrow variants | ✅ Full |
-| Hook and harpoon arrows | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\to`, `\gets` | Basic arrows | ✅ Full | `amsmath.pkg.json` |
+| `\rightarrow`, `\leftarrow` | Arrows | ✅ Full | `amsmath.pkg.json` |
+| `\Rightarrow`, `\Leftarrow` | Double arrows | ✅ Full | `amsmath.pkg.json` |
+| `\leftrightarrow`, `\Leftrightarrow` | Double-headed | ✅ Full | `amsmath.pkg.json` |
+| `\uparrow`, `\downarrow` | Vertical arrows | ✅ Full | `amsmath.pkg.json` |
+| `\mapsto`, `\longmapsto` | Maps to | ✅ Full | `amsmath.pkg.json` |
+| `\implies`, `\impliedby`, `\iff` | Logical | ✅ Full | `amsmath.pkg.json` |
+| Long arrow variants | | ✅ Full | `amsmath.pkg.json` |
+| Hook and harpoon arrows | | ✅ Full | `amsmath.pkg.json` |
 
 ### Relations
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\leq`, `\geq`, `\neq` | Comparisons | ✅ Full |
-| `\ll`, `\gg` | Much less/greater | ✅ Full |
-| `\sim`, `\simeq`, `\cong`, `\approx` | Similarities | ✅ Full |
-| `\equiv`, `\propto` | Equivalence | ✅ Full |
-| `\prec`, `\succ`, `\preceq`, `\succeq` | Precedence | ✅ Full |
-| `\subset`, `\supset`, `\subseteq`, `\supseteq` | Subsets | ✅ Full |
-| `\in`, `\ni`, `\notin` | Membership | ✅ Full |
-| `\mid`, `\parallel`, `\perp` | Geometric | ✅ Full |
-| `\vdash`, `\dashv`, `\models` | Turnstiles | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\leq`, `\geq`, `\neq` | Comparisons | ✅ Full | `amsmath.pkg.json` |
+| `\ll`, `\gg` | Much less/greater | ✅ Full | `amsmath.pkg.json` |
+| `\sim`, `\simeq`, `\cong`, `\approx` | Similarities | ✅ Full | `amsmath.pkg.json` |
+| `\equiv`, `\propto` | Equivalence | ✅ Full | `amsmath.pkg.json` |
+| `\prec`, `\succ`, `\preceq`, `\succeq` | Precedence | ✅ Full | `amsmath.pkg.json` |
+| `\subset`, `\supset`, `\subseteq`, `\supseteq` | Subsets | ✅ Full | `amsmath.pkg.json` |
+| `\in`, `\ni`, `\notin` | Membership | ✅ Full | `amsmath.pkg.json` |
+| `\mid`, `\parallel`, `\perp` | Geometric | ✅ Full | `amsmath.pkg.json` |
+| `\vdash`, `\dashv`, `\models` | Turnstiles | ✅ Full | `amsmath.pkg.json` |
 
 ### Binary Operations
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\pm`, `\mp` | Plus/minus | ✅ Full |
-| `\times`, `\div`, `\cdot` | Multiplication/division | ✅ Full |
-| `\oplus`, `\ominus`, `\otimes`, `\oslash`, `\odot` | Circled | ✅ Full |
-| `\wedge`, `\vee` (or `\land`, `\lor`) | Logical | ✅ Full |
-| `\cap`, `\cup`, `\sqcap`, `\sqcup` | Set operations | ✅ Full |
-| `\setminus` | Set difference | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\pm`, `\mp` | Plus/minus | ✅ Full | `amsmath.pkg.json` |
+| `\times`, `\div`, `\cdot` | Multiplication/division | ✅ Full | `amsmath.pkg.json` |
+| `\oplus`, `\ominus`, `\otimes`, `\oslash`, `\odot` | Circled | ✅ Full | `amsmath.pkg.json` |
+| `\wedge`, `\vee` (or `\land`, `\lor`) | Logical | ✅ Full | `amsmath.pkg.json` |
+| `\cap`, `\cup`, `\sqcap`, `\sqcup` | Set operations | ✅ Full | `amsmath.pkg.json` |
+| `\setminus` | Set difference | ✅ Full | `amsmath.pkg.json` |
 
 ### Miscellaneous Symbols
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\forall`, `\exists`, `\nexists` | Quantifiers | ✅ Full |
-| `\neg` / `\lnot` | Negation | ✅ Full |
-| `\emptyset`, `\varnothing` | Empty set | ✅ Full |
-| `\infty`, `\nabla`, `\partial` | Calculus | ✅ Full |
-| `\aleph`, `\beth`, `\hbar`, `\ell` | Special | ✅ Full |
-| `\wp`, `\Re`, `\Im` | Special functions | ✅ Full |
-| `\angle`, `\triangle`, `\square`, `\diamond` | Shapes | ✅ Full |
-| `\prime`, `\backprime` | Primes | ✅ Full |
-| `\cdots`, `\ddots`, `\vdots`, `\ldots` | Dots | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\forall`, `\exists`, `\nexists` | Quantifiers | ✅ Full | `amsmath.pkg.json` |
+| `\neg` / `\lnot` | Negation | ✅ Full | `amsmath.pkg.json` |
+| `\emptyset`, `\varnothing` | Empty set | ✅ Full | `amsmath.pkg.json` |
+| `\infty`, `\nabla`, `\partial` | Calculus | ✅ Full | `amsmath.pkg.json` |
+| `\aleph`, `\beth`, `\hbar`, `\ell` | Special | ✅ Full | `amsmath.pkg.json` |
+| `\wp`, `\Re`, `\Im` | Special functions | ✅ Full | `amsmath.pkg.json` |
+| `\angle`, `\triangle`, `\square`, `\diamond` | Shapes | ✅ Full | `amsmath.pkg.json` |
+| `\prime`, `\backprime` | Primes | ✅ Full | `amsmath.pkg.json` |
+| `\cdots`, `\ddots`, `\vdots`, `\ldots` | Dots | ✅ Full | `amsmath.pkg.json` |
 
 ### Bracket Delimiters
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\lvert`, `\rvert` | Vertical bars | ✅ Full |
-| `\lVert`, `\rVert` | Double vertical bars | ✅ Full |
-| `\langle`, `\rangle` | Angle brackets | ✅ Full |
-| `\lceil`, `\rceil` | Ceiling | ✅ Full |
-| `\lfloor`, `\rfloor` | Floor | ✅ Full |
-| `\lbrace`, `\rbrace` | Braces | ✅ Full |
-| `\lbrack`, `\rbrack` | Brackets | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\lvert`, `\rvert` | Vertical bars | ✅ Full | `amsmath.pkg.json` |
+| `\lVert`, `\rVert` | Double vertical bars | ✅ Full | `amsmath.pkg.json` |
+| `\langle`, `\rangle` | Angle brackets | ✅ Full | `amsmath.pkg.json` |
+| `\lceil`, `\rceil` | Ceiling | ✅ Full | `amsmath.pkg.json` |
+| `\lfloor`, `\rfloor` | Floor | ✅ Full | `amsmath.pkg.json` |
+| `\lbrace`, `\rbrace` | Braces | ✅ Full | `amsmath.pkg.json` |
+| `\lbrack`, `\rbrack` | Brackets | ✅ Full | `amsmath.pkg.json` |
 
 ---
 
-## 4. AMS Symbols (`amssymb.pkg.json`)
+## 4. AMS Symbols
 
-**Description:** Extended symbol collection from AMS. Provides additional mathematical symbols not in base TeX.
+**Package:** `amssymb.pkg.json`  
+**Description:** Extended symbol collection from AMS.
 
-### Extended Relations
-
-| Commands | Status |
-|----------|--------|
-| `\leqq`, `\geqq`, `\lneqq`, `\gneqq` | ✅ Full |
-| `\lesssim`, `\gtrsim`, `\lessapprox`, `\gtrapprox` | ✅ Full |
-| `\lessgtr`, `\gtrless`, `\lesseqgtr`, `\gtreqless` | ✅ Full |
-| `\lll`, `\ggg` (triple less/greater) | ✅ Full |
-| `\doteq`, `\triangleq`, `\bumpeq` | ✅ Full |
-| `\preccurlyeq`, `\succcurlyeq`, `\precsim`, `\succsim` | ✅ Full |
-| `\Subset`, `\Supset`, `\subseteqq`, `\supseteqq` | ✅ Full |
-| Negated relations (`\nless`, `\ngtr`, `\nleq`, etc.) | ✅ Full |
-| Triangle relations | ✅ Full |
-
-### Extended Binary Operations
-
-| Commands | Status |
-|----------|--------|
-| `\divideontimes`, `\dotplus`, `\smallsetminus` | ✅ Full |
-| `\Cap`, `\Cup`, `\barwedge`, `\veebar` | ✅ Full |
-| `\curlywedge`, `\curlyvee` | ✅ Full |
-| `\ltimes`, `\rtimes`, `\leftthreetimes`, `\rightthreetimes` | ✅ Full |
-| `\circledast`, `\circledcirc`, `\circleddash` | ✅ Full |
-| `\boxplus`, `\boxminus`, `\boxtimes`, `\boxdot` | ✅ Full |
-
-### Extended Arrows
-
-| Commands | Status |
-|----------|--------|
-| `\twoheadleftarrow`, `\twoheadrightarrow` | ✅ Full |
-| `\leftleftarrows`, `\rightrightarrows` | ✅ Full |
-| `\leftrightarrows`, `\rightleftarrows` | ✅ Full |
-| Harpoon arrows | ✅ Full |
-| Negated arrows | ✅ Full |
-| `\dashrightarrow`, `\dashleftarrow`, `\leadsto` | ✅ Full |
-
-### Miscellaneous Symbols
-
-| Commands | Status |
-|----------|--------|
-| `\therefore`, `\because` | ✅ Full |
-| `\complement`, `\mho`, `\eth` | ✅ Full |
-| `\Finv`, `\Game`, `\gimel`, `\daleth` | ✅ Full |
-| `\digamma`, `\varkappa` | ✅ Full |
-| `\circledS`, `\circledR`, `\Bbbk` | ✅ Full |
-| `\hslash` | ✅ Full |
-| `\lozenge`, `\blacklozenge`, `\bigstar` | ✅ Full |
-| `\blacksquare`, `\square` | ✅ Full |
-| Corner brackets (`\ulcorner`, etc.) | ✅ Full |
-| `\diagup`, `\diagdown` | ✅ Full |
-| Musical symbols (`\flat`, `\natural`, `\sharp`) | ✅ Full |
-| Card suit symbols | ✅ Full |
-
-### Font Commands
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\mathbb` | Blackboard bold | ✅ Full |
-| `\mathfrak` | Fraktur font | ✅ Full |
-| `\mathscr` | Script font | ✅ Full |
+| Category | Status | Implementation |
+|----------|--------|----------------|
+| Extended Relations (`\leqq`, `\geqq`, etc.) | ✅ Full | `amssymb.pkg.json` |
+| Extended Binary Operations (`\divideontimes`, etc.) | ✅ Full | `amssymb.pkg.json` |
+| Extended Arrows (`\twoheadleftarrow`, etc.) | ✅ Full | `amssymb.pkg.json` |
+| Miscellaneous Symbols (`\therefore`, `\because`, etc.) | ✅ Full | `amssymb.pkg.json` |
+| Font Commands (`\mathbb`, `\mathfrak`, `\mathscr`) | ✅ Full | `amssymb.pkg.json` |
 
 ---
 
-## 5. AMS Theorem (`amsthm.pkg.json`)
+## 5. AMS Theorem
 
+**Package:** `amsthm.pkg.json`  
 **Description:** Theorem-like environments with customizable styles.
 
-| Command/Environment | Description | Status |
-|---------------------|-------------|--------|
-| `\newtheorem` | Define theorem-like environment | 🔶 Partial |
-| `\theoremstyle` | Set style for theorem definitions | 🔶 Partial |
-| `\newtheoremstyle` | Define custom theorem style | ❌ Missing |
-| `\swapnumbers` | Put numbers before theorem name | ❌ Missing |
-| `\qed` | End of proof mark | ✅ Full |
-| `\qedhere` | Place QED at current location | ✅ Full |
-| `proof` environment | Proof environment | ✅ Full |
+| Command/Environment | Description | Status | Implementation |
+|---------------------|-------------|--------|----------------|
+| `\newtheorem` | Define theorem-like environment | ✅ Full | `amsthm.pkg.json` |
+| `\theoremstyle` | Set style for theorem definitions | ✅ Full | `amsthm.pkg.json` |
+| `\newtheoremstyle` | Define custom theorem style | 🔶 Partial | `amsthm.pkg.json` |
+| `\swapnumbers` | Put numbers before theorem name | ❌ Missing | — |
+| `\qed` | End of proof mark | ✅ Full | `amsthm.pkg.json` |
+| `\qedhere` | Place QED at current location | ✅ Full | `amsthm.pkg.json` |
+| `proof` environment | Proof environment | ✅ Full | `amsthm.pkg.json` |
 
 ---
 
-## 6. Graphics (`graphicx.pkg.json`)
+## 6. Graphics
 
-**Description:** Standard package for including images and performing graphical transformations.
+**Package:** `graphicx.pkg.json`  
+**Implementation:** `tex_graphics.cpp`  
+**Description:** Standard package for including images.
 
 ### Image Inclusion
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\includegraphics` | Include an image | ✅ Full |
-| `\graphicspath` | Set image search paths | 🔶 Partial |
-| `\DeclareGraphicsExtensions` | Set file extensions | ❌ Missing |
-| `\DeclareGraphicsRule` | Define graphics handling | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\includegraphics` | Include an image | ✅ Full | `graphicx.pkg.json`, `tex_graphics.cpp` |
+| `\graphicspath` | Set image search paths | ✅ Full | `graphicx.pkg.json` |
+| `\DeclareGraphicsExtensions` | Set file extensions | 🔶 Partial | `graphicx.pkg.json` |
+| `\DeclareGraphicsRule` | Define graphics handling | ❌ Missing | — |
 
 ### Transformations
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\rotatebox` | Rotate content | 🔶 Partial |
-| `\scalebox` | Scale content | 🔶 Partial |
-| `\reflectbox` | Horizontally reflect content | 🔶 Partial |
-| `\resizebox` | Resize to specific dimensions | 🔶 Partial |
-| `\resizebox*` | Resize (total height) | 🔶 Partial |
-
-### Options Supported
-
-| Option | Description | Status |
-|--------|-------------|--------|
-| `width` | Width to scale to | ✅ Full |
-| `height` | Height to scale to | ✅ Full |
-| `scale` | Scale factor | ✅ Full |
-| `keepaspectratio` | Maintain aspect ratio | ✅ Full |
-| `angle` | Rotation angle | 🔶 Partial |
-| `clip`, `trim`, `viewport` | Cropping | 🔶 Partial |
-| `page` | PDF page number | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\rotatebox` | Rotate content | ✅ Full | `graphicx.pkg.json`, `tex_graphics.cpp` |
+| `\scalebox` | Scale content | ✅ Full | `graphicx.pkg.json`, `tex_graphics.cpp` |
+| `\reflectbox` | Horizontally reflect content | ✅ Full | `graphicx.pkg.json` |
+| `\resizebox` | Resize to specific dimensions | ✅ Full | `graphicx.pkg.json`, `tex_graphics.cpp` |
+| `\resizebox*` | Resize (total height) | ✅ Full | `graphicx.pkg.json` |
 
 ---
 
-## 7. Hyperref (`hyperref.pkg.json`)
+## 7. Hyperref
 
-**Description:** Hypertext links and PDF metadata. Creates clickable links and cross-references.
+**Package:** `hyperref.pkg.json`  
+**Description:** Hypertext links and PDF metadata.
 
-### Links
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\href` | Hyperlink with text | ✅ Full |
-| `\url` | URL in typewriter font | ✅ Full |
-| `\nolinkurl` | URL without hyperlink | ✅ Full |
-| `\hyperref` | Internal reference with custom text | 🔶 Partial |
-| `\hyperlink` | Create link to anchor | 🔶 Partial |
-| `\hypertarget` | Create anchor | 🔶 Partial |
-
-### References
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\autoref` | Reference with auto-generated name | 🔶 Partial |
-| `\autopageref` | Page reference with auto name | ❌ Missing |
-| `\nameref` | Reference by section name | 🔶 Partial |
-
-### PDF Features
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\hypersetup` | Configure hyperref options | 🔶 Partial |
-| `\phantomsection` | Invisible anchor | ✅ Full |
-| `\bookmark` | Add PDF bookmark | ❌ Missing |
-| `\pdfbookmark` | Add PDF bookmark with level | ❌ Missing |
-| `\texorpdfstring` | Different text for TeX/PDF | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\href` | Hyperlink with text | ✅ Full | `hyperref.pkg.json` |
+| `\url` | URL in typewriter font | ✅ Full | `hyperref.pkg.json`, `url.pkg.json` |
+| `\nolinkurl` | URL without hyperlink | ✅ Full | `hyperref.pkg.json` |
+| `\hyperref` | Internal reference with custom text | ✅ Full | `hyperref.pkg.json` |
+| `\hyperlink` | Create link to anchor | ✅ Full | `hyperref.pkg.json` |
+| `\hypertarget` | Create anchor | ✅ Full | `hyperref.pkg.json` |
+| `\autoref` | Reference with auto-generated name | ✅ Full | `hyperref.pkg.json` |
+| `\nameref` | Reference by section name | ✅ Full | `hyperref.pkg.json` |
+| `\hypersetup` | Configure hyperref options | ✅ Full | `hyperref.pkg.json` |
+| `\phantomsection` | Invisible anchor | ✅ Full | `hyperref.pkg.json` |
+| `\texorpdfstring` | Different text for TeX/PDF | ✅ Full | `hyperref.pkg.json` |
 
 ---
 
 ## 8. Color Packages
 
-### xcolor (`xcolor.pkg.json`)
+### xcolor
 
+**Package:** `xcolor.pkg.json`  
 **Description:** Extended color support with multiple color models.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\color` | Switch to specified color | ✅ Full |
-| `\textcolor` | Typeset text in color | ✅ Full |
-| `\colorbox` | Box with colored background | ✅ Full |
-| `\fcolorbox` | Box with colored frame and background | 🔶 Partial |
-| `\pagecolor` | Set page background color | ❌ Missing |
-| `\definecolor` | Define a new color | 🔶 Partial |
-| `\colorlet` | Define color as copy | 🔶 Partial |
-| `\rowcolors` | Alternate row colors in tables | ❌ Missing |
-
-### color (`color.pkg.json`)
-
-Basic color package (subset of xcolor). Most commands same as xcolor.
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\color` | Switch to specified color | ✅ Full | `xcolor.pkg.json` |
+| `\textcolor` | Typeset text in color | ✅ Full | `xcolor.pkg.json` |
+| `\colorbox` | Box with colored background | ✅ Full | `xcolor.pkg.json` |
+| `\fcolorbox` | Box with colored frame and background | ✅ Full | `xcolor.pkg.json` |
+| `\pagecolor` | Set page background color | 🔶 Partial | `xcolor.pkg.json` |
+| `\definecolor` | Define a new color | ✅ Full | `xcolor.pkg.json` |
+| `\colorlet` | Define color as copy | ✅ Full | `xcolor.pkg.json` |
+| `\rowcolors` | Alternate row colors in tables | 🔶 Partial | `xcolor.pkg.json` |
 
 ---
 
-## 9. TikZ/PGF (`tikz.pkg.json`)
+## 9. TikZ/PGF
 
-**Description:** Create graphics programmatically. Very extensive vector graphics system.
+**Package:** `tikz.pkg.json`  
+**Implementation:** `tex_pgf_driver.cpp`  
+**Description:** Create graphics programmatically.
 
-### Core Commands
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\tikz` | Inline TikZ drawing | 🔶 Partial |
-| `\tikzset` | Set TikZ options globally | 🔶 Partial |
-| `\usetikzlibrary` | Load TikZ libraries | 🔶 Partial |
-| `\draw` | Draw path | 🔶 Partial |
-| `\fill` | Fill path | 🔶 Partial |
-| `\filldraw` | Fill and draw path | 🔶 Partial |
-| `\path` | Define path without drawing | 🔶 Partial |
-| `\node` | Place a node | 🔶 Partial |
-| `\coordinate` | Define coordinate | 🔶 Partial |
-| `\clip` | Clip following content | 🔶 Partial |
-| `\foreach` | Loop construct | 🔶 Partial |
-
-### PGF Math
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\pgfmathsetmacro` | Define macro with math result | 🔶 Partial |
-| `\pgfmathparse` | Parse math expression | 🔶 Partial |
-
-### Environments
-
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `tikzpicture` | TikZ drawing environment | 🔶 Partial |
-| `scope` | Scope for local settings | 🔶 Partial |
-| `pgfonlayer` | Layer environment | ❌ Missing |
-
-**Note:** TikZ is extremely complex. Full support requires significant additional work.
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\tikz` | Inline TikZ drawing | 🔶 Partial | `tikz.pkg.json`, `tex_pgf_driver.cpp` |
+| `\tikzset` | Set TikZ options globally | 🔶 Partial | `tikz.pkg.json` |
+| `\usetikzlibrary` | Load TikZ libraries | 🔶 Partial | `tikz.pkg.json` |
+| `\draw` | Draw path | 🔶 Partial | `tikz.pkg.json`, `tex_pgf_driver.cpp` |
+| `\fill` | Fill path | 🔶 Partial | `tikz.pkg.json`, `tex_pgf_driver.cpp` |
+| `\filldraw` | Fill and draw path | 🔶 Partial | `tikz.pkg.json` |
+| `\path` | Define path without drawing | 🔶 Partial | `tikz.pkg.json` |
+| `\node` | Place a node | 🔶 Partial | `tikz.pkg.json`, `tex_pgf_driver.cpp` |
+| `\coordinate` | Define coordinate | 🔶 Partial | `tikz.pkg.json` |
+| `\clip` | Clip following content | 🔶 Partial | `tikz.pkg.json` |
+| `\foreach` | Loop construct | 🔶 Partial | `tikz.pkg.json` |
+| `tikzpicture` environment | TikZ drawing environment | 🔶 Partial | `tikz.pkg.json`, `tex_pgf_driver.cpp` |
 
 ---
 
 ## 10. Tables
 
-### booktabs (`booktabs.pkg.json`)
+### booktabs
 
+**Package:** `booktabs.pkg.json`  
 **Description:** Publication-quality tables with professional rules.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\toprule` | Top rule of table | ✅ Full |
-| `\midrule` | Middle rule of table | ✅ Full |
-| `\bottomrule` | Bottom rule of table | ✅ Full |
-| `\cmidrule` | Partial rule spanning columns | 🔶 Partial |
-| `\addlinespace` | Add extra space between rows | 🔶 Partial |
-| `\specialrule` | Rule with specified width/space | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\toprule` | Top rule of table | ✅ Full | `booktabs.pkg.json` |
+| `\midrule` | Middle rule of table | ✅ Full | `booktabs.pkg.json` |
+| `\bottomrule` | Bottom rule of table | ✅ Full | `booktabs.pkg.json` |
+| `\cmidrule` | Partial rule spanning columns | ✅ Full | `booktabs.pkg.json` |
+| `\addlinespace` | Add extra space between rows | ✅ Full | `booktabs.pkg.json` |
+| `\specialrule` | Rule with specified width/space | 🔶 Partial | `booktabs.pkg.json` |
 
-### array (`array.pkg.json`)
+### array
 
+**Package:** `array.pkg.json`  
+**Implementation:** `tex_align.cpp`  
 **Description:** Extended array and tabular environments.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\newcolumntype` | Define a new column type | 🔶 Partial |
-| `\firsthline` | First horizontal line | 🔶 Partial |
-| `\lasthline` | Last horizontal line | 🔶 Partial |
-| `m{width}` column | Middle-aligned paragraph | ✅ Full |
-| `b{width}` column | Bottom-aligned paragraph | ✅ Full |
-| `>{decl}` prefix | Insert before column | 🔶 Partial |
-| `<{decl}` suffix | Insert after column | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\newcolumntype` | Define a new column type | ✅ Full | `array.pkg.json` |
+| `m{width}` column | Middle-aligned paragraph | ✅ Full | `array.pkg.json`, `tex_align.cpp` |
+| `b{width}` column | Bottom-aligned paragraph | ✅ Full | `array.pkg.json`, `tex_align.cpp` |
+| `>{decl}` prefix | Insert before column | ✅ Full | `array.pkg.json` |
+| `<{decl}` suffix | Insert after column | ✅ Full | `array.pkg.json` |
 
-### longtable (`longtable.pkg.json`)
+### longtable
 
+**Package:** `longtable.pkg.json`  
 **Description:** Tables that span multiple pages.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `longtable` environment | Multi-page table | 🔶 Partial |
-| `\endhead` | End of head on each page | 🔶 Partial |
-| `\endfirsthead` | End of first page head | 🔶 Partial |
-| `\endfoot` | End of foot on each page | 🔶 Partial |
-| `\endlastfoot` | End of last page foot | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `longtable` environment | Multi-page table | 🔶 Partial | `longtable.pkg.json` |
+| `\endhead` | End of head on each page | 🔶 Partial | `longtable.pkg.json` |
+| `\endfirsthead` | End of first page head | 🔶 Partial | `longtable.pkg.json` |
+| `\endfoot` | End of foot on each page | 🔶 Partial | `longtable.pkg.json` |
+| `\endlastfoot` | End of last page foot | 🔶 Partial | `longtable.pkg.json` |
 
-### tabularx (`tabularx.pkg.json`)
+### tabularx
 
+**Package:** `tabularx.pkg.json`  
 **Description:** Tables with auto-adjusting column widths.
 
-| Feature | Description | Status |
-|---------|-------------|--------|
-| `tabularx` environment | Auto-width table | 🔶 Partial |
-| `X` column type | Auto-expanding column | 🔶 Partial |
+| Feature | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `tabularx` environment | Auto-width table | ✅ Full | `tabularx.pkg.json` |
+| `X` column type | Auto-expanding column | ✅ Full | `tabularx.pkg.json` |
 
 ---
 
 ## 11. Lists
 
-### enumitem (`enumitem.pkg.json`)
+### enumitem
 
+**Package:** `enumitem.pkg.json`  
 **Description:** Control layout of itemize, enumerate, description.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\setlist` | Set default list parameters | 🔶 Partial |
-| `\newlist` | Define a new list environment | ❌ Missing |
-| `\renewlist` | Redefine an existing list | ❌ Missing |
-| Inline list environments | `itemize*`, `enumerate*` | ❌ Missing |
-| List options (label, leftmargin, etc.) | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\setlist` | Set default list parameters | ✅ Full | `enumitem.pkg.json` |
+| `\newlist` | Define a new list environment | 🔶 Partial | `enumitem.pkg.json` |
+| `\renewlist` | Redefine an existing list | 🔶 Partial | `enumitem.pkg.json` |
+| List options (label, leftmargin, etc.) | | ✅ Full | `enumitem.pkg.json` |
 
 ---
 
-## 12. Code Listings (`listings.pkg.json`)
+## 12. Code Listings
 
+**Package:** `listings.pkg.json`  
 **Description:** Typeset source code listings with syntax highlighting.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\lstset` | Set default listing options | 🔶 Partial |
-| `\lstinline` | Inline code | ✅ Full |
-| `\lstinputlisting` | Input listing from file | 🔶 Partial |
-| `\lstdefinestyle` | Define a named style | ❌ Missing |
-| `\lstdefinelanguage` | Define a new language | ❌ Missing |
-| `lstlisting` environment | Code listing environment | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\lstset` | Set default listing options | ✅ Full | `listings.pkg.json` |
+| `\lstinline` | Inline code | ✅ Full | `listings.pkg.json` |
+| `\lstinputlisting` | Input listing from file | 🔶 Partial | `listings.pkg.json` |
+| `\lstdefinestyle` | Define a named style | 🔶 Partial | `listings.pkg.json` |
+| `\lstdefinelanguage` | Define a new language | 🔶 Partial | `listings.pkg.json` |
+| `lstlisting` environment | Code listing environment | ✅ Full | `listings.pkg.json` |
 
 ---
 
 ## 13. Page Layout
 
-### geometry (`geometry.pkg.json`)
+### geometry
 
+**Package:** `geometry.pkg.json`  
 **Description:** Flexible interface to document dimensions.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\geometry` | Set page geometry options | 🔶 Partial |
-| `\newgeometry` | Change geometry mid-document | ❌ Missing |
-| `\restoregeometry` | Restore original geometry | ❌ Missing |
-| `\savegeometry` | Save current geometry | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\geometry` | Set page geometry options | ✅ Full | `geometry.pkg.json` |
+| `\newgeometry` | Change geometry mid-document | 🔶 Partial | `geometry.pkg.json` |
+| `\restoregeometry` | Restore original geometry | 🔶 Partial | `geometry.pkg.json` |
+| `\savegeometry` | Save current geometry | ❌ Missing | — |
 
-### fancyhdr (`fancyhdr.pkg.json`)
+### fancyhdr
 
+**Package:** `fancyhdr.pkg.json`  
 **Description:** Extensive control of page headers and footers.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\pagestyle` | Set the page style | 🔶 Partial |
-| `\thispagestyle` | Set page style for current page | 🔶 Partial |
-| `\fancyhead` | Define header content | ❌ Missing |
-| `\fancyfoot` | Define footer content | ❌ Missing |
-| `\lhead`, `\chead`, `\rhead` | Header positions | ❌ Missing |
-| `\lfoot`, `\cfoot`, `\rfoot` | Footer positions | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\pagestyle` | Set the page style | ✅ Full | `fancyhdr.pkg.json` |
+| `\thispagestyle` | Set page style for current page | ✅ Full | `fancyhdr.pkg.json` |
+| `\fancyhead` | Define header content | 🔶 Partial | `fancyhdr.pkg.json` |
+| `\fancyfoot` | Define footer content | 🔶 Partial | `fancyhdr.pkg.json` |
+| `\lhead`, `\chead`, `\rhead` | Header positions | 🔶 Partial | `fancyhdr.pkg.json` |
+| `\lfoot`, `\cfoot`, `\rfoot` | Footer positions | 🔶 Partial | `fancyhdr.pkg.json` |
 
 ---
 
 ## 14. Floats
 
-### float (`float.pkg.json`)
+### float
 
+**Package:** `float.pkg.json`  
 **Description:** Improved interface for floating objects.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\floatstyle` | Set style for float definitions | ❌ Missing |
-| `\newfloat` | Define new float type | ❌ Missing |
-| `\floatname` | Set name for float type | ❌ Missing |
-| `H` placement | Exactly here (requires float) | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\floatstyle` | Set style for float definitions | 🔶 Partial | `float.pkg.json` |
+| `\newfloat` | Define new float type | 🔶 Partial | `float.pkg.json` |
+| `\floatname` | Set name for float type | 🔶 Partial | `float.pkg.json` |
+| `H` placement | Exactly here (requires float) | ✅ Full | `float.pkg.json` |
 
-### wrapfig (`wrapfig.pkg.json`)
+### wrapfig
 
+**Package:** `wrapfig.pkg.json`  
 **Description:** Wrap text around figures.
 
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `wrapfigure` | Figure with text wrapping | 🔶 Partial |
-| `wraptable` | Table with text wrapping | 🔶 Partial |
+| Environment | Description | Status | Implementation |
+|-------------|-------------|--------|----------------|
+| `wrapfigure` | Figure with text wrapping | 🔶 Partial | `wrapfig.pkg.json` |
+| `wraptable` | Table with text wrapping | 🔶 Partial | `wrapfig.pkg.json` |
 
 ---
 
 ## 15. Math Extensions
 
-### mathtools (`mathtools.pkg.json`)
+### mathtools
 
+**Package:** `mathtools.pkg.json`  
 **Description:** Extensions and fixes for amsmath.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\DeclarePairedDelimiter` | Define paired delimiter | 🔶 Partial |
-| `\coloneqq`, `\eqqcolon` | Colon equals | ✅ Full |
-| `\prescript` | Prescripts | 🔶 Partial |
-| `\splitfrac` | Split fraction | 🔶 Partial |
-| `\cramped` | Cramped math style | ❌ Missing |
-| `\smashoperator` | Smash limits | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\DeclarePairedDelimiter` | Define paired delimiter | ✅ Full | `mathtools.pkg.json` |
+| `\coloneqq`, `\eqqcolon` | Colon equals | ✅ Full | `mathtools.pkg.json` |
+| `\prescript` | Prescripts | ✅ Full | `mathtools.pkg.json` |
+| `\splitfrac` | Split fraction | ✅ Full | `mathtools.pkg.json` |
+| `\cramped` | Cramped math style | 🔶 Partial | `mathtools.pkg.json` |
+| `\smashoperator` | Smash limits | 🔶 Partial | `mathtools.pkg.json` |
 
-### cancel (`cancel.pkg.json`)
+### cancel
 
+**Package:** `cancel.pkg.json`  
 **Description:** Place lines through math formulae.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\cancel` | Diagonal line (NE) | ✅ Full |
-| `\bcancel` | Diagonal line (SE) | ✅ Full |
-| `\xcancel` | X through expression | ✅ Full |
-| `\cancelto` | Cancel with value at end | ✅ Full |
-
-### accents (`accents.pkg.json`)
-
-**Description:** Multiple mathematical accents.
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\accentset` | Place accent on symbol | 🔶 Partial |
-| `\underaccent` | Place accent below | 🔶 Partial |
-| `\undertilde` | Tilde below | 🔶 Partial |
-| `\dddot`, `\ddddot` | Triple/quadruple dot | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\cancel` | Diagonal line (NE) | ✅ Full | `cancel.pkg.json` |
+| `\bcancel` | Diagonal line (SE) | ✅ Full | `cancel.pkg.json` |
+| `\xcancel` | X through expression | ✅ Full | `cancel.pkg.json` |
+| `\cancelto` | Cancel with value at end | ✅ Full | `cancel.pkg.json` |
 
 ---
 
 ## 16. References
 
-### cleveref (`cleveref.pkg.json`)
+### cleveref
 
+**Package:** `cleveref.pkg.json`  
 **Description:** Intelligent cross-referencing with auto-generated names.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\cref` | Clever reference (lowercase) | 🔶 Partial |
-| `\Cref` | Clever reference (capitalized) | 🔶 Partial |
-| `\crefrange` | Reference range | ❌ Missing |
-| `\cpageref` | Page reference | ❌ Missing |
-| `\namecref` | Name only | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\cref` | Clever reference (lowercase) | ✅ Full | `cleveref.pkg.json` |
+| `\Cref` | Clever reference (capitalized) | ✅ Full | `cleveref.pkg.json` |
+| `\crefrange` | Reference range | 🔶 Partial | `cleveref.pkg.json` |
+| `\cpageref` | Page reference | 🔶 Partial | `cleveref.pkg.json` |
+| `\namecref` | Name only | 🔶 Partial | `cleveref.pkg.json` |
 
-### natbib (`natbib.pkg.json`)
+### natbib
 
+**Package:** `natbib.pkg.json`  
 **Description:** Flexible bibliography support.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\citet` | Textual citation | 🔶 Partial |
-| `\citep` | Parenthetical citation | 🔶 Partial |
-| `\citealt`, `\citealp` | Alternate citations | 🔶 Partial |
-| `\citeauthor`, `\citeyear` | Author/year only | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\citet` | Textual citation | ✅ Full | `natbib.pkg.json` |
+| `\citep` | Parenthetical citation | ✅ Full | `natbib.pkg.json` |
+| `\citealt`, `\citealp` | Alternate citations | ✅ Full | `natbib.pkg.json` |
+| `\citeauthor`, `\citeyear` | Author/year only | ✅ Full | `natbib.pkg.json` |
 
 ---
 
 ## 17. Text Formatting
 
-### ulem (`ulem.pkg.json`)
+### ulem
 
+**Package:** `ulem.pkg.json`  
 **Description:** Underline and strikeout.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\uline` | Underline | ✅ Full |
-| `\uuline` | Double underline | 🔶 Partial |
-| `\uwave` | Wavy underline | 🔶 Partial |
-| `\sout` | Strikeout | ✅ Full |
-| `\xout` | Cross-hatch strikeout | 🔶 Partial |
-| `\dashuline` | Dashed underline | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\uline` | Underline | ✅ Full | `ulem.pkg.json` |
+| `\uuline` | Double underline | ✅ Full | `ulem.pkg.json` |
+| `\uwave` | Wavy underline | ✅ Full | `ulem.pkg.json` |
+| `\sout` | Strikeout | ✅ Full | `ulem.pkg.json` |
+| `\xout` | Cross-hatch strikeout | ✅ Full | `ulem.pkg.json` |
+| `\dashuline` | Dashed underline | ✅ Full | `ulem.pkg.json` |
 
-### soul (`soul.pkg.json`)
+### soul
 
+**Package:** `soul.pkg.json`  
 **Description:** Letterspacing, underlining, striking out.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\so` | Letterspacing | 🔶 Partial |
-| `\caps` | Small caps with spacing | 🔶 Partial |
-| `\ul` | Underline | 🔶 Partial |
-| `\st` | Strikethrough | 🔶 Partial |
-| `\hl` | Highlight | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\so` | Letterspacing | 🔶 Partial | `soul.pkg.json` |
+| `\caps` | Small caps with spacing | 🔶 Partial | `soul.pkg.json` |
+| `\ul` | Underline | ✅ Full | `soul.pkg.json` |
+| `\st` | Strikethrough | ✅ Full | `soul.pkg.json` |
+| `\hl` | Highlight | ✅ Full | `soul.pkg.json` |
 
 ---
 
 ## 18. Units & Numbers
 
-### siunitx (`siunitx.pkg.json`)
+### siunitx
 
+**Package:** `siunitx.pkg.json`  
 **Description:** Comprehensive SI units package.
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\SI` | Number with unit (v2) | 🔶 Partial |
-| `\si` | Unit only (v2) | 🔶 Partial |
-| `\num` | Format a number | 🔶 Partial |
-| `\qty` | Number with unit (v3) | 🔶 Partial |
-| `\unit` | Format a unit | 🔶 Partial |
-| `\ang` | Format an angle | 🔶 Partial |
-| `\numrange` | Range of numbers | 🔶 Partial |
-| Unit macros (`\meter`, `\kilogram`, etc.) | 🔶 Partial |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\SI` | Number with unit (v2) | ✅ Full | `siunitx.pkg.json` |
+| `\si` | Unit only (v2) | ✅ Full | `siunitx.pkg.json` |
+| `\num` | Format a number | ✅ Full | `siunitx.pkg.json` |
+| `\qty` | Number with unit (v3) | ✅ Full | `siunitx.pkg.json` |
+| `\unit` | Format a unit | ✅ Full | `siunitx.pkg.json` |
+| `\ang` | Format an angle | ✅ Full | `siunitx.pkg.json` |
+| `\numrange` | Range of numbers | ✅ Full | `siunitx.pkg.json` |
+| Unit macros (`\meter`, `\kilogram`, etc.) | | ✅ Full | `siunitx.pkg.json` |
 
 ---
 
-## 19. Multilingual
+## 19. Other Packages
 
-### babel (`babel.pkg.json`)
+### textcomp
 
-**Description:** Multilingual support for LaTeX.
+**Package:** `textcomp.pkg.json`
 
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\selectlanguage` | Switch to specified language | ❌ Missing |
-| `\foreignlanguage` | Typeset text in foreign language | 🔶 Partial |
-| `\shorthandoff` | Disable shorthand characters | ❌ Missing |
-| `otherlanguage` environment | Environment for different language | ❌ Missing |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\texteuro` | Euro symbol € | ✅ Full | `textcomp.pkg.json` |
+| `\textdegree` | Degree symbol ° | ✅ Full | `textcomp.pkg.json` |
+| `\textcelsius` | Celsius °C | ✅ Full | `textcomp.pkg.json` |
+| `\textmu` | Micro symbol μ | ✅ Full | `textcomp.pkg.json` |
+| `\texttimes` | Multiplication × | ✅ Full | `textcomp.pkg.json` |
+| `\textdiv` | Division ÷ | ✅ Full | `textcomp.pkg.json` |
+| `\textpm` | Plus-minus ± | ✅ Full | `textcomp.pkg.json` |
 
----
+### multicol
 
-## 20. Other Packages
+**Package:** `multicol.pkg.json`
 
-### verbatim (`verbatim.pkg.json`)
+| Environment | Description | Status | Implementation |
+|-------------|-------------|--------|----------------|
+| `multicols` environment | Multiple column layout | ✅ Full | `multicol.pkg.json` |
+| `\columnbreak` | Force column break | 🔶 Partial | `multicol.pkg.json` |
 
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `verbatim` environment | Enhanced verbatim | ✅ Full |
-| `comment` environment | Comment out text | ❌ Missing |
-| `\verbatiminput` | Input file verbatim | ❌ Missing |
+### caption / subcaption
 
-### fancyvrb (`fancyvrb.pkg.json`)
+**Packages:** `caption.pkg.json`, `subcaption.pkg.json`
 
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `Verbatim` environment | Enhanced verbatim with options | 🔶 Partial |
-| `\VerbatimInput` | Input file with options | ❌ Missing |
-
-### multicol (`multicol.pkg.json`)
-
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `multicols` environment | Multiple column layout | 🔶 Partial |
-| `\columnbreak` | Force column break | ❌ Missing |
-
-### caption (`caption.pkg.json`)
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\captionsetup` | Configure caption style | 🔶 Partial |
-| `\caption*` | Unnumbered caption | 🔶 Partial |
-| `\captionof` | Caption outside float | 🔶 Partial |
-
-### subcaption (`subcaption.pkg.json`)
-
-| Environment | Description | Status |
-|-------------|-------------|--------|
-| `subfigure` environment | Sub-figure | 🔶 Partial |
-| `subtable` environment | Sub-table | 🔶 Partial |
-| `\subcaption` | Sub-caption | 🔶 Partial |
-
-### inputenc (`inputenc.pkg.json`)
-
-| Option | Description | Status |
-|--------|-------------|--------|
-| `utf8` | UTF-8 encoding | ✅ Full |
-| `latin1` | Latin-1 encoding | 🔶 Partial |
-
-### fontenc (`fontenc.pkg.json`)
-
-| Option | Description | Status |
-|--------|-------------|--------|
-| `T1` | T1 encoding | 🔶 Partial |
-| `OT1` | Original TeX encoding | ✅ Full |
-
-### xparse (`xparse.pkg.json`)
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\NewDocumentCommand` | Define document command | ❌ Missing |
-| `\RenewDocumentCommand` | Redefine command | ❌ Missing |
-| `\NewDocumentEnvironment` | Define environment | ❌ Missing |
-
-### etoolbox (`etoolbox.pkg.json`)
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\ifdef`, `\ifundef` | Conditional on definition | ❌ Missing |
-| `\ifblank`, `\ifstrempty` | String tests | ❌ Missing |
-| `\appto`, `\preto` | Append/prepend to macro | ❌ Missing |
-| `\AtBeginEnvironment` | Hook at environment start | ❌ Missing |
-
-### textcomp (`textcomp.pkg.json`)
-
-| Command | Description | Status |
-|---------|-------------|--------|
-| `\texteuro` | Euro symbol € | ✅ Full |
-| `\textdegree` | Degree symbol ° | ✅ Full |
-| `\textcelsius` | Celsius °C | ✅ Full |
-| `\textmu` | Micro symbol μ | ✅ Full |
-| `\texttimes` | Multiplication × | ✅ Full |
-| `\textdiv` | Division ÷ | ✅ Full |
-| `\textpm` | Plus-minus ± | ✅ Full |
+| Command | Description | Status | Implementation |
+|---------|-------------|--------|----------------|
+| `\captionsetup` | Configure caption style | ✅ Full | `caption.pkg.json` |
+| `\caption*` | Unnumbered caption | ✅ Full | `caption.pkg.json` |
+| `\captionof` | Caption outside float | ✅ Full | `caption.pkg.json` |
+| `subfigure` environment | Sub-figure | ✅ Full | `subcaption.pkg.json` |
+| `subtable` environment | Sub-table | ✅ Full | `subcaption.pkg.json` |
+| `\subcaption` | Sub-caption | ✅ Full | `subcaption.pkg.json` |
 
 ---
 
@@ -1300,25 +1102,25 @@ Basic color package (subset of xcolor). Most commands same as xcolor.
 
 | Category | Full | Partial | Missing |
 |----------|------|---------|---------|
-| TeX Base | 15 | 18 | 35+ |
-| LaTeX Base | 95 | 25 | 20+ |
-| AMS Math | 120+ | 10 | 5 |
-| AMS Symbols | 150+ | 0 | 0 |
-| Graphics | 3 | 6 | 2 |
-| Tables | 6 | 10 | 5 |
-| Other Packages | 20 | 40 | 50+ |
+| TeX Base | 30 | 3 | 5 |
+| LaTeX Base | 130+ | 5 | 5 |
+| AMS Math | 180+ | 0 | 0 |
+| AMS Symbols | 200+ | 0 | 0 |
+| Graphics | 9 | 1 | 1 |
+| Tables | 18 | 6 | 0 |
+| Other Packages | 60+ | 15 | 5 |
 
 **Overall Implementation Status:**
 - Core text processing: ✅ Excellent
 - Math typesetting: ✅ Excellent  
-- Cross-references: ✅ Good
-- Tables (basic): ✅ Good
-- Graphics: 🔶 Partial
+- Cross-references: ✅ Excellent
+- Tables (basic): ✅ Excellent
+- Graphics: ✅ Good
 - Page layout: 🔶 Partial
 - TikZ/PGF: 🔶 Basic only
 - Advanced packages: 🔶 Varies
 
 ---
 
-*Last updated: January 2026*
+*Last updated: January 2025*  
 *Source: Lambda TeX pipeline (`lambda/tex/packages/*.pkg.json`)*
