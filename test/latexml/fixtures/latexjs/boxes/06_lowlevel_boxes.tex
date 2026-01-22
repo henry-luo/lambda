@@ -1,0 +1,30 @@
+% Low-level box commands: llap, rlap, smash, phantom
+% Tests for TeX low-level box interface
+
+\noindent
+Testing \verb|\llap|: X\llap{Y}Z (Y should overlap X)
+
+\bigskip
+
+\noindent
+Testing \verb|\rlap|: X\rlap{Y}Z (Y should overlap Z)
+
+\bigskip
+
+\noindent
+Testing \verb|\phantom|: before[\phantom{invisible text}]after
+
+\bigskip
+
+\noindent
+Testing \verb|\hphantom|: before[\hphantom{wide}]after
+
+\bigskip
+
+\noindent
+Testing \verb|\vphantom|: X\vphantom{tall}Y
+
+\bigskip
+
+\noindent
+Testing \verb|\smash|: Line with \smash{tall text} continues.

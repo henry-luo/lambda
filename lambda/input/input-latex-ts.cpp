@@ -2372,9 +2372,69 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
     return env_elem_builder.final();
 }
 
+// Pre-process LaTeX source to strip comment environments
+// This must be done before parsing because comment environments treat their content
+// as verbatim (including malformed LaTeX) and should be completely removed.
+// Returns a new string allocated with arena_alloc, or the original if no comments found.
+static const char* strip_comment_environments(Arena* arena, const char* latex_string, size_t len) {
+    // Quick check: if no \begin{comment} in source, return original
+    if (!memmem(latex_string, len, "\\begin{comment}", 15)) {
+        return latex_string;
+    }
+    
+    log_debug("strip_comment_environments: found \\begin{comment}, stripping...");
+    
+    // Allocate output buffer (same size as input, comments will shrink it)
+    char* output = (char*)arena_alloc(arena, len + 1);
+    if (!output) {
+        log_error("strip_comment_environments: failed to allocate output buffer");
+        return latex_string;
+    }
+    
+    size_t out_pos = 0;
+    size_t i = 0;
+    
+    while (i < len) {
+        // Check for \begin{comment}
+        if (i + 15 <= len && strncmp(latex_string + i, "\\begin{comment}", 15) == 0) {
+            // Found comment environment start - skip until \end{comment}
+            i += 15;  // Skip \begin{comment}
+            
+            // Find matching \end{comment}
+            while (i < len) {
+                if (i + 13 <= len && strncmp(latex_string + i, "\\end{comment}", 13) == 0) {
+                    i += 13;  // Skip \end{comment}
+                    // Skip optional trailing newline after \end{comment}
+                    if (i < len && latex_string[i] == '}') {
+                        i++;  // Skip closing brace if present (it should be)
+                    }
+                    if (i < len && latex_string[i] == '\n') {
+                        i++;  // Skip newline after comment env
+                    }
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        
+        // Copy regular character
+        output[out_pos++] = latex_string[i++];
+    }
+    
+    output[out_pos] = '\0';
+    log_debug("strip_comment_environments: stripped from %zu to %zu bytes", len, out_pos);
+    return output;
+}
+
 // Main entry point - tree-sitter LaTeX parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
     log_info("Tree-sitter LaTeX parser starting...");
+    
+    // Pre-process: strip comment environments before parsing
+    // This handles malformed content inside comment environments correctly
+    size_t orig_len = strlen(latex_string);
+    const char* processed = strip_comment_environments(input->arena, latex_string, orig_len);
 
     // Create tree-sitter parser
     TSParser* parser = ts_parser_new();
@@ -2392,8 +2452,9 @@ extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
         return;
     }
 
-    // Parse the LaTeX string
-    TSTree* tree = ts_parser_parse_string(parser, NULL, latex_string, strlen(latex_string));
+    // Parse the pre-processed LaTeX string
+    size_t processed_len = strlen(processed);
+    TSTree* tree = ts_parser_parse_string(parser, NULL, processed, processed_len);
     if (!tree) {
         log_error("Failed to parse LaTeX string");
         ts_parser_delete(parser);
@@ -2404,10 +2465,10 @@ extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
     TSNode root_node = ts_tree_root_node(tree);
 
     // Create input context for error tracking and source location
-    InputContext ctx(input, latex_string, strlen(latex_string));
+    InputContext ctx(input, processed, processed_len);
 
     // Convert tree-sitter CST to Lambda tree
-    Item lambda_tree = convert_latex_node(ctx, root_node, latex_string);
+    Item lambda_tree = convert_latex_node(ctx, root_node, processed);
     input->root = lambda_tree;
 
     // Check for parse errors
