@@ -3,6 +3,13 @@
 // Tests the LaTeX typesetting pipeline by comparing generated DVI files
 // against reference DVI files produced by standard TeX.
 //
+// Directory structure:
+//   test/latex/fixtures/<category>/<name>.tex  - Source files
+//   test/latex/expected/<category>/<name>.dvi  - Reference DVI files
+//
+// To regenerate reference files:
+//   node utils/generate_latex_refs.js --output-format=dvi --force
+//
 // This test uses the Lambda CLI (./lambda.exe render) to generate DVI output,
 // making it a true integration test of the full rendering pipeline.
 
@@ -273,6 +280,18 @@ protected:
      * Returns true on success, false on failure.
      */
     bool render_latex_to_dvi_internal(const char* latex_file, const char* dvi_output) {
+        // Ensure output directory exists
+        char out_dir[512];
+        strncpy(out_dir, dvi_output, sizeof(out_dir) - 1);
+        out_dir[sizeof(out_dir) - 1] = '\0';
+        char* last_slash = strrchr(out_dir, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            char mkdir_cmd[600];
+            snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", out_dir);
+            system(mkdir_cmd);
+        }
+
         // Build the command with timeout (30 seconds max)
         // Redirect stderr to stdout, then to /dev/null to avoid buffer blocking
         char cmd[1024];
@@ -407,6 +426,7 @@ protected:
 
     /**
      * Run the full comparison test for a LaTeX file.
+     * test_name is relative path from fixtures/ without .tex extension
      */
     ::testing::AssertionResult test_latex_file(const char* test_name) {
         char latex_path[512];
@@ -414,9 +434,9 @@ protected:
         char out_dvi_path[512];
 
         snprintf(latex_path, sizeof(latex_path),
-                 "test/latex/%s.tex", test_name);
+                 "test/latex/fixtures/%s.tex", test_name);
         snprintf(ref_dvi_path, sizeof(ref_dvi_path),
-                 "test/latex/reference/%s.dvi", test_name);
+                 "test/latex/expected/%s.dvi", test_name);
         snprintf(out_dvi_path, sizeof(out_dvi_path),
                  "%s/%s.dvi", temp_dir, test_name);
 
@@ -427,7 +447,8 @@ protected:
         }
         if (!file_exists(ref_dvi_path)) {
             return ::testing::AssertionFailure()
-                << "Reference DVI not found: " << ref_dvi_path;
+                << "Reference DVI not found: " << ref_dvi_path
+                << " (run: node utils/generate_latex_refs.js --output-format=dvi)";
         }
 
         // Render LaTeX to DVI
@@ -457,7 +478,7 @@ class DVICompareExtendedTest : public DVICompareTest {};
 
 TEST_F(DVICompareBaselineTest, NormalizationIgnoresComment) {
     // Parse a reference DVI file
-    const char* ref_path = "test/latex/reference/test_simple_text.dvi";
+    const char* ref_path = "test/latex/expected/basic/test_simple_text.dvi";
     if (!file_exists(ref_path)) {
         GTEST_SKIP() << "Reference DVI not found: " << ref_path;
     }
@@ -475,7 +496,7 @@ TEST_F(DVICompareBaselineTest, NormalizationIgnoresComment) {
 }
 
 TEST_F(DVICompareBaselineTest, ExtractTextContent) {
-    const char* ref_path = "test/latex/reference/test_simple_text.dvi";
+    const char* ref_path = "test/latex/expected/basic/test_simple_text.dvi";
     if (!file_exists(ref_path)) {
         GTEST_SKIP() << "Reference DVI not found: " << ref_path;
     }
@@ -500,58 +521,54 @@ TEST_F(DVICompareBaselineTest, SimpleText) {
     // Generate the DVI and save to a known location for debugging
     char out_dvi_path[512];
     snprintf(out_dvi_path, sizeof(out_dvi_path), "/tmp/lambda_test_simple_text.dvi");
-    if (render_latex_to_dvi_internal("test/latex/test_simple_text.tex", out_dvi_path)) {
+    if (render_latex_to_dvi_internal("test/latex/fixtures/basic/test_simple_text.tex", out_dvi_path)) {
         fprintf(stderr, "[DEBUG] Generated DVI saved to: %s\n", out_dvi_path);
     }
-    EXPECT_TRUE(test_latex_file("test_simple_text"));
+    EXPECT_TRUE(test_latex_file("basic/test_simple_text"));
 }
 
 TEST_F(DVICompareBaselineTest, SimpleMath) {
-    EXPECT_TRUE(test_latex_file("test_simple_math"));
+    EXPECT_TRUE(test_latex_file("basic/test_simple_math"));
 }
 
 TEST_F(DVICompareBaselineTest, Fraction) {
-    EXPECT_TRUE(test_latex_file("test_fraction"));
+    EXPECT_TRUE(test_latex_file("math/test_fraction"));
 }
 
 TEST_F(DVICompareBaselineTest, Greek) {
-    EXPECT_TRUE(test_latex_file("test_greek"));
+    EXPECT_TRUE(test_latex_file("math/test_greek"));
 }
 
 TEST_F(DVICompareBaselineTest, Sqrt) {
-    EXPECT_TRUE(test_latex_file("test_sqrt"));
+    EXPECT_TRUE(test_latex_file("math/test_sqrt"));
 }
 
 TEST_F(DVICompareBaselineTest, SubscriptSuperscript) {
-    EXPECT_TRUE(test_latex_file("test_subscript_superscript"));
+    EXPECT_TRUE(test_latex_file("math/test_subscript_superscript"));
 }
 
 TEST_F(DVICompareBaselineTest, Delimiters) {
-    EXPECT_TRUE(test_latex_file("test_delimiters"));
+    EXPECT_TRUE(test_latex_file("math/test_delimiters"));
 }
 
 TEST_F(DVICompareBaselineTest, SumIntegral) {
-    EXPECT_TRUE(test_latex_file("test_sum_integral"));
-}
-
-TEST_F(DVICompareBaselineTest, Matrix) {
-    EXPECT_TRUE(test_latex_file("test_matrix"));
+    EXPECT_TRUE(test_latex_file("math/test_sum_integral"));
 }
 
 TEST_F(DVICompareBaselineTest, ComplexFormula) {
-    EXPECT_TRUE(test_latex_file("test_complex_formula"));
+    EXPECT_TRUE(test_latex_file("math/test_complex_formula"));
 }
 
 TEST_F(DVICompareBaselineTest, Calculus) {
-    EXPECT_TRUE(test_latex_file("test_calculus"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_calculus"));
 }
 
 TEST_F(DVICompareBaselineTest, SetTheory) {
-    EXPECT_TRUE(test_latex_file("test_set_theory"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_set_theory"));
 }
 
 TEST_F(DVICompareBaselineTest, LinearAlgebra2_Eigenvalues) {
-    EXPECT_TRUE(test_latex_file("test_linear_algebra2"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_linear_algebra2"));
 }
 
 // ============================================================================
@@ -564,43 +581,43 @@ TEST_F(DVICompareBaselineTest, LinearAlgebra2_Eigenvalues) {
 
 // Spacing primitives
 TEST_F(DVICompareExtendedTest, PrimSpacingHskip) {
-    EXPECT_TRUE(test_latex_file("test_prim_spacing_hskip"));
+    EXPECT_TRUE(test_latex_file("primitives/test_prim_spacing_hskip"));
 }
 
 TEST_F(DVICompareExtendedTest, PrimSpacingGlue) {
-    EXPECT_TRUE(test_latex_file("test_prim_spacing_glue"));
+    EXPECT_TRUE(test_latex_file("primitives/test_prim_spacing_glue"));
 }
 
 // Rule primitives
 TEST_F(DVICompareExtendedTest, PrimRulesHruleVrule) {
-    EXPECT_TRUE(test_latex_file("test_prim_rules_hrule_vrule"));
+    EXPECT_TRUE(test_latex_file("primitives/test_prim_rules_hrule_vrule"));
 }
 
 // Penalty primitives
 TEST_F(DVICompareExtendedTest, PrimPenalties) {
-    EXPECT_TRUE(test_latex_file("test_prim_penalties"));
+    EXPECT_TRUE(test_latex_file("primitives/test_prim_penalties"));
 }
 
 // Box primitives
 TEST_F(DVICompareExtendedTest, PrimBoxesHbox) {
-    EXPECT_TRUE(test_latex_file("test_prim_boxes_hbox"));
+    EXPECT_TRUE(test_latex_file("boxes/test_prim_boxes_hbox"));
 }
 
 TEST_F(DVICompareExtendedTest, PrimBoxesVbox) {
-    EXPECT_TRUE(test_latex_file("test_prim_boxes_vbox"));
+    EXPECT_TRUE(test_latex_file("boxes/test_prim_boxes_vbox"));
 }
 
 TEST_F(DVICompareExtendedTest, PrimBoxesLap) {
-    EXPECT_TRUE(test_latex_file("test_prim_boxes_lap"));
+    EXPECT_TRUE(test_latex_file("boxes/test_prim_boxes_lap"));
 }
 
 TEST_F(DVICompareExtendedTest, PrimBoxesShift) {
-    EXPECT_TRUE(test_latex_file("test_prim_boxes_shift"));
+    EXPECT_TRUE(test_latex_file("boxes/test_prim_boxes_shift"));
 }
 
 // Combined layout using multiple primitives
 TEST_F(DVICompareExtendedTest, PrimCombinedLayout) {
-    EXPECT_TRUE(test_latex_file("test_prim_combined_layout"));
+    EXPECT_TRUE(test_latex_file("primitives/test_prim_combined_layout"));
 }
 
 // ============================================================================
@@ -609,7 +626,7 @@ TEST_F(DVICompareExtendedTest, PrimCombinedLayout) {
 
 TEST_F(DVICompareBaselineTest, SelfConsistency) {
     // Render the same file twice and verify outputs match
-    const char* latex_path = "test/latex/test_simple_text.tex";
+    const char* latex_path = "test/latex/fixtures/basic/test_simple_text.tex";
     if (!file_exists(latex_path)) {
         GTEST_SKIP() << "LaTeX source not found: " << latex_path;
     }
@@ -640,12 +657,16 @@ TEST_F(DVICompareBaselineTest, SelfConsistency) {
 // Extended: Linear Algebra (split into smaller tests)
 // ============================================================================
 
+TEST_F(DVICompareExtendedTest, Matrix) {
+    EXPECT_TRUE(test_latex_file("math/test_matrix"));
+}
+
 TEST_F(DVICompareExtendedTest, LinearAlgebra1_Matrix) {
-    EXPECT_TRUE(test_latex_file("test_linear_algebra1"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_linear_algebra1"));
 }
 
 TEST_F(DVICompareExtendedTest, LinearAlgebra3_SpecialMatrices) {
-    EXPECT_TRUE(test_latex_file("test_linear_algebra3"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_linear_algebra3"));
 }
 
 // ============================================================================
@@ -653,11 +674,11 @@ TEST_F(DVICompareExtendedTest, LinearAlgebra3_SpecialMatrices) {
 // ============================================================================
 
 TEST_F(DVICompareExtendedTest, Physics1_Mechanics) {
-    EXPECT_TRUE(test_latex_file("test_physics1"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_physics1"));
 }
 
 TEST_F(DVICompareExtendedTest, Physics2_Quantum) {
-    EXPECT_TRUE(test_latex_file("test_physics2"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_physics2"));
 }
 
 // ============================================================================
@@ -665,11 +686,11 @@ TEST_F(DVICompareExtendedTest, Physics2_Quantum) {
 // ============================================================================
 
 TEST_F(DVICompareExtendedTest, Nested1_Fractions) {
-    EXPECT_TRUE(test_latex_file("test_nested1"));
+    EXPECT_TRUE(test_latex_file("math/test_nested1"));
 }
 
 TEST_F(DVICompareExtendedTest, Nested2_Scripts) {
-    EXPECT_TRUE(test_latex_file("test_nested2"));
+    EXPECT_TRUE(test_latex_file("math/test_nested2"));
 }
 
 // ============================================================================
@@ -677,31 +698,31 @@ TEST_F(DVICompareExtendedTest, Nested2_Scripts) {
 // ============================================================================
 
 TEST_F(DVICompareExtendedTest, NumberTheory) {
-    EXPECT_TRUE(test_latex_file("test_number_theory"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_number_theory"));
 }
 
 TEST_F(DVICompareExtendedTest, Probability) {
-    EXPECT_TRUE(test_latex_file("test_probability"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_probability"));
 }
 
 TEST_F(DVICompareExtendedTest, Combinatorics) {
-    EXPECT_TRUE(test_latex_file("test_combinatorics"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_combinatorics"));
 }
 
 TEST_F(DVICompareExtendedTest, AbstractAlgebra) {
-    EXPECT_TRUE(test_latex_file("test_abstract_algebra"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_abstract_algebra"));
 }
 
 TEST_F(DVICompareExtendedTest, DifferentialEquations) {
-    EXPECT_TRUE(test_latex_file("test_differential_equations"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_differential_equations"));
 }
 
 TEST_F(DVICompareExtendedTest, ComplexAnalysis) {
-    EXPECT_TRUE(test_latex_file("test_complex_analysis"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_complex_analysis"));
 }
 
 TEST_F(DVICompareExtendedTest, Topology) {
-    EXPECT_TRUE(test_latex_file("test_topology"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_topology"));
 }
 
 // ============================================================================
@@ -709,29 +730,29 @@ TEST_F(DVICompareExtendedTest, Topology) {
 // ============================================================================
 
 TEST_F(DVICompareExtendedTest, EdgeCases) {
-    EXPECT_TRUE(test_latex_file("test_edge_cases"));
+    EXPECT_TRUE(test_latex_file("align/test_edge_cases"));
 }
 
 TEST_F(DVICompareExtendedTest, AllGreek) {
-    EXPECT_TRUE(test_latex_file("test_all_greek"));
+    EXPECT_TRUE(test_latex_file("math/test_all_greek"));
 }
 
 TEST_F(DVICompareExtendedTest, AllOperators) {
-    EXPECT_TRUE(test_latex_file("test_all_operators"));
+    EXPECT_TRUE(test_latex_file("math/test_all_operators"));
 }
 
 TEST_F(DVICompareExtendedTest, AlignmentAdvanced) {
-    EXPECT_TRUE(test_latex_file("test_alignment_advanced"));
+    EXPECT_TRUE(test_latex_file("align/test_alignment_advanced"));
 }
 
 TEST_F(DVICompareExtendedTest, Chemistry) {
-    EXPECT_TRUE(test_latex_file("test_chemistry"));
+    EXPECT_TRUE(test_latex_file("math/subjects/test_chemistry"));
 }
 
 TEST_F(DVICompareExtendedTest, FontStyles) {
-    EXPECT_TRUE(test_latex_file("test_font_styles"));
+    EXPECT_TRUE(test_latex_file("math/test_font_styles"));
 }
 
 TEST_F(DVICompareExtendedTest, Tables) {
-    EXPECT_TRUE(test_latex_file("test_tables"));
+    EXPECT_TRUE(test_latex_file("document/test_tables"));
 }
