@@ -502,6 +502,68 @@ int64_t it2i(Item item);
 
 ---
 
+## Literal Parsing and Auto-Promotion
+
+### Design Decision: Large Literals Promote to Float
+
+When parsing integer literals in Lambda scripts, if the literal value exceeds the int56 range, it is **automatically promoted to float (double)** rather than producing a parse error.
+
+**Rationale:**
+1. **Graceful handling**: Users writing large numbers shouldn't get cryptic parse errors
+2. **Predictable behavior**: Large constants become floats, which can represent them (with potential precision loss for very large values)
+3. **Distinction from runtime**: Literals are known at parse time; runtime overflow returns `ITEM_ERROR`
+
+### Implementation
+
+**File**: [lambda/build_ast.cpp](lambda/build_ast.cpp#L687-L696)
+
+```cpp
+// Check if the value fits in 56-bit signed integer range
+if (INT56_MIN <= value && value <= INT56_MAX) {
+    log_debug("Using LIT_INT for value %lld", value);
+    i_node->type = &LIT_INT;
+}
+else { // promote to float for values outside int56 range
+    log_debug("Using float for value %lld (outside int56 range)", value);
+    i_node->type = build_lit_float(tp, expr_node);
+}
+```
+
+### Examples
+
+```lambda
+// Within int56 range - stays as int
+let a = 36028797018963967   // INT56_MAX - type: int
+type(a)  // → "int"
+
+// Exceeds int56 range - promoted to float
+let b = 36028797018963968   // INT56_MAX + 1 - type: float
+type(b)  // → "float"
+
+// Large negative - promoted to float
+let c = -36028797018963969  // < INT56_MIN - type: float
+type(c)  // → "float"
+
+// Very large literal - promoted to float
+let d = 99999999999999999999  // type: float
+type(d)  // → "float"
+```
+
+### Comparison: Parsing vs Runtime
+
+| Scenario | Parsing (Literals) | Runtime (Operations) |
+|----------|-------------------|---------------------|
+| Value > INT56_MAX | Promotes to float | Returns `ITEM_ERROR` |
+| Value < INT56_MIN | Promotes to float | Returns `ITEM_ERROR` |
+| Detection | At compile time | At runtime |
+| Behavior | Silent type change | Explicit error |
+
+**Why the difference?**
+- **Literals**: Known at compile time, can be represented as float with no further consequences
+- **Runtime overflow**: Result of computation, should signal error so caller can handle it
+
+---
+
 ## Migration Strategy
 
 ### Phase 1: Add Infrastructure
