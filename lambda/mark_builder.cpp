@@ -848,14 +848,14 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     case LMD_TYPE_ARRAY_INT: {
         ArrayInt* arr = item.array_int;
         // Allocate new ArrayInt from arena
-        size_t size = sizeof(ArrayInt) + arr->length * sizeof(int32_t);
+        size_t size = sizeof(ArrayInt) + arr->length * sizeof(int64_t);
         ArrayInt* new_arr = (ArrayInt*)arena_alloc(arena_, size);
         if (!new_arr) return ItemNull;
 
         new_arr->type_id = LMD_TYPE_ARRAY_INT;
         new_arr->capacity = new_arr->length = arr->length;
-        new_arr->items = (int*)((char*)new_arr + sizeof(ArrayInt));
-        memcpy(new_arr->items, arr->items, arr->length * sizeof(int32_t));
+        new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayInt));
+        memcpy(new_arr->items, arr->items, arr->length * sizeof(int64_t));
         return {.array_int = new_arr};
     }
 
@@ -868,7 +868,7 @@ Item MarkBuilder::deep_copy_internal(Item item) {
 
         new_arr->type_id = LMD_TYPE_ARRAY_INT64;
         new_arr->length = new_arr->capacity = arr->length;
-        new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayInt));
+        new_arr->items = (int64_t*)((char*)new_arr + sizeof(ArrayInt64));
         memcpy(new_arr->items, arr->items, arr->length * sizeof(int64_t));
         return {.array_int64 = new_arr};
     }
