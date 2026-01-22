@@ -13,6 +13,7 @@
  *   --force           Regenerate even if .html already exists
  *   --verbose         Show detailed output
  *   --test=<pattern>  Only process files matching pattern
+ *   --test-dir=<dir>  Test directory relative to project root (default: test/latexml)
  *   --clean           Remove existing .html files first
  *   --dry-run         Show what would be done without doing it
  * 
@@ -27,8 +28,6 @@ const { execSync, spawnSync } = require('child_process');
 
 // Configuration
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const FIXTURES_DIR = path.join(PROJECT_ROOT, 'test', 'latexml', 'fixtures');
-const EXPECTED_DIR = path.join(PROJECT_ROOT, 'test', 'latexml', 'expected');
 const LATEXJS_PATH = path.join(PROJECT_ROOT, 'latex-js', 'bin', 'latex.js');
 
 // Parse arguments
@@ -38,15 +37,22 @@ const options = {
     verbose: args.includes('--verbose'),
     clean: args.includes('--clean'),
     dryRun: args.includes('--dry-run'),
-    test: null
+    test: null,
+    testDir: 'test/latexml' // default test directory
 };
 
-// Parse --test=pattern
+// Parse --test=pattern and --test-dir=dir
 for (const arg of args) {
     if (arg.startsWith('--test=')) {
         options.test = arg.substring(7);
+    } else if (arg.startsWith('--test-dir=')) {
+        options.testDir = arg.substring(11);
     }
 }
+
+// Compute directories based on --test-dir
+const FIXTURES_DIR = path.join(PROJECT_ROOT, options.testDir, 'fixtures');
+const EXPECTED_DIR = path.join(PROJECT_ROOT, options.testDir, 'expected');
 
 // ============================================================================
 // Transformation functions (ported from generate_hybrid_refs.py)
@@ -578,6 +584,7 @@ function cleanHtmlFiles() {
 function main() {
     console.log('LaTeX Reference Generator');
     console.log('=========================');
+    console.log(`Test Dir: ${options.testDir}`);
     console.log(`Fixtures: ${FIXTURES_DIR}`);
     console.log(`Expected: ${EXPECTED_DIR}`);
     console.log(`Options:  force=${options.force}, verbose=${options.verbose}, test=${options.test || 'all'}`);
