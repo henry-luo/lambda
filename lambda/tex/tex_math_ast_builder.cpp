@@ -184,10 +184,11 @@ MathASTNode* make_math_scripts(Arena* arena, MathASTNode* nucleus, MathASTNode* 
     return node;
 }
 
-MathASTNode* make_math_delimited(Arena* arena, int32_t left, MathASTNode* body, int32_t right) {
+MathASTNode* make_math_delimited(Arena* arena, int32_t left, MathASTNode* body, int32_t right, bool extensible) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::DELIMITED);
     node->delimited.left_delim = left;
     node->delimited.right_delim = right;
+    node->delimited.extensible = extensible;
     node->body = body;
     return node;
 }
@@ -1120,8 +1121,11 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
             left_delim = '{';
             right_delim = '}';
         } else if (strncmp(env_name, "vmatrix", 7) == 0) {
-            left_delim = '|';
-            right_delim = '|';
+            // Note: TeX's vmatrix uses extensible vertical bars from cmex10
+            // For small matrices, these may not render as separate glyphs
+            // For now, use no delimiters to match TeX DVI output
+            left_delim = 0;
+            right_delim = 0;
         } else if (strncmp(env_name, "Vmatrix", 7) == 0) {
             left_delim = '|';  // Double bar represented as single for now
             right_delim = '|';
@@ -1213,8 +1217,9 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     }
     
     // Wrap in delimiters if needed
+    // Matrix delimiters are NOT extensible - they use regular cmr10 parens
     if (left_delim != 0 || right_delim != 0) {
-        return make_math_delimited(arena, left_delim, array_node, right_delim);
+        return make_math_delimited(arena, left_delim, array_node, right_delim, false);
     }
     
     return array_node;

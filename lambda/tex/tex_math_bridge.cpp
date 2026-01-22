@@ -917,7 +917,7 @@ TexNode* typeset_scripts(TexNode* nucleus, TexNode* subscript, TexNode* superscr
 // ============================================================================
 
 TexNode* typeset_delimited(int32_t left_delim, TexNode* content,
-                           int32_t right_delim, MathContext& ctx) {
+                           int32_t right_delim, MathContext& ctx, bool extensible) {
     Arena* arena = ctx.arena;
 
     // Calculate delimiter height needed
@@ -932,22 +932,46 @@ TexNode* typeset_delimited(int32_t left_delim, TexNode* content,
     TexNode* left = nullptr;
     TexNode* right = nullptr;
 
-    // Create left delimiter
-    if (left_delim != 0) {
-        left = make_delimiter(arena, left_delim, delim_size, true);
-        left->width = ctx.base_size_pt * 0.4f;  // Delimiter width
-        left->height = delim_size / 2.0f + ctx.axis_height;
-        left->depth = delim_size / 2.0f - ctx.axis_height;
-        total_width += left->width;
-    }
+    // For non-extensible delimiters (matrix environments), use regular char nodes
+    // For extensible delimiters (\left/\right), use Delimiter nodes
+    if (!extensible) {
+        // Non-extensible: use regular cmr10 characters
+        FontSpec font("cmr10", ctx.base_size_pt, nullptr, 0);
+        float char_width = ctx.base_size_pt * 0.4f;
+        float char_height = ctx.x_height;
+        float char_depth = 0;
+        
+        if (left_delim != 0) {
+            left = make_char(arena, left_delim, font);
+            left->width = char_width;
+            left->height = char_height;
+            left->depth = char_depth;
+            total_width += left->width;
+        }
+        if (right_delim != 0) {
+            right = make_char(arena, right_delim, font);
+            right->width = char_width;
+            right->height = char_height;
+            right->depth = char_depth;
+            total_width += right->width;
+        }
+    } else {
+        // Extensible: use Delimiter nodes (will be sized by DVI output)
+        if (left_delim != 0) {
+            left = make_delimiter(arena, left_delim, delim_size, true);
+            left->width = ctx.base_size_pt * 0.4f;
+            left->height = delim_size / 2.0f + ctx.axis_height;
+            left->depth = delim_size / 2.0f - ctx.axis_height;
+            total_width += left->width;
+        }
 
-    // Create right delimiter
-    if (right_delim != 0) {
-        right = make_delimiter(arena, right_delim, delim_size, false);
-        right->width = ctx.base_size_pt * 0.4f;
-        right->height = delim_size / 2.0f + ctx.axis_height;
-        right->depth = delim_size / 2.0f - ctx.axis_height;
-        total_width += right->width;
+        if (right_delim != 0) {
+            right = make_delimiter(arena, right_delim, delim_size, false);
+            right->width = ctx.base_size_pt * 0.4f;
+            right->height = delim_size / 2.0f + ctx.axis_height;
+            right->depth = delim_size / 2.0f - ctx.axis_height;
+            total_width += right->width;
+        }
     }
 
     // Create containing HBox

@@ -15,6 +15,9 @@
 
 namespace tex {
 
+// Forward declarations
+struct TFMFontManager;
+
 // ============================================================================
 // TFM Constants
 // ============================================================================
@@ -160,6 +163,9 @@ struct TFMFont {
     // Get extensible recipe (for delimiters)
     const ExtensibleRecipe* get_extensible(int c) const;
 
+    // Check if character has extensible recipe
+    bool has_extensible(int c) const;
+
     // Get font parameter
     float get_param(int index) const {
         if (index < 1 || index > np) return 0;
@@ -220,6 +226,30 @@ TFMFont* get_builtin_cmsy10(Arena* arena);
 
 // Get built-in CMEX10 metrics (math extensions)
 TFMFont* get_builtin_cmex10(Arena* arena);
+
+// ============================================================================
+// Delimiter Selection (TeX spec: TeXBook p.152)
+// ============================================================================
+
+// Result of delimiter selection
+struct DelimiterSelection {
+    const char* font_name;  // Font to use (e.g., "cmex10")
+    int codepoint;          // Character position in font
+    float height;           // Actual height of selected glyph
+    float depth;            // Actual depth of selected glyph
+    bool is_extensible;     // True if assembled from pieces
+    ExtensibleRecipe recipe; // Recipe if is_extensible
+};
+
+// Select a delimiter glyph based on TeX algorithm (TeXBook p.152, Appendix G Rule 19)
+// Parameters:
+//   fonts - Font manager for TFM access
+//   delim_char - ASCII delimiter character ('(', ')', '[', ']', '{', '}', '|', etc.)
+//   target_size - Required height+depth (from content measurement)
+//   axis_height - Math axis height (for centering)
+// Returns: Selected delimiter info
+DelimiterSelection select_delimiter(TFMFontManager* fonts, int delim_char,
+                                    float target_size, float font_size_pt);
 
 // ============================================================================
 // Font Manager

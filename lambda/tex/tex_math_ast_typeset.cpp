@@ -984,7 +984,7 @@ static TexNode* typeset_scripts_node(MathASTNode* node, MathContext& ctx) {
 static TexNode* typeset_delimited_node(MathASTNode* node, MathContext& ctx) {
     TexNode* content = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
 
-    return typeset_delimited(node->delimited.left_delim, content, node->delimited.right_delim, ctx);
+    return typeset_delimited(node->delimited.left_delim, content, node->delimited.right_delim, ctx, node->delimited.extensible);
 }
 
 // ============================================================================
