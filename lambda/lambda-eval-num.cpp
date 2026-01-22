@@ -79,9 +79,33 @@ bool decimal_is_zero(mpd_t* dec_val) {
     return mpd_iszero(dec_val);
 }
 
+// helper macro for vector type detection
+#define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_INT || (t) == LMD_TYPE_ARRAY_INT64 || \
+                           (t) == LMD_TYPE_ARRAY_FLOAT || (t) == LMD_TYPE_ARRAY || \
+                           (t) == LMD_TYPE_LIST || (t) == LMD_TYPE_RANGE)
+
+#define IS_SCALAR_NUMERIC(t) ((t) == LMD_TYPE_INT || (t) == LMD_TYPE_INT64 || \
+                              (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_DECIMAL)
+
+// forward declarations for vector ops (defined in lambda-vector.cpp)
+Item vec_add(Item a, Item b);
+Item vec_sub(Item a, Item b);
+Item vec_mul(Item a, Item b);
+Item vec_div(Item a, Item b);
+Item vec_mod(Item a, Item b);
+Item vec_pow(Item a, Item b);
+
 Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
+    
+    // vector operations: scalar+vector, vector+scalar, or vector+vector
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vec_add(item_a, item_b);
+    }
+    
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -216,6 +240,14 @@ Item fn_add(Item item_a, Item item_b) {
 
 Item fn_mul(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+    
+    // vector operations
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vec_mul(item_a, item_b);
+    }
+    
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -339,6 +371,14 @@ Item fn_mul(Item item_a, Item item_b) {
 
 Item fn_sub(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+    
+    // vector operations
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vec_sub(item_a, item_b);
+    }
+    
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -456,6 +496,14 @@ Item fn_sub(Item item_a, Item item_b) {
 
 Item fn_div(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+    
+    // vector operations
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vec_div(item_a, item_b);
+    }
+    
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t b = item_b.get_int56();
         if (b == 0) {
@@ -687,7 +735,16 @@ Item fn_idiv(Item item_a, Item item_b) {
 }
 
 Item fn_pow(Item item_a, Item item_b) {
-    log_debug("fn_pow called with types: %d and %d", item_a._type_id, item_b._type_id);
+    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+    log_debug("fn_pow called with types: %d and %d", type_a, type_b);
+    
+    // vector operations
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vec_pow(item_a, item_b);
+    }
+    
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         // For now, convert decimals to double for power operations
         // This is a limitation of libmpdec - it doesn't have general power operations
@@ -795,6 +852,15 @@ Item fn_pow(Item item_a, Item item_b) {
 }
 
 Item fn_mod(Item item_a, Item item_b) {
+    TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+    
+    // vector operations
+    if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
+        (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
+        return vec_mod(item_a, item_b);
+    }
+    
     // Handle decimal types first
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         mpd_t* val_a = convert_to_decimal(item_a, context->decimal_ctx);
