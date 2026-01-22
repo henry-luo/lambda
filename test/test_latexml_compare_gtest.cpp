@@ -255,6 +255,18 @@ static std::string normalize_for_hybrid(const std::string& s) {
     // Normalize code tags: <code class="tt"> -> <code> for hybrid comparison
     cleaned = std::regex_replace(cleaned, std::regex(R"(<code class="tt">)"), "<code>");
     
+    // Normalize extra CSS classes that don't affect semantics
+    // Remove "latex-article" from article class
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<article class="latex-document latex-article">)"), "<article class=\"latex-document\">");
+    // Remove "latex-paragraph" class from p tags
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<p class="latex-paragraph">)"), "<p>");
+    // Remove "latex-graphics" class from graphics spans  
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<span class="latex-graphics">)"), "<span class=\"graphics\">");
+    
+    // Remove whitespace after <br> tags (line breaks shouldn't affect content)
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<br> )"), "<br>");
+    cleaned = std::regex_replace(cleaned, std::regex(R"(<br/> )"), "<br/>");
+    
     return cleaned;
 }
 
