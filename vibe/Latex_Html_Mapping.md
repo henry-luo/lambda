@@ -199,9 +199,100 @@ Lambda supports multiple output modes via `HtmlOutputOptions`:
 
 ---
 
+## Test Infrastructure
+
+### Directory Structure
+
+All LaTeX tests are consolidated under `test/latex/`:
+
+```
+test/latex/
+├── fixtures/           # Source .tex files organized by category
+│   ├── basic/          # Basic text and formatting
+│   ├── math/           # Mathematical expressions
+│   │   └── subjects/   # Subject-specific math (calculus, physics, etc.)
+│   ├── latexjs/        # latex.js-specific fixtures (fragments)
+│   ├── fonts/          # Font handling tests
+│   ├── structure/      # Document structure (sections, lists)
+│   ├── graphics/       # Images and graphics
+│   ├── tikz/           # TikZ diagrams
+│   └── ...             # Other categories (align, ams, boxes, etc.)
+├── expected/           # Reference output files
+│   ├── basic/          # HTML and DVI references matching fixtures
+│   ├── math/
+│   │   └── subjects/
+│   ├── latexjs/
+│   └── ...
+└── run_tex_tests.sh    # Legacy test runner
+```
+
+**Naming convention:**
+- Fixture: `fixtures/<category>/<name>.tex`
+- HTML reference: `expected/<category>/<name>.html`
+- DVI reference: `expected/<category>/<name>.dvi`
+
+### Reference Generation Script
+
+The unified script `utils/generate_latex_refs.js` generates both HTML and DVI references:
+
+```bash
+# Generate HTML references (default)
+node utils/generate_latex_refs.js
+
+# Generate DVI references
+node utils/generate_latex_refs.js --output-format=dvi
+
+# Options
+node utils/generate_latex_refs.js --force           # Regenerate all
+node utils/generate_latex_refs.js --verbose         # Show details
+node utils/generate_latex_refs.js --test=matrix     # Filter by pattern
+node utils/generate_latex_refs.js --test-dir=dir    # Custom test directory
+node utils/generate_latex_refs.js --clean           # Remove existing first
+node utils/generate_latex_refs.js --dry-run         # Preview actions
+```
+
+**HTML generation logic:**
+- **latexjs/** fixtures: Uses latex.js → transforms to Lambda hybrid HTML
+- **Other fixtures**: Uses LaTeXML → transforms to Lambda hybrid HTML
+
+**DVI generation:**
+- Uses `latex` command from MacTeX
+- Requires `\documentclass` — fragment files (like latexjs/) will fail
+- Generated DVI files are used for glyph-level comparison tests
+
+**Requirements:**
+```bash
+# For HTML generation
+cd latex-js && npm install --legacy-peer-deps && npm run build
+brew install latexml
+
+# For DVI generation
+brew install --cask mactex
+```
+
+### Test Executables
+
+| Test | Purpose | Command |
+|------|---------|---------|
+| HTML comparison | Compare Lambda HTML output vs references | `./test/test_latex_html_compare_gtest.exe` |
+| DVI comparison | Compare Lambda DVI output vs references | `./test/test_latex_dvi_compare_gtest.exe` |
+
+**Running tests:**
+```bash
+# All baseline tests
+make test-latex-baseline
+
+# Specific test suites
+./test/test_latex_html_compare_gtest.exe --gtest_filter="*Baseline*"
+./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareBaselineTest.*"
+```
+
+---
+
 ## References
 
 - latex.js: https://github.com/nickvdw/latex.js
 - LaTeXML: https://dlmf.nist.gov/LaTeXML/
-- Lambda fixture tests: `test/latexml/fixtures/latexjs/`
-- Expected outputs: `test/latexml/expected/latexjs/*.latexjs.html`, `*.latexml.html`
+- Lambda test fixtures: `test/latex/fixtures/`
+- Expected outputs: `test/latex/expected/`
+- Reference generator: `utils/generate_latex_refs.js`
