@@ -3,6 +3,7 @@
 // Reference: TeXBook Appendix A, DVI format specification
 
 #include "tex_dvi_out.hpp"
+#include "tex_tfm.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 #include <cmath>
@@ -884,8 +885,7 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
         }
 
         case NodeClass::Delimiter: {
-            // Output a delimiter character
-            // Use appropriate font based on delimiter type and size
+            // Output a delimiter character using TFM-based selection (TeXBook p.152)
             int32_t cp = node->content.delim.codepoint;
             float target_size = node->content.delim.target_size;
             
@@ -895,88 +895,52 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             const char* font_name = "cmr10";
             int32_t output_cp = cp;
             
-            if (target_size > 10.0f) {
-                // Select font and codepoint based on delimiter type and size
-                // cmex10 layout for delimiters (grouped by size):
-                //   Small (0-15): 0=(, 1=), 2=[, 3=], 4=floor_l, 5=floor_r, ...
-                //   Medium group 1 (16-23): 16/17=(), 18/19=(), 20/21=[], 22/23=[]
-                //   Medium group 2 (24-31): 24/25=(), 26/27=[], 28/29=[], 30/31=[]
-                //   Large brackets: positions 104-107 for very large delimiters
+            // Use TFM-based delimiter selection if font manager available
+            if (fonts) {
+                DelimiterSelection sel = select_delimiter(fonts, cp, target_size, font_size);
+                font_name = sel.font_name;
+                output_cp = sel.codepoint;
                 
-                switch (cp) {
-                    case '(':
-                        font_name = "cmex10";
-                        // Paren sizes: 0, 16, 18, 20, 22
-                        if (target_size > 30.0f) output_cp = 22;
-                        else if (target_size > 24.0f) output_cp = 20;
-                        else if (target_size > 18.0f) output_cp = 18;
-                        else if (target_size > 14.0f) output_cp = 16;
-                        else output_cp = 0;
-                        break;
-                    case ')':
-                        font_name = "cmex10";
-                        if (target_size > 30.0f) output_cp = 23;
-                        else if (target_size > 24.0f) output_cp = 21;
-                        else if (target_size > 18.0f) output_cp = 19;
-                        else if (target_size > 14.0f) output_cp = 17;
-                        else output_cp = 1;
-                        break;
-                    case '[':
-                        font_name = "cmex10";
-                        // Bracket sizes in cmex10: 2(small), 20/22 (medium), 26/28/30 (large)
-                        // Position 104 ('h') for specific medium-small fractions
-                        if (target_size > 30.0f) output_cp = 30;
-                        else if (target_size > 24.0f) output_cp = 28;
-                        else if (target_size > 20.0f) output_cp = 26;
-                        else if (target_size > 16.0f) output_cp = 22;
-                        else if (target_size > 14.0f) output_cp = 20;
-                        else if (target_size > 12.0f) output_cp = 104;  // 'h' - for smaller fractions
-                        else output_cp = 2;  // Smallest
-                        break;
-                    case ']':
-                        font_name = "cmex10";
-                        if (target_size > 30.0f) output_cp = 31;
-                        else if (target_size > 24.0f) output_cp = 29;
-                        else if (target_size > 20.0f) output_cp = 27;
-                        else if (target_size > 16.0f) output_cp = 23;
-                        else if (target_size > 14.0f) output_cp = 21;
-                        else if (target_size > 12.0f) output_cp = 105;  // 'i' - for smaller fractions
-                        else output_cp = 3;  // Smallest
-                        break;
-                    case '{':
-                        // Braces use cmsy10 for printable output
-                        font_name = "cmsy10";
-                        output_cp = 102;  // cmsy10 left brace 'f'
-                        break;
-                    case '}':
-                        font_name = "cmsy10";
-                        output_cp = 103;  // cmsy10 right brace 'g'
-                        break;
-                    case '|':
-                        font_name = "cmex10";
-                        output_cp = 12;   // cmex10 vertical bar
-                        break;
-                    default:
-                        output_cp = cp;
-                        break;
+                log_debug("tex_dvi_out: TFM selected font=%s pos=%d (h=%.1f d=%.1f ext=%d)",
+                          font_name, output_cp, sel.height, sel.depth, sel.is_extensible);
+                
+                // For extensible delimiters, we'd need to output multiple pieces
+                // For now, just use the base character (extensible building is TODO)
+                if (sel.is_extensible) {
+                    log_debug("tex_dvi_out: extensible recipe: top=%d mid=%d bot=%d rep=%d",
+                              sel.recipe.top, sel.recipe.mid, sel.recipe.bot, sel.recipe.rep);
+                    // TODO: Build extensible from pieces for very large delimiters
                 }
             } else {
-                // Small delimiters - map to appropriate fonts
+                // Fallback: use simple hardcoded mapping for small delimiters
                 switch (cp) {
                     case '{':
                         font_name = "cmsy10";
-                        output_cp = 102;  // cmsy10 left brace
+                        output_cp = 102;
                         break;
                     case '}':
                         font_name = "cmsy10";
-                        output_cp = 103;  // cmsy10 right brace
+                        output_cp = 103;
                         break;
                     case '|':
-                        font_name = "cmsy10";
-                        output_cp = 106;  // cmsy10 vert 'j'
+                        if (target_size > 10.0f) {
+                            font_name = "cmex10";
+                            output_cp = 12;
+                        } else {
+                            font_name = "cmsy10";
+                            output_cp = 106;
+                        }
                         break;
                     default:
-                        // Parens, brackets stay in cmr10
+                        // Parens, brackets: use cmex10 for larger sizes
+                        if (target_size > 10.0f) {
+                            font_name = "cmex10";
+                            // Map to cmex10 small positions
+                            if (cp == '(') output_cp = 0;
+                            else if (cp == ')') output_cp = 1;
+                            else if (cp == '[') output_cp = 2;
+                            else if (cp == ']') output_cp = 3;
+                        }
                         break;
                 }
             }

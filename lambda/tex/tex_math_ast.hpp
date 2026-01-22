@@ -122,6 +122,7 @@ struct MathASTNode {
         struct {
             int32_t left_delim;     // Left delimiter codepoint
             int32_t right_delim;    // Right delimiter codepoint
+            bool extensible;        // True for \left/\right, false for matrix delimiters
         } delimited;
 
         // For ACCENT
@@ -193,7 +194,7 @@ MathASTNode* make_math_row(Arena* arena);
 MathASTNode* make_math_frac(Arena* arena, MathASTNode* numer, MathASTNode* denom, float rule_thickness = -1.0f);
 MathASTNode* make_math_sqrt(Arena* arena, MathASTNode* radicand, MathASTNode* index = nullptr);
 MathASTNode* make_math_scripts(Arena* arena, MathASTNode* nucleus, MathASTNode* super = nullptr, MathASTNode* sub = nullptr);
-MathASTNode* make_math_delimited(Arena* arena, int32_t left, MathASTNode* body, int32_t right);
+MathASTNode* make_math_delimited(Arena* arena, int32_t left, MathASTNode* body, int32_t right, bool extensible = true);
 MathASTNode* make_math_accent(Arena* arena, int32_t accent_char, const char* command, MathASTNode* base);
 MathASTNode* make_math_overunder(Arena* arena, MathASTNode* nucleus, MathASTNode* over, MathASTNode* under, const char* command = nullptr);
 
