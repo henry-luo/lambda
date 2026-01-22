@@ -1,6 +1,9 @@
 # Math Layout Test Suite
 
-This directory contains tests for Lambda's math layout engine, using test fixtures extracted from MathLive.
+This directory contains unit tests for Lambda's math typesetting API (`typeset_latex_math()`).
+
+> **Note:** Math fixtures have been consolidated under `test/latex/fixtures/math/mathlive/`.
+> The JSON fixtures here are the source, converted to .tex files by `utils/convert_math_fixtures.js`.
 
 ## Directory Structure
 
@@ -9,45 +12,55 @@ test/math/
 ├── README.md                  # This file
 ├── math_fixture_loader.h      # C++ fixture loader header
 ├── math_fixture_loader.cpp    # C++ fixture loader implementation
-├── test_math_layout.cpp       # GTest test suite
-└── fixtures/                  # JSON test fixtures (generated)
-    ├── all_tests.json         # Combined fixture file
-    ├── fractions.json         # Fraction tests
-    ├── subscripts.json        # Subscript/superscript tests
-    ├── radicals.json          # Radical (sqrt) tests
-    ├── accents.json           # Accent tests
-    ├── delimiters.json        # Delimiter tests
-    ├── operators.json         # Big operator tests
-    └── spacing.json           # Spacing tests
+├── test_math_layout.cpp       # GTest unit tests (internal API)
+├── fixtures/                  # JSON test fixtures (source)
+│   ├── all_tests.json         # Combined fixture file
+│   ├── fractions.json         # Fraction tests
+│   └── ...                    # Other categories
+└── reference/                 # Reference DVI files for unit tests
 ```
 
-## Generating Fixtures
+## Consolidated Test Structure
 
-Run the extraction script to generate fixtures from MathLive:
+Math tests exist at two levels:
+
+| Test File | Level | What It Tests |
+|-----------|-------|---------------|
+| `test/math/test_math_layout.cpp` | Unit | `typeset_latex_math()` API directly |
+| `test/test_latex_dvi_compare_gtest.cpp` | Integration | Full CLI pipeline (`./lambda.exe render`) |
+
+The JSON fixtures in this directory have been converted to .tex files:
+- Source: `test/math/fixtures/*.json` (201 test cases)
+- Target: `test/latex/fixtures/math/mathlive/*.tex` (201 files)
+- DVI refs: `test/latex/expected/math/mathlive/*.dvi` (196 files)
+
+## Converting Fixtures
+
+To regenerate .tex files from JSON fixtures:
 
 ```bash
-python3 utils/extract_mathlive_tests.py
+node utils/convert_math_fixtures.js --clean
 ```
 
-This extracts test cases from:
-- `mathlive/test/markup.test.ts` - Jest unit tests
-- `mathlive/test/static/index.html` - Visual test cases
+To regenerate DVI references:
+
+```bash
+node utils/generate_latex_refs.js --output-format=dvi --test=mathlive --force
+```
 
 ## Running Tests
 
 ```bash
-# Build the test executable
-make build-test
-
-# Run all math layout tests
+# Unit tests (internal API)
 ./test/test_math_layout.exe
+
+# Integration tests (CLI pipeline)
+./test/test_latex_dvi_compare_gtest.exe --gtest_filter="*Mathlive*"
 
 # Run specific category
 ./test/test_math_layout.exe --gtest_filter=Fractions*
-
-# Run with verbose output
-./test/test_math_layout.exe --gtest_filter=* --gtest_print_time=1
 ```
+
 
 ## Test Categories
 

@@ -572,6 +572,28 @@ TEST_F(DVICompareBaselineTest, LinearAlgebra2_Eigenvalues) {
 }
 
 // ============================================================================
+// Baseline: MathLive Fixtures (converted from test/math/fixtures)
+// ============================================================================
+
+TEST_F(DVICompareBaselineTest, Mathlive_Fractions) {
+    EXPECT_TRUE(test_latex_file("math/mathlive/fractions_000"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/fractions_001"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/fractions_002"));
+}
+
+TEST_F(DVICompareBaselineTest, Mathlive_Accents) {
+    EXPECT_TRUE(test_latex_file("math/mathlive/accents_000"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/accents_001"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/accents_002"));
+}
+
+TEST_F(DVICompareBaselineTest, Mathlive_Operators) {
+    EXPECT_TRUE(test_latex_file("math/mathlive/operators_000"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/operators_001"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/operators_002"));
+}
+
+// ============================================================================
 // Extended: TeX Primitives (Spacing, Glue, Rules, Boxes)
 // Note: These tests verify DVI output of TeX primitives. The primitives are
 // currently implemented for HTML output only (see test_tex_primitives_gtest.cpp).
@@ -755,4 +777,26 @@ TEST_F(DVICompareExtendedTest, FontStyles) {
 
 TEST_F(DVICompareExtendedTest, Tables) {
     EXPECT_TRUE(test_latex_file("document/test_tables"));
+}
+
+// ============================================================================
+// Extended: MathLive Fixtures (work in progress)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, Mathlive_Radicals) {
+    EXPECT_TRUE(test_latex_file("math/mathlive/radicals_000"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/radicals_001"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/radicals_002"));
+}
+
+TEST_F(DVICompareExtendedTest, Mathlive_Delimiters) {
+    EXPECT_TRUE(test_latex_file("math/mathlive/left_right_000"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/left_right_001"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/left_right_002"));
+}
+
+TEST_F(DVICompareExtendedTest, Mathlive_Spacing) {
+    EXPECT_TRUE(test_latex_file("math/mathlive/spacing_000"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/spacing_001"));
+    EXPECT_TRUE(test_latex_file("math/mathlive/spacing_002"));
 }
