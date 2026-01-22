@@ -10,16 +10,18 @@
  *   node utils/generate_latex_refs.js [options]
  * 
  * Options:
- *   --force           Regenerate even if .html already exists
+ *   --force           Regenerate even if output already exists
  *   --verbose         Show detailed output
  *   --test=<pattern>  Only process files matching pattern
- *   --test-dir=<dir>  Test directory relative to project root (default: test/latexml)
- *   --clean           Remove existing .html files first
+ *   --test-dir=<dir>  Test directory relative to project root (default: test/latex)
+ *   --output-format=<fmt>  Output format: html (default) or dvi
+ *   --clean           Remove existing output files first
  *   --dry-run         Show what would be done without doing it
  * 
  * Requirements:
- *   - latex.js built: cd latex-js && npm install --legacy-peer-deps && npm run build
- *   - latexml installed: brew install latexml
+ *   - For HTML: latex.js built: cd latex-js && npm install --legacy-peer-deps && npm run build
+ *   - For HTML: latexml installed: brew install latexml
+ *   - For DVI: tex installed: brew install --cask mactex
  */
 
 const fs = require('fs');
@@ -38,15 +40,18 @@ const options = {
     clean: args.includes('--clean'),
     dryRun: args.includes('--dry-run'),
     test: null,
-    testDir: 'test/latex' // default test directory
+    testDir: 'test/latex', // default test directory
+    outputFormat: 'html' // default output format: 'html' or 'dvi'
 };
 
-// Parse --test=pattern and --test-dir=dir
+// Parse --test=pattern, --test-dir=dir, and --output-format=fmt
 for (const arg of args) {
     if (arg.startsWith('--test=')) {
         options.test = arg.substring(7);
     } else if (arg.startsWith('--test-dir=')) {
         options.testDir = arg.substring(11);
+    } else if (arg.startsWith('--output-format=')) {
+        options.outputFormat = arg.substring(16);
     }
 }
 
@@ -360,10 +365,7 @@ function findTexFiles(dir, baseDir = dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-            // Skip math directory
-            if (entry.name !== 'math') {
-                files.push(...findTexFiles(fullPath, baseDir));
-            }
+            files.push(...findTexFiles(fullPath, baseDir));
         } else if (entry.name.endsWith('.tex')) {
             files.push({
                 texPath: fullPath,
@@ -400,6 +402,55 @@ function generateWithLatexjs(texPath) {
     }
 
     return result.stdout;
+}
+
+/**
+ * Generate DVI using tex/latex
+ */
+function generateWithTex(texPath, dviPath) {
+    // Check if latex is available
+    try {
+        execSync('which latex', { encoding: 'utf-8', stdio: 'pipe' });
+    } catch {
+        throw new Error('latex not found. Install with: brew install --cask mactex');
+    }
+
+    const texDir = path.dirname(texPath);
+    const texFile = path.basename(texPath);
+    const baseName = path.basename(texPath, '.tex');
+
+    // Run latex in the tex file's directory to handle relative paths
+    const result = spawnSync('latex', [
+        '-interaction=nonstopmode',
+        '-output-directory=' + texDir,
+        texFile
+    ], {
+        cwd: texDir,
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024
+    });
+
+    // Check if DVI was created (latex may report errors but still produce output)
+    const generatedDvi = path.join(texDir, baseName + '.dvi');
+    if (!fs.existsSync(generatedDvi)) {
+        throw new Error(`latex failed to create DVI: ${result.stderr || result.stdout || 'unknown error'}`);
+    }
+
+    // Move DVI to expected location
+    const expectedDir = path.dirname(dviPath);
+    fs.mkdirSync(expectedDir, { recursive: true });
+    fs.copyFileSync(generatedDvi, dviPath);
+
+    // Clean up auxiliary files in tex directory
+    const auxFiles = ['.aux', '.log', '.dvi'];
+    for (const ext of auxFiles) {
+        const auxPath = path.join(texDir, baseName + ext);
+        if (fs.existsSync(auxPath)) {
+            fs.unlinkSync(auxPath);
+        }
+    }
+
+    return true;
 }
 
 /**
@@ -455,9 +506,9 @@ function generateWithLatexml(texPath) {
 }
 
 /**
- * Process a single fixture
+ * Process a single fixture for HTML output
  */
-function processFixture(texFile, stats) {
+function processFixtureHtml(texFile, stats) {
     const { texPath, relPath } = texFile;
     const baseName = path.basename(relPath, '.tex');
     const dirName = path.dirname(relPath);
@@ -550,10 +601,73 @@ function processFixture(texFile, stats) {
 }
 
 /**
- * Clean existing .html files
+ * Process a single fixture for DVI output
  */
-function cleanHtmlFiles() {
-    console.log('Cleaning existing .html files...');
+function processFixtureDvi(texFile, stats) {
+    const { texPath, relPath } = texFile;
+    const baseName = path.basename(relPath, '.tex');
+    const dirName = path.dirname(relPath);
+    
+    const expectedDir = path.join(EXPECTED_DIR, dirName);
+    const dviPath = path.join(expectedDir, baseName + '.dvi');
+
+    // Apply test pattern filter
+    if (options.test && !relPath.includes(options.test)) {
+        return;
+    }
+
+    // Check if output exists
+    if (fs.existsSync(dviPath) && !options.force) {
+        stats.skipped++;
+        if (options.verbose) {
+            console.log(`  [SKIP] ${relPath} (exists)`);
+        }
+        return;
+    }
+
+    if (options.dryRun) {
+        console.log(`  [DRY-RUN] Would process ${relPath} with tex`);
+        stats.processed++;
+        return;
+    }
+
+    try {
+        generateWithTex(texPath, dviPath);
+
+        stats.success++;
+        if (options.verbose) {
+            console.log(`  [OK] ${relPath} (tex)`);
+        } else {
+            process.stdout.write('.');
+        }
+    } catch (err) {
+        stats.failed++;
+        if (options.verbose) {
+            console.log(`  [FAIL] ${relPath}: ${err.message}`);
+        } else {
+            process.stdout.write('F');
+        }
+        stats.errors.push({ relPath, error: err.message });
+    }
+}
+
+/**
+ * Process a single fixture (dispatches to HTML or DVI based on options)
+ */
+function processFixture(texFile, stats) {
+    if (options.outputFormat === 'dvi') {
+        processFixtureDvi(texFile, stats);
+    } else {
+        processFixtureHtml(texFile, stats);
+    }
+}
+
+/**
+ * Clean existing output files
+ */
+function cleanOutputFiles() {
+    const ext = options.outputFormat === 'dvi' ? '.dvi' : '.html';
+    console.log(`Cleaning existing ${ext} files...`);
     
     function cleanDir(dir) {
         if (!fs.existsSync(dir)) return;
@@ -562,6 +676,13 @@ function cleanHtmlFiles() {
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 cleanDir(fullPath);
+            } else if (options.outputFormat === 'dvi') {
+                if (entry.name.endsWith('.dvi')) {
+                    fs.unlinkSync(fullPath);
+                    if (options.verbose) {
+                        console.log(`  Removed: ${fullPath}`);
+                    }
+                }
             } else if (entry.name.endsWith('.html') && 
                        !entry.name.endsWith('.latexjs.html') && 
                        !entry.name.endsWith('.latexml.html')) {
@@ -587,20 +708,32 @@ function main() {
     console.log(`Test Dir: ${options.testDir}`);
     console.log(`Fixtures: ${FIXTURES_DIR}`);
     console.log(`Expected: ${EXPECTED_DIR}`);
+    console.log(`Output:   ${options.outputFormat}`);
     console.log(`Options:  force=${options.force}, verbose=${options.verbose}, test=${options.test || 'all'}`);
     console.log();
 
-    // Check dependencies
-    if (!fs.existsSync(LATEXJS_PATH)) {
-        console.warn(`Warning: latex.js not found at ${LATEXJS_PATH}`);
-        console.warn('         latexjs/ fixtures will fail. Build with:');
-        console.warn('         cd latex-js && npm install --legacy-peer-deps && npm run build');
-        console.warn();
+    // Check dependencies based on output format
+    if (options.outputFormat === 'dvi') {
+        try {
+            execSync('which latex', { encoding: 'utf-8', stdio: 'pipe' });
+        } catch {
+            console.warn('Warning: latex not found.');
+            console.warn('         DVI generation will fail. Install with:');
+            console.warn('         brew install --cask mactex');
+            console.warn();
+        }
+    } else {
+        if (!fs.existsSync(LATEXJS_PATH)) {
+            console.warn(`Warning: latex.js not found at ${LATEXJS_PATH}`);
+            console.warn('         latexjs/ fixtures will fail. Build with:');
+            console.warn('         cd latex-js && npm install --legacy-peer-deps && npm run build');
+            console.warn();
+        }
     }
 
     // Clean if requested
     if (options.clean) {
-        cleanHtmlFiles();
+        cleanOutputFiles();
     }
 
     // Find all .tex files
