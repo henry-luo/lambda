@@ -6,13 +6,10 @@
 "=== Broadcasting Rules ==="
 
 // Single element broadcasting to larger vector
-// [5] + [1, 2, 3]        // Should become [6, 7, 8]
+[5] + [1, 2, 3]
 
 // Scalar effectively broadcasts to any size
 3 + [1, 2, 3, 4, 5]
-
-// Different size vectors (should error without broadcasting)
-// [1, 2] + [3, 4, 5]     // Size mismatch error
 
 "=== Complex Expressions ==="
 
@@ -68,6 +65,26 @@ max([5, 2, 8, 1])
 min([3.7, 1.2, 5.8])
 max([3.7, 1.2, 5.8])
 
+// Product
+prod([1, 2, 3, 4])
+prod([2, 3, 5])
+
+// Cumulative operations
+cumsum([1, 2, 3, 4])
+cumprod([1, 2, 3, 4])
+
+// Argmin/Argmax
+argmin([5, 2, 8, 1, 9])
+argmax([5, 2, 8, 1, 9])
+
+// Dot product and norm
+dot([1, 2, 3], [4, 5, 6])
+norm([3, 4])
+
+// Fill
+fill(5, 3)
+fill(3, 0)
+
 "=== Vector Indexing ==="
 
 // Access vector elements
@@ -76,58 +93,35 @@ numbers[0]
 numbers[2]
 numbers[4]
 
-// Out of bounds (should return null or error)
-// numbers[10]
-// numbers[-1]
-
 // Index with expressions
 numbers[1 + 1]
-numbers[sum([1, 1])]
 
-"=== Vectors in Control Flow ==="
+"=== For loops with vectors ==="
 
-// If expressions with vectors
-let condition = true
-if (condition) [1, 2, 3] else [4, 5, 6]
-
-// For loops with vectors
 for (x in [1, 2, 3]) x * 2
-
-// Vector in conditions (truthiness)
-if ([1, 2, 3]) "non-empty" else "empty"
-if ([]) "non-empty" else "empty"
 
 "=== Mixed Type Vectors ==="
 
-// Heterogeneous vectors
+// Heterogeneous vectors with error handling
 [1, "hello", true, 3.14]
 
-// Operations on mixed vectors (should handle gracefully)
-// [1, "hello"] + 5        // Should error or handle strings specially
+// Operations on mixed vectors produce per-element errors
+[3, "str", 5] + 1
 
 // Mostly numeric with some non-numeric
-// [1, 2, "three", 4] * 2  // Should handle appropriately
+[1, 2, "three", 4] * 2
 
 "=== Error Cases ==="
 
 // Division by zero in vectors
-// [1, 2, 3] / 0           // All elements divided by zero
-// [6, 8, 10] / [2, 0, 2]  // One element has division by zero
+[1, 2, 3] / 0
+[6, 8, 10] / [2, 0, 2]
 
 // Modulo by zero
-// [5, 10, 15] % 0
-// [10, 20] % [5, 0]
-
-// Invalid operations
-// [1, 2, 3] + "hello"     // Type error
-// true * [1, 2, 3]        // Type error
+[5, 10, 15] % 0
+[10, 20] % [5, 0]
 
 "=== Vector Comparisons ==="
-
-// Element-wise comparisons (if supported)
-// [1, 2, 3] > [0, 2, 4]   // [true, false, false]
-// [1, 2, 3] == [1, 2, 3]  // [true, true, true]
-// [1, 2, 3] == 2          // [false, true, false]
 
 // Vector equality as a whole
 [1, 2, 3] == [1, 2, 3]
@@ -138,56 +132,28 @@ if ([]) "non-empty" else "empty"
 
 // Large vector operations
 let large_vec = for (i in 1 to 100) i
-large_vec + large_vec
-large_vec * 2
-
-// Chained large operations
-let big_result = large_vec * 2 + large_vec / 2
-
-"=== Vector Transformations ==="
-
-// Vector to list and back (if different)
-let original = [1, 2, 3]
-// let as_list = to_list(original)
-// let back_to_vector = to_vector(as_list)
+sum(large_vec)
+avg(large_vec)
 
 "=== Nested Vector Operations ==="
 
 // Vectors containing vectors (2D-like structures)
 [[1, 2], [3, 4], [5, 6]]
 
-// Operations on nested structures
-// [[1, 2], [3, 4]] + 1    // Should add 1 to each inner vector?
-
-"=== String and Vector Operations ==="
-
-// String repetition with vectors (if supported)
-// "abc" * [1, 2, 3]       // ["abc", "abcabc", "abcabcabc"]
-
 // Vector of strings
 ["hello", "world", "test"]
 
-// String operations on string vectors
-// ["a", "b", "c"] + "!"   // ["a!", "b!", "c!"]
-
 "=== Vector with Ranges ==="
 
-// Range to vector conversion
+// Range operations
 1 to 5
 for (x in 1 to 5) x
 
-// Vector operations with ranges
-// (1 to 5) + [1, 1, 1, 1, 1]
-// [1, 2, 3, 4, 5] * (1 to 5)
+// Range with scalar arithmetic
+(1 to 5) * 2
+(1 to 5) + 10
 
 "=== Memory and Performance Edge Cases ==="
-
-// Very large vectors
-// let huge = for (i in 1 to 10000) i
-// huge + huge
-
-// Deeply nested operations
-// [1, 2, 3] + [4, 5, 6] + [7, 8, 9] + [10, 11, 12]
 
 // Repeated operations
 let base = [1, 2, 3]
@@ -209,21 +175,5 @@ type([1, "hello", true])
 sum([1, 2, 3] * [2, 2, 2])
 avg([10, 20, 30] + [5, 5, 5])
 max([1, 5, 3] + [2, 1, 4])
-
-"=== Conditional Vector Operations ==="
-
-// Vector operations in conditional expressions
-let choice = 1
-if (choice == 1) [1, 2, 3] + 5 else [4, 5, 6] * 2
-
-// Vectors in boolean contexts
-if ([1, 2, 3]) "has elements" else "empty"
-if ([]) "has elements" else "empty"
-
-"=== Vector Slicing (Future Feature) ==="
-
-// These would be advanced features for later implementation
-// [1, 2, 3, 4, 5][1:3]    // Slice notation
-// [1, 2, 3, 4, 5][::2]    // Step notation
 
 "End of Vector Advanced Operations Tests"

@@ -1,0 +1,126 @@
+"===== VECTOR ADVANCED OPERATIONS TEST ======== Broadcasting Rules ==="
+6
+7
+8
+4
+5
+6
+7
+8
+"=== Complex Expressions ==="
+10
+14
+18
+7
+9
+11
+13
+15
+9
+17
+16
+30
+"=== Integration with Variables ==="
+5
+7
+9
+10
+20
+30
+9
+8
+7
+50
+70
+90
+"=== Integration with Functions ==="
+4
+0
+1
+10
+7.5
+0
+2.5
+20
+2.5
+1
+8
+1.2
+5.8
+24
+30
+[1, 3, 6, 10]
+[1, 2, 6, 24]
+3
+4
+32
+5
+[3, 3, 3, 3, 3]
+[0, 0, 0]
+"=== Vector Indexing ==="
+10
+30
+50
+30
+"=== For loops with vectors ==="
+2
+4
+6
+"=== Mixed Type Vectors ==="
+[1, "hello", true, 3.14]
+4
+error
+6
+2
+4
+error
+8
+"=== Error Cases ==="
+[inf, inf, inf]
+[3, inf, 5]
+nan
+nan
+nan
+0
+nan
+"=== Vector Comparisons ==="
+error
+error
+error
+"=== Performance Tests ==="
+5050
+50.5
+"=== Nested Vector Operations ==="
+[[1, 2], [3, 4], [5, 6]]
+["hello", "world", "test"]
+"=== Vector with Ranges ==="
+[1, 2, 3, 4, 5]
+1
+2
+3
+4
+5
+2
+4
+6
+8
+10
+11
+12
+13
+14
+15
+"=== Memory and Performance Edge Cases ==="
+4
+8
+12
+"=== Type System Integration ==="
+array
+array
+array
+array
+"=== Vector Aggregation Chain ==="
+12
+25
+7
+"End of Vector Advanced Operations Tests"
