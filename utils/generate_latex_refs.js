@@ -483,20 +483,38 @@ function processFixture(texFile, stats) {
     try {
         let rawHtml;
         let hybridHtml;
+        let usedTool;
 
         if (isLatexjsFixture(relPath)) {
-            // Use latex.js for latexjs/ fixtures
-            rawHtml = generateWithLatexjs(texPath);
-            hybridHtml = transformLatexjsToHybrid(rawHtml);
-            
-            // Also save raw latexjs.html for reference
-            const latexjsPath = path.join(expectedDir, baseName + '.latexjs.html');
-            fs.mkdirSync(expectedDir, { recursive: true });
-            fs.writeFileSync(latexjsPath, rawHtml);
+            // Try latex.js first for latexjs/ fixtures
+            try {
+                rawHtml = generateWithLatexjs(texPath);
+                hybridHtml = transformLatexjsToHybrid(rawHtml);
+                usedTool = 'latex.js';
+                
+                // Also save raw latexjs.html for reference
+                const latexjsPath = path.join(expectedDir, baseName + '.latexjs.html');
+                fs.mkdirSync(expectedDir, { recursive: true });
+                fs.writeFileSync(latexjsPath, rawHtml);
+            } catch (latexjsErr) {
+                // Fall back to latexml if latex.js fails
+                if (options.verbose) {
+                    console.log(`  [FALLBACK] ${relPath}: latex.js failed, trying latexml...`);
+                }
+                rawHtml = generateWithLatexml(texPath);
+                hybridHtml = transformLatexmlToHybrid(rawHtml);
+                usedTool = 'latexml (fallback)';
+                
+                // Save raw latexml.html for reference
+                const latexmlPath = path.join(expectedDir, baseName + '.latexml.html');
+                fs.mkdirSync(expectedDir, { recursive: true });
+                fs.writeFileSync(latexmlPath, rawHtml);
+            }
         } else {
             // Use latexml for other fixtures
             rawHtml = generateWithLatexml(texPath);
             hybridHtml = transformLatexmlToHybrid(rawHtml);
+            usedTool = 'latexml';
             
             // Also save raw latexml.html for reference
             const latexmlPath = path.join(expectedDir, baseName + '.latexml.html');
@@ -510,8 +528,7 @@ function processFixture(texFile, stats) {
 
         stats.success++;
         if (options.verbose) {
-            const tool = isLatexjsFixture(relPath) ? 'latex.js' : 'latexml';
-            console.log(`  [OK] ${relPath} (${tool})`);
+            console.log(`  [OK] ${relPath} (${usedTool})`);
         } else {
             process.stdout.write('.');
         }
