@@ -145,7 +145,7 @@ struct Container {
         uint8_t flags;
         uint16_t ref_cnt;  // reference count
         //---------------------
-        int* items;  // pointer to 32-bit integer items
+        int64_t* items;  // pointer to int56 values (stored as int64)
         int64_t length;  // number of items
         int64_t extra;   // count of extra items stored at the end of the array
         int64_t capacity;  // allocated capacity
