@@ -2979,8 +2979,8 @@
                         "icon": "\ud83d\uddbc"
                     },
                     {
-                        "source": "test/test_latexml_compare_gtest.cpp",
-                        "name": "LaTeXML Comparison Tests",
+                        "source": "test/test_latex_html_compare_gtest.cpp",
+                        "name": "LaTeX HTML Comparison Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -2991,7 +2991,7 @@
                             "tree-sitter",
                             "tree-sitter-latex-math"
                         ],
-                        "binary": "test_latexml_compare_gtest.exe",
+                        "binary": "test_latex_html_compare_gtest.exe",
                         "additional_sources": [
                             "lambda/tex/tex_document_model.cpp",
                             "lambda/tex/tex_doc_model_text.cpp",
