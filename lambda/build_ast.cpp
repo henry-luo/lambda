@@ -683,10 +683,10 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         free(num_str);
 
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        // Check if the value fits in 32-bit signed integer range
-        if (errno == ERANGE || value < INT32_MIN || value > INT32_MAX) {
-            // promote to float
-            log_debug("promote int to float");
+        // Check if the value fits in 56-bit signed integer range
+        if (errno == ERANGE || value < INT56_MIN || value > INT56_MAX) {
+            // promote to float for values outside int56 range
+            log_debug("promote int to float (value outside int56 range)");
             ast_node->type = build_lit_float(tp, child);
         }
         else {
@@ -2124,13 +2124,13 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         free(num_str);
 
         log_debug("SYM_INT: parsed value %lld, checking range", value);
-        // Check if the value fits in 32-bit signed integer range
-        if (INT32_MIN <= value && value <= INT32_MAX) {
+        // Check if the value fits in 56-bit signed integer range
+        if (INT56_MIN <= value && value <= INT56_MAX) {
             log_debug("Using LIT_INT for value %lld", value);
             i_node->type = &LIT_INT;
         }
-        else { // promote to float
-            log_debug("Using float for value %lld", value);
+        else { // promote to float for values outside int56 range
+            log_debug("Using float for value %lld (outside int56 range)", value);
             i_node->type = build_lit_float(tp, expr_node);
         }
         return (AstNode*)i_node;
