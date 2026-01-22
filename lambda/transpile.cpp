@@ -1223,7 +1223,25 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     // transpile the params
     strbuf_append_str(tp->code_buf, "(");
     AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
+    int arg_index = 0;
+    int expected_count = fn_type ? fn_type->param_count : -1;
+    bool has_output_arg = false;
+    
     while (arg) {
+        // Check for extra arguments (more args than params)
+        if (expected_count >= 0 && arg_index >= expected_count) {
+            log_warn("param_mismatch: discarding extra argument %d (function expects %d params)",
+                arg_index + 1, expected_count);
+            arg = arg->next;
+            arg_index++;
+            continue;  // skip transpiling this argument
+        }
+        
+        if (has_output_arg) {
+            strbuf_append_char(tp->code_buf, ',');
+        }
+        has_output_arg = true;
+        
         log_debug("transpile arg: %p, &t: %p, type %d, node_type %d", arg, arg->type, arg->type ? arg->type->type_id : -1, arg->node_type);
         // For system functions, box DateTime arguments
         if (call_node->function->node_type == AST_NODE_SYS_FUNC && arg->type->type_id == LMD_TYPE_DTIME) {
@@ -1296,11 +1314,24 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             }
         }
         else transpile_box_item(tp, arg);
-        if (arg->next) {
+        
+        arg = arg->next;  
+        param_type = param_type ? param_type->next : NULL;
+        arg_index++;
+    }
+    
+    // Fill missing arguments with ITEM_NULL
+    while (param_type) {
+        log_debug("param_mismatch: filling missing argument with null for param type %d", 
+            param_type->type_id);
+        if (has_output_arg) {
             strbuf_append_char(tp->code_buf, ',');
         }
-        arg = arg->next;  param_type = param_type ? param_type->next : NULL;
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        has_output_arg = true;
+        param_type = param_type->next;
     }
+    
     strbuf_append_char(tp->code_buf, ')');
 }
 

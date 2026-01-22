@@ -6,13 +6,13 @@ error
 "155."
 error
 "156."
-error
+false
 "157."
 error
 "158."
 error
 "159."
-error
+true
 'Additional Error Cases - Invalid Type Comparisons:'
 "160."
 error
