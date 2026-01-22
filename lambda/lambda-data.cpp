@@ -164,27 +164,15 @@ Type* alloc_type(Pool* pool, TypeId type, size_t size) {
 
 extern "C" {
 
-int64_t it2l(Item itm) {
-    if (itm._type_id == LMD_TYPE_INT) {
-        return itm.int_val;
-    }
-    else if (itm._type_id == LMD_TYPE_INT64) {
-        return itm.get_int64();
-    }
-    else if (itm._type_id == LMD_TYPE_FLOAT) {
-        return (int64_t)itm.get_double();
-    }
-    log_debug("invalid type %d", itm._type_id);
-    // todo: push error
-    return 0;
-}
+// Old it2l - redirects to get_int56() for int type
+// Note: The main it2l function is defined below it2i
 
 double it2d(Item itm) {
     if (itm._type_id == LMD_TYPE_INT) {
-        return itm.int_val;
+        return (double)itm.get_int56();
     }
     else if (itm._type_id == LMD_TYPE_INT64) {
-        return itm.get_int64();
+        return (double)itm.get_int64();
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
         return itm.get_double();
@@ -214,7 +202,7 @@ bool it2b(Item itm) {
         return false;
     }
     else if (itm._type_id == LMD_TYPE_INT) {
-        return itm.int_val != 0;
+        return itm.get_int56() != 0;
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
         double d = itm.get_double();
@@ -230,7 +218,8 @@ bool it2b(Item itm) {
 
 int it2i(Item itm) {
     if (itm._type_id == LMD_TYPE_INT) {
-        return itm.int_val;
+        // extract int56 sign-extended to int64, truncate to int32 for legacy compatibility
+        return (int)itm.get_int56();
     }
     else if (itm._type_id == LMD_TYPE_INT64) {
         return (int)itm.get_int64();
@@ -241,7 +230,24 @@ int it2i(Item itm) {
     else if (itm._type_id == LMD_TYPE_BOOL) { // should bool be convertible to int?
         return itm.bool_val ? 1 : 0;
     }
-    return INT_ERROR;
+    return ITEM_ERROR;
+}
+
+// extract int56 as int64 (full precision)
+int64_t it2l(Item itm) {
+    if (itm._type_id == LMD_TYPE_INT) {
+        return itm.get_int56();
+    }
+    else if (itm._type_id == LMD_TYPE_INT64) {
+        return itm.get_int64();
+    }
+    else if (itm._type_id == LMD_TYPE_FLOAT) {
+        return (int64_t)itm.get_double();
+    }
+    else if (itm._type_id == LMD_TYPE_BOOL) {
+        return itm.bool_val ? 1 : 0;
+    }
+    return INT64_MAX;  // error sentinel
 }
 
 String* it2s(Item itm) {

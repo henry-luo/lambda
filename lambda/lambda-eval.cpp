@@ -195,9 +195,9 @@ Item fn_normalize(Item str_item, Item type_item) {
 Range* fn_to(Item item_a, Item item_b) {
     if ((item_a._type_id == LMD_TYPE_INT || item_a._type_id == LMD_TYPE_INT64 || item_a._type_id == LMD_TYPE_FLOAT) &&
         (item_b._type_id == LMD_TYPE_INT || item_b._type_id == LMD_TYPE_INT64 || item_b._type_id == LMD_TYPE_FLOAT)) {
-        int64_t start = item_a._type_id == LMD_TYPE_INT ? item_a.int_val :
+        int64_t start = item_a._type_id == LMD_TYPE_INT ? item_a.get_int56() :
             item_a._type_id == LMD_TYPE_INT64 ? *(int64_t*)item_a.int64_ptr : (int64_t)*(double*)item_a.double_ptr;
-        int64_t end = item_b._type_id == LMD_TYPE_INT ? item_b.int_val :
+        int64_t end = item_b._type_id == LMD_TYPE_INT ? item_b.get_int56() :
             item_b._type_id == LMD_TYPE_INT64 ? *(int64_t*)item_b.int64_ptr : (int64_t)*(double*)item_b.double_ptr;
         if (start > end) {
             // return empty range instead of NULL
@@ -287,7 +287,7 @@ Bool fn_eq(Item a_item, Item b_item) {
         return (a_item.bool_val == b_item.bool_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT) {
-        return (a_item.int_val == b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_int56() == b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT64) {
         return (a_item.get_int64() == b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
@@ -345,7 +345,7 @@ Bool fn_lt(Item a_item, Item b_item) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
     else if (a_item._type_id == LMD_TYPE_INT) {
-        return (a_item.int_val < b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_int56() < b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT64) {
         return (a_item.get_int64() < b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
@@ -396,7 +396,7 @@ Bool fn_gt(Item a_item, Item b_item) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
     else if (a_item._type_id == LMD_TYPE_INT) {
-        return (a_item.int_val > b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_int56() > b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT64) {
         return (a_item.get_int64() > b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
@@ -635,8 +635,8 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_INT: {
         char buf[32];
-        int int_val = itm.int_val;
-        snprintf(buf, sizeof(buf), "%d", int_val);
+        int64_t int_val = itm.get_int56();
+        snprintf(buf, sizeof(buf), "%lld", (long long)int_val);
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
@@ -864,7 +864,7 @@ Item fn_index(Item item, Item index_item) {
     int64_t index = -1;
     switch (index_item._type_id) {
     case LMD_TYPE_INT:
-        index = index_item.int_val;
+        index = index_item.get_int56();
         break;
     case LMD_TYPE_INT64:
         index = index_item.get_int64();
@@ -960,7 +960,7 @@ int64_t fn_len(Item item) {
         break;
     }
     case LMD_TYPE_ERROR:
-        return INT_ERROR;
+        return INT64_ERROR;
     default: // NULL and scalar types
         size = 0;
         break;
