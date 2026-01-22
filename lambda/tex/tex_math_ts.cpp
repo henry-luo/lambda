@@ -252,11 +252,20 @@ private:
     const char* source;
     size_t source_len;
 
-    // Cached TFM fonts
+    // Cached TFM fonts for each size
+    // Text/Display style: cmr10, cmmi10, cmsy10, cmex10
     TFMFont* roman_tfm;
     TFMFont* italic_tfm;
     TFMFont* symbol_tfm;
     TFMFont* extension_tfm;
+    // Script style: cmr7, cmmi7, cmsy7
+    TFMFont* roman7_tfm;
+    TFMFont* italic7_tfm;
+    TFMFont* symbol7_tfm;
+    // ScriptScript style: cmr5, cmmi5, cmsy5
+    TFMFont* roman5_tfm;
+    TFMFont* italic5_tfm;
+    TFMFont* symbol5_tfm;
 
     // Current font size (based on style)
     float current_size() const { return ctx.font_size(); }
@@ -319,6 +328,30 @@ private:
 
     // Add spacing kern between atoms
     void add_atom_spacing(TexNode*& last, AtomType prev, AtomType curr);
+
+    // ========================================
+    // Style-aware font selection (Phase 1a)
+    // ========================================
+    
+    // Get the appropriate font name for current style
+    // TeX uses different fonts for different styles:
+    //   Display/Text: cmr10, cmmi10, cmsy10
+    //   Script:       cmr7, cmmi7, cmsy7
+    //   ScriptScript: cmr5, cmmi5, cmsy5
+    const char* get_roman_font_name() const;
+    const char* get_italic_font_name() const;
+    const char* get_symbol_font_name() const;
+    
+    // Get TFM font for current style
+    TFMFont* get_roman_tfm() const;
+    TFMFont* get_italic_tfm() const;
+    TFMFont* get_symbol_tfm() const;
+    
+    // Create FontSpec with correct font name for current style
+    FontSpec make_roman_font() const;
+    FontSpec make_italic_font() const;
+    FontSpec make_symbol_font() const;
+    FontSpec make_extension_font() const;
 };
 
 // ============================================================================
@@ -327,15 +360,96 @@ private:
 
 MathTypesetter::MathTypesetter(MathContext& c, const char* src, size_t len)
     : ctx(c), source(src), source_len(len) {
-    // Cache TFM fonts
+    // Cache TFM fonts for all three sizes
+    // Text/Display style: 10pt fonts
     roman_tfm = ctx.fonts ? ctx.fonts->get_font("cmr10") : nullptr;
     italic_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi10") : nullptr;
     symbol_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy10") : nullptr;
     extension_tfm = ctx.fonts ? ctx.fonts->get_font("cmex10") : nullptr;
+    // Script style: 7pt fonts
+    roman7_tfm = ctx.fonts ? ctx.fonts->get_font("cmr7") : nullptr;
+    italic7_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi7") : nullptr;
+    symbol7_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy7") : nullptr;
+    // ScriptScript style: 5pt fonts
+    roman5_tfm = ctx.fonts ? ctx.fonts->get_font("cmr5") : nullptr;
+    italic5_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi5") : nullptr;
+    symbol5_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy5") : nullptr;
+    
+    log_debug("tex_math_ts: loaded script fonts - cmr7=%p cmmi7=%p cmsy7=%p cmr5=%p cmmi5=%p cmsy5=%p",
+              roman7_tfm, italic7_tfm, symbol7_tfm, roman5_tfm, italic5_tfm, symbol5_tfm);
 }
 
 MathTypesetter::~MathTypesetter() {
     // Nothing to clean up - fonts owned by manager
+}
+
+// ============================================================================
+// Style-aware font selection (Phase 1a)
+// ============================================================================
+
+const char* MathTypesetter::get_roman_font_name() const {
+    if (is_script(ctx.style)) {
+        if (ctx.style >= MathStyle::ScriptScript) return "cmr5";
+        return "cmr7";
+    }
+    return "cmr10";
+}
+
+const char* MathTypesetter::get_italic_font_name() const {
+    if (is_script(ctx.style)) {
+        if (ctx.style >= MathStyle::ScriptScript) return "cmmi5";
+        return "cmmi7";
+    }
+    return "cmmi10";
+}
+
+const char* MathTypesetter::get_symbol_font_name() const {
+    if (is_script(ctx.style)) {
+        if (ctx.style >= MathStyle::ScriptScript) return "cmsy5";
+        return "cmsy7";
+    }
+    return "cmsy10";
+}
+
+TFMFont* MathTypesetter::get_roman_tfm() const {
+    if (is_script(ctx.style)) {
+        if (ctx.style >= MathStyle::ScriptScript) return roman5_tfm ? roman5_tfm : roman_tfm;
+        return roman7_tfm ? roman7_tfm : roman_tfm;
+    }
+    return roman_tfm;
+}
+
+TFMFont* MathTypesetter::get_italic_tfm() const {
+    if (is_script(ctx.style)) {
+        if (ctx.style >= MathStyle::ScriptScript) return italic5_tfm ? italic5_tfm : italic_tfm;
+        return italic7_tfm ? italic7_tfm : italic_tfm;
+    }
+    return italic_tfm;
+}
+
+TFMFont* MathTypesetter::get_symbol_tfm() const {
+    if (is_script(ctx.style)) {
+        if (ctx.style >= MathStyle::ScriptScript) return symbol5_tfm ? symbol5_tfm : symbol_tfm;
+        return symbol7_tfm ? symbol7_tfm : symbol_tfm;
+    }
+    return symbol_tfm;
+}
+
+FontSpec MathTypesetter::make_roman_font() const {
+    return FontSpec(get_roman_font_name(), current_size(), nullptr, 0);
+}
+
+FontSpec MathTypesetter::make_italic_font() const {
+    return FontSpec(get_italic_font_name(), current_size(), nullptr, 0);
+}
+
+FontSpec MathTypesetter::make_symbol_font() const {
+    return FontSpec(get_symbol_font_name(), current_size(), nullptr, 0);
+}
+
+FontSpec MathTypesetter::make_extension_font() const {
+    // Extension font (cmex10) is the same for all sizes - extensible chars scale
+    return FontSpec("cmex10", current_size(), nullptr, 0);
 }
 
 TexNode* MathTypesetter::typeset() {
@@ -599,20 +713,19 @@ TexNode* MathTypesetter::build_symbol(TSNode node) {
 
     int32_t cp = text[0];
 
-    // Variables use italic font (cmmi10)
-    FontSpec font = ctx.italic_font;
-    font.size_pt = current_size();
+    // Variables use italic font - use style-aware font selection
+    FontSpec font = make_italic_font();
 
-    return make_char_node(cp, AtomType::Ord, font, italic_tfm);
+    return make_char_node(cp, AtomType::Ord, font, get_italic_tfm());
 }
 
 TexNode* MathTypesetter::build_number(TSNode node) {
     int len;
     const char* text = node_text(node, &len);
 
-    // Numbers use roman font (cmr10)
-    FontSpec font = ctx.roman_font;
-    font.size_pt = current_size();
+    // Numbers use roman font - style-aware
+    FontSpec font = make_roman_font();
+    TFMFont* tfm = get_roman_tfm();
 
     // Build sequence of digit characters
     TexNode* first = nullptr;
@@ -621,10 +734,10 @@ TexNode* MathTypesetter::build_number(TSNode node) {
     for (int i = 0; i < len; i++) {
         char c = text[i];
         if (c >= '0' && c <= '9') {
-            TexNode* digit = make_char_node(c, AtomType::Ord, font, roman_tfm);
+            TexNode* digit = make_char_node(c, AtomType::Ord, font, tfm);
             link_node(first, last, digit);
         } else if (c == '.') {
-            TexNode* dot = make_char_node('.', AtomType::Punct, font, roman_tfm);
+            TexNode* dot = make_char_node('.', AtomType::Punct, font, tfm);
             link_node(first, last, dot);
         }
     }
@@ -634,7 +747,6 @@ TexNode* MathTypesetter::build_number(TSNode node) {
 
 TexNode* MathTypesetter::build_operator(TSNode node) {
     char* text = node_text_dup(node);
-    float size = current_size();
     TexNode* result = nullptr;
 
     // Check if it's a command (starts with \)
@@ -644,9 +756,8 @@ TexNode* MathTypesetter::build_operator(TSNode node) {
 
         const SymbolEntry* sym = lookup_symbol_entry(cmd, cmd_len);
         if (sym) {
-            FontSpec font = ctx.symbol_font;
-            font.size_pt = size;
-            result = make_char_node(sym->code, sym->atom, font, symbol_tfm);
+            FontSpec font = make_symbol_font();
+            result = make_char_node(sym->code, sym->atom, font, get_symbol_tfm());
         }
     }
 
@@ -656,14 +767,12 @@ TexNode* MathTypesetter::build_operator(TSNode node) {
 
         // Special handling for minus sign: use cmsy character 0 (proper minus)
         if (cp == '-') {
-            FontSpec font = ctx.symbol_font;
-            font.size_pt = size;
-            result = make_char_node(0, AtomType::Bin, font, symbol_tfm);  // cmsy minus at 0
+            FontSpec font = make_symbol_font();
+            result = make_char_node(0, AtomType::Bin, font, get_symbol_tfm());  // cmsy minus at 0
         } else {
             // Other operators (like +) use roman font
-            FontSpec font = ctx.roman_font;
-            font.size_pt = size;
-            result = make_char_node(cp, AtomType::Bin, font, roman_tfm);
+            FontSpec font = make_roman_font();
+            result = make_char_node(cp, AtomType::Bin, font, get_roman_tfm());
         }
     }
 
@@ -673,7 +782,6 @@ TexNode* MathTypesetter::build_operator(TSNode node) {
 
 TexNode* MathTypesetter::build_relation(TSNode node) {
     char* text = node_text_dup(node);
-    float size = current_size();
     TexNode* result = nullptr;
 
     // Check if it's a command
@@ -683,18 +791,16 @@ TexNode* MathTypesetter::build_relation(TSNode node) {
 
         const SymbolEntry* sym = lookup_symbol_entry(cmd, cmd_len);
         if (sym) {
-            FontSpec font = ctx.symbol_font;
-            font.size_pt = size;
-            result = make_char_node(sym->code, sym->atom, font, symbol_tfm);
+            FontSpec font = make_symbol_font();
+            result = make_char_node(sym->code, sym->atom, font, get_symbol_tfm());
         }
     }
 
     if (!result) {
         // Single character relation
         int32_t cp = text[0];
-        FontSpec font = ctx.roman_font;
-        font.size_pt = size;
-        result = make_char_node(cp, AtomType::Rel, font, roman_tfm);
+        FontSpec font = make_roman_font();
+        result = make_char_node(cp, AtomType::Rel, font, get_roman_tfm());
     }
 
     free(text);
@@ -703,40 +809,39 @@ TexNode* MathTypesetter::build_relation(TSNode node) {
 
 TexNode* MathTypesetter::build_punctuation(TSNode node) {
     char* text = node_text_dup(node);
-    float size = current_size();
     size_t len = strlen(text);
 
     int32_t cp = text[0];
     AtomType atom = AtomType::Punct;
     
-    // Handle escaped braces (\{ and \}) - use cmsy10 positions
+    // Handle escaped braces (\{ and \}) - use cmsy positions
     FontSpec font;
     TFMFont* tfm;
     if (len >= 2 && text[0] == '\\') {
         if (text[1] == '{' || strncmp(text, "\\lbrace", 7) == 0) {
-            // Left brace: cmsy10 position 102
+            // Left brace: cmsy position 102
             cp = 102;
             atom = AtomType::Open;
-            font = ctx.symbol_font;
-            tfm = symbol_tfm;
+            font = make_symbol_font();
+            tfm = get_symbol_tfm();
         } else if (text[1] == '}' || strncmp(text, "\\rbrace", 7) == 0) {
-            // Right brace: cmsy10 position 103
+            // Right brace: cmsy position 103
             cp = 103;
             atom = AtomType::Close;
-            font = ctx.symbol_font;
-            tfm = symbol_tfm;
+            font = make_symbol_font();
+            tfm = get_symbol_tfm();
         } else {
             // Unknown escape - treat as roman
             cp = text[1];  // Use the character after backslash
-            font = ctx.roman_font;
-            tfm = roman_tfm;
+            font = make_roman_font();
+            tfm = get_roman_tfm();
         }
     } else if (cp == '|') {
-        // Vertical bar uses cmsy10 position 106 (shows as 'j' in printable range)
+        // Vertical bar uses cmsy position 106 (shows as 'j' in printable range)
         cp = 106;
         atom = AtomType::Ord;  // |x| for absolute value - treated as ordinary
-        font = ctx.symbol_font;
-        tfm = symbol_tfm;
+        font = make_symbol_font();
+        tfm = get_symbol_tfm();
     } else {
         // Parentheses are open/close
         if (cp == '(') atom = AtomType::Open;
@@ -745,19 +850,18 @@ TexNode* MathTypesetter::build_punctuation(TSNode node) {
         else if (cp == ']') atom = AtomType::Close;
 
         // TeX uses cmmi (math italic) for comma, cmr (roman) for semicolon
-        // In cmmi10: position 59 is comma glyph
-        // In cmr10: position 59 is semicolon glyph
+        // In cmmi: position 59 is comma glyph
+        // In cmr: position 59 is semicolon glyph
         if (cp == ',') {
-            // Comma uses math italic font (cmmi10) at position 59
-            font = ctx.italic_font;
-            tfm = italic_tfm;
+            // Comma uses math italic font (cmmi) at position 59
+            font = make_italic_font();
+            tfm = get_italic_tfm();
         } else {
             // Other punctuation (semicolon, colon, etc.) uses roman font
-            font = ctx.roman_font;
-            tfm = roman_tfm;
+            font = make_roman_font();
+            tfm = get_roman_tfm();
         }
     }
-    font.size_pt = size;
 
     TexNode* result = make_char_node(cp, atom, font, tfm);
     free(text);
@@ -821,17 +925,14 @@ TexNode* MathTypesetter::build_greek_letter(const char* cmd, size_t len) {
     int code = lookup_greek(cmd, len);
     if (code < 0) return nullptr;
 
-    float size = current_size();
-    FontSpec font = ctx.italic_font;
-    font.size_pt = size;
-
-    return make_char_node(code, AtomType::Ord, font, italic_tfm);
+    FontSpec font = make_italic_font();
+    return make_char_node(code, AtomType::Ord, font, get_italic_tfm());
 }
 
 TexNode* MathTypesetter::build_symbol_command(const char* cmd, size_t len) {
+    FontSpec font = make_symbol_font();
+    TFMFont* tfm = get_symbol_tfm();
     float size = current_size();
-    FontSpec font = ctx.symbol_font;
-    font.size_pt = size;
 
     // Handle composite symbols that require multiple characters
     // \notin = \not (negation slash at 54) overlaid with \in (element-of at 50)
@@ -840,8 +941,8 @@ TexNode* MathTypesetter::build_symbol_command(const char* cmd, size_t len) {
         TexNode* first = nullptr;
         TexNode* last = nullptr;
         
-        // NOT slash (cmsy10 position 54)
-        TexNode* not_char = make_char_node(54, AtomType::Rel, font, symbol_tfm);
+        // NOT slash (cmsy position 54)
+        TexNode* not_char = make_char_node(54, AtomType::Rel, font, tfm);
         link_node(first, last, not_char);
         
         // Negative kern to overlap the characters
@@ -849,8 +950,8 @@ TexNode* MathTypesetter::build_symbol_command(const char* cmd, size_t len) {
         TexNode* kern = make_kern(ctx.arena, kern_amount);
         link_node(first, last, kern);
         
-        // IN symbol (cmsy10 position 50)
-        TexNode* in_char = make_char_node(50, AtomType::Rel, font, symbol_tfm);
+        // IN symbol (cmsy position 50)
+        TexNode* in_char = make_char_node(50, AtomType::Rel, font, tfm);
         link_node(first, last, in_char);
         
         return wrap_in_hbox(first, last);
@@ -859,22 +960,21 @@ TexNode* MathTypesetter::build_symbol_command(const char* cmd, size_t len) {
     const SymbolEntry* sym = lookup_symbol_entry(cmd, len);
     if (!sym) return nullptr;
 
-    return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+    return make_char_node(sym->code, sym->atom, font, tfm);
 }
 
 TexNode* MathTypesetter::build_function_operator(const char* cmd, size_t len) {
     if (!is_func_operator(cmd, len)) return nullptr;
 
-    float size = current_size();
-    FontSpec font = ctx.roman_font;
-    font.size_pt = size;
+    FontSpec font = make_roman_font();
+    TFMFont* tfm = get_roman_tfm();
 
     // Build HBox with roman characters
     TexNode* first = nullptr;
     TexNode* last = nullptr;
 
     for (size_t i = 0; i < len; i++) {
-        TexNode* ch = make_char_node(cmd[i], AtomType::Op, font, roman_tfm);
+        TexNode* ch = make_char_node(cmd[i], AtomType::Op, font, tfm);
         link_node(first, last, ch);
     }
 
@@ -898,19 +998,19 @@ TexNode* MathTypesetter::build_dots_command(const char* cmd, size_t len) {
     
     if ((len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
         (len == 4 && strncmp(cmd, "dots", 4) == 0)) {
-        dot_code = 58;  // period in cmmi10
+        dot_code = 58;  // period in cmmi
         is_triple = true;
         use_cmmi = true;
     } else if (len == 5 && strncmp(cmd, "cdots", 5) == 0) {
-        dot_code = 1;   // cdot in cmsy10
+        dot_code = 1;   // cdot in cmsy
         is_triple = true;
         use_cmmi = false;
     } else if (len == 5 && strncmp(cmd, "vdots", 5) == 0) {
-        dot_code = 61;  // vdots in cmsy10
+        dot_code = 61;  // vdots in cmsy
         is_triple = false;
         use_cmmi = false;
     } else if (len == 5 && strncmp(cmd, "ddots", 5) == 0) {
-        dot_code = 62;  // ddots in cmsy10
+        dot_code = 62;  // ddots in cmsy
         is_triple = false;
         use_cmmi = false;
     } else {
@@ -918,9 +1018,8 @@ TexNode* MathTypesetter::build_dots_command(const char* cmd, size_t len) {
     }
     
     float size = current_size();
-    FontSpec font = use_cmmi ? ctx.italic_font : ctx.symbol_font;
-    TFMFont* tfm = use_cmmi ? italic_tfm : symbol_tfm;
-    font.size_pt = size;
+    FontSpec font = use_cmmi ? make_italic_font() : make_symbol_font();
+    TFMFont* tfm = use_cmmi ? get_italic_tfm() : get_symbol_tfm();
     
     if (is_triple) {
         // Build 3 dots with proper spacing (like TeX does)
@@ -1650,10 +1749,23 @@ TexNode* MathTypesetter::build_space_command(TSNode node) {
 class MathASTTypesetter {
 public:
     MathASTTypesetter(MathContext& c) : ctx(c) {
+        // Cache TFM fonts for all three sizes
+        // Text/Display style: 10pt fonts
         roman_tfm = ctx.fonts ? ctx.fonts->get_font("cmr10") : nullptr;
         italic_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi10") : nullptr;
         symbol_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy10") : nullptr;
         extension_tfm = ctx.fonts ? ctx.fonts->get_font("cmex10") : nullptr;
+        // Script style: 7pt fonts
+        roman7_tfm = ctx.fonts ? ctx.fonts->get_font("cmr7") : nullptr;
+        italic7_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi7") : nullptr;
+        symbol7_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy7") : nullptr;
+        // ScriptScript style: 5pt fonts
+        roman5_tfm = ctx.fonts ? ctx.fonts->get_font("cmr5") : nullptr;
+        italic5_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi5") : nullptr;
+        symbol5_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy5") : nullptr;
+        
+        log_debug("tex_math_ast: loaded script fonts - cmr7=%p cmmi7=%p cmsy7=%p cmr5=%p cmmi5=%p cmsy5=%p",
+                  roman7_tfm, italic7_tfm, symbol7_tfm, roman5_tfm, italic5_tfm, symbol5_tfm);
     }
 
     TexNode* typeset(const ItemReader& ast_root) {
@@ -1663,12 +1775,88 @@ public:
 
 private:
     MathContext& ctx;
+    // Text/Display style: 10pt fonts
     TFMFont* roman_tfm;
     TFMFont* italic_tfm;
     TFMFont* symbol_tfm;
     TFMFont* extension_tfm;
+    // Script style: 7pt fonts
+    TFMFont* roman7_tfm;
+    TFMFont* italic7_tfm;
+    TFMFont* symbol7_tfm;
+    // ScriptScript style: 5pt fonts
+    TFMFont* roman5_tfm;
+    TFMFont* italic5_tfm;
+    TFMFont* symbol5_tfm;
 
     float current_size() const { return ctx.font_size(); }
+    
+    // Style-aware font name selection
+    const char* get_roman_font_name() const {
+        if (is_script(ctx.style)) {
+            if (ctx.style >= MathStyle::ScriptScript) return "cmr5";
+            return "cmr7";
+        }
+        return "cmr10";
+    }
+    
+    const char* get_italic_font_name() const {
+        if (is_script(ctx.style)) {
+            if (ctx.style >= MathStyle::ScriptScript) return "cmmi5";
+            return "cmmi7";
+        }
+        return "cmmi10";
+    }
+    
+    const char* get_symbol_font_name() const {
+        if (is_script(ctx.style)) {
+            if (ctx.style >= MathStyle::ScriptScript) return "cmsy5";
+            return "cmsy7";
+        }
+        return "cmsy10";
+    }
+    
+    // Style-aware TFM font selection
+    TFMFont* get_roman_tfm() const {
+        if (is_script(ctx.style)) {
+            if (ctx.style >= MathStyle::ScriptScript) return roman5_tfm ? roman5_tfm : roman_tfm;
+            return roman7_tfm ? roman7_tfm : roman_tfm;
+        }
+        return roman_tfm;
+    }
+    
+    TFMFont* get_italic_tfm() const {
+        if (is_script(ctx.style)) {
+            if (ctx.style >= MathStyle::ScriptScript) return italic5_tfm ? italic5_tfm : italic_tfm;
+            return italic7_tfm ? italic7_tfm : italic_tfm;
+        }
+        return italic_tfm;
+    }
+    
+    TFMFont* get_symbol_tfm() const {
+        if (is_script(ctx.style)) {
+            if (ctx.style >= MathStyle::ScriptScript) return symbol5_tfm ? symbol5_tfm : symbol_tfm;
+            return symbol7_tfm ? symbol7_tfm : symbol_tfm;
+        }
+        return symbol_tfm;
+    }
+    
+    // Style-aware FontSpec creation
+    FontSpec make_roman_font() const {
+        return FontSpec(get_roman_font_name(), current_size(), nullptr, 0);
+    }
+    
+    FontSpec make_italic_font() const {
+        return FontSpec(get_italic_font_name(), current_size(), nullptr, 0);
+    }
+    
+    FontSpec make_symbol_font() const {
+        return FontSpec(get_symbol_font_name(), current_size(), nullptr, 0);
+    }
+    
+    FontSpec make_extension_font() const {
+        return FontSpec("cmex10", current_size(), nullptr, 0);
+    }
 
     // Node builders
     TexNode* build_node(const ItemReader& item) {
@@ -1776,19 +1964,18 @@ private:
     }
 
     TexNode* build_symbol(char c) {
-        FontSpec font = ctx.italic_font;
-        font.size_pt = current_size();
-        return make_char_node(c, AtomType::Ord, font, italic_tfm);
+        FontSpec font = make_italic_font();
+        return make_char_node(c, AtomType::Ord, font, get_italic_tfm());
     }
 
     TexNode* build_number(const char* text, size_t len) {
-        FontSpec font = ctx.roman_font;
-        font.size_pt = current_size();
+        FontSpec font = make_roman_font();
+        TFMFont* tfm = get_roman_tfm();
         TexNode* first = nullptr;
         TexNode* last = nullptr;
         for (size_t i = 0; i < len; i++) {
             AtomType atom = (text[i] == '.') ? AtomType::Punct : AtomType::Ord;
-            link_node(first, last, make_char_node(text[i], atom, font, roman_tfm));
+            link_node(first, last, make_char_node(text[i], atom, font, tfm));
         }
         return wrap_in_hbox(first, last);
     }
@@ -1798,17 +1985,16 @@ private:
 
         int greek_code = lookup_greek(cmd, len);
         if (greek_code >= 0) {
-            FontSpec font = ctx.italic_font;
-            font.size_pt = current_size();
-            return make_char_node(greek_code, AtomType::Ord, font, italic_tfm);
+            FontSpec font = make_italic_font();
+            return make_char_node(greek_code, AtomType::Ord, font, get_italic_tfm());
         }
 
         // Try dots commands (\ldots, \cdots, etc.)
         // TeX uses:
-        //   - ldots: 3× period(58) from cmmi10 with kerns
-        //   - cdots: 3× cdot(1) from cmsy10 with kerns
-        //   - vdots: single char(61) from cmsy10
-        //   - ddots: single char(62) from cmsy10
+        //   - ldots: 3× period(58) from cmmi with kerns
+        //   - cdots: 3× cdot(1) from cmsy with kerns
+        //   - vdots: single char(61) from cmsy
+        //   - ddots: single char(62) from cmsy
         {
             int dot_code = -1;
             bool is_triple = false;
@@ -1816,28 +2002,27 @@ private:
             
             if ((len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
                 (len == 4 && strncmp(cmd, "dots", 4) == 0)) {
-                dot_code = 58;  // period in cmmi10
+                dot_code = 58;  // period in cmmi
                 is_triple = true;
                 use_cmmi = true;
             } else if (len == 5 && strncmp(cmd, "cdots", 5) == 0) {
-                dot_code = 1;   // cdot in cmsy10
+                dot_code = 1;   // cdot in cmsy
                 is_triple = true;
                 use_cmmi = false;
             } else if (len == 5 && strncmp(cmd, "vdots", 5) == 0) {
-                dot_code = 61;  // vdots in cmsy10
+                dot_code = 61;  // vdots in cmsy
                 is_triple = false;
                 use_cmmi = false;
             } else if (len == 5 && strncmp(cmd, "ddots", 5) == 0) {
-                dot_code = 62;  // ddots in cmsy10
+                dot_code = 62;  // ddots in cmsy
                 is_triple = false;
                 use_cmmi = false;
             }
             
             if (dot_code >= 0) {
                 float size = current_size();
-                FontSpec font = use_cmmi ? ctx.italic_font : ctx.symbol_font;
-                TFMFont* tfm = use_cmmi ? italic_tfm : symbol_tfm;
-                font.size_pt = size;
+                FontSpec font = use_cmmi ? make_italic_font() : make_symbol_font();
+                TFMFont* tfm = use_cmmi ? get_italic_tfm() : get_symbol_tfm();
                 
                 if (is_triple) {
                     TexNode* first = nullptr;
@@ -1859,18 +2044,16 @@ private:
 
         const SymbolEntry* sym = lookup_symbol_entry(cmd, len);
         if (sym) {
-            FontSpec font = ctx.symbol_font;
-            font.size_pt = current_size();
-            return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+            FontSpec font = make_symbol_font();
+            return make_char_node(sym->code, sym->atom, font, get_symbol_tfm());
         }
 
         if (is_func_operator(cmd, len)) {
-            FontSpec font = ctx.roman_font;
-            font.size_pt = current_size();
+            FontSpec font = make_roman_font();
             TexNode* first = nullptr;
             TexNode* last = nullptr;
             for (size_t i = 0; i < len; i++) {
-                link_node(first, last, make_char_node(cmd[i], AtomType::Op, font, roman_tfm));
+                link_node(first, last, make_char_node(cmd[i], AtomType::Op, font, get_roman_tfm()));
             }
             return wrap_in_hbox(first, last);
         }
@@ -1890,42 +2073,35 @@ private:
     TexNode* build_operator_elem(const ElementReader& elem) {
         const char* value = elem.get_attr_string("value");
         if (!value) return nullptr;
-        float size = current_size();
 
         if (value[0] == '\\') {
             const SymbolEntry* sym = lookup_symbol_entry(value + 1, strlen(value) - 1);
             if (sym) {
-                FontSpec font = ctx.symbol_font;
-                font.size_pt = size;
-                return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+                FontSpec font = make_symbol_font();
+                return make_char_node(sym->code, sym->atom, font, get_symbol_tfm());
             }
         }
         if (value[0] == '-') {
-            FontSpec font = ctx.symbol_font;
-            font.size_pt = size;
-            return make_char_node(0, AtomType::Bin, font, symbol_tfm);
+            FontSpec font = make_symbol_font();
+            return make_char_node(0, AtomType::Bin, font, get_symbol_tfm());
         }
-        FontSpec font = ctx.roman_font;
-        font.size_pt = size;
-        return make_char_node(value[0], AtomType::Bin, font, roman_tfm);
+        FontSpec font = make_roman_font();
+        return make_char_node(value[0], AtomType::Bin, font, get_roman_tfm());
     }
 
     TexNode* build_relation_elem(const ElementReader& elem) {
         const char* value = elem.get_attr_string("value");
         if (!value) return nullptr;
-        float size = current_size();
 
         if (value[0] == '\\') {
             const SymbolEntry* sym = lookup_symbol_entry(value + 1, strlen(value) - 1);
             if (sym) {
-                FontSpec font = ctx.symbol_font;
-                font.size_pt = size;
-                return make_char_node(sym->code, sym->atom, font, symbol_tfm);
+                FontSpec font = make_symbol_font();
+                return make_char_node(sym->code, sym->atom, font, get_symbol_tfm());
             }
         }
-        FontSpec font = ctx.roman_font;
-        font.size_pt = size;
-        return make_char_node(value[0], AtomType::Rel, font, roman_tfm);
+        FontSpec font = make_roman_font();
+        return make_char_node(value[0], AtomType::Rel, font, get_roman_tfm());
     }
 
     TexNode* build_punctuation_elem(const ElementReader& elem) {
@@ -1937,40 +2113,39 @@ private:
         FontSpec font;
         TFMFont* tfm;
         
-        // Handle escaped braces (\{ and \}) - use cmsy10 positions
+        // Handle escaped braces (\{ and \}) - use cmsy positions
         if (len >= 2 && value[0] == '\\') {
             if (value[1] == '{' || strncmp(value, "\\lbrace", 7) == 0) {
-                // Left brace: cmsy10 position 102
+                // Left brace: cmsy position 102
                 cp = 102;
                 atom = AtomType::Open;
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
+                font = make_symbol_font();
+                tfm = get_symbol_tfm();
             } else if (value[1] == '}' || strncmp(value, "\\rbrace", 7) == 0) {
-                // Right brace: cmsy10 position 103
+                // Right brace: cmsy position 103
                 cp = 103;
                 atom = AtomType::Close;
-                font = ctx.symbol_font;
-                tfm = symbol_tfm;
+                font = make_symbol_font();
+                tfm = get_symbol_tfm();
             } else {
                 // Unknown escape - treat as roman
                 cp = value[1];
-                font = ctx.roman_font;
-                tfm = roman_tfm;
+                font = make_roman_font();
+                tfm = get_roman_tfm();
             }
         } else if (cp == '|') {
-            // Vertical bar uses cmsy10 position 106
+            // Vertical bar uses cmsy position 106
             cp = 106;
             atom = AtomType::Ord;
-            font = ctx.symbol_font;
-            tfm = symbol_tfm;
+            font = make_symbol_font();
+            tfm = get_symbol_tfm();
         } else {
             if (cp == '(' || cp == '[') atom = AtomType::Open;
             else if (cp == ')' || cp == ']') atom = AtomType::Close;
-            // comma in TeX is from cmmi10 (math italic), others from cmr10
-            font = (cp == ',') ? ctx.italic_font : ctx.roman_font;
-            tfm = (cp == ',') ? italic_tfm : roman_tfm;
+            // comma in TeX is from cmmi (math italic), others from cmr
+            font = (cp == ',') ? make_italic_font() : make_roman_font();
+            tfm = (cp == ',') ? get_italic_tfm() : get_roman_tfm();
         }
-        font.size_pt = current_size();
         return make_char_node(cp, atom, font, tfm);
     }
 
