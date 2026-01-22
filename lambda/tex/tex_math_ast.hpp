@@ -64,6 +64,8 @@ enum class MathNodeType : uint8_t {
     ARRAY_ROW,      // Row in array
     ARRAY_CELL,     // Cell in array
     SPACE,          // Math spacing: \, \; \quad \qquad
+    PHANTOM,        // Phantom box: \phantom, \hphantom, \vphantom
+    NOT,            // Negation overlay: \not
     ERROR,          // Parse error recovery
 };
 
@@ -156,6 +158,11 @@ struct MathASTNode {
         struct {
             float width_mu;         // Width in mu (1/18 em)
         } space;
+
+        // For PHANTOM (phantom_type: 0=full, 1=hphantom, 2=vphantom, 3=smash)
+        struct {
+            uint8_t phantom_type;   // 0=phantom, 1=hphantom, 2=vphantom, 3=smash
+        } phantom;
     };
 
     // Tree structure (named branches - inspired by MathLive)
@@ -201,6 +208,8 @@ MathASTNode* make_math_overunder(Arena* arena, MathASTNode* nucleus, MathASTNode
 // Create text/space nodes
 MathASTNode* make_math_text(Arena* arena, const char* text, size_t len, bool is_roman);
 MathASTNode* make_math_space(Arena* arena, float width_mu);
+MathASTNode* make_math_phantom(Arena* arena, MathASTNode* content, uint8_t phantom_type);
+MathASTNode* make_math_not(Arena* arena, MathASTNode* operand);
 
 // Create error node
 MathASTNode* make_math_error(Arena* arena, const char* message);

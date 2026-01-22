@@ -32,6 +32,8 @@ static TexNode* typeset_overunder_node(MathASTNode* node, MathContext& ctx);
 static TexNode* typeset_text_node(MathASTNode* node, MathContext& ctx);
 static TexNode* typeset_space_node(MathASTNode* node, MathContext& ctx);
 static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx);
+static TexNode* typeset_phantom_node(MathASTNode* node, MathContext& ctx);
+static TexNode* typeset_not_node(MathASTNode* node, MathContext& ctx);
 
 // ============================================================================
 // Greek Letter Table (cmmi10 positions)
@@ -431,6 +433,11 @@ struct TypesetContext {
         return symbol_tfm;
     }
     
+    TFMFont* get_extension_tfm() const {
+        // cmex10 has no size variants - always use extension_tfm
+        return extension_tfm;
+    }
+    
     // Style-aware FontSpec creation
     FontSpec make_roman_font() const {
         return FontSpec(get_roman_font_name(), font_size(), nullptr, 0);
@@ -519,6 +526,12 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
 
         case MathNodeType::SPACE:
             return typeset_space_node(node, ctx);
+
+        case MathNodeType::PHANTOM:
+            return typeset_phantom_node(node, ctx);
+
+        case MathNodeType::NOT:
+            return typeset_not_node(node, ctx);
 
         case MathNodeType::ARRAY:
             return typeset_array_node(node, ctx);
@@ -999,32 +1012,71 @@ static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx) {
     // Get accent character
     int32_t accent_cp = node->accent.accent_char;
     
-    // Default to symbol font for most accents
-    FontSpec accent_font = tc.make_symbol_font();
-    TFMFont* accent_tfm = tc.get_symbol_tfm();
+    // Default to cmmi10 for most math accents (TeXBook p. 443)
+    // Note: TeX uses cmmi10 for most accents, cmr10 for some, cmex10 for wide accents
+    FontSpec accent_font = tc.make_italic_font();
+    TFMFont* accent_tfm = tc.get_italic_tfm();
+    bool is_wide = false;
     
     // Lookup accent code if command given
     if (node->accent.command) {
         const char* cmd = node->accent.command;
         size_t len = strlen(cmd);
         
-        // Map command to cmmi10/cmsy10 accent codes
-        if (len == 3 && strncmp(cmd, "hat", 3) == 0) accent_cp = 94;
-        else if (len == 3 && strncmp(cmd, "bar", 3) == 0) accent_cp = 22;
+        // Map command to cmmi10 accent codes (TeX convention)
+        // Reference: TeXBook Appendix F, cmmi10 character table
+        if (len == 3 && strncmp(cmd, "hat", 3) == 0) {
+            accent_cp = 94;  // circumflex in cmmi10 (0x5E)
+        }
+        else if (len == 5 && strncmp(cmd, "check", 5) == 0) {
+            accent_cp = 20;  // caron/hacek in cmmi10 (0x14)
+        }
         else if (len == 5 && strncmp(cmd, "tilde", 5) == 0) {
-            accent_cp = 126;
-            accent_font = tc.make_italic_font();  // tilde uses cmmi
-            accent_tfm = tc.get_italic_tfm();
+            accent_cp = 126; // tilde in cmmi10 (0x7E)
+        }
+        else if (len == 5 && strncmp(cmd, "acute", 5) == 0) {
+            accent_cp = 19;  // acute in cmmi10 (0x13)
+        }
+        else if (len == 5 && strncmp(cmd, "grave", 5) == 0) {
+            accent_cp = 18;  // grave in cmmi10 (0x12)
+        }
+        else if (len == 3 && strncmp(cmd, "dot", 3) == 0) {
+            accent_cp = 95;  // dot in cmmi10 (0x5F)
+        }
+        else if (len == 4 && strncmp(cmd, "ddot", 4) == 0) {
+            accent_cp = 127; // dieresis in cmmi10 (0x7F)
+        }
+        else if (len == 5 && strncmp(cmd, "breve", 5) == 0) {
+            accent_cp = 21;  // breve in cmmi10 (0x15)
+        }
+        else if (len == 3 && strncmp(cmd, "bar", 3) == 0) {
+            accent_cp = 22;  // macron in cmmi10 (0x16)
         }
         else if (len == 3 && strncmp(cmd, "vec", 3) == 0) {
-            accent_cp = 126;
-            accent_font = tc.make_italic_font();  // vec uses cmmi (vector arrow)
-            accent_tfm = tc.get_italic_tfm();
+            accent_cp = 126; // vector arrow uses tilde position in cmmi10
         }
-        else if (len == 3 && strncmp(cmd, "dot", 3) == 0) accent_cp = 95;
-        else if (len == 4 && strncmp(cmd, "ddot", 4) == 0) accent_cp = 127;
-        else if (len == 8 && strncmp(cmd, "overline", 8) == 0) accent_cp = 22;  // macron/bar
-        else if (len == 9 && strncmp(cmd, "underline", 9) == 0) accent_cp = 22;  // treated same
+        else if (len == 8 && strncmp(cmd, "mathring", 8) == 0) {
+            accent_cp = 23;  // ring in cmmi10 (0x17)
+        }
+        else if (len == 8 && strncmp(cmd, "overline", 8) == 0) {
+            accent_cp = 22;  // macron/bar in cmmi10
+        }
+        else if (len == 9 && strncmp(cmd, "underline", 9) == 0) {
+            accent_cp = 22;  // treated same as overline
+        }
+        // Wide accents use cmex10 (extensible font)
+        else if (len == 7 && strncmp(cmd, "widehat", 7) == 0) {
+            accent_cp = 98;  // start of widehat chain in cmex10 (0x62)
+            accent_font = tc.make_extension_font();
+            accent_tfm = tc.get_extension_tfm();
+            is_wide = true;
+        }
+        else if (len == 9 && strncmp(cmd, "widetilde", 9) == 0) {
+            accent_cp = 101; // start of widetilde chain in cmex10 (0x65)
+            accent_font = tc.make_extension_font();
+            accent_tfm = tc.get_extension_tfm();
+            is_wide = true;
+        }
     }
 
     float size = tc.font_size();
@@ -1137,6 +1189,118 @@ static TexNode* typeset_space_node(MathASTNode* node, MathContext& ctx) {
     }
 
     return make_glue(ctx.arena, Glue::fixed(width_pt), "mathspace");
+}
+
+// ============================================================================
+// Phantom Typesetting
+// ============================================================================
+
+static TexNode* typeset_phantom_node(MathASTNode* node, MathContext& ctx) {
+    // Typeset the content to get its dimensions
+    TexNode* content = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
+    
+    uint8_t phantom_type = node->phantom.phantom_type;
+    
+    // Create an empty box with appropriate dimensions
+    TexNode* phantom = make_hbox(ctx.arena);
+    
+    switch (phantom_type) {
+        case 0:  // \phantom - full box, no rendering
+            phantom->width = content->width;
+            phantom->height = content->height;
+            phantom->depth = content->depth;
+            break;
+        case 1:  // \hphantom - width only (zero height/depth)
+            phantom->width = content->width;
+            phantom->height = 0;
+            phantom->depth = 0;
+            break;
+        case 2:  // \vphantom - height/depth only (zero width)
+            phantom->width = 0;
+            phantom->height = content->height;
+            phantom->depth = content->depth;
+            break;
+        case 3:  // \smash - render but zero height/depth
+            // For smash, we actually render the content but report zero height
+            phantom->first_child = content->first_child;
+            phantom->last_child = content->last_child;
+            phantom->width = content->width;
+            phantom->height = 0;
+            phantom->depth = 0;
+            // Update parent pointers for children
+            for (TexNode* child = phantom->first_child; child; child = child->next_sibling) {
+                child->parent = phantom;
+            }
+            break;
+        default:
+            // Unknown phantom type - treat as full phantom
+            phantom->width = content->width;
+            phantom->height = content->height;
+            phantom->depth = content->depth;
+            break;
+    }
+    
+    log_debug("[TYPESET] phantom type=%d: w=%.2f h=%.2f d=%.2f", 
+              phantom_type, phantom->width, phantom->height, phantom->depth);
+    
+    return phantom;
+}
+
+// ============================================================================
+// Not (Negation Overlay) Typesetting
+// ============================================================================
+
+static TexNode* typeset_not_node(MathASTNode* node, MathContext& ctx) {
+    TypesetContext tc(ctx);
+    Arena* arena = tc.arena();
+    float size = tc.font_size();
+    
+    // Typeset the operand
+    TexNode* operand = node->body ? typeset_node(node->body, ctx) : nullptr;
+    
+    // Create the negation slash character from cmsy10 at position 54 (character '6')
+    // This is the standard TeX negation slash
+    FontSpec slash_font = tc.make_symbol_font();
+    slash_font.size_pt = size;
+    TFMFont* slash_tfm = tc.get_symbol_tfm();
+    
+    TexNode* slash = make_char_with_metrics(arena, 54, AtomType::Rel, slash_font, slash_tfm, size);
+    
+    if (!operand) {
+        // No operand - just return the slash
+        return slash;
+    }
+    
+    // Create composite box - overlay slash on operand
+    // Position slash centered horizontally and vertically on the operand
+    TexNode* result = make_hbox(arena);
+    result->width = operand->width;
+    result->height = fmax(operand->height, slash->height);
+    result->depth = fmax(operand->depth, slash->depth);
+    
+    // Position operand at x=0
+    operand->x = 0;
+    operand->y = 0;
+    
+    // Position slash centered over operand
+    // Use a negative kern to overlay the slash on the operand
+    float slash_offset = (operand->width - slash->width) / 2.0f;
+    slash->x = slash_offset;
+    slash->y = 0;
+    
+    // Add children in order: operand first, then slash overlay
+    result->first_child = operand;
+    operand->parent = result;
+    operand->next_sibling = slash;
+    slash->prev_sibling = operand;
+    slash->parent = result;
+    result->last_child = slash;
+    
+    // The width is just the operand width (slash overlays, doesn't add width)
+    log_debug("[TYPESET] not: operand_w=%.2f slash_w=%.2f result_w=%.2f", 
+              operand->width, slash->width, result->width);
+    
+    return result;
 }
 
 // ============================================================================

@@ -826,25 +826,25 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             const char* radical_font = "cmsy10";
             int radical_glyph = 112;  // Default: cmsy10 surd (smallest)
             
-            // TeX threshold for switching to cmex10 is approximately 8pt total height
+            // TeX threshold for switching to cmex10 is approximately 10pt total height
             // The cmex10 radical glyphs scale with the content:
             // Thresholds tuned to match TeX's glyph selection behavior
-            if (total_height > 8.0f) {
+            if (total_height > 10.0f) {
                 radical_font = "cmex10";
                 // Select glyph based on total height (tuned thresholds):
-                // 112 = smallest cmex10 surd (~8-9pt)
-                // 113 = (~9-10pt)
-                // 114 = (~10-11pt)
-                // 115 = (~11-12pt)
-                // 116 = (~12-14pt)
-                // 117 = (~14-16pt)
-                // 118 = (~16pt and above)
-                if (total_height > 16.0f) radical_glyph = 118;
-                else if (total_height > 14.0f) radical_glyph = 117;
-                else if (total_height > 12.0f) radical_glyph = 116;
-                else if (total_height > 11.0f) radical_glyph = 115;
-                else if (total_height > 10.0f) radical_glyph = 114;
-                else if (total_height > 9.0f) radical_glyph = 113;
+                // 112 = smallest cmex10 surd (~10-11pt)
+                // 113 = (~11-12pt)
+                // 114 = (~12-13pt)
+                // 115 = (~13-14pt)
+                // 116 = (~14-16pt)
+                // 117 = (~16-18pt)
+                // 118 = (~18pt and above)
+                if (total_height > 18.0f) radical_glyph = 118;
+                else if (total_height > 16.0f) radical_glyph = 117;
+                else if (total_height > 14.0f) radical_glyph = 116;
+                else if (total_height > 13.0f) radical_glyph = 115;
+                else if (total_height > 12.0f) radical_glyph = 114;
+                else if (total_height > 11.0f) radical_glyph = 113;
                 else radical_glyph = 112;
             }
             

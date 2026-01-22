@@ -53,6 +53,8 @@ const char* math_node_type_name(MathNodeType type) {
         case MathNodeType::ARRAY_ROW: return "ARRAY_ROW";
         case MathNodeType::ARRAY_CELL: return "ARRAY_CELL";
         case MathNodeType::SPACE:     return "SPACE";
+        case MathNodeType::PHANTOM:   return "PHANTOM";
+        case MathNodeType::NOT:       return "NOT";
         case MathNodeType::ERROR:     return "ERROR";
         default:                      return "UNKNOWN";
     }
@@ -227,6 +229,19 @@ MathASTNode* make_math_text(Arena* arena, const char* text, size_t len, bool is_
 MathASTNode* make_math_space(Arena* arena, float width_mu) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::SPACE);
     node->space.width_mu = width_mu;
+    return node;
+}
+
+MathASTNode* make_math_phantom(Arena* arena, MathASTNode* content, uint8_t phantom_type) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::PHANTOM);
+    node->phantom.phantom_type = phantom_type;
+    node->body = content;
+    return node;
+}
+
+MathASTNode* make_math_not(Arena* arena, MathASTNode* operand) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::NOT);
+    node->body = operand;
     return node;
 }
 
@@ -619,6 +634,60 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
+        const char* type = ts_node_type(child);
+        
+        // Check for \not command followed by an operand
+        if (strcmp(type, "command") == 0 || strcmp(type, "symbol_command") == 0) {
+            int len;
+            const char* text = node_text(child, &len);
+            if (len == 4 && strncmp(text, "\\not", 4) == 0) {
+                // Look for following operand (symbol, relation, or command)
+                if (i + 1 < child_count) {
+                    TSNode next = ts_node_named_child(node, i + 1);
+                    MathASTNode* operand = build_ts_node(next);
+                    if (operand) {
+                        MathASTNode* not_node = make_math_not(arena, operand);
+                        math_row_append(row, not_node);
+                        i++;  // Skip the operand we just consumed
+                        continue;
+                    }
+                }
+                // \not at end of expression - just output a standalone slash
+                MathASTNode* not_node = make_math_not(arena, nullptr);
+                math_row_append(row, not_node);
+                continue;
+            }
+        }
+        
+        // Check for phantom commands followed by a group
+        if (strcmp(type, "space_command") == 0) {
+            int len;
+            const char* text = node_text(child, &len);
+            uint8_t phantom_type = 255;  // Invalid
+            
+            if (len >= 8 && strncmp(text, "\\phantom", 8) == 0) {
+                phantom_type = 0;  // full phantom
+            } else if (len >= 9 && strncmp(text, "\\hphantom", 9) == 0) {
+                phantom_type = 1;  // horizontal phantom
+            } else if (len >= 9 && strncmp(text, "\\vphantom", 9) == 0) {
+                phantom_type = 2;  // vertical phantom
+            }
+            
+            if (phantom_type != 255 && i + 1 < child_count) {
+                // Look for following group
+                TSNode next = ts_node_named_child(node, i + 1);
+                const char* next_type = ts_node_type(next);
+                if (strcmp(next_type, "group") == 0) {
+                    // Build the content and create phantom node
+                    MathASTNode* content = build_ts_node(next);
+                    MathASTNode* phantom = make_math_phantom(arena, content, phantom_type);
+                    math_row_append(row, phantom);
+                    i++;  // Skip the group we just consumed
+                    continue;
+                }
+            }
+        }
+        
         MathASTNode* child_node = build_ts_node(child);
         if (child_node) {
             math_row_append(row, child_node);
