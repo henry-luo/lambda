@@ -97,8 +97,8 @@ Item array_int_get(ArrayInt *array, int index) {
         return ItemNull;  // return null instead of error
     }
     int val = array->items[index];
-    Item item = (Item){.int_val = val, ._type_id = LMD_TYPE_INT};
-    log_debug("array_int_get returning: type: %d, int_val: %d", item._type_id, item.int_val);
+    Item item = (Item){.item = i2it(val)};
+    log_debug("array_int_get returning: type: %d, int_val: %lld", item._type_id, (long long)item.get_int56());
     return item;
 }
 
@@ -222,7 +222,7 @@ void array_float_set_item(ArrayFloat *arr, int index, Item value) {
             dval = (double)(value.get_int64());
             break;
         case LMD_TYPE_INT:
-            dval = (double)(value.int_val);
+            dval = (double)(value.get_int56());
             break;
         default:
             return;  // Unsupported type, do nothing

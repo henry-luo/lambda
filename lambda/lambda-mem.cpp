@@ -93,7 +93,7 @@ Item push_l(int64_t lval) {
         log_error("push_l called with invalid context");
         return ItemError;
     }
-    if (lval == INT_ERROR) return ItemError;
+    if (lval == INT64_ERROR) return ItemError;
     int64_t *lptr = num_stack_push_long(context->num_stack, lval);
     return {.item = l2it(lptr)};
 }

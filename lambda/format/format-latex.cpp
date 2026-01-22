@@ -53,7 +53,7 @@ static void format_latex_value(StringBuf* sb, Item value) {
     else if (type == LMD_TYPE_INT) {
         // Integer values
         char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%d", value.int_val);
+        snprintf(num_buf, sizeof(num_buf), "%" PRId64, value.get_int56());
         stringbuf_append_str(sb, num_buf);
     }
     else if (type == LMD_TYPE_FLOAT) {

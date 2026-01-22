@@ -441,9 +441,9 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
             break;
         }
         case LMD_TYPE_INT: {
-            int value = item.int_val;
+            int64_t value = item.get_int56();
             char buffer[32];
-            snprintf(buffer, sizeof(buffer), "%d", value);
+            snprintf(buffer, sizeof(buffer), "%" PRId64, value);
             stringbuf_append_str(sb, buffer);
             break;
         }
