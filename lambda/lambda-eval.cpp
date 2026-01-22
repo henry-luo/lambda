@@ -269,14 +269,18 @@ Bool fn_is(Item a, Item b) {
 Bool fn_eq(Item a_item, Item b_item) {
     log_debug("equal_comp expr");
     if (a_item._type_id != b_item._type_id) {
+        // special case: null comparison with any type returns false (not error)
+        // this allows idiomatic null checking like: if (x == null) ...
+        if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
+            return BOOL_FALSE;
+        }
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
-        // Note: null can only be compared to null, any other comparison is a type error
+        // Type mismatch error for equality comparisons (e.g., true == 1)
         return BOOL_ERROR;
     }
 
