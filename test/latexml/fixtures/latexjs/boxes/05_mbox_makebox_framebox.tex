@@ -1,0 +1,30 @@
+% mbox, makebox, framebox, fbox
+% Tests for horizontal box commands
+
+\noindent\fbox{Testing \texttt{fbox} with inline text.}
+
+\bigskip
+
+\noindent
+Using \verb|\mbox| to prevent line breaks: \mbox{unbreakable text here}.
+
+\bigskip
+
+\noindent
+\fbox{\makebox[10cm][c]{\textbf{c} e \textbf{n} t r a l}}
+
+\bigskip
+
+\framebox{Guess I'm framed now!}
+
+\bigskip
+
+\framebox[4cm][r]{Right aligned}
+
+\bigskip
+
+\framebox[4cm][l]{Left aligned}
+
+\bigskip
+
+\framebox[4cm][c]{Centered}
