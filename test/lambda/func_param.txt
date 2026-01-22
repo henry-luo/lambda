@@ -1,0 +1,11 @@
+[1, null]
+[null, null]
+1
+10
+10
+101
+42
+3.14
+12.5
+["no opt1", "no opt2", "all present"]
+"hello"

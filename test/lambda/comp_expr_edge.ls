@@ -6,10 +6,10 @@
 'Testing invalid comparisons...'
 "154."; ("hello" < 5)
 "155."; (true >= false)
-"156."; (null == 3)
+"156."; (null == 3)       // null equality returns false (not error) to enable null checking
 "157."; (5 > "world")
 "158."; (false <= true)
-"159."; ("test" != null)
+"159."; ("test" != null)  // null inequality returns true (not error) to enable null checking
 
 'Additional Error Cases - Invalid Type Comparisons:'
 "160."; (true == 1)

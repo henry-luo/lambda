@@ -65,6 +65,55 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
     return NULL;
 }
 
+// Check if arg_type is compatible with param_type for function calls
+bool types_compatible(Type* arg_type, Type* param_type) {
+    if (!arg_type || !param_type) return true;  // unknown types are compatible
+    if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
+    if (arg_type->type_id == LMD_TYPE_ANY) return true;  // any arg can pass to typed param (runtime check)
+    if (arg_type->type_id == param_type->type_id) return true;
+    
+    // Numeric coercion: int → int64, int → float, int64 → float
+    if (param_type->type_id == LMD_TYPE_FLOAT) {
+        if (arg_type->type_id == LMD_TYPE_INT || 
+            arg_type->type_id == LMD_TYPE_INT64) return true;
+    }
+    if (param_type->type_id == LMD_TYPE_INT64) {
+        if (arg_type->type_id == LMD_TYPE_INT) return true;
+    }
+    if (param_type->type_id == LMD_TYPE_NUMBER) {
+        if (arg_type->type_id == LMD_TYPE_INT || 
+            arg_type->type_id == LMD_TYPE_INT64 ||
+            arg_type->type_id == LMD_TYPE_FLOAT ||
+            arg_type->type_id == LMD_TYPE_DECIMAL) return true;
+    }
+    
+    return false;
+}
+
+// Record a type error and check if we should continue transpiling
+void record_type_error(Transpiler* tp, int line, const char* format, ...) {
+    tp->error_count++;
+    
+    // Format and log error message
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    
+    log_error("type_error (line %d): %s", line, error_msg);
+    
+    // Check threshold
+    if (tp->error_count >= tp->max_errors) {
+        log_error("error_threshold: max errors (%d) reached", tp->max_errors);
+    }
+}
+
+// Check if should continue transpiling based on error count
+bool should_continue_transpiling(Transpiler* tp) {
+    return tp->error_count < tp->max_errors;
+}
+
 mpd_t* str_to_decimal(char* str, mpd_context_t* ctx) {
     mpd_t* dec_val = mpd_new(ctx);
     if (dec_val == NULL) {
@@ -275,6 +324,31 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
+    
+    // Validate argument types against parameter types (for user-defined functions)
+    if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
+        TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
+        TypeParam* expected_param = func_type->param;
+        AstNode* arg = ast_node->argument;
+        int arg_index = 0;
+        int line = ts_node_start_point(call_node).row + 1;
+        
+        while (arg && expected_param) {
+            if (arg->type && !types_compatible(arg->type, (Type*)expected_param)) {
+                record_type_error(tp, line, 
+                    "argument %d has incompatible type %d, expected %d",
+                    arg_index + 1, arg->type->type_id, expected_param->type_id);
+                if (!should_continue_transpiling(tp)) {
+                    ast_node->type = &TYPE_ERROR;
+                    return (AstNode*)ast_node;
+                }
+            }
+            arg = arg->next;
+            expected_param = expected_param->next;
+            arg_index++;
+        }
+    }
+    
     log_debug("end building call expr type: %p, %d, is_const:%d", ast_node->type, ast_node->type->type_id, ast_node->type->is_const);
     return (AstNode*)ast_node;
 }
@@ -2006,7 +2080,19 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     ast_node->body = build_expr(tp, fn_body_node);
 
     // determine the function return type
-    if (!fn_type->returned) fn_type->returned = ast_node->body->type;
+    if (!fn_type->returned) {
+        fn_type->returned = ast_node->body->type;
+    } else if (ast_node->body->type) {
+        // Validate declared return type against body type
+        if (!types_compatible(ast_node->body->type, fn_type->returned)) {
+            int line = ts_node_start_point(func_node).row + 1;
+            record_type_error(tp, line, 
+                "function '%.*s' body returns type %d, declared return type %d",
+                (int)ast_node->name->len, ast_node->name->chars,
+                ast_node->body->type->type_id, fn_type->returned->type_id);
+            // Keep declared return type for interface consistency
+        }
+    }
 
     // restore parent namescope
     tp->current_scope = ast_node->vars->parent;
