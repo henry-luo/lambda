@@ -607,6 +607,10 @@ TEST_F(DVICompareBaselineTest, LinearAlgebra2_Eigenvalues) {
     EXPECT_TRUE(test_latex_file("math/subjects/test_linear_algebra2"));
 }
 
+TEST_F(DVICompareBaselineTest, Matrix) {
+    EXPECT_TRUE(test_latex_file("math/test_matrix"));
+}
+
 // ============================================================================
 // Baseline: MathLive Fixtures (converted from test/math/fixtures)
 // ============================================================================
@@ -715,10 +719,6 @@ TEST_F(DVICompareBaselineTest, SelfConsistency) {
 // Extended: Linear Algebra (split into smaller tests)
 // ============================================================================
 
-TEST_F(DVICompareExtendedTest, Matrix) {
-    EXPECT_TRUE(test_latex_file("math/test_matrix"));
-}
-
 TEST_F(DVICompareExtendedTest, LinearAlgebra1_Matrix) {
     EXPECT_TRUE(test_latex_file("math/subjects/test_linear_algebra1"));
 }
@@ -813,6 +813,66 @@ TEST_F(DVICompareExtendedTest, FontStyles) {
 
 TEST_F(DVICompareExtendedTest, Tables) {
     EXPECT_TRUE(test_latex_file("document/test_tables"));
+}
+
+// ============================================================================
+// Extended: Math Fixtures (additional coverage)
+// ============================================================================
+
+TEST_F(DVICompareExtendedTest, Accents) {
+    EXPECT_TRUE(test_latex_file("math/accents"));
+}
+
+TEST_F(DVICompareExtendedTest, Arrows) {
+    EXPECT_TRUE(test_latex_file("math/arrows"));
+}
+
+TEST_F(DVICompareExtendedTest, Array) {
+    EXPECT_TRUE(test_latex_file("math/array"));
+}
+
+TEST_F(DVICompareExtendedTest, BigOperators) {
+    EXPECT_TRUE(test_latex_file("math/big_operators"));
+}
+
+TEST_F(DVICompareExtendedTest, Choose) {
+    EXPECT_TRUE(test_latex_file("math/choose"));
+}
+
+TEST_F(DVICompareExtendedTest, ExtensibleDelims) {
+    EXPECT_TRUE(test_latex_file("math/extensible_delims"));
+}
+
+TEST_F(DVICompareExtendedTest, Fracs) {
+    EXPECT_TRUE(test_latex_file("math/fracs"));
+}
+
+TEST_F(DVICompareExtendedTest, Not) {
+    EXPECT_TRUE(test_latex_file("math/not"));
+}
+
+TEST_F(DVICompareExtendedTest, Phantoms) {
+    EXPECT_TRUE(test_latex_file("math/phantoms"));
+}
+
+TEST_F(DVICompareExtendedTest, Sampler) {
+    EXPECT_TRUE(test_latex_file("math/sampler"));
+}
+
+TEST_F(DVICompareExtendedTest, SimpleMath) {
+    EXPECT_TRUE(test_latex_file("math/simplemath"));
+}
+
+TEST_F(DVICompareExtendedTest, NestedStructures) {
+    EXPECT_TRUE(test_latex_file("math/test_nested_structures"));
+}
+
+TEST_F(DVICompareExtendedTest, Over) {
+    EXPECT_TRUE(test_latex_file("math/testover"));
+}
+
+TEST_F(DVICompareExtendedTest, Scripts) {
+    EXPECT_TRUE(test_latex_file("math/testscripts"));
 }
 
 // ============================================================================
