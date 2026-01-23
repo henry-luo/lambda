@@ -3021,10 +3021,10 @@
                         "icon": "\ud83c\udf10"
                     },
                     {
-                        "source": "test/test_lambda_proc_extended_gtest.cpp",
-                        "name": "Lambda Procedural Extended Tests",
+                        "source": "test/test_lambda_extended_gtest.cpp",
+                        "name": "Lambda Extended Tests",
                         "dependencies": [],
-                        "binary": "test_lambda_proc_extended_gtest.exe",
+                        "binary": "test_lambda_extended_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"

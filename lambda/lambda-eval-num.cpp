@@ -95,6 +95,40 @@ Item vec_div(Item a, Item b);
 Item vec_mod(Item a, Item b);
 Item vec_pow(Item a, Item b);
 
+// helper: get length of a vector-like item
+static int64_t vector_length(Item item) {
+    TypeId type = get_type_id(item);
+    switch (type) {
+        case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
+        case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
+        case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
+        case LMD_TYPE_ARRAY:
+        case LMD_TYPE_LIST:        return item.list->length;
+        case LMD_TYPE_RANGE:       return item.range->length;
+        default:                   return -1;
+    }
+}
+
+// helper: get element from a vector-like item at index
+static Item vector_get(Item item, int64_t index) {
+    TypeId type = get_type_id(item);
+    switch (type) {
+        case LMD_TYPE_ARRAY_INT:
+            return { .item = i2it(item.array_int->items[index]) };
+        case LMD_TYPE_ARRAY_INT64:
+            return push_l(item.array_int64->items[index]);
+        case LMD_TYPE_ARRAY_FLOAT:
+            return push_d(item.array_float->items[index]);
+        case LMD_TYPE_ARRAY:
+        case LMD_TYPE_LIST:
+            return item.list->items[index];
+        case LMD_TYPE_RANGE:
+            return { .item = i2it(item.range->start + index) };
+        default:
+            return ItemError;
+    }
+}
+
 Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
@@ -949,67 +983,177 @@ Item fn_mod(Item item_a, Item item_b) {
 // Numeric system functions implementation
 
 Item fn_abs(Item item) {
-    // abs() - absolute value of a number
-    if (item._type_id == LMD_TYPE_INT) {
+    // abs() - absolute value of a number or element-wise for arrays
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT) {
         int64_t val = item.get_int56();
         return (Item) { .item = i2it(val < 0 ? -val : val) };
     }
-    else if (item._type_id == LMD_TYPE_INT64) {
+    else if (type == LMD_TYPE_INT64) {
         int64_t val = item.get_int64();
         return push_l(val < 0 ? -val : val);
     }
-    else if (item._type_id == LMD_TYPE_FLOAT) {
+    else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
         return push_d(fabs(val));
     }
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+        int64_t len = vector_length(item);
+        if (len < 0) return ItemError;
+        if (len == 0) {
+            ArrayFloat* result = array_float_new(0);
+            return { .array_float = result };
+        }
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = vector_get(item, i);
+            TypeId elem_type = get_type_id(elem);
+            if (elem_type == LMD_TYPE_INT) {
+                int64_t val = elem.get_int56();
+                result->items[i] = (double)(val < 0 ? -val : val);
+            } else if (elem_type == LMD_TYPE_INT64) {
+                int64_t val = elem.get_int64();
+                result->items[i] = (double)(val < 0 ? -val : val);
+            } else if (elem_type == LMD_TYPE_FLOAT) {
+                result->items[i] = fabs(elem.get_double());
+            } else {
+                log_error("abs: non-numeric element at index %ld, type: %d", i, elem_type);
+                return ItemError;
+            }
+        }
+        return { .array_float = result };
+    }
     else {
-        log_error("abs not supported for type: %d", item._type_id);
+        log_error("abs not supported for type: %d", type);
         return ItemError;
     }
 }
 
 Item fn_round(Item item) {
-    // round() - round to nearest integer
-    if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_INT64) {
+    // round() - round to nearest integer, or element-wise for arrays
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
         // Already an integer, return as-is
         return item;
     }
-    else if (item._type_id == LMD_TYPE_FLOAT) {
+    else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
         return push_d(round(val));
     }
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+        int64_t len = vector_length(item);
+        if (len < 0) return ItemError;
+        if (len == 0) {
+            ArrayFloat* result = array_float_new(0);
+            return { .array_float = result };
+        }
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = vector_get(item, i);
+            TypeId elem_type = get_type_id(elem);
+            if (elem_type == LMD_TYPE_INT) {
+                result->items[i] = (double)elem.get_int56();
+            } else if (elem_type == LMD_TYPE_INT64) {
+                result->items[i] = (double)elem.get_int64();
+            } else if (elem_type == LMD_TYPE_FLOAT) {
+                result->items[i] = round(elem.get_double());
+            } else {
+                log_error("round: non-numeric element at index %ld, type: %d", i, elem_type);
+                return ItemError;
+            }
+        }
+        return { .array_float = result };
+    }
     else {
-        log_debug("round not supported for type: %d", item._type_id);
+        log_debug("round not supported for type: %d", type);
         return ItemError;
     }
 }
 
 Item fn_floor(Item item) {
-    // floor() - round down to nearest integer
-    if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_INT64) {
+    // floor() - round down to nearest integer, or element-wise for arrays
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
         return item;  // return as-is
     }
-    else if (item._type_id == LMD_TYPE_FLOAT) {
+    else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
         return push_d(floor(val));
     }
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+        int64_t len = vector_length(item);
+        if (len < 0) return ItemError;
+        if (len == 0) {
+            ArrayFloat* result = array_float_new(0);
+            return { .array_float = result };
+        }
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = vector_get(item, i);
+            TypeId elem_type = get_type_id(elem);
+            if (elem_type == LMD_TYPE_INT) {
+                result->items[i] = (double)elem.get_int56();
+            } else if (elem_type == LMD_TYPE_INT64) {
+                result->items[i] = (double)elem.get_int64();
+            } else if (elem_type == LMD_TYPE_FLOAT) {
+                result->items[i] = floor(elem.get_double());
+            } else {
+                log_error("floor: non-numeric element at index %ld, type: %d", i, elem_type);
+                return ItemError;
+            }
+        }
+        return { .array_float = result };
+    }
     else {
-        log_debug("floor not supported for type: %d", item._type_id);
+        log_debug("floor not supported for type: %d", type);
         return ItemError;
     }
 }
 
 Item fn_ceil(Item item) {
-    // ceil() - round up to nearest integer
-    if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_INT64) {
+    // ceil() - round up to nearest integer, or element-wise for arrays
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
         return item;  // return as-is
     }
-    else if (item._type_id == LMD_TYPE_FLOAT) {
+    else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
         return push_d(ceil(val));
     }
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+             type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
+        int64_t len = vector_length(item);
+        if (len < 0) return ItemError;
+        if (len == 0) {
+            ArrayFloat* result = array_float_new(0);
+            return { .array_float = result };
+        }
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = vector_get(item, i);
+            TypeId elem_type = get_type_id(elem);
+            if (elem_type == LMD_TYPE_INT) {
+                result->items[i] = (double)elem.get_int56();
+            } else if (elem_type == LMD_TYPE_INT64) {
+                result->items[i] = (double)elem.get_int64();
+            } else if (elem_type == LMD_TYPE_FLOAT) {
+                result->items[i] = ceil(elem.get_double());
+            } else {
+                log_error("ceil: non-numeric element at index %ld, type: %d", i, elem_type);
+                return ItemError;
+            }
+        }
+        return { .array_float = result };
+    }
     else {
-        log_debug("ceil not supported for type: %d", item._type_id);
+        log_debug("ceil not supported for type: %d", type);
         return ItemError;
     }
 }
@@ -1176,6 +1320,15 @@ Item fn_min1(Item item_a) {
             return (Item) { .item = i2it((int64_t)min_val) };
         }
     }
+    else if (type_id == LMD_TYPE_RANGE) {
+        Range* rng = item_a.range;
+        if (!rng || rng->length == 0) {
+            return ItemError;
+        }
+        // For a range, min is the smaller of start or end
+        int64_t min_val = (rng->start < rng->end) ? rng->start : rng->end;
+        return push_l(min_val);
+    }
     else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
         // single numeric value, return as-is
         return item_a;
@@ -1331,6 +1484,15 @@ Item fn_max1(Item item_a) {
             return (Item) { .item = i2it((int64_t)max_val) };
         }
     }
+    else if (type_id == LMD_TYPE_RANGE) {
+        Range* rng = item_a.range;
+        if (!rng || rng->length == 0) {
+            return ItemError;
+        }
+        // For a range, max is the larger of start or end
+        int64_t max_val = (rng->start > rng->end) ? rng->start : rng->end;
+        return push_l(max_val);
+    }
     else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
         // single numeric value, return as-is
         return item_a;
@@ -1471,6 +1633,16 @@ Item fn_sum(Item item) {
             }
         }
     }
+    else if (type_id == LMD_TYPE_RANGE) {
+        Range* rng = item.range;
+        if (!rng || rng->length == 0) {
+            return { .item = i2it(0) };
+        }
+        // Sum of arithmetic sequence: n * (first + last) / 2
+        int64_t n = rng->length;
+        int64_t sum = n * (rng->start + rng->end) / 2;
+        return push_l(sum);
+    }
     else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
         // single numeric value, return as-is
         return item;
@@ -1566,6 +1738,15 @@ Item fn_avg(Item item) {
             }
         }
         return push_d(sum / (double)list->length);
+    }
+    else if (type_id == LMD_TYPE_RANGE) {
+        Range* rng = item.range;
+        if (!rng || rng->length == 0) {
+            return ItemError;
+        }
+        // Average of arithmetic sequence: (first + last) / 2
+        double avg = (double)(rng->start + rng->end) / 2.0;
+        return push_d(avg);
     }
     else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
         // single numeric value, return as-is

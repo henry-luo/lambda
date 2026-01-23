@@ -708,3 +708,675 @@ Item fn_norm(Item item) {
     
     return push_d(sqrt(sum_sq));
 }
+
+//==============================================================================
+// Statistical Functions
+//==============================================================================
+
+// mean(vec) - arithmetic mean (alias for avg)
+Item fn_mean(Item item) {
+    // Delegate to existing fn_avg
+    extern Item fn_avg(Item);
+    return fn_avg(item);
+}
+
+// median(vec) - median value
+Item fn_median(Item item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) return ItemNull;
+    
+    // Copy values to sortable array
+    ArrayFloat* sorted = array_float_new(len);
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        if (std::isnan(val)) {
+            log_error("fn_median: non-numeric element at index %ld", i);
+            return ItemError;
+        }
+        sorted->items[i] = val;
+    }
+    
+    // Simple bubble sort (can optimize later)
+    for (int64_t i = 0; i < len - 1; i++) {
+        for (int64_t j = 0; j < len - i - 1; j++) {
+            if (sorted->items[j] > sorted->items[j + 1]) {
+                double tmp = sorted->items[j];
+                sorted->items[j] = sorted->items[j + 1];
+                sorted->items[j + 1] = tmp;
+            }
+        }
+    }
+    
+    if (len % 2 == 1) {
+        return push_d(sorted->items[len / 2]);
+    } else {
+        return push_d((sorted->items[len / 2 - 1] + sorted->items[len / 2]) / 2.0);
+    }
+}
+
+// variance(vec) - population variance
+Item fn_variance(Item item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) return ItemNull;
+    
+    // Calculate mean
+    double sum = 0.0;
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        if (std::isnan(val)) {
+            log_error("fn_variance: non-numeric element at index %ld", i);
+            return ItemError;
+        }
+        sum += val;
+    }
+    double mean = sum / len;
+    
+    // Calculate variance
+    double var_sum = 0.0;
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        double diff = val - mean;
+        var_sum += diff * diff;
+    }
+    
+    return push_d(var_sum / len);
+}
+
+// deviation(vec) - population standard deviation
+Item fn_deviation(Item item) {
+    Item var_result = fn_variance(item);
+    if (get_type_id(var_result) == LMD_TYPE_ERROR) return var_result;
+    if (get_type_id(var_result) == LMD_TYPE_NULL) return var_result;
+    
+    double variance = var_result.get_double();
+    return push_d(sqrt(variance));
+}
+
+// quantile(vec, p) - p-th quantile (0 <= p <= 1)
+Item fn_quantile(Item item, Item p_item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) return ItemNull;
+    
+    double p = item_to_double(p_item);
+    if (std::isnan(p) || p < 0.0 || p > 1.0) {
+        log_error("fn_quantile: p must be between 0 and 1");
+        return ItemError;
+    }
+    
+    // Copy values to sortable array
+    ArrayFloat* sorted = array_float_new(len);
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        if (std::isnan(val)) {
+            log_error("fn_quantile: non-numeric element at index %ld", i);
+            return ItemError;
+        }
+        sorted->items[i] = val;
+    }
+    
+    // Sort
+    for (int64_t i = 0; i < len - 1; i++) {
+        for (int64_t j = 0; j < len - i - 1; j++) {
+            if (sorted->items[j] > sorted->items[j + 1]) {
+                double tmp = sorted->items[j];
+                sorted->items[j] = sorted->items[j + 1];
+                sorted->items[j + 1] = tmp;
+            }
+        }
+    }
+    
+    // Linear interpolation method (same as NumPy's default)
+    double idx = p * (len - 1);
+    int64_t lo = (int64_t)floor(idx);
+    int64_t hi = (int64_t)ceil(idx);
+    
+    if (lo == hi || hi >= len) {
+        return push_d(sorted->items[lo]);
+    }
+    
+    double frac = idx - lo;
+    return push_d(sorted->items[lo] * (1.0 - frac) + sorted->items[hi] * frac);
+}
+
+//==============================================================================
+// Element-wise Math Functions
+//==============================================================================
+
+// Helper: apply unary math function element-wise
+static Item vec_unary_math(Item item, double (*func)(double), const char* name) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) {
+        ArrayFloat* result = array_float_new(0);
+        return { .array_float = result };
+    }
+    
+    ArrayFloat* result = array_float_new(len);
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        if (std::isnan(val)) {
+            result->items[i] = NAN;  // propagate error as NaN
+        } else {
+            result->items[i] = func(val);
+        }
+    }
+    return { .array_float = result };
+}
+
+// sqrt(vec) - element-wise square root
+Item fn_sqrt(Item item) {
+    // Check if scalar
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(sqrt(val));
+    }
+    return vec_unary_math(item, sqrt, "fn_sqrt");
+}
+
+// log(vec) - element-wise natural logarithm
+Item fn_log(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(log(val));
+    }
+    return vec_unary_math(item, log, "fn_log");
+}
+
+// log10(vec) - element-wise base-10 logarithm
+Item fn_log10(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(log10(val));
+    }
+    return vec_unary_math(item, log10, "fn_log10");
+}
+
+// exp(vec) - element-wise exponential
+Item fn_exp(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(exp(val));
+    }
+    return vec_unary_math(item, exp, "fn_exp");
+}
+
+// sin(vec) - element-wise sine
+Item fn_sin(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(sin(val));
+    }
+    return vec_unary_math(item, sin, "fn_sin");
+}
+
+// cos(vec) - element-wise cosine
+Item fn_cos(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(cos(val));
+    }
+    return vec_unary_math(item, cos, "fn_cos");
+}
+
+// tan(vec) - element-wise tangent
+Item fn_tan(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        return push_d(tan(val));
+    }
+    return vec_unary_math(item, tan, "fn_tan");
+}
+
+// sign helper
+static double sign_func(double x) {
+    if (x > 0) return 1.0;
+    if (x < 0) return -1.0;
+    return 0.0;
+}
+
+// sign(vec) - element-wise sign (-1, 0, 1)
+Item fn_sign(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
+        double val = item_to_double(item);
+        int64_t s = (val > 0) ? 1 : (val < 0) ? -1 : 0;
+        return { .item = i2it(s) };
+    }
+    
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) {
+        ArrayInt64* result = array_int64_new(0);
+        return { .array_int64 = result };
+    }
+    
+    ArrayInt64* result = array_int64_new(len);
+    for (int64_t i = 0; i < len; i++) {
+        double val = item_to_double(vector_get(item, i));
+        if (std::isnan(val)) {
+            result->items[i] = 0;  // treat NaN as 0
+        } else {
+            result->items[i] = (val > 0) ? 1 : (val < 0) ? -1 : 0;
+        }
+    }
+    return { .array_int64 = result };
+}
+
+//==============================================================================
+// Vector Manipulation Functions
+//==============================================================================
+
+// reverse(vec) - reverse order of elements
+Item fn_reverse(Item item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) {
+        List* result = list();
+        return { .list = result };
+    }
+    
+    TypeId type = get_type_id(item);
+    
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        ArrayInt64* result = array_int64_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            result->items[i] = arr->items[len - 1 - i];
+        }
+        return { .array_int64 = result };
+    }
+    else if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            result->items[i] = arr->items[len - 1 - i];
+        }
+        return { .array_float = result };
+    }
+    else {
+        List* result = list();
+        for (int64_t i = len - 1; i >= 0; i--) {
+            list_push(result, vector_get(item, i));
+        }
+        return { .list = result };
+    }
+}
+
+// sort(vec) - sort in ascending order
+Item fn_sort1(Item item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) {
+        List* result = list();
+        return { .list = result };
+    }
+    
+    TypeId type = get_type_id(item);
+    
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        ArrayInt64* result = array_int64_new(len);
+        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
+        // Simple bubble sort
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                if (result->items[j] > result->items[j + 1]) {
+                    int64_t tmp = result->items[j];
+                    result->items[j] = result->items[j + 1];
+                    result->items[j + 1] = tmp;
+                }
+            }
+        }
+        return { .array_int64 = result };
+    }
+    else if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                if (result->items[j] > result->items[j + 1]) {
+                    double tmp = result->items[j];
+                    result->items[j] = result->items[j + 1];
+                    result->items[j + 1] = tmp;
+                }
+            }
+        }
+        return { .array_float = result };
+    }
+    else {
+        // For mixed types, convert to float and sort
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            result->items[i] = item_to_double(vector_get(item, i));
+        }
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                if (result->items[j] > result->items[j + 1]) {
+                    double tmp = result->items[j];
+                    result->items[j] = result->items[j + 1];
+                    result->items[j + 1] = tmp;
+                }
+            }
+        }
+        return { .array_float = result };
+    }
+}
+
+// sort(vec, direction) - sort with direction ('asc' or 'desc')
+Item fn_sort2(Item item, Item dir_item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) {
+        List* result = list();
+        return { .list = result };
+    }
+    
+    // Parse direction - default to ascending
+    bool descending = false;
+    TypeId dir_type = get_type_id(dir_item);
+    if (dir_type == LMD_TYPE_STRING) {
+        String* str = dir_item.get_string();
+        if (str && (strcmp(str->chars, "desc") == 0 || strcmp(str->chars, "descending") == 0)) {
+            descending = true;
+        }
+    } else if (dir_type == LMD_TYPE_SYMBOL) {
+        String* sym = dir_item.get_symbol();
+        if (sym && (strcmp(sym->chars, "desc") == 0 || strcmp(sym->chars, "descending") == 0)) {
+            descending = true;
+        }
+    }
+    
+    TypeId type = get_type_id(item);
+    
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        ArrayInt64* result = array_int64_new(len);
+        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                bool swap = descending ? (result->items[j] < result->items[j + 1])
+                                       : (result->items[j] > result->items[j + 1]);
+                if (swap) {
+                    int64_t tmp = result->items[j];
+                    result->items[j] = result->items[j + 1];
+                    result->items[j + 1] = tmp;
+                }
+            }
+        }
+        return { .array_int64 = result };
+    }
+    else if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                bool swap = descending ? (result->items[j] < result->items[j + 1])
+                                       : (result->items[j] > result->items[j + 1]);
+                if (swap) {
+                    double tmp = result->items[j];
+                    result->items[j] = result->items[j + 1];
+                    result->items[j + 1] = tmp;
+                }
+            }
+        }
+        return { .array_float = result };
+    }
+    else {
+        ArrayFloat* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            result->items[i] = item_to_double(vector_get(item, i));
+        }
+        for (int64_t i = 0; i < len - 1; i++) {
+            for (int64_t j = 0; j < len - i - 1; j++) {
+                bool swap = descending ? (result->items[j] < result->items[j + 1])
+                                       : (result->items[j] > result->items[j + 1]);
+                if (swap) {
+                    double tmp = result->items[j];
+                    result->items[j] = result->items[j + 1];
+                    result->items[j + 1] = tmp;
+                }
+            }
+        }
+        return { .array_float = result };
+    }
+}
+
+// unique(vec) - remove duplicates
+Item fn_unique(Item item) {
+    int64_t len = vector_length(item);
+    if (len < 0) return ItemError;
+    if (len == 0) {
+        List* result = list();
+        return { .list = result };
+    }
+    
+    List* result = list();
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = vector_get(item, i);
+        double elem_val = item_to_double(elem);
+        
+        // Check if already in result
+        bool found = false;
+        for (int64_t j = 0; j < result->length; j++) {
+            double res_val = item_to_double(result->items[j]);
+            if (elem_val == res_val || (std::isnan(elem_val) && std::isnan(res_val))) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            list_push(result, elem);
+        }
+    }
+    return { .list = result };
+}
+
+// concat(v1, v2) - concatenate two vectors
+Item fn_concat(Item a, Item b) {
+    int64_t len_a = vector_length(a);
+    int64_t len_b = vector_length(b);
+    
+    if (len_a < 0 || len_b < 0) return ItemError;
+    
+    TypeId type_a = get_type_id(a);
+    TypeId type_b = get_type_id(b);
+    
+    // If both are same homogeneous type, preserve it
+    if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* result = array_int64_new(len_a + len_b);
+        for (int64_t i = 0; i < len_a; i++) result->items[i] = a.array_int64->items[i];
+        for (int64_t i = 0; i < len_b; i++) result->items[len_a + i] = b.array_int64->items[i];
+        return { .array_int64 = result };
+    }
+    else if (type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* result = array_float_new(len_a + len_b);
+        for (int64_t i = 0; i < len_a; i++) result->items[i] = a.array_float->items[i];
+        for (int64_t i = 0; i < len_b; i++) result->items[len_a + i] = b.array_float->items[i];
+        return { .array_float = result };
+    }
+    else {
+        // Generic list concatenation
+        List* result = list();
+        for (int64_t i = 0; i < len_a; i++) list_push(result, vector_get(a, i));
+        for (int64_t i = 0; i < len_b; i++) list_push(result, vector_get(b, i));
+        return { .list = result };
+    }
+}
+
+// take(vec, n) - first n elements
+Item fn_take(Item vec, Item n_item) {
+    int64_t len = vector_length(vec);
+    if (len < 0) return ItemError;
+    
+    TypeId n_type = get_type_id(n_item);
+    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
+        log_error("fn_take: n must be integer");
+        return ItemError;
+    }
+    
+    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
+    if (n < 0) n = 0;
+    if (n > len) n = len;
+    
+    TypeId type = get_type_id(vec);
+    
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* result = array_int64_new(n);
+        for (int64_t i = 0; i < n; i++) result->items[i] = vec.array_int64->items[i];
+        return { .array_int64 = result };
+    }
+    else if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* result = array_float_new(n);
+        for (int64_t i = 0; i < n; i++) result->items[i] = vec.array_float->items[i];
+        return { .array_float = result };
+    }
+    else {
+        List* result = list();
+        for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
+        return { .list = result };
+    }
+}
+
+// drop(vec, n) - drop first n elements
+Item fn_drop(Item vec, Item n_item) {
+    int64_t len = vector_length(vec);
+    if (len < 0) return ItemError;
+    
+    TypeId n_type = get_type_id(n_item);
+    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
+        log_error("fn_drop: n must be integer");
+        return ItemError;
+    }
+    
+    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
+    if (n < 0) n = 0;
+    if (n > len) n = len;
+    
+    int64_t new_len = len - n;
+    TypeId type = get_type_id(vec);
+    
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* result = array_int64_new(new_len);
+        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_int64->items[n + i];
+        return { .array_int64 = result };
+    }
+    else if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* result = array_float_new(new_len);
+        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_float->items[n + i];
+        return { .array_float = result };
+    }
+    else {
+        List* result = list();
+        for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
+        return { .list = result };
+    }
+}
+
+// slice(vec, start, end) - extract elements from start (inclusive) to end (exclusive)
+Item fn_slice(Item vec, Item start_item, Item end_item) {
+    int64_t len = vector_length(vec);
+    if (len < 0) return ItemError;
+    
+    TypeId start_type = get_type_id(start_item);
+    TypeId end_type = get_type_id(end_item);
+    if ((start_type != LMD_TYPE_INT && start_type != LMD_TYPE_INT64) ||
+        (end_type != LMD_TYPE_INT && end_type != LMD_TYPE_INT64)) {
+        log_error("fn_slice: start and end must be integers");
+        return ItemError;
+    }
+    
+    int64_t start = (start_type == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
+    int64_t end = (end_type == LMD_TYPE_INT) ? end_item.get_int56() : end_item.get_int64();
+    
+    // Clamp indices to valid range
+    if (start < 0) start = 0;
+    if (end > len) end = len;
+    if (start > end) start = end;
+    
+    int64_t new_len = end - start;
+    TypeId type = get_type_id(vec);
+    
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* result = array_int64_new(new_len);
+        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_int64->items[start + i];
+        return { .array_int64 = result };
+    }
+    else if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* result = array_float_new(new_len);
+        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_float->items[start + i];
+        return { .array_float = result };
+    }
+    else {
+        List* result = list();
+        for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
+        return { .list = result };
+    }
+}
+
+// zip(v1, v2) - pair elements into tuples
+Item fn_zip(Item a, Item b) {
+    int64_t len_a = vector_length(a);
+    int64_t len_b = vector_length(b);
+    
+    if (len_a < 0 || len_b < 0) return ItemError;
+    
+    int64_t len = (len_a < len_b) ? len_a : len_b;  // take shorter length
+    
+    List* result = list();
+    for (int64_t i = 0; i < len; i++) {
+        List* pair = list();
+        list_push(pair, vector_get(a, i));
+        list_push(pair, vector_get(b, i));
+        list_push(result, { .list = pair });
+    }
+    return { .list = result };
+}
+
+// range(start, end, step) - generate range with step
+Item fn_range3(Item start_item, Item end_item, Item step_item) {
+    double start = item_to_double(start_item);
+    double end = item_to_double(end_item);
+    double step = item_to_double(step_item);
+    
+    if (std::isnan(start) || std::isnan(end) || std::isnan(step)) {
+        log_error("fn_range3: all arguments must be numeric");
+        return ItemError;
+    }
+    
+    if (step == 0) {
+        log_error("fn_range3: step cannot be zero");
+        return ItemError;
+    }
+    
+    // Calculate number of elements
+    int64_t n = 0;
+    if (step > 0 && start < end) {
+        n = (int64_t)ceil((end - start) / step);
+    } else if (step < 0 && start > end) {
+        n = (int64_t)ceil((start - end) / (-step));
+    }
+    
+    if (n <= 0) {
+        ArrayFloat* result = array_float_new(0);
+        return { .array_float = result };
+    }
+    
+    ArrayFloat* result = array_float_new(n);
+    for (int64_t i = 0; i < n; i++) {
+        result->items[i] = start + i * step;
+    }
+    
+    return { .array_float = result };
+}
