@@ -1,0 +1,115 @@
+{
+  "source": "test_subscript_superscript.tex",
+  "generatedAt": "2026-01-23T09:55:46.840Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "inline",
+      "latex": "x^2",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x^2",
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "inline",
+      "latex": "x_i",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x_i",
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "inline",
+      "latex": "x_i^2",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x_i^2",
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ],
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "inline",
+      "latex": "a^{b+c}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a^{b+c}",
+        "body": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "b",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "c"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "inline",
+      "latex": "x_{n+1}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x_{n+1}",
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "n",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "1"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

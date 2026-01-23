@@ -1,0 +1,716 @@
+{
+  "source": "accents.tex",
+  "generatedAt": "2026-01-23T09:55:46.758Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\hat",
+            "verbatimLatex": "\\hat{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 94
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\check",
+            "verbatimLatex": "\\check{b}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "b"
+                ]
+              }
+            ],
+            "body": [
+              "b"
+            ],
+            "accentChar": 711
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\tilde",
+            "verbatimLatex": "\\tilde{c}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "c"
+            ],
+            "accentChar": 126
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\acute",
+            "verbatimLatex": "\\acute{d}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "d"
+                ]
+              }
+            ],
+            "body": [
+              "d"
+            ],
+            "accentChar": 714
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "\\grave{e} \\quad \\dot{f} \\quad \\ddot{g} \\quad \\breve{h}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\grave{e} \\quad \\dot{f} \\quad \\ddot{g} \\quad \\breve{h}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\grave",
+            "verbatimLatex": "\\grave{e}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "e"
+                ]
+              }
+            ],
+            "body": [
+              "e"
+            ],
+            "accentChar": 715
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\dot",
+            "verbatimLatex": "\\dot{f}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "f"
+                ]
+              }
+            ],
+            "body": [
+              "f"
+            ],
+            "accentChar": 729
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\ddot",
+            "verbatimLatex": "\\ddot{g}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "g"
+                ]
+              }
+            ],
+            "body": [
+              "g"
+            ],
+            "accentChar": 168
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\breve",
+            "verbatimLatex": "\\breve{h}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "h"
+                ]
+              }
+            ],
+            "body": [
+              "h"
+            ],
+            "accentChar": 728
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\bar",
+            "verbatimLatex": "\\bar{i}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "i"
+                ]
+              }
+            ],
+            "body": [
+              "i"
+            ],
+            "accentChar": 713
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\vec",
+            "verbatimLatex": "\\vec{v}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "v"
+                ]
+              }
+            ],
+            "body": [
+              "v"
+            ],
+            "accentChar": 8407
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\mathring",
+            "verbatimLatex": "\\mathring{o}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "o"
+                ]
+              }
+            ],
+            "body": [
+              "o"
+            ],
+            "accentChar": 730
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "\\widehat{xyz} \\quad \\widetilde{abc}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\widehat{xyz} \\quad \\widetilde{abc}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\widehat",
+            "verbatimLatex": "\\widehat{xyz}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "x",
+                  "y",
+                  "z"
+                ]
+              }
+            ],
+            "body": [
+              "x",
+              "y",
+              "z"
+            ],
+            "svgAccent": "widehat2"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\widetilde",
+            "verbatimLatex": "\\widetilde{abc}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              "b",
+              "c"
+            ],
+            "svgAccent": "widetilde2"
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "\\hat{x+y} \\quad \\bar{a+b}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\hat{x+y} \\quad \\bar{a+b}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\hat",
+            "verbatimLatex": "\\hat{x+y}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "x",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y"
+            ],
+            "accentChar": 94
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\bar",
+            "verbatimLatex": "\\bar{a+b}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "b"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b"
+            ],
+            "accentChar": 713
+          }
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "display",
+      "latex": "\\overline{a+b} \\quad \\underline{x+y}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\overline{a+b} \\quad \\underline{x+y}",
+        "body": [
+          {
+            "command": "\\overline",
+            "verbatimLatex": "\\overline{a+b}",
+            "args": [
+              {
+                "group": [
+                  "a",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "b"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "command": "\\underline",
+            "verbatimLatex": "\\underline{x+y}",
+            "args": [
+              {
+                "group": [
+                  "x",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "type": "display",
+      "latex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}",
+        "body": [
+          {
+            "type": "overunder",
+            "command": "\\overbrace",
+            "subsupPlacement": "over-under",
+            "body": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "c"
+            ],
+            "superscript": [
+              "n"
+            ],
+            "skipBoundary": false,
+            "svgAbove": "overbrace",
+            "paddedBody": true
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "overunder",
+            "command": "\\underbrace",
+            "subsupPlacement": "over-under",
+            "body": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "z"
+            ],
+            "subscript": [
+              "m"
+            ],
+            "skipBoundary": false,
+            "svgBelow": "underbrace",
+            "paddedBody": true
+          }
+        ]
+      }
+    },
+    {
+      "index": 7,
+      "type": "display",
+      "latex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}",
+        "body": [
+          {
+            "type": "overunder",
+            "command": "\\overrightarrow",
+            "verbatimLatex": "\\overrightarrow{AB}",
+            "subsupPlacement": "over-under",
+            "body": [
+              "A",
+              "B"
+            ],
+            "skipBoundary": false,
+            "svgAbove": "overrightarrow",
+            "boxType": "rel",
+            "paddedBody": true
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "overunder",
+            "command": "\\overleftarrow",
+            "verbatimLatex": "\\overleftarrow{CD}",
+            "subsupPlacement": "over-under",
+            "body": [
+              "C",
+              "D"
+            ],
+            "skipBoundary": false,
+            "svgAbove": "overleftarrow",
+            "boxType": "rel",
+            "paddedBody": true
+          }
+        ]
+      }
+    },
+    {
+      "index": 8,
+      "type": "display",
+      "latex": "\\hat{\\bar{x}} \\quad \\dot{\\hat{y}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\hat{\\bar{x}} \\quad \\dot{\\hat{y}}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\hat",
+            "verbatimLatex": "\\hat{\\bar{x}}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "accent",
+                    "command": "\\bar",
+                    "verbatimLatex": "\\bar{x}",
+                    "skipBoundary": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "x"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "x"
+                    ],
+                    "accentChar": 713
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "accent",
+                "command": "\\bar",
+                "verbatimLatex": "\\bar{x}",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "x"
+                    ]
+                  }
+                ],
+                "body": [
+                  "x"
+                ],
+                "accentChar": 713
+              }
+            ],
+            "accentChar": 94
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\dot",
+            "verbatimLatex": "\\dot{\\hat{y}}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "accent",
+                    "command": "\\hat",
+                    "verbatimLatex": "\\hat{y}",
+                    "skipBoundary": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "y"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "y"
+                    ],
+                    "accentChar": 94
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "accent",
+                "command": "\\hat",
+                "verbatimLatex": "\\hat{y}",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "y"
+                    ]
+                  }
+                ],
+                "body": [
+                  "y"
+                ],
+                "accentChar": 94
+              }
+            ],
+            "accentChar": 729
+          }
+        ]
+      }
+    }
+  ]
+}

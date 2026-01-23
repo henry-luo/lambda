@@ -37,7 +37,7 @@
     "README-WASM-JS.md"
   ],
   "dependencies": {
-    "puppeteer": "^24.22.3"
+    "puppeteer": "^24.36.0"
   },
   "repository": {
     "type": "git",

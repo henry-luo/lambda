@@ -1,0 +1,164 @@
+{
+  "source": "test_nested2.tex",
+  "generatedAt": "2026-01-23T09:55:46.834Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "\\left[\\left(\\left\\{\\left|\\frac{a}{b}\\right|\\right\\}\\right)\\right]",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\left[\\left(\\left\\{\\left|\\frac{a}{b}\\right|\\right\\}\\right)\\right]",
+        "body": [
+          {
+            "type": "leftright",
+            "displayContainsHighlight": true,
+            "body": [
+              {
+                "type": "leftright",
+                "displayContainsHighlight": true,
+                "body": [
+                  {
+                    "type": "leftright",
+                    "displayContainsHighlight": true,
+                    "body": [
+                      {
+                        "type": "leftright",
+                        "displayContainsHighlight": true,
+                        "body": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{a}{b}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "a"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "b"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "a"
+                            ],
+                            "below": [
+                              "b"
+                            ]
+                          }
+                        ],
+                        "variant": "left...right",
+                        "leftDelim": "|",
+                        "rightDelim": "|"
+                      }
+                    ],
+                    "variant": "left...right",
+                    "leftDelim": "\\{",
+                    "rightDelim": "\\}"
+                  }
+                ],
+                "variant": "left...right",
+                "leftDelim": "(",
+                "rightDelim": ")"
+              }
+            ],
+            "variant": "left...right",
+            "leftDelim": "[",
+            "rightDelim": "]"
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "x_{i_j}^{k^{l}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x_{i_j}^{k^{l}}",
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "j"
+                ]
+              }
+            ],
+            "superscript": [
+              "k",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "l"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "a_{b_{c_{d}}}^{f^{g^{h}}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a_{b_{c_{d}}}^{f^{g^{h}}}",
+        "body": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "c",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "subscript": [
+                      "d"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "superscript": [
+              "f",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "g",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "h"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
