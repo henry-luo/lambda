@@ -1,0 +1,137 @@
+{
+  "source": "test_greek.tex",
+  "generatedAt": "2026-01-23T09:55:46.832Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "inline",
+      "latex": "\\alpha \\beta \\gamma \\delta",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\alpha \\beta \\gamma \\delta",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\alpha",
+            "value": "α",
+            "verbatimLatex": "\\alpha"
+          },
+          {
+            "type": "mord",
+            "command": "\\beta",
+            "value": "β",
+            "verbatimLatex": "\\beta"
+          },
+          {
+            "type": "mord",
+            "command": "\\gamma",
+            "value": "γ",
+            "verbatimLatex": "\\gamma"
+          },
+          {
+            "type": "mord",
+            "command": "\\delta",
+            "value": "δ",
+            "verbatimLatex": "\\delta"
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "inline",
+      "latex": "\\epsilon \\zeta \\eta \\theta",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\epsilon \\zeta \\eta \\theta",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\epsilon",
+            "value": "ϵ",
+            "verbatimLatex": "\\epsilon"
+          },
+          {
+            "type": "mord",
+            "command": "\\zeta",
+            "value": "ζ",
+            "verbatimLatex": "\\zeta"
+          },
+          {
+            "type": "mord",
+            "command": "\\eta",
+            "value": "η",
+            "verbatimLatex": "\\eta"
+          },
+          {
+            "type": "mord",
+            "command": "\\theta",
+            "value": "θ",
+            "verbatimLatex": "\\theta"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "inline",
+      "latex": "\\Gamma \\Delta \\Theta \\Lambda",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\Gamma \\Delta \\Theta \\Lambda",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\Gamma",
+            "value": "Γ",
+            "verbatimLatex": "\\Gamma"
+          },
+          {
+            "type": "mord",
+            "command": "\\Delta",
+            "value": "Δ",
+            "verbatimLatex": "\\Delta"
+          },
+          {
+            "type": "mord",
+            "command": "\\Theta",
+            "value": "Θ",
+            "verbatimLatex": "\\Theta"
+          },
+          {
+            "type": "mord",
+            "command": "\\Lambda",
+            "value": "Λ",
+            "verbatimLatex": "\\Lambda"
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "inline",
+      "latex": "\\pi r^2",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\pi r^2",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\pi",
+            "value": "π",
+            "verbatimLatex": "\\pi"
+          },
+          "r",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

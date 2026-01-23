@@ -1,0 +1,932 @@
+{
+  "source": "test_all_greek.tex",
+  "generatedAt": "2026-01-23T09:55:46.812Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\alpha",
+            "value": "α",
+            "verbatimLatex": "\\alpha"
+          },
+          {
+            "type": "mord",
+            "command": "\\beta",
+            "value": "β",
+            "verbatimLatex": "\\beta"
+          },
+          {
+            "type": "mord",
+            "command": "\\gamma",
+            "value": "γ",
+            "verbatimLatex": "\\gamma"
+          },
+          {
+            "type": "mord",
+            "command": "\\delta",
+            "value": "δ",
+            "verbatimLatex": "\\delta"
+          },
+          {
+            "type": "mord",
+            "command": "\\epsilon",
+            "value": "ϵ",
+            "verbatimLatex": "\\epsilon"
+          },
+          {
+            "type": "mord",
+            "command": "\\varepsilon",
+            "value": "ε",
+            "verbatimLatex": "\\varepsilon"
+          },
+          {
+            "type": "mord",
+            "command": "\\zeta",
+            "value": "ζ",
+            "verbatimLatex": "\\zeta"
+          },
+          {
+            "type": "mord",
+            "command": "\\eta",
+            "value": "η",
+            "verbatimLatex": "\\eta"
+          },
+          {
+            "type": "mord",
+            "command": "\\theta",
+            "value": "θ",
+            "verbatimLatex": "\\theta"
+          },
+          {
+            "type": "mord",
+            "command": "\\vartheta",
+            "value": "ϑ",
+            "verbatimLatex": "\\vartheta"
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "\\iota \\kappa \\varkappa \\lambda \\mu \\nu \\xi o \\pi \\varpi",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\iota \\kappa \\varkappa \\lambda \\mu \\nu \\xi o \\pi \\varpi",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\iota",
+            "value": "ι",
+            "verbatimLatex": "\\iota"
+          },
+          {
+            "type": "mord",
+            "command": "\\kappa",
+            "value": "κ",
+            "verbatimLatex": "\\kappa"
+          },
+          {
+            "type": "mord",
+            "command": "\\varkappa",
+            "value": "ϰ",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\varkappa"
+          },
+          {
+            "type": "mord",
+            "command": "\\lambda",
+            "value": "λ",
+            "verbatimLatex": "\\lambda"
+          },
+          {
+            "type": "mord",
+            "command": "\\mu",
+            "value": "μ",
+            "verbatimLatex": "\\mu"
+          },
+          {
+            "type": "mord",
+            "command": "\\nu",
+            "value": "ν",
+            "verbatimLatex": "\\nu"
+          },
+          {
+            "type": "mord",
+            "command": "\\xi",
+            "value": "ξ",
+            "verbatimLatex": "\\xi"
+          },
+          "o",
+          {
+            "type": "mord",
+            "command": "\\pi",
+            "value": "π",
+            "verbatimLatex": "\\pi"
+          },
+          {
+            "type": "mord",
+            "command": "\\varpi",
+            "value": "ϖ",
+            "verbatimLatex": "\\varpi"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "\\rho \\varrho \\sigma \\varsigma \\tau \\upsilon \\phi \\varphi \\chi \\psi \\omega",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\rho \\varrho \\sigma \\varsigma \\tau \\upsilon \\phi \\varphi \\chi \\psi \\omega",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\rho",
+            "value": "ρ",
+            "verbatimLatex": "\\rho"
+          },
+          {
+            "type": "mord",
+            "command": "\\varrho",
+            "value": "ϱ",
+            "verbatimLatex": "\\varrho"
+          },
+          {
+            "type": "mord",
+            "command": "\\sigma",
+            "value": "σ",
+            "verbatimLatex": "\\sigma"
+          },
+          {
+            "type": "mord",
+            "command": "\\varsigma",
+            "value": "ς",
+            "verbatimLatex": "\\varsigma"
+          },
+          {
+            "type": "mord",
+            "command": "\\tau",
+            "value": "τ",
+            "verbatimLatex": "\\tau"
+          },
+          {
+            "type": "mord",
+            "command": "\\upsilon",
+            "value": "υ",
+            "verbatimLatex": "\\upsilon"
+          },
+          {
+            "type": "mord",
+            "command": "\\phi",
+            "value": "ϕ",
+            "verbatimLatex": "\\phi"
+          },
+          {
+            "type": "mord",
+            "command": "\\varphi",
+            "value": "φ",
+            "verbatimLatex": "\\varphi"
+          },
+          {
+            "type": "mord",
+            "command": "\\chi",
+            "value": "χ",
+            "verbatimLatex": "\\chi"
+          },
+          {
+            "type": "mord",
+            "command": "\\psi",
+            "value": "ψ",
+            "verbatimLatex": "\\psi"
+          },
+          {
+            "type": "mord",
+            "command": "\\omega",
+            "value": "ω",
+            "verbatimLatex": "\\omega"
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega",
+        "body": [
+          "A",
+          "B",
+          {
+            "type": "mord",
+            "command": "\\Gamma",
+            "value": "Γ",
+            "verbatimLatex": "\\Gamma"
+          },
+          {
+            "type": "mord",
+            "command": "\\Delta",
+            "value": "Δ",
+            "verbatimLatex": "\\Delta"
+          },
+          "E",
+          "Z",
+          "H",
+          {
+            "type": "mord",
+            "command": "\\Theta",
+            "value": "Θ",
+            "verbatimLatex": "\\Theta"
+          },
+          "I",
+          "K",
+          {
+            "type": "mord",
+            "command": "\\Lambda",
+            "value": "Λ",
+            "verbatimLatex": "\\Lambda"
+          },
+          "M",
+          "N",
+          {
+            "type": "mord",
+            "command": "\\Xi",
+            "value": "Ξ",
+            "verbatimLatex": "\\Xi"
+          },
+          "O",
+          {
+            "type": "mord",
+            "command": "\\Pi",
+            "value": "Π",
+            "verbatimLatex": "\\Pi"
+          },
+          "P",
+          {
+            "type": "mord",
+            "command": "\\Sigma",
+            "value": "Σ",
+            "verbatimLatex": "\\Sigma"
+          },
+          "T",
+          {
+            "type": "mord",
+            "command": "\\Upsilon",
+            "value": "Υ",
+            "verbatimLatex": "\\Upsilon"
+          },
+          {
+            "type": "mord",
+            "command": "\\Phi",
+            "value": "Φ",
+            "verbatimLatex": "\\Phi"
+          },
+          "X",
+          {
+            "type": "mord",
+            "command": "\\Psi",
+            "value": "Ψ",
+            "verbatimLatex": "\\Psi"
+          },
+          {
+            "type": "mord",
+            "command": "\\Omega",
+            "value": "Ω",
+            "verbatimLatex": "\\Omega"
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "\\alpha^2 + \\beta^2 = \\gamma^2",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\alpha^2 + \\beta^2 = \\gamma^2",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\alpha",
+            "value": "α",
+            "verbatimLatex": "\\alpha"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "mord",
+            "command": "\\beta",
+            "value": "β",
+            "verbatimLatex": "\\beta"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "mord",
+            "command": "\\gamma",
+            "value": "γ",
+            "verbatimLatex": "\\gamma"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "display",
+      "latex": "e^{i\\pi} + 1 = 0",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "e^{i\\pi} + 1 = 0",
+        "body": [
+          "e",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "i",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              }
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "type": "display",
+      "latex": "\\Gamma(n+1) = n!",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\Gamma(n+1) = n!",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\Gamma",
+            "value": "Γ",
+            "verbatimLatex": "\\Gamma"
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "n",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "n",
+          "!"
+        ]
+      }
+    },
+    {
+      "index": 7,
+      "type": "display",
+      "latex": "\\Delta x = x_2 - x_1",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\Delta x = x_2 - x_1",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\Delta",
+            "value": "Δ",
+            "verbatimLatex": "\\Delta"
+          },
+          "x",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 8,
+      "type": "display",
+      "latex": "\\Sigma = \\sum_{i=1}^{n} x_i",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\Sigma = \\sum_{i=1}^{n} x_i",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\Sigma",
+            "value": "Σ",
+            "verbatimLatex": "\\Sigma"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\sum",
+            "value": "∑",
+            "subsupPlacement": "auto",
+            "args": [],
+            "subscript": [
+              "i",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "1"
+            ],
+            "superscript": [
+              "n"
+            ],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∑"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 9,
+      "type": "display",
+      "latex": "\\Phi(x) = \\int_{-\\infty}^{x} \\phi(t) \\, dt",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\Phi(x) = \\int_{-\\infty}^{x} \\phi(t) \\, dt",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\Phi",
+            "value": "Φ",
+            "verbatimLatex": "\\Phi"
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "x",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\int",
+            "value": "∫",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "subscript": [
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              {
+                "type": "mord",
+                "command": "\\infty",
+                "value": "∞",
+                "verbatimLatex": "\\infty"
+              }
+            ],
+            "superscript": [
+              "x"
+            ],
+            "limits": "adjacent",
+            "symbol": "∫"
+          },
+          {
+            "type": "mord",
+            "command": "\\phi",
+            "value": "ϕ",
+            "verbatimLatex": "\\phi"
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "t",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "spacing",
+            "command": "\\,",
+            "verbatimLatex": "\\,",
+            "args": []
+          },
+          "d",
+          "t"
+        ]
+      }
+    },
+    {
+      "index": 10,
+      "type": "display",
+      "latex": "\\nabla \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\nabla \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t}",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\nabla",
+            "value": "∇",
+            "verbatimLatex": "\\nabla"
+          },
+          {
+            "type": "mbin",
+            "command": "\\times",
+            "value": "×",
+            "verbatimLatex": "\\times"
+          },
+          {
+            "type": "accent",
+            "command": "\\vec",
+            "verbatimLatex": "\\vec{E}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "E"
+                ]
+              }
+            ],
+            "body": [
+              "E"
+            ],
+            "accentChar": 8407
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{\\partial\\vec{B}}{\\partial t}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\partial",
+                    "value": "∂",
+                    "verbatimLatex": "\\partial"
+                  },
+                  {
+                    "type": "accent",
+                    "command": "\\vec",
+                    "verbatimLatex": "\\vec{B}",
+                    "skipBoundary": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "B"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "B"
+                    ],
+                    "accentChar": 8407
+                  }
+                ]
+              },
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\partial",
+                    "value": "∂",
+                    "verbatimLatex": "\\partial"
+                  },
+                  "t"
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "accent",
+                "command": "\\vec",
+                "verbatimLatex": "\\vec{B}",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "B"
+                    ]
+                  }
+                ],
+                "body": [
+                  "B"
+                ],
+                "accentChar": 8407
+              }
+            ],
+            "below": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "t"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 11,
+      "type": "display",
+      "latex": "\\boldsymbol{\\alpha}, \\boldsymbol{\\beta}, \\boldsymbol{\\gamma}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\boldsymbol{\\alpha}, \\boldsymbol{\\beta}, \\boldsymbol{\\gamma}",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\alpha",
+            "value": "α",
+            "style": {
+              "variantStyle": "bold"
+            },
+            "verbatimLatex": "\\alpha"
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          {
+            "type": "mord",
+            "command": "\\beta",
+            "value": "β",
+            "style": {
+              "variantStyle": "bold"
+            },
+            "verbatimLatex": "\\beta"
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          {
+            "type": "mord",
+            "command": "\\gamma",
+            "value": "γ",
+            "style": {
+              "variantStyle": "bold"
+            },
+            "verbatimLatex": "\\gamma"
+          }
+        ]
+      }
+    },
+    {
+      "index": 12,
+      "type": "display",
+      "latex": "\\sigma_\\alpha \\quad \\tau_\\beta \\quad \\omega_\\gamma",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sigma_\\alpha \\quad \\tau_\\beta \\quad \\omega_\\gamma",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\sigma",
+            "value": "σ",
+            "verbatimLatex": "\\sigma"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              {
+                "type": "mord",
+                "command": "\\alpha",
+                "value": "α",
+                "verbatimLatex": "\\alpha"
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\tau",
+            "value": "τ",
+            "verbatimLatex": "\\tau"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              {
+                "type": "mord",
+                "command": "\\beta",
+                "value": "β",
+                "verbatimLatex": "\\beta"
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\omega",
+            "value": "ω",
+            "verbatimLatex": "\\omega"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              {
+                "type": "mord",
+                "command": "\\gamma",
+                "value": "γ",
+                "verbatimLatex": "\\gamma"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 13,
+      "type": "display",
+      "latex": "x^\\alpha \\quad y^\\beta \\quad z^\\gamma",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x^\\alpha \\quad y^\\beta \\quad z^\\gamma",
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mord",
+                "command": "\\alpha",
+                "value": "α",
+                "verbatimLatex": "\\alpha"
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "y",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mord",
+                "command": "\\beta",
+                "value": "β",
+                "verbatimLatex": "\\beta"
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "z",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mord",
+                "command": "\\gamma",
+                "value": "γ",
+                "verbatimLatex": "\\gamma"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

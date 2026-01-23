@@ -1,0 +1,185 @@
+{
+  "source": "test_sum_integral.tex",
+  "generatedAt": "2026-01-23T09:55:46.840Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "inline",
+      "latex": "\\sum_{i=1}^{n} x_i",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sum_{i=1}^{n} x_i",
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\sum",
+            "value": "∑",
+            "subsupPlacement": "auto",
+            "args": [],
+            "subscript": [
+              "i",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "1"
+            ],
+            "superscript": [
+              "n"
+            ],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∑"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "inline",
+      "latex": "\\int_0^1 f(x) dx",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\int_0^1 f(x) dx",
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\int",
+            "value": "∫",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "subscript": [
+              "0"
+            ],
+            "superscript": [
+              "1"
+            ],
+            "limits": "adjacent",
+            "symbol": "∫"
+          },
+          "f",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "x",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          "d",
+          "x"
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "inline",
+      "latex": "\\prod_{k=1}^{n} a_k",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\prod_{k=1}^{n} a_k",
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\prod",
+            "value": "∏",
+            "subsupPlacement": "auto",
+            "args": [],
+            "subscript": [
+              "k",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "1"
+            ],
+            "superscript": [
+              "n"
+            ],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∏"
+          },
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "k"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "inline",
+      "latex": "\\lim_{n \\to \\infty} \\frac{1}{n}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\lim_{n \\to \\infty} \\frac{1}{n}",
+        "body": [
+          {
+            "type": "operator",
+            "command": "\\lim",
+            "value": "lim",
+            "subsupPlacement": "over-under",
+            "args": [],
+            "subscript": [
+              "n",
+              {
+                "type": "mrel",
+                "command": "\\to",
+                "value": "→",
+                "verbatimLatex": "\\to"
+              },
+              {
+                "type": "mord",
+                "command": "\\infty",
+                "value": "∞",
+                "verbatimLatex": "\\infty"
+              }
+            ],
+            "variant": "main",
+            "limits": "over-under",
+            "symbol": "lim"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{n}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "n"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "n"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
