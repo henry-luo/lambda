@@ -25,7 +25,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false},
     {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false},
     {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false},
-    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY, false, false},
+    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false},
     {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false},
     {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false},
     {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true}, // TYPE_NUMBER;
@@ -53,6 +53,31 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false},
     {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false},
     {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false},
+    // statistical functions
+    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false},
+    // element-wise math functions
+    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false},
+    // vector manipulation functions
+    {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true},   // is_overloaded: generates fn_sort1
+    {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true},  // is_overloaded: generates fn_sort2
+    {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false},
+    {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false},
+    {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false},
+    {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false},
+    {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true},  // is_overloaded: generates fn_range3
+    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false},
     // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
     // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},
     {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false},
