@@ -153,6 +153,248 @@ bool should_continue_transpiling(Transpiler* tp) {
     return tp->error_count < tp->max_errors;
 }
 
+// Forward declaration for closure capture analysis
+void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope, 
+                                 NameScope* global_scope, CaptureInfo** captures);
+
+// Check if a scope is an ancestor of another scope
+bool is_ancestor_scope(NameScope* ancestor, NameScope* descendant) {
+    NameScope* scope = descendant;
+    while (scope) {
+        if (scope == ancestor) return true;
+        scope = scope->parent;
+    }
+    return false;
+}
+
+// Check if a name entry is defined in a scope or its descendants (local to function)
+bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
+    // Check if entry is in fn_scope or any nested scope within the function
+    NameScope* scope = fn_scope;
+    while (scope) {
+        NameEntry* e = scope->first;
+        while (e) {
+            if (e == entry) return true;
+            e = e->next;
+        }
+        // Note: we only check the immediate scope, not children
+        // This is because fn_scope contains params and local vars
+        break;
+    }
+    return false;
+}
+
+// Check if a name entry is in global scope
+bool is_global_entry(NameEntry* entry, NameScope* global_scope) {
+    if (!global_scope) return false;
+    NameEntry* e = global_scope->first;
+    while (e) {
+        if (e == entry) return true;
+        e = e->next;
+    }
+    return false;
+}
+
+// Add a capture to the list if not already present
+void add_capture(Transpiler* tp, CaptureInfo** captures, String* name, NameEntry* entry) {
+    // Check if already captured
+    CaptureInfo* c = *captures;
+    while (c) {
+        if (c->name == name || (c->name && name && 
+            c->name->len == name->len && 
+            memcmp(c->name->chars, name->chars, name->len) == 0)) {
+            return; // already captured
+        }
+        c = c->next;
+    }
+    
+    // Add new capture
+    CaptureInfo* capture = (CaptureInfo*)pool_calloc(tp->pool, sizeof(CaptureInfo));
+    capture->name = name;
+    capture->entry = entry;
+    capture->is_mutable = false; // TODO: detect mutations
+    capture->next = *captures;
+    *captures = capture;
+    log_debug("capture added: %.*s", (int)name->len, name->chars);
+}
+
+// Recursively collect captures from an AST node
+void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_scope, 
+                                 NameScope* global_scope, CaptureInfo** captures) {
+    if (!node) return;
+    
+    switch (node->node_type) {
+    case AST_NODE_IDENT: {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        if (ident->entry && ident->entry->node) {
+            // Check if this identifier refers to a variable from an enclosing scope
+            // (not local to fn_scope, not global, not an import)
+            if (!ident->entry->import && 
+                !is_local_to_scope(ident->entry, fn_scope) &&
+                !is_global_entry(ident->entry, global_scope)) {
+                add_capture(tp, captures, ident->name, ident->entry);
+            }
+        }
+        break;
+    }
+    case AST_NODE_PRIMARY: {
+        AstPrimaryNode* pri = (AstPrimaryNode*)node;
+        collect_captures_from_node(tp, pri->expr, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_UNARY: {
+        AstUnaryNode* un = (AstUnaryNode*)node;
+        collect_captures_from_node(tp, un->operand, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bin = (AstBinaryNode*)node;
+        collect_captures_from_node(tp, bin->left, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, bin->right, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_IF_STAM: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        collect_captures_from_node(tp, if_node->cond, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, if_node->then, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, if_node->otherwise, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM: {
+        AstForNode* for_node = (AstForNode*)node;
+        // Note: loop variable is local, handled by fn_scope extension
+        AstNode* loop = for_node->loop;
+        while (loop) {
+            if (loop->node_type == AST_NODE_LOOP) {
+                AstNamedNode* loop_var = (AstNamedNode*)loop;
+                collect_captures_from_node(tp, loop_var->as, fn_scope, global_scope, captures);
+            }
+            loop = loop->next;
+        }
+        collect_captures_from_node(tp, for_node->then, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* while_node = (AstWhileNode*)node;
+        collect_captures_from_node(tp, while_node->cond, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, while_node->body, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        collect_captures_from_node(tp, call->function, fn_scope, global_scope, captures);
+        AstNode* arg = call->argument;
+        while (arg) {
+            collect_captures_from_node(tp, arg, fn_scope, global_scope, captures);
+            arg = arg->next;
+        }
+        break;
+    }
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        collect_captures_from_node(tp, field->object, fn_scope, global_scope, captures);
+        collect_captures_from_node(tp, field->field, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_LIST:
+    case AST_NODE_CONTENT:
+    case AST_NODE_ARRAY: {
+        AstListNode* list = (AstListNode*)node;
+        AstNode* item = list->item;
+        while (item) {
+            collect_captures_from_node(tp, item, fn_scope, global_scope, captures);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_MAP: {
+        AstMapNode* map = (AstMapNode*)node;
+        AstNode* item = map->item;
+        while (item) {
+            collect_captures_from_node(tp, item, fn_scope, global_scope, captures);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN:
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_LOOP: {
+        AstNamedNode* named = (AstNamedNode*)node;
+        collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_RETURN_STAM: {
+        AstReturnNode* ret = (AstReturnNode*)node;
+        collect_captures_from_node(tp, ret->value, fn_scope, global_scope, captures);
+        break;
+    }
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM: {
+        AstLetNode* let = (AstLetNode*)node;
+        AstNode* decl = let->declare;
+        while (decl) {
+            collect_captures_from_node(tp, decl, fn_scope, global_scope, captures);
+            decl = decl->next;
+        }
+        break;
+    }
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC: {
+        // Nested functions: we need to propagate any captures that the nested function
+        // has which come from scopes ABOVE the current function's scope.
+        // This ensures that intermediate functions capture variables needed by their
+        // nested functions for closure environment construction.
+        AstFuncNode* nested_fn = (AstFuncNode*)node;
+        if (nested_fn->captures) {
+            CaptureInfo* cap = nested_fn->captures;
+            while (cap) {
+                // Check if this captured variable is NOT local to the current function's scope
+                // and NOT global. If so, the current function also needs to capture it.
+                if (cap->entry && !cap->entry->import &&
+                    !is_local_to_scope(cap->entry, fn_scope) &&
+                    !is_global_entry(cap->entry, global_scope)) {
+                    add_capture(tp, captures, cap->name, cap->entry);
+                }
+                cap = cap->next;
+            }
+        }
+        break;
+    }
+    default:
+        // Other node types don't need capture analysis
+        break;
+    }
+}
+
+// Analyze captures for a function node
+void analyze_captures(Transpiler* tp, AstFuncNode* fn_node, NameScope* global_scope) {
+    fn_node->captures = nullptr;
+    collect_captures_from_node(tp, fn_node->body, fn_node->vars, global_scope, &fn_node->captures);
+    
+    if (fn_node->captures) {
+        log_debug("function %.*s has captures:", 
+            fn_node->name ? (int)fn_node->name->len : 5,
+            fn_node->name ? fn_node->name->chars : "anon");
+        CaptureInfo* c = fn_node->captures;
+        while (c) {
+            log_debug("  - %.*s", (int)c->name->len, c->name->chars);
+            c = c->next;
+        }
+    }
+}
+
+// Find the global scope by walking up the parent chain
+NameScope* find_global_scope(NameScope* scope) {
+    while (scope && scope->parent) {
+        scope = scope->parent;
+    }
+    return scope;
+}
+
 mpd_t* str_to_decimal(char* str, mpd_context_t* ctx) {
     mpd_t* dec_val = mpd_new(ctx);
     if (dec_val == NULL) {
@@ -2350,6 +2592,11 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 
     // restore parent namescope
     tp->current_scope = ast_node->vars->parent;
+    
+    // Analyze captures for closure support
+    NameScope* global_scope = find_global_scope(ast_node->vars);
+    analyze_captures(tp, ast_node, global_scope);
+    
     log_debug("end building fn");
     return (AstNode*)ast_node;
 }

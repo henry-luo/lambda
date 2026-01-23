@@ -136,6 +136,8 @@ func_obj_t func_list[] = {
     {"it2i", (fn_ptr) it2i},
     {"to_fn", (fn_ptr) to_fn},
     {"to_fn_n", (fn_ptr) to_fn_n},
+    {"to_closure", (fn_ptr) to_closure},
+    {"heap_calloc", (fn_ptr) heap_calloc},
     {"fn_call", (fn_ptr) fn_call},
     {"fn_call0", (fn_ptr) fn_call0},
     {"fn_call1", (fn_ptr) fn_call1},

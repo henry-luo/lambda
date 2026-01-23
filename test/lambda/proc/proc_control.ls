@@ -30,8 +30,9 @@ pn test_return_value() {
 pn test_nested_while() {
     var total = 0
     var i = 0
+    var j = 0
     while (i < 3) {
-        var j = 0
+        j = 0
         while (j < 3) {
             total = total + 1
             j = j + 1

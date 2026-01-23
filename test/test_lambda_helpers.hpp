@@ -99,6 +99,11 @@ inline char* execute_lambda_script(const char* script_path, bool is_procedural =
         return nullptr;
     }
 
+    // If no output was collected, return empty string
+    if (!full_output) {
+        return strdup("");
+    }
+
     // Extract result from "##### Script" marker
     char* marker = strstr(full_output, "##### Script");
     if (marker) {

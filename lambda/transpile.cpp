@@ -7,6 +7,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
+void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
 
 void write_node_source(Transpiler* tp, TSNode node) {
     int start_byte = ts_node_start_byte(node);
@@ -40,6 +41,172 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
     strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
 }
 
+// write closure env struct name
+void write_env_name(StrBuf *strbuf, AstFuncNode* fn_node) {
+    strbuf_append_str(strbuf, "Env_f");
+    strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
+}
+
+// define closure environment struct for a function with captures
+void define_closure_env(Transpiler* tp, AstFuncNode *fn_node) {
+    if (!fn_node->captures) return;
+    
+    strbuf_append_str(tp->code_buf, "\ntypedef struct ");
+    write_env_name(tp->code_buf, fn_node);
+    strbuf_append_str(tp->code_buf, " {\n");
+    
+    // add each captured variable to the struct
+    CaptureInfo* cap = fn_node->captures;
+    while (cap) {
+        strbuf_append_str(tp->code_buf, "  ");
+        // use Item type for captured values (immutable capture by value)
+        strbuf_append_str(tp->code_buf, "Item ");
+        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        strbuf_append_str(tp->code_buf, ";\n");
+        cap = cap->next;
+    }
+    
+    strbuf_append_str(tp->code_buf, "} ");
+    write_env_name(tp->code_buf, fn_node);
+    strbuf_append_str(tp->code_buf, ";\n");
+}
+
+// check if an identifier is a captured variable in the current closure
+CaptureInfo* find_capture(AstFuncNode* closure, String* name) {
+    if (!closure || !closure->captures) return nullptr;
+    CaptureInfo* cap = closure->captures;
+    while (cap) {
+        if (cap->name->len == name->len && 
+            strncmp(cap->name->chars, name->chars, name->len) == 0) {
+            return cap;
+        }
+        cap = cap->next;
+    }
+    return nullptr;
+}
+
+// Forward declaration for recursive call
+void pre_define_closure_envs(Transpiler* tp, AstNode* node);
+void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node);
+
+// Recursively traverse AST and emit closure env struct definitions
+// Also emits forward declarations for closure functions
+void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
+    if (!node) return;
+    
+    switch (node->node_type) {
+    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC: {
+        AstFuncNode* fn = (AstFuncNode*)node;
+        // Define this function's closure env if it has captures
+        if (fn->captures) {
+            define_closure_env(tp, fn);
+            // Also emit a forward declaration for the closure function
+            // so it can be referenced before its full definition
+            forward_declare_func(tp, fn);
+        }
+        // Also check function's body and parameters for nested closures
+        pre_define_closure_envs(tp, fn->body);
+        AstNamedNode* param = fn->param;
+        while (param) {
+            pre_define_closure_envs(tp, (AstNode*)param);
+            param = (AstNamedNode*)param->next;
+        }
+        break;
+    }
+    case AST_NODE_PRIMARY:
+        pre_define_closure_envs(tp, ((AstPrimaryNode*)node)->expr);
+        break;
+    case AST_NODE_UNARY:
+        pre_define_closure_envs(tp, ((AstUnaryNode*)node)->operand);
+        break;
+    case AST_NODE_BINARY:
+        pre_define_closure_envs(tp, ((AstBinaryNode*)node)->left);
+        pre_define_closure_envs(tp, ((AstBinaryNode*)node)->right);
+        break;
+    case AST_NODE_IF_EXPR:  case AST_NODE_IF_STAM: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        pre_define_closure_envs(tp, if_node->cond);
+        pre_define_closure_envs(tp, if_node->then);
+        pre_define_closure_envs(tp, if_node->otherwise);
+        break;
+    }
+    case AST_NODE_FOR_EXPR:  case AST_NODE_FOR_STAM: {
+        AstForNode* for_node = (AstForNode*)node;
+        pre_define_closure_envs(tp, (AstNode*)for_node->loop);
+        pre_define_closure_envs(tp, for_node->then);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* while_node = (AstWhileNode*)node;
+        pre_define_closure_envs(tp, while_node->cond);
+        pre_define_closure_envs(tp, while_node->body);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        pre_define_closure_envs(tp, ((AstReturnNode*)node)->value);
+        break;
+    case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM: {
+        AstNode* decl = ((AstLetNode*)node)->declare;
+        while (decl) {
+            pre_define_closure_envs(tp, decl);
+            decl = decl->next;
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN:  case AST_NODE_KEY_EXPR:
+        pre_define_closure_envs(tp, ((AstNamedNode*)node)->as);
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        pre_define_closure_envs(tp, ((AstAssignStamNode*)node)->value);
+        break;
+    case AST_NODE_LIST:  case AST_NODE_CONTENT: {
+        AstListNode* list = (AstListNode*)node;
+        AstNode* decl = list->declare;
+        while (decl) {
+            pre_define_closure_envs(tp, decl);
+            decl = decl->next;
+        }
+        AstNode* item = list->item;
+        while (item) {
+            pre_define_closure_envs(tp, item);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_ARRAY: {
+        AstNode* item = ((AstArrayNode*)node)->item;
+        while (item) {
+            pre_define_closure_envs(tp, item);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_MAP:  case AST_NODE_ELEMENT: {
+        AstNode* item = ((AstMapNode*)node)->item;
+        while (item) {
+            pre_define_closure_envs(tp, item);
+            item = item->next;
+        }
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        pre_define_closure_envs(tp, ((AstCallNode*)node)->function);
+        AstNode* arg = ((AstCallNode*)node)->argument;
+        while (arg) {
+            pre_define_closure_envs(tp, arg);
+            arg = arg->next;
+        }
+        break;
+    }
+    case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
+        pre_define_closure_envs(tp, ((AstFieldNode*)node)->object);
+        pre_define_closure_envs(tp, ((AstFieldNode*)node)->field);
+        break;
+    default:
+        break;
+    }
+}
+
 // check if an AST node is an optional parameter reference (already Item type at runtime)
 bool is_optional_param_ref(AstNode* item) {
     // unwrap nested PRIMARY nodes
@@ -64,20 +231,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         return;
     }
     // log_debug("transpile box item: %d", item->type->type_id);
-        
-    // Debug: if this is a primary node with an identifier, show more info
-    if (item->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* pri = (AstPrimaryNode*)item;
-        if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
-            AstIdentNode* ident = (AstIdentNode*)pri->expr;
-            log_debug("transpile_box_item: identifier found: %.*s", 
-                (int)ident->name->len, ident->name->chars);
-            if (ident->entry && ident->entry->node) {
-                log_debug("transpile_box_item: identifier entry type: %d", 
-                    ident->entry->node->type->type_id);
-            }
-        }
-    }
+
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
         if (item->type->is_literal) {
@@ -344,17 +498,87 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             log_debug("transpile_primary_expr: identifier %.*s, type: %d", 
                 (int)ident_node->name->len, ident_node->name->chars, pri_node->type->type_id);
             
+            // check if this is a captured variable in the current closure
+            if (tp->current_closure) {
+                CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
+                if (cap) {
+                    // access captured variable via env
+                    // env stores Items, so we may need to unbox depending on usage
+                    TypeId type_id = pri_node->type->type_id;
+                    if (type_id == LMD_TYPE_INT) {
+                        strbuf_append_str(tp->code_buf, "it2i(_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_INT64) {
+                        strbuf_append_str(tp->code_buf, "it2l(_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_FLOAT) {
+                        strbuf_append_str(tp->code_buf, "it2f(_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_BOOL) {
+                        strbuf_append_str(tp->code_buf, "it2b(_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
+                        strbuf_append_str(tp->code_buf, "it2s(_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else {
+                        // for Item or container types, return directly
+                        strbuf_append_str(tp->code_buf, "_env->");
+                        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                    }
+                    return;
+                }
+            }
+            
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
             if (entry_node) {
                 if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC) {
-                    // Function reference - wrap with to_fn_n() for first-class usage
+                    // Function reference - check if it's a closure
                     AstFuncNode* fn_node = (AstFuncNode*)entry_node;
                     TypeFunc* fn_type = fn_node->type ? (TypeFunc*)fn_node->type : nullptr;
                     int arity = fn_type ? fn_type->param_count : 0;
-                    strbuf_append_format(tp->code_buf, "to_fn_n(");
-                    write_fn_name(tp->code_buf, fn_node, 
-                        (AstImportNode*)ident_node->entry->import);
-                    strbuf_append_format(tp->code_buf, ",%d)", arity);
+                    
+                    if (fn_node->captures) {
+                        // This is a closure - need to create the env and use to_closure
+                        // Generate same code as transpile_fn_expr for closures
+                        strbuf_append_str(tp->code_buf, "({ ");
+                        write_env_name(tp->code_buf, fn_node);
+                        strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
+                        write_env_name(tp->code_buf, fn_node);
+                        strbuf_append_str(tp->code_buf, "), 0);\n");
+                        
+                        // populate captured variables
+                        CaptureInfo* cap = fn_node->captures;
+                        while (cap) {
+                            strbuf_append_str(tp->code_buf, "  _closure_env->");
+                            strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                            strbuf_append_str(tp->code_buf, " = ");
+                            
+                            // box the captured variable
+                            bool from_outer = false;
+                            if (tp->current_closure) {
+                                CaptureInfo* outer_cap = find_capture(tp->current_closure, cap->name);
+                                from_outer = (outer_cap != nullptr);
+                            }
+                            transpile_box_capture(tp, cap, from_outer);
+                            strbuf_append_str(tp->code_buf, ";\n");
+                            cap = cap->next;
+                        }
+                        
+                        strbuf_append_str(tp->code_buf, "  to_closure(");
+                        write_fn_name(tp->code_buf, fn_node, (AstImportNode*)ident_node->entry->import);
+                        strbuf_append_format(tp->code_buf, ",%d,_closure_env); })", arity);
+                    } else {
+                        // Regular function without captures
+                        strbuf_append_format(tp->code_buf, "to_fn_n(");
+                        write_fn_name(tp->code_buf, fn_node, 
+                            (AstImportNode*)ident_node->entry->import);
+                        strbuf_append_format(tp->code_buf, ",%d)", arity);
+                    }
                 }
                 else {
                     log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
@@ -1568,9 +1792,11 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     else {
         TypeId callee_type_id = call_node->function->type ? call_node->function->type->type_id : LMD_TYPE_NULL;
         
-        // Check if callee is a parameter that should be treated as a function
-        // even if it doesn't have explicit function type
+        // Check if callee is a parameter or variable that should be treated as a function
+        // even if it doesn't have explicit function type (e.g., let add10 = make_adder(10); add10(5))
         bool is_callable_param = false;
+        bool is_callable_variable = false;  // variable that might hold a function at runtime
+        bool is_callable_call_expr = false; // callee is a call expression (e.g., make_adder(10)(5))
         AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
             (AstPrimaryNode*)call_node->function : null;
         if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
@@ -1580,9 +1806,28 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 // This is a parameter being used as a callable
                 is_callable_param = true;
             }
+            else if (entry_node && entry_node->node_type == AST_NODE_ASSIGN) {
+                // This is a let variable being called - might hold a function at runtime
+                // We can't statically know it's a function, but we'll use fn_call dynamically
+                is_callable_variable = true;
+                log_debug("callable variable (let) detected: %.*s", 
+                    (int)ident_node->name->len, ident_node->name->chars);
+            }
         }
         
-        if (callee_type_id == LMD_TYPE_FUNC || is_callable_param) {
+        // Check if callee is a call expression (chained call like make_adder(10)(5))
+        // Note: call expressions may be wrapped in a primary expression
+        if (call_node->function->node_type == AST_NODE_CALL_EXPR) {
+            is_callable_call_expr = true;
+            log_debug("callable call expression detected (direct)");
+        }
+        else if (primary_fn_node && primary_fn_node->expr && 
+                 primary_fn_node->expr->node_type == AST_NODE_CALL_EXPR) {
+            is_callable_call_expr = true;
+            log_debug("callable call expression detected (wrapped in primary)");
+        }
+        
+        if (callee_type_id == LMD_TYPE_FUNC || is_callable_param || is_callable_variable || is_callable_call_expr) {
             if (callee_type_id == LMD_TYPE_FUNC) {
                 fn_type = (TypeFunc*)call_node->function->type;
             }
@@ -2007,7 +2252,53 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     strbuf_append_char(tp->code_buf, ')');    
 }
 
+// Emit a forward declaration for a function (just signature, no body)
+void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
+    bool is_closure = (fn_node->captures != nullptr);
+    
+    strbuf_append_char(tp->code_buf, '\n');
+    Type *ret_type = fn_node->body->type;
+    write_type(tp->code_buf, ret_type);
+    strbuf_append_char(tp->code_buf, ' ');
+    write_fn_name(tp->code_buf, fn_node, NULL);
+    strbuf_append_char(tp->code_buf, '(');
+    
+    // for closures, add hidden env parameter as first param
+    bool has_params = false;
+    if (is_closure) {
+        strbuf_append_str(tp->code_buf, "void* _env_ptr");
+        has_params = true;
+    }
+    
+    AstNamedNode *param = fn_node->param;
+    while (param) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        TypeParam* param_type = (TypeParam*)param->type;
+        if (param_type->is_optional) {
+            strbuf_append_str(tp->code_buf, "Item");
+        } else {
+            write_type(tp->code_buf, param->type);
+        }
+        strbuf_append_str(tp->code_buf, " _");
+        strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+        param = (AstNamedNode*)param->next;
+        has_params = true;
+    }
+    
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+    if (fn_type && fn_type->is_variadic) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_str(tp->code_buf, "List* _vargs");
+    }
+    
+    strbuf_append_str(tp->code_buf, ");\n");
+}
+
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
+    bool is_closure = (fn_node->captures != nullptr);
+    
+    // Note: closure env struct is defined in pre_define_closure_envs()
+    
     strbuf_append_char(tp->code_buf, '\n');
     // use function body type as the return type for the time being
     Type *ret_type = fn_node->body->type;
@@ -2020,8 +2311,15 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // write the params
     strbuf_append_char(tp->code_buf, '(');
-    AstNamedNode *param = fn_node->param;
+    
+    // for closures, add hidden env parameter as first param
     bool has_params = false;
+    if (is_closure) {
+        strbuf_append_str(tp->code_buf, "void* _env_ptr");
+        has_params = true;
+    }
+    
+    AstNamedNode *param = fn_node->param;
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
         // for optional params, use Item type to allow null
@@ -2049,9 +2347,25 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     }
     // write fn body
     strbuf_append_str(tp->code_buf, "){\n");
+    
+    // for closures, cast and extract captured variables from env
+    if (is_closure) {
+        strbuf_append_str(tp->code_buf, " ");
+        write_env_name(tp->code_buf, fn_node);
+        strbuf_append_str(tp->code_buf, "* _env = (");
+        write_env_name(tp->code_buf, fn_node);
+        strbuf_append_str(tp->code_buf, "*)_env_ptr;\n");
+    }
+    
     // set vargs before function body for variadic functions
     if (fn_type && fn_type->is_variadic) {
         strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
+    }
+    
+    // set current_closure context for body transpilation
+    AstFuncNode* prev_closure = tp->current_closure;
+    if (is_closure) {
+        tp->current_closure = fn_node;
     }
     
     // for procedures, use procedural content transpilation
@@ -2065,12 +2379,105 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         transpile_expr(tp, fn_node->body);
         strbuf_append_str(tp->code_buf, ";\n}\n");
     }
+    
+    // restore previous closure context
+    tp->current_closure = prev_closure;
+}
+
+// helper to generate boxing code for a captured variable
+void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env) {
+    Type* type = cap->entry && cap->entry->node ? cap->entry->node->type : nullptr;
+    TypeId type_id = type ? type->type_id : LMD_TYPE_ANY;
+    
+    if (from_outer_env) {
+        // already boxed in outer env, just copy
+        strbuf_append_str(tp->code_buf, "_env->");
+        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        return;
+    }
+    
+    // box based on type
+    switch (type_id) {
+    case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "i2it(_");
+        break;
+    case LMD_TYPE_INT64:
+        strbuf_append_str(tp->code_buf, "l2it(&_");
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "d2it(&_");
+        break;
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "b2it(_");
+        break;
+    case LMD_TYPE_STRING:
+        strbuf_append_str(tp->code_buf, "s2it(_");
+        break;
+    case LMD_TYPE_SYMBOL:
+        strbuf_append_str(tp->code_buf, "y2it(_");
+        break;
+    case LMD_TYPE_BINARY:
+        strbuf_append_str(tp->code_buf, "x2it(_");
+        break;
+    case LMD_TYPE_DECIMAL:
+        strbuf_append_str(tp->code_buf, "c2it(_");
+        break;
+    case LMD_TYPE_DTIME:
+        strbuf_append_str(tp->code_buf, "k2it(&_");
+        break;
+    default:
+        // for container types (List*, Map*, etc.) and Item, cast to Item
+        strbuf_append_str(tp->code_buf, "(Item)_");
+        strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+        return;
+    }
+    strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     int arity = fn_type ? fn_type->param_count : 0;
-    strbuf_append_format(tp->code_buf, "to_fn_n(_f%d,%d)", ts_node_start_byte(fn_node->node), arity);
+    
+    if (fn_node->captures) {
+        // closure: allocate env, populate captured values, call to_closure
+        // generate: ({ Env_fXXX* env = heap_calloc(sizeof(Env_fXXX), 0); 
+        //              env->var1 = i2it(_var1); env->var2 = s2it(_var2); ...
+        //              to_closure(_fXXX, arity, env); })
+        strbuf_append_str(tp->code_buf, "({ ");
+        write_env_name(tp->code_buf, fn_node);
+        strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
+        write_env_name(tp->code_buf, fn_node);
+        strbuf_append_str(tp->code_buf, "), 0);\n");
+        
+        // populate captured variables
+        CaptureInfo* cap = fn_node->captures;
+        while (cap) {
+            strbuf_append_str(tp->code_buf, "  _closure_env->");
+            strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+            strbuf_append_str(tp->code_buf, " = ");
+            
+            // box the captured variable to Item
+            // the captured variable may be in our own closure env if we're a nested closure
+            bool from_outer = false;
+            if (tp->current_closure) {
+                CaptureInfo* outer_cap = find_capture(tp->current_closure, cap->name);
+                from_outer = (outer_cap != nullptr);
+            }
+            transpile_box_capture(tp, cap, from_outer);
+            strbuf_append_str(tp->code_buf, ";\n");
+            cap = cap->next;
+        }
+        
+        strbuf_append_str(tp->code_buf, "  to_closure(");
+        write_fn_name(tp->code_buf, fn_node, NULL);
+        strbuf_append_format(tp->code_buf, ",%d,_closure_env); })", arity);
+    } else {
+        // regular function without captures
+        strbuf_append_format(tp->code_buf, "to_fn_n(");
+        write_fn_name(tp->code_buf, fn_node, NULL);
+        strbuf_append_format(tp->code_buf, ",%d)", arity);
+    }
 }
 
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
@@ -2470,9 +2877,26 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     log_debug("define_ast_node ...");
     // defines global runtime context
     strbuf_append_str(tp->code_buf, "\nContext *rt;\n");
+    
+    // Pre-define all closure environment structs before any function definitions
+    // This ensures structs are available when functions reference them
+    log_debug("pre-defining closure env structs...");
+    AstNode* child = script->child;
+    while (child) {
+        if (child->node_type == AST_NODE_CONTENT) {
+            AstNode* item = ((AstListNode*)child)->item;
+            while (item) {
+                pre_define_closure_envs(tp, item);
+                item = item->next;
+            }
+        } else {
+            pre_define_closure_envs(tp, child);
+        }
+        child = child->next;
+    }
 
     // declare global vars, types, define fns, etc.
-    AstNode* child = script->child;
+    child = script->child;
     while (child) {
         switch (child->node_type) {
         case AST_NODE_CONTENT:
