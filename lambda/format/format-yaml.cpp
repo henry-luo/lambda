@@ -5,6 +5,7 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/log.h"
 #include <string.h>
 
 // forward declarations
@@ -288,13 +289,11 @@ static void format_item_reader(YamlContext& ctx, const ItemReader& item, int ind
 
 // yaml formatter that produces proper YAML output
 String* format_yaml(Pool* pool, Item root_item) {
-    printf("format_yaml: ENTRY - MarkReader version\n");
-    fflush(stdout);
+    log_debug("format_yaml: ENTRY - MarkReader version");
     
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
-        printf("format_yaml: failed to create string buffer\n");
-        fflush(stdout);
+        log_error("format_yaml: failed to create string buffer");
         return NULL;
     }
     

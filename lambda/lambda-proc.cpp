@@ -1,6 +1,8 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/file.h"
 #include "utf_string.h"
+#include "format/format.h"
 
 #include <stdarg.h>
 #include <time.h>
@@ -17,7 +19,7 @@
 #include <string.h>  // for strlen
 #include "input/input.hpp"
 
-extern __thread Context* context;
+extern __thread EvalContext* context;
 
 Item pn_print(Item item) {
     TypeId type_id = get_type_id(item);
@@ -27,6 +29,119 @@ Item pn_print(Item item) {
         printf("%s", str->chars);
     }
     return ItemNull;
+}
+
+// output(source, url, format?) - write formatted data to file
+// source: data to output
+// url: file path to write to
+// format: optional symbol for format type ('json, 'yaml, 'html, etc.)
+//         if omitted, auto-detect from file extension
+Item pn_output(Item source, Item url_item, Item format_item) {
+    // validate url parameter
+    TypeId url_type = get_type_id(url_item);
+    if (url_type != LMD_TYPE_STRING) {
+        log_error("pn_output: url must be a string, got type %d", url_type);
+        return ItemError;
+    }
+    String* url = it2s(url_item);
+    if (!url || !url->chars) {
+        log_error("pn_output: url string is null");
+        return ItemError;
+    }
+    
+    log_debug("pn_output: writing to %s", url->chars);
+    
+    // determine format - from parameter or auto-detect from extension
+    const char* format_str = NULL;
+    TypeId format_type = get_type_id(format_item);
+    
+    if (format_type == LMD_TYPE_SYMBOL) {
+        String* format_sym = it2s(format_item);
+        if (format_sym && format_sym->chars) {
+            format_str = format_sym->chars;
+        }
+    } else if (format_type != LMD_TYPE_NULL) {
+        log_error("pn_output: format must be a symbol, got type %d", format_type);
+        return ItemError;
+    }
+    
+    // auto-detect format from file extension if not specified
+    if (!format_str) {
+        const char* dot = strrchr(url->chars, '.');
+        if (dot) {
+            const char* ext = dot + 1;
+            if (strcmp(ext, "json") == 0) format_str = "json";
+            else if (strcmp(ext, "yaml") == 0 || strcmp(ext, "yml") == 0) format_str = "yaml";
+            else if (strcmp(ext, "xml") == 0) format_str = "xml";
+            else if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) format_str = "html";
+            else if (strcmp(ext, "md") == 0) format_str = "markdown";
+            else if (strcmp(ext, "csv") == 0) format_str = "csv";
+            else if (strcmp(ext, "txt") == 0) format_str = "text";
+            else if (strcmp(ext, "toml") == 0) format_str = "toml";
+            else if (strcmp(ext, "ini") == 0) format_str = "ini";
+            else if (strcmp(ext, "ls") == 0 || strcmp(ext, "mark") == 0) format_str = "mark";
+            else format_str = "json";  // default to json
+        } else {
+            format_str = "json";  // default to json if no extension
+        }
+    }
+    
+    log_debug("pn_output: using format '%s'", format_str);
+    
+    // format the data
+    Pool* temp_pool = pool_create();
+    String* formatted = NULL;
+    
+    if (strcmp(format_str, "json") == 0) {
+        formatted = format_json(temp_pool, source);
+    } else if (strcmp(format_str, "yaml") == 0) {
+        formatted = format_yaml(temp_pool, source);
+    } else if (strcmp(format_str, "xml") == 0) {
+        formatted = format_xml(temp_pool, source);
+    } else if (strcmp(format_str, "html") == 0) {
+        formatted = format_html(temp_pool, source);
+    } else if (strcmp(format_str, "markdown") == 0) {
+        StringBuf* sb = stringbuf_new(temp_pool);
+        format_markdown(sb, source);
+        formatted = stringbuf_to_string(sb);
+        stringbuf_free(sb);
+    } else if (strcmp(format_str, "text") == 0) {
+        formatted = format_text_string(temp_pool, source);
+    } else if (strcmp(format_str, "toml") == 0) {
+        formatted = format_toml(temp_pool, source);
+    } else if (strcmp(format_str, "ini") == 0) {
+        formatted = format_ini(temp_pool, source);
+    } else if (strcmp(format_str, "mark") == 0) {
+        // For mark format, use JSON as fallback for now
+        formatted = format_json(temp_pool, source);
+    } else {
+        log_error("pn_output: unsupported format '%s'", format_str);
+        pool_destroy(temp_pool);
+        return ItemError;
+    }
+    
+    if (!formatted || !formatted->chars) {
+        log_error("pn_output: formatting failed");
+        pool_destroy(temp_pool);
+        return ItemError;
+    }
+    
+    // write to file
+    write_text_file(url->chars, formatted->chars);
+    log_debug("pn_output: wrote %zu bytes to %s", strlen(formatted->chars), url->chars);
+    
+    pool_destroy(temp_pool);
+    return ItemNull;
+}
+
+// 2-parameter wrapper: output(source, url) - auto-detect format
+Item pn_output2(Item source, Item url_item) {
+    return pn_output(source, url_item, ItemNull);
+}
+
+// 3-parameter wrapper: output(source, url, format)
+Item pn_output3(Item source, Item url_item, Item format_item) {
+    return pn_output(source, url_item, format_item);
 }
 
 extern void free_fetch_response(FetchResponse* response);
