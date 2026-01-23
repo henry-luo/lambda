@@ -48,6 +48,7 @@ struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
     TSParser* parser;
     char* current_dir;
+    int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
 };
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
