@@ -4,6 +4,7 @@
 extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
+void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 
@@ -968,6 +969,60 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
     strbuf_append_str(tp->code_buf, " list_end(ls);})");
 }
 
+// while statement (procedural only)
+void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
+    log_debug("transpile while stam");
+    if (!while_node || !while_node->cond || !while_node->body) {
+        log_error("Error: invalid while_node");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        return;
+    }
+    
+    strbuf_append_str(tp->code_buf, "while (");
+    if (while_node->cond->type && while_node->cond->type->type_id == LMD_TYPE_BOOL) {
+        transpile_expr(tp, while_node->cond);
+    } else {
+        strbuf_append_str(tp->code_buf, "is_truthy(");
+        transpile_box_item(tp, while_node->cond);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    strbuf_append_str(tp->code_buf, ") {\n");
+    // use procedural content for while body
+    if (while_node->body->node_type == AST_NODE_CONTENT) {
+        transpile_proc_content(tp, (AstListNode*)while_node->body);
+    } else {
+        transpile_expr(tp, while_node->body);
+    }
+    strbuf_append_str(tp->code_buf, ";\n}");
+}
+
+// return statement (procedural only)
+void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
+    log_debug("transpile return stam");
+    strbuf_append_str(tp->code_buf, "return ");
+    if (return_node->value) {
+        transpile_box_item(tp, return_node->value);
+    } else {
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+    }
+    strbuf_append_char(tp->code_buf, ';');
+}
+
+// assignment statement for mutable variables (procedural only)
+void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
+    log_debug("transpile assign stam");
+    if (!assign_node || !assign_node->target || !assign_node->value) {
+        log_error("Error: invalid assign_node");
+        return;
+    }
+    
+    strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
+    strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+    strbuf_append_char(tp->code_buf, '=');
+    transpile_expr(tp, assign_node->value);
+    strbuf_append_char(tp->code_buf, ';');
+}
+
 void transpile_items(Transpiler* tp, AstNode *item) {
     bool is_first = true;
     while (item) {
@@ -1063,6 +1118,94 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     else {
         transpile_push_items(tp, list_node->item, false);
     }
+}
+
+// transpile procedural content - sequential statements without list wrapper
+void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
+    log_debug("transpile proc content");
+    if (!list_node) { log_error("Error: missing list_node");  return; }
+    
+    AstNode *item = list_node->item;
+    AstNode *last_item = NULL;
+    
+    // find the last non-declaration item for return value
+    AstNode *scan = item;
+    while (scan) {
+        if (scan->node_type != AST_NODE_LET_STAM && scan->node_type != AST_NODE_PUB_STAM &&
+            scan->node_type != AST_NODE_TYPE_STAM && scan->node_type != AST_NODE_FUNC &&
+            scan->node_type != AST_NODE_FUNC_EXPR && scan->node_type != AST_NODE_PROC &&
+            scan->node_type != AST_NODE_VAR_STAM) {
+            last_item = scan;
+        }
+        scan = scan->next;
+    }
+    
+    strbuf_append_str(tp->code_buf, "({\n Item _result = ITEM_NULL;");
+    
+    while (item) {
+        // handle declarations
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_VAR_STAM) {
+            transpile_let_stam(tp, (AstLetNode*)item, false);
+        }
+        else if (item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM ||
+                 item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR ||
+                 item->node_type == AST_NODE_PROC) {
+            // skip - already handled globally
+        }
+        else if (item->node_type == AST_NODE_WHILE_STAM) {
+            transpile_while(tp, (AstWhileNode*)item);
+        }
+        else if (item->node_type == AST_NODE_BREAK_STAM) {
+            strbuf_append_str(tp->code_buf, "\n break;");
+        }
+        else if (item->node_type == AST_NODE_CONTINUE_STAM) {
+            strbuf_append_str(tp->code_buf, "\n continue;");
+        }
+        else if (item->node_type == AST_NODE_RETURN_STAM) {
+            transpile_return(tp, (AstReturnNode*)item);
+        }
+        else if (item->node_type == AST_NODE_ASSIGN_STAM) {
+            transpile_assign_stam(tp, (AstAssignStamNode*)item);
+        }
+        else if (item->node_type == AST_NODE_FOR_STAM) {
+            transpile_for(tp, (AstForNode*)item);
+        }
+        else if (item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_IF_STAM) {
+            // if expression - wrap value
+            if (item == last_item) {
+                strbuf_append_str(tp->code_buf, "\n _result = ");
+            } else {
+                strbuf_append_str(tp->code_buf, "\n ");
+            }
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ';');
+        }
+        else if (item->node_type == AST_NODE_CALL_EXPR) {
+            // call expression - capture result if last
+            if (item == last_item) {
+                strbuf_append_str(tp->code_buf, "\n _result = ");
+            } else {
+                strbuf_append_str(tp->code_buf, "\n ");
+            }
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ';');
+        }
+        else {
+            // other expressions - capture if last
+            if (item == last_item) {
+                strbuf_append_str(tp->code_buf, "\n _result = ");
+                transpile_box_item(tp, item);
+                strbuf_append_char(tp->code_buf, ';');
+            } else {
+                strbuf_append_str(tp->code_buf, "\n ");
+                transpile_expr(tp, item);
+                strbuf_append_char(tp->code_buf, ';');
+            }
+        }
+        item = item->next;
+    }
+    
+    strbuf_append_str(tp->code_buf, "\n _result;})");
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
@@ -1723,9 +1866,18 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     if (fn_type && fn_type->is_variadic) {
         strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
     }
-    strbuf_append_str(tp->code_buf, " return ");
-    transpile_expr(tp, fn_node->body);
-    strbuf_append_str(tp->code_buf, ";\n}\n");
+    
+    // for procedures, use procedural content transpilation
+    bool is_proc = (fn_node->node_type == AST_NODE_PROC);
+    if (is_proc && fn_node->body->node_type == AST_NODE_CONTENT) {
+        strbuf_append_str(tp->code_buf, " return ");
+        transpile_proc_content(tp, (AstListNode*)fn_node->body);
+        strbuf_append_str(tp->code_buf, ";\n}\n");
+    } else {
+        strbuf_append_str(tp->code_buf, " return ");
+        transpile_expr(tp, fn_node->body);
+        strbuf_append_str(tp->code_buf, ";\n}\n");
+    }
 }
 
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
@@ -1765,7 +1917,25 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;        
     case AST_NODE_FOR_STAM:
         transpile_for(tp, (AstForNode*)expr_node);
-        break;        
+        break;
+    case AST_NODE_WHILE_STAM:
+        transpile_while(tp, (AstWhileNode*)expr_node);
+        break;
+    case AST_NODE_BREAK_STAM:
+        strbuf_append_str(tp->code_buf, "break");
+        break;
+    case AST_NODE_CONTINUE_STAM:
+        strbuf_append_str(tp->code_buf, "continue");
+        break;
+    case AST_NODE_RETURN_STAM:
+        transpile_return(tp, (AstReturnNode*)expr_node);
+        break;
+    case AST_NODE_VAR_STAM:
+        transpile_let_stam(tp, (AstLetNode*)expr_node, false);  // reuse let transpiler
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        transpile_assign_stam(tp, (AstAssignStamNode*)expr_node);
+        break;
     case AST_NODE_ASSIGN:
         transpile_assign_expr(tp, (AstNamedNode*)expr_node);
         break;
@@ -1958,6 +2128,36 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             loop = loop->next;
         }
         define_ast_node(tp, ((AstForNode*)node)->then);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* while_node = (AstWhileNode*)node;
+        define_ast_node(tp, while_node->cond);
+        define_ast_node(tp, while_node->body);
+        break;
+    }
+    case AST_NODE_BREAK_STAM:
+    case AST_NODE_CONTINUE_STAM:
+        // no child nodes to define
+        break;
+    case AST_NODE_RETURN_STAM: {
+        AstReturnNode* ret_node = (AstReturnNode*)node;
+        if (ret_node->value) {
+            define_ast_node(tp, ret_node->value);
+        }
+        break;
+    }
+    case AST_NODE_VAR_STAM: {
+        AstNode *declare = ((AstLetNode*)node)->declare;
+        while (declare) {
+            define_ast_node(tp, declare);
+            declare = declare->next;
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        define_ast_node(tp, assign->value);
         break;
     }
     case AST_NODE_ASSIGN: {
