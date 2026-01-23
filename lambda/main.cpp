@@ -319,7 +319,8 @@ void run_repl(Runtime *runtime, bool use_mir) {
     strbuf_free(last_output);
 }
 
-void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
+// Run a script file and return 0 on success, 1 on failure
+int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
     log_debug("run_script_file called: %s, use_mir=%d", script_path, use_mir);
     Input* output_input = nullptr;
     if (use_mir) {
@@ -332,7 +333,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     if (!output_input) {
         log_error("Failed to execute script: %s (output_input is NULL)", script_path);
         fprintf(stderr, "Error: Failed to execute script: %s\n", script_path);
-        return;
+        return 1;  // failure
     }
 
     log_debug("run_script_file: output_input->root.item = %llu", output_input->root.item);
@@ -346,7 +347,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
             pool_destroy(output_input->pool);
         }
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
-        return;
+        return 1;  // failure
     }
 
     StrBuf *output = strbuf_new_cap(256);
@@ -366,6 +367,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     // Note: Do NOT destroy output_input->pool here!
     // The pool is shared with the Script, which is managed by the Runtime
     // Also do NOT delete output_input - it was allocated from the pool
+    return 0;  // success
 }
 
 void run_assertions() {
@@ -2002,10 +2004,10 @@ int main(int argc, char *argv[]) {
         log_debug("Running script '%s' with run_main=true, use_mir=%s", script_file, use_mir ? "true" : "false");
 
         // Execute script with run_main enabled
-        run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
+        int result = run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
 
         log_finish();
-        return 0;
+        return result;
     }
 
     bool use_mir = false;
@@ -2058,8 +2060,7 @@ int main(int argc, char *argv[]) {
         print_help();
     }
     else if (script_file) {
-        run_script_file(&runtime, script_file, use_mir, transpile_only, false);  // false for run_main in regular execution
-        // todo: inspect return value
+        ret_code = run_script_file(&runtime, script_file, use_mir, transpile_only, false);  // false for run_main in regular execution
     }
     else if (transpile_only) { // without a script file
         printf("Error: --transpile-only requires a script file\n");

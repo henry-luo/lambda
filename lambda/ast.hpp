@@ -295,13 +295,25 @@ typedef struct AstElementNode : AstMapNode {
     AstNode *content;  // first content node
 } AstElementNode;
 
+// Forward declare for capture list
+struct CaptureInfo;
+
 // aligned with AstNamedNode on name
 typedef struct AstFuncNode : AstNode {
     String* name;               // Changed from StrView to String* (from name pool)
     AstNamedNode *param;        // first parameter of the function
     AstNode *body;
     NameScope *vars;            // vars including params and local variables
+    struct CaptureInfo* captures; // list of captured variables (NULL if no captures)
 } AstFuncNode;
+
+// Capture info for closures
+typedef struct CaptureInfo {
+    String* name;              // captured variable name
+    NameEntry* entry;          // reference to the captured variable's scope entry
+    bool is_mutable;           // true if the captured variable is modified
+    struct CaptureInfo* next;  // next capture in list
+} CaptureInfo;
 
 // root of the AST
 typedef struct AstScript : AstNode {
@@ -340,6 +352,9 @@ typedef struct Transpiler : Script {
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count
     int max_errors;            // threshold (default: 10)
+    
+    // Closure transpilation context
+    AstFuncNode* current_closure;  // non-null when transpiling inside a closure body
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type
