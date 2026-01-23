@@ -300,6 +300,9 @@ typedef enum SysFunc {
     SYSFUNC_ZIP,
     SYSFUNC_RANGE3,
     SYSFUNC_QUANTILE,
+    // variadic parameter access
+    SYSFUNC_VARG0,          // varg() - get all variadic args as list
+    SYSFUNC_VARG1,          // varg(n) - get nth variadic arg
     // procedural functions
     SYSPROC_NOW,
     SYSPROC_TODAY,

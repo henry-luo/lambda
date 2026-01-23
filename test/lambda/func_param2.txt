@@ -9,5 +9,9 @@
   test8_named_with_defaults: [["localhost", 8080, false], ["localhost", 3000, false], ["localhost", 8080, true], ["example.com", 8080, true]],
   test9_expr_default: [100, 15],
   test10_typed_default: [10, 15],
-  test11_optional_typed: [10, 8]
+  test11_optional_typed: [10, 8],
+  test12_variadic_sum: [0, 1, 6, 15],
+  test13_variadic_with_params: [["Hello", 0], ["Hello %s", 1], ["%d + %d = %d", 3]],
+  test14_variadic_first: [42, 1],
+  test15_variadic_len: [0, 3]
 }
