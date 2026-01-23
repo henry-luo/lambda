@@ -308,14 +308,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);  // list_end() -> Item 
         break;
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+        // All container types including Function* are direct pointers
         strbuf_append_str(tp->code_buf, "(Item)(");
         transpile_expr(tp, item);  // raw pointer treated as Item
-        strbuf_append_char(tp->code_buf, ')');
-        break;
-    case LMD_TYPE_FUNC:
-        strbuf_append_str(tp->code_buf, "to_fn(");
-        transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_ANY:
@@ -351,8 +347,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
             if (entry_node) {
                 if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC) {
-                    write_fn_name(tp->code_buf, (AstFuncNode*)entry_node, 
+                    // Function reference - wrap with to_fn_n() for first-class usage
+                    AstFuncNode* fn_node = (AstFuncNode*)entry_node;
+                    TypeFunc* fn_type = fn_node->type ? (TypeFunc*)fn_node->type : nullptr;
+                    int arity = fn_type ? fn_type->param_count : 0;
+                    strbuf_append_format(tp->code_buf, "to_fn_n(");
+                    write_fn_name(tp->code_buf, fn_node, 
                         (AstImportNode*)ident_node->entry->import);
+                    strbuf_append_format(tp->code_buf, ",%d)", arity);
                 }
                 else {
                     log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
@@ -1553,6 +1555,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     TypeFunc *fn_type = NULL;
     AstFuncNode* fn_node = NULL;  // used for named args lookup
     bool is_sys_func = (call_node->function->node_type == AST_NODE_SYS_FUNC);
+    bool is_fn_variable = false;  // true if calling through a function variable (need fn_call)
+    bool is_direct_call = true;   // true if we can use direct function call
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
@@ -1562,27 +1566,66 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         if (sys_fn_node->fn_info->is_overloaded) { strbuf_append_int(tp->code_buf, sys_fn_node->fn_info->arg_count); }
     }
     else {
-        if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
-            fn_type = (TypeFunc*)call_node->function->type;
-            AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
-                (AstPrimaryNode*)call_node->function:null;
+        TypeId callee_type_id = call_node->function->type ? call_node->function->type->type_id : LMD_TYPE_NULL;
+        
+        // Check if callee is a parameter that should be treated as a function
+        // even if it doesn't have explicit function type
+        bool is_callable_param = false;
+        AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+            (AstPrimaryNode*)call_node->function : null;
+        if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
+            AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
+            if (entry_node && entry_node->node_type == AST_NODE_PARAM) {
+                // This is a parameter being used as a callable
+                is_callable_param = true;
+            }
+        }
+        
+        if (callee_type_id == LMD_TYPE_FUNC || is_callable_param) {
+            if (callee_type_id == LMD_TYPE_FUNC) {
+                fn_type = (TypeFunc*)call_node->function->type;
+            }
             if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
                 AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
                 if (entry_node && (entry_node->node_type == AST_NODE_FUNC || 
                     entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC)) {
+                    // Direct function reference - use direct call
                     fn_node = (AstFuncNode*)entry_node;  // save for named args lookup
                     write_fn_name(tp->code_buf, fn_node, 
                         (AstImportNode*)ident_node->entry->import);
-                } else { // variable
-                    strbuf_append_char(tp->code_buf, '_');
-                    write_node_source(tp, primary_fn_node->expr->node);
+                } else if (entry_node && entry_node->node_type == AST_NODE_PARAM) {
+                    // Function parameter - use fn_call for dynamic dispatch
+                    is_fn_variable = true;
+                    is_direct_call = false;
+                    log_debug("callable parameter detected: %.*s", 
+                        (int)ident_node->name->len, ident_node->name->chars);
+                } else { 
+                    // Variable holding a function - use fn_call for dynamic dispatch
+                    is_fn_variable = true;
+                    is_direct_call = false;
+                    log_debug("function variable detected: %.*s", 
+                        (int)ident_node->name->len, ident_node->name->chars);
                 }
             }
-            else {
-                transpile_expr(tp, call_node->function);
+            else if (call_node->function->node_type == AST_NODE_INDEX_EXPR ||
+                     call_node->function->node_type == AST_NODE_MEMBER_EXPR) {
+                // Function from array/map access - need dynamic call
+                is_fn_variable = true;
+                is_direct_call = false;
+                log_debug("function from index/member expression");
             }
-            if (fn_type->is_anonymous) {
+            else {
+                // Other expression returning function - use dynamic call
+                is_fn_variable = true;
+                is_direct_call = false;
+                log_debug("function from expression");
+            }
+            
+            // For anonymous functions referenced directly (not through variable), use ->ptr
+            if (fn_type && fn_type->is_anonymous && !is_fn_variable) {
+                transpile_expr(tp, call_node->function);
                 strbuf_append_str(tp->code_buf, "->ptr");
             }
         } else { // handle Item
@@ -1607,6 +1650,89 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     int expected_count = fn_type ? fn_type->param_count : -1;
     bool is_variadic = fn_type ? fn_type->is_variadic : false;
 
+    // For function variables, use fn_callN() for efficiency or fn_call() for many args
+    if (is_fn_variable) {
+        // Get the function pointer expression
+        AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+            (AstPrimaryNode*)call_node->function : null;
+        
+        // Check if callee is a parameter with Item type (needs extraction from tagged pointer)
+        bool needs_item_extraction = false;
+        AstNode* callee_entry_node = nullptr;
+        if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
+            callee_entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
+            if (callee_entry_node && callee_entry_node->node_type == AST_NODE_PARAM) {
+                AstNamedNode* param_node = (AstNamedNode*)callee_entry_node;
+                // If parameter doesn't have explicit function type, it's Item type
+                if (!param_node->type || param_node->type->type_id != LMD_TYPE_FUNC) {
+                    needs_item_extraction = true;
+                }
+            }
+        }
+        
+        if (arg_count <= 3 && !is_variadic) {
+            // Use specialized fn_callN for common cases (avoids list allocation)
+            strbuf_append_format(tp->code_buf, "fn_call%d(", arg_count);
+            
+            // Emit function expression - Function* is a direct pointer like other containers
+            if (primary_fn_node && primary_fn_node->expr && callee_entry_node) {
+                if (needs_item_extraction) {
+                    // Cast Item to Function* (direct pointer, no masking needed)
+                    strbuf_append_str(tp->code_buf, "(Function*)");
+                    write_var_name(tp->code_buf, (AstNamedNode*)callee_entry_node, NULL);
+                } else {
+                    write_var_name(tp->code_buf, (AstNamedNode*)callee_entry_node, NULL);
+                }
+            } else {
+                strbuf_append_str(tp->code_buf, "(Function*)");
+                transpile_expr(tp, call_node->function);
+            }
+            
+            // Emit arguments
+            arg = call_node->argument;
+            while (arg) {
+                strbuf_append_char(tp->code_buf, ',');
+                transpile_box_item(tp, arg);
+                arg = arg->next;
+            }
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            // Use fn_call with List for more arguments
+            strbuf_append_str(tp->code_buf, "fn_call(");
+            
+            // Emit function expression - Function* is a direct pointer like other containers
+            if (primary_fn_node && primary_fn_node->expr && callee_entry_node) {
+                if (needs_item_extraction) {
+                    // Cast Item to Function* (direct pointer, no masking needed)
+                    strbuf_append_str(tp->code_buf, "(Function*)");
+                    write_var_name(tp->code_buf, (AstNamedNode*)callee_entry_node, NULL);
+                } else {
+                    write_var_name(tp->code_buf, (AstNamedNode*)callee_entry_node, NULL);
+                }
+            } else {
+                strbuf_append_str(tp->code_buf, "(Function*)");
+                transpile_expr(tp, call_node->function);
+            }
+            
+            // Build argument list
+            strbuf_append_str(tp->code_buf, ",({Item _fa[]={");
+            arg = call_node->argument;
+            bool first = true;
+            while (arg) {
+                if (!first) strbuf_append_char(tp->code_buf, ',');
+                transpile_box_item(tp, arg);
+                arg = arg->next;
+                first = false;
+            }
+            strbuf_append_format(tp->code_buf, 
+                "}; List _fl={.type_id=%d,.items=_fa,.length=%d,.capacity=%d}; &_fl;}))",
+                LMD_TYPE_LIST, arg_count, arg_count);
+        }
+        return;  // Done with function variable call
+    }
+
+    // Direct function call (original logic)
     // transpile the params
     strbuf_append_str(tp->code_buf, "(");
     bool has_output_arg = false;
@@ -1942,7 +2068,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 }
 
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
-    strbuf_append_format(tp->code_buf, "to_fn(_f%d)", ts_node_start_byte(fn_node->node));
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+    int arity = fn_type ? fn_type->param_count : 0;
+    strbuf_append_format(tp->code_buf, "to_fn_n(_f%d,%d)", ts_node_start_byte(fn_node->node), arity);
 }
 
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
