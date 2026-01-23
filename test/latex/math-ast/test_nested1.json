@@ -1,0 +1,575 @@
+{
+  "source": "test_nested1.tex",
+  "generatedAt": "2026-01-23T09:55:46.834Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "\\frac{1}{1 + \\frac{1}{2}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\frac{1}{1 + \\frac{1}{2}}",
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{1 + \\frac{1}{2}}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "1",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{1}{2}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "1"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "1"
+                    ],
+                    "below": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "1",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1}{2}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "2"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1"
+                ],
+                "below": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3}}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3}}}",
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3}}}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "1",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{2 + \\sqrt{3}}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "2",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{3}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "2",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{3}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              "1",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{2 + \\sqrt{3}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "2",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{3}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  "2",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{3}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "3"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "3"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "\\frac{\\sqrt{a + \\frac{b}{c}}}{\\sqrt{f + \\frac{g}{h}}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\frac{\\sqrt{a + \\frac{b}{c}}}{\\sqrt{f + \\frac{g}{h}}}",
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{\\sqrt{a + \\frac{b}{c}}}{\\sqrt{f + \\frac{g}{h}}}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{a + \\frac{b}{c}}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "a",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{b}{c}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "b"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "c"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "b"
+                            ],
+                            "below": [
+                              "c"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "a",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{b}{c}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "b"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "c"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "b"
+                        ],
+                        "below": [
+                          "c"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{f + \\frac{g}{h}}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "f",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{g}{h}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "g"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "h"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "g"
+                            ],
+                            "below": [
+                              "h"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "f",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{g}{h}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "g"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "h"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "g"
+                        ],
+                        "below": [
+                          "h"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{a + \\frac{b}{c}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "a",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{b}{c}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "b"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "c"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "b"
+                        ],
+                        "below": [
+                          "c"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  "a",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{b}{c}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "b"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "c"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "b"
+                    ],
+                    "below": [
+                      "c"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "below": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{f + \\frac{g}{h}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "f",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{g}{h}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "g"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "h"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "g"
+                        ],
+                        "below": [
+                          "h"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  "f",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{g}{h}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "g"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "h"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "g"
+                    ],
+                    "below": [
+                      "h"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

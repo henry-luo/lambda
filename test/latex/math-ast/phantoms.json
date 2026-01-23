@@ -1,0 +1,458 @@
+{
+  "source": "phantoms.tex",
+  "generatedAt": "2026-01-23T09:55:46.808Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "a + \\phantom{b} + c",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a + \\phantom{b} + c",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "phantom",
+            "command": "\\phantom",
+            "verbatimLatex": "\\phantom{b}",
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "b"
+                ]
+              }
+            ],
+            "body": [
+              "b"
+            ],
+            "isInvisible": true
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "c"
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "\\frac{1}{\\hphantom{+}2}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\frac{1}{\\hphantom{+}2}",
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{\\hphantom{+}2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  {
+                    "type": "phantom",
+                    "command": "\\hphantom",
+                    "verbatimLatex": "\\hphantom{+}",
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      }
+                    ],
+                    "isInvisible": true,
+                    "smashDepth": true,
+                    "smashHeight": true
+                  },
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              {
+                "type": "phantom",
+                "command": "\\hphantom",
+                "verbatimLatex": "\\hphantom{+}",
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  }
+                ],
+                "isInvisible": true,
+                "smashDepth": true,
+                "smashHeight": true
+              },
+              "2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "\\sqrt{\\vphantom{y}x} = \\sqrt{y}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sqrt{\\vphantom{y}x} = \\sqrt{y}",
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{\\vphantom{y}x}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  {
+                    "type": "phantom",
+                    "command": "\\vphantom",
+                    "verbatimLatex": "\\vphantom{y}",
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "y"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "y"
+                    ],
+                    "isInvisible": true,
+                    "smashWidth": true
+                  },
+                  "x"
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "phantom",
+                "command": "\\vphantom",
+                "verbatimLatex": "\\vphantom{y}",
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "y"
+                    ]
+                  }
+                ],
+                "body": [
+                  "y"
+                ],
+                "isInvisible": true,
+                "smashWidth": true
+              },
+              "x"
+            ]
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{y}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              "y"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "\\sqrt{\\smash{y}} \\quad \\sqrt{y}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sqrt{\\smash{y}} \\quad \\sqrt{y}",
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{\\smash{y}}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  {
+                    "type": "phantom",
+                    "command": "\\smash",
+                    "verbatimLatex": "\\smash{y}",
+                    "captureSelection": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "y"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "y"
+                    ],
+                    "smashDepth": true,
+                    "smashHeight": true
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "phantom",
+                "command": "\\smash",
+                "verbatimLatex": "\\smash{y}",
+                "captureSelection": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "y"
+                    ]
+                  }
+                ],
+                "body": [
+                  "y"
+                ],
+                "smashDepth": true,
+                "smashHeight": true
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{y}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              "y"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "a \\! b \\quad a b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\! b \\quad a b",
+        "body": [
+          "a",
+          {
+            "type": "spacing",
+            "command": "\\!",
+            "verbatimLatex": "\\!",
+            "args": []
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "display",
+      "latex": "\\sqrt{x} + \\sqrt{y} \\quad \\sqrt{x} + \\sqrt{\\vphantom{x}y}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sqrt{x} + \\sqrt{y} \\quad \\sqrt{x} + \\sqrt{\\vphantom{x}y}",
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{x}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "x"
+                ]
+              }
+            ],
+            "body": [
+              "x"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{y}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              "y"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{x}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "x"
+                ]
+              }
+            ],
+            "body": [
+              "x"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{\\vphantom{x}y}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  {
+                    "type": "phantom",
+                    "command": "\\vphantom",
+                    "verbatimLatex": "\\vphantom{x}",
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "x"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "x"
+                    ],
+                    "isInvisible": true,
+                    "smashWidth": true
+                  },
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "phantom",
+                "command": "\\vphantom",
+                "verbatimLatex": "\\vphantom{x}",
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "x"
+                    ]
+                  }
+                ],
+                "body": [
+                  "x"
+                ],
+                "isInvisible": true,
+                "smashWidth": true
+              },
+              "y"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
