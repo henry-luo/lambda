@@ -315,7 +315,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
     transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
-    transpiler.error_count = 0;  transpiler.max_errors = 10;  // error threshold
+    transpiler.error_count = 0;
+    transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
     transpile_script(&transpiler, new_script, script_path);
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
@@ -510,6 +511,7 @@ void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
     runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
+    runtime->max_errors = 10;  // default error threshold
 }
 
 void runtime_cleanup(Runtime* runtime) {
