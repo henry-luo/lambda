@@ -374,10 +374,13 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"supseteq", 19, AtomType::Rel}, {"in", 50, AtomType::Rel},
     {"ni", 51, AtomType::Rel}, {"notin", 54, AtomType::Rel},
     {"neq", 54, AtomType::Rel}, {"ne", 54, AtomType::Rel},
-    {"prec", 28, AtomType::Rel}, {"succ", 29, AtomType::Rel},
-    {"ll", 30, AtomType::Rel}, {"gg", 31, AtomType::Rel},
+    {"prec", 30, AtomType::Rel}, {"succ", 31, AtomType::Rel},   // 0x1E, 0x1F
+    {"ll", 28, AtomType::Rel}, {"gg", 29, AtomType::Rel},       // 0x1C, 0x1D
     {"perp", 63, AtomType::Rel}, {"mid", 106, AtomType::Rel},
     {"parallel", 107, AtomType::Rel},
+    {"preceq", 22, AtomType::Rel}, {"succeq", 23, AtomType::Rel},
+    {"sqsubseteq", 118, AtomType::Rel}, {"sqsupseteq", 119, AtomType::Rel}, // 0x76, 0x77
+    {"asymp", 16, AtomType::Rel},
     // Arrows (cmsy10 positions)
     {"to", 33, AtomType::Rel}, {"rightarrow", 33, AtomType::Rel},
     {"leftarrow", 32, AtomType::Rel}, {"gets", 32, AtomType::Rel},
@@ -401,6 +404,13 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"land", 94, AtomType::Bin}, {"setminus", 110, AtomType::Bin},
     {"oplus", 8, AtomType::Bin}, {"ominus", 9, AtomType::Bin},
     {"otimes", 10, AtomType::Bin}, {"oslash", 11, AtomType::Bin},
+    // LaTeX symbols (lasy10) - positions from latexsym.sty
+    {"lhd", 0x01, AtomType::Bin}, {"unlhd", 0x02, AtomType::Bin},
+    {"rhd", 0x03, AtomType::Bin}, {"unrhd", 0x04, AtomType::Bin},
+    {"mho", 0x30, AtomType::Ord}, {"Join", 0x31, AtomType::Rel},
+    {"Box", 0x32, AtomType::Ord}, {"Diamond", 0x33, AtomType::Ord},
+    {"leadsto", 0x3B, AtomType::Rel},
+    {"sqsubset", 0x3C, AtomType::Rel}, {"sqsupset", 0x3D, AtomType::Rel},
     {nullptr, 0, AtomType::Ord}
 };
 
