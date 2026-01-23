@@ -693,6 +693,109 @@ let triple = fn(x: int) => x * multiplier;
 triple(5)  // Returns 15
 ```
 
+### Procedural Functions
+
+Lambda also supports **procedural functions** using the `pn` keyword. Unlike pure functional `fn` functions, procedural functions allow mutable state, side effects, and imperative control flow.
+
+```lambda
+// Procedural function declaration
+pn counter() {
+    var x = 0          // Mutable variable
+    while (x < 5) {
+        x = x + 1      // Assignment
+    }
+    x                  // Returns 5
+}
+```
+
+#### Key Differences from `fn`
+
+| Feature | `fn` (Functional) | `pn` (Procedural) |
+|---------|-------------------|-------------------|
+| Mutable variables | No | Yes (`var`) |
+| Assignment | No | Yes (`x = value`) |
+| While loops | No | Yes |
+| Early return | No | Yes (`return`) |
+| Side effects | Discouraged | Allowed |
+
+#### Implicit Return Value
+
+Like Rust, Ruby, and Scala, **the last expression in a procedural function becomes its return value**:
+
+```lambda
+pn add_one(x: int) {
+    x + 1    // Last expression is returned
+}
+
+pn factorial(n: int) {
+    var result = 1
+    var i = 1
+    while (i <= n) {
+        result = result * i
+        i = i + 1
+    }
+    result   // Last expression is returned
+}
+
+add_one(5)      // Returns 6
+factorial(5)    // Returns 120
+```
+
+This design follows the principle that **everything is an expression** - even statement blocks evaluate to a value.
+
+#### Early Return with `return`
+
+Use `return` to exit early from a procedural function:
+
+```lambda
+pn find_first_even(nums: [int]) {
+    var i = 0
+    while (i < len(nums)) {
+        if (nums[i] % 2 == 0) {
+            return nums[i]   // Early exit
+        }
+        i = i + 1
+    }
+    null   // Not found
+}
+```
+
+#### Procedural Control Flow
+
+Procedural functions support imperative control structures:
+
+```lambda
+// While loop
+pn countdown(n: int) {
+    var x = n
+    while (x > 0) {
+        print(x)
+        x = x - 1
+    }
+    "Done"
+}
+
+// Mutable variables
+pn swap_values() {
+    var a = 1
+    var b = 2
+    var temp = a
+    a = b
+    b = temp
+    (a, b)   // Returns (2, 1)
+}
+```
+
+#### Running Procedural Scripts
+
+Use the `run` command to execute scripts with a `main()` procedure:
+
+```bash
+./lambda.exe run script.ls    # Executes main() procedure
+```
+
+The `main()` procedure serves as the entry point for procedural scripts.
+
 ---
 
 ## Collections
