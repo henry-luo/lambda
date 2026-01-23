@@ -1,0 +1,684 @@
+{
+  "source": "testscripts.tex",
+  "generatedAt": "2026-01-23T09:55:46.842Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "f_a,  f^a, f_a^a, f^a_a",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "f_a,  f^a, f_a^a, f^a_a",
+        "body": [
+          "f",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "a"
+            ]
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "f",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "a"
+            ]
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "f",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "a"
+            ],
+            "superscript": [
+              "a"
+            ]
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "f",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "a"
+            ],
+            "subscript": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "\\mathop{A}\\limits_B\\limits^C \\qquad\n   \\mathop{A}\\limits^C \\limits_B \\qquad\n   \\mathop{A}\\nolimits_B\\limits^C \\qquad\n   \\mathop{A}\\nolimits^C \\limits_B",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\mathop{A}\\limits_B\\limits^C \\qquad\n   \\mathop{A}\\limits^C \\limits_B \\qquad\n   \\mathop{A}\\nolimits_B\\limits^C \\qquad\n   \\mathop{A}\\nolimits^C \\limits_B",
+        "body": [
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "over-under",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "subscript": [
+              "B"
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "over-under",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "superscript": [
+              "C"
+            ],
+            "subscript": [
+              "B"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "over-under",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "subscript": [
+              "B"
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "over-under",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "superscript": [
+              "C"
+            ],
+            "subscript": [
+              "B"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "\\mathop{A}\\limits_B\\nolimits^C \\qquad\n   \\mathop{A}\\limits^C \\nolimits_B \\qquad\n   \\mathop{A}\\nolimits_B\\nolimits^C\\qquad\n   \\mathop{A}\\nolimits^C\\nolimits_B",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\mathop{A}\\limits_B\\nolimits^C \\qquad\n   \\mathop{A}\\limits^C \\nolimits_B \\qquad\n   \\mathop{A}\\nolimits_B\\nolimits^C\\qquad\n   \\mathop{A}\\nolimits^C\\nolimits_B",
+        "body": [
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "adjacent",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "subscript": [
+              "B"
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "adjacent",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "superscript": [
+              "C"
+            ],
+            "subscript": [
+              "B"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "adjacent",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "subscript": [
+              "B"
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "adjacent",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "A"
+                ]
+              }
+            ],
+            "body": [
+              "A"
+            ],
+            "superscript": [
+              "C"
+            ],
+            "subscript": [
+              "B"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "\\mathop{\\mathop{A}\\limits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\limits_B}\\nolimits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\nolimits^C",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\mathop{\\mathop{A}\\limits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\limits_B}\\nolimits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\nolimits^C",
+        "body": [
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "over-under",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mop",
+                    "command": "\\mathop",
+                    "subsupPlacement": "over-under",
+                    "explicitSubsupPlacement": true,
+                    "isFunction": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "A"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "A"
+                    ],
+                    "subscript": [
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mop",
+                "command": "\\mathop",
+                "subsupPlacement": "over-under",
+                "explicitSubsupPlacement": true,
+                "isFunction": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "A"
+                    ]
+                  }
+                ],
+                "body": [
+                  "A"
+                ],
+                "subscript": [
+                  "B"
+                ]
+              }
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "over-under",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mop",
+                    "command": "\\mathop",
+                    "subsupPlacement": "adjacent",
+                    "explicitSubsupPlacement": true,
+                    "isFunction": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "A"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "A"
+                    ],
+                    "subscript": [
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mop",
+                "command": "\\mathop",
+                "subsupPlacement": "adjacent",
+                "explicitSubsupPlacement": true,
+                "isFunction": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "A"
+                    ]
+                  }
+                ],
+                "body": [
+                  "A"
+                ],
+                "subscript": [
+                  "B"
+                ]
+              }
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "adjacent",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mop",
+                    "command": "\\mathop",
+                    "subsupPlacement": "over-under",
+                    "explicitSubsupPlacement": true,
+                    "isFunction": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "A"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "A"
+                    ],
+                    "subscript": [
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mop",
+                "command": "\\mathop",
+                "subsupPlacement": "over-under",
+                "explicitSubsupPlacement": true,
+                "isFunction": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "A"
+                    ]
+                  }
+                ],
+                "body": [
+                  "A"
+                ],
+                "subscript": [
+                  "B"
+                ]
+              }
+            ],
+            "superscript": [
+              "C"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\qquad",
+            "verbatimLatex": "\\qquad",
+            "args": []
+          },
+          {
+            "type": "mop",
+            "command": "\\mathop",
+            "subsupPlacement": "adjacent",
+            "explicitSubsupPlacement": true,
+            "isFunction": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mop",
+                    "command": "\\mathop",
+                    "subsupPlacement": "adjacent",
+                    "explicitSubsupPlacement": true,
+                    "isFunction": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "A"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "A"
+                    ],
+                    "subscript": [
+                      "B"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mop",
+                "command": "\\mathop",
+                "subsupPlacement": "adjacent",
+                "explicitSubsupPlacement": true,
+                "isFunction": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "A"
+                    ]
+                  }
+                ],
+                "body": [
+                  "A"
+                ],
+                "subscript": [
+                  "B"
+                ]
+              }
+            ],
+            "superscript": [
+              "C"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "\\stackrel{C}{{\\stackrel{B}{A}}}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\stackrel{C}{{\\stackrel{B}{A}}}",
+        "body": [
+          {
+            "type": "overunder",
+            "command": "\\stackrel",
+            "verbatimLatex": "\\stackrel{C}{{\\stackrel{B}{A}}}",
+            "body": [
+              {
+                "type": "group",
+                "verbatimLatex": "{\\stackrel{B}{A}}",
+                "skipBoundary": true,
+                "body": [
+                  {
+                    "type": "overunder",
+                    "command": "\\stackrel",
+                    "verbatimLatex": "\\stackrel{B}{A}",
+                    "body": [
+                      "A"
+                    ],
+                    "above": [
+                      "B"
+                    ],
+                    "below": [],
+                    "skipBoundary": false,
+                    "boxType": "rel"
+                  }
+                ]
+              }
+            ],
+            "above": [
+              "C"
+            ],
+            "below": [],
+            "skipBoundary": false,
+            "boxType": "rel"
+          }
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "inline",
+      "latex": "{}_a",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "{}_a",
+        "body": [
+          {
+            "type": "group",
+            "verbatimLatex": "{}",
+            "skipBoundary": true,
+            "body": []
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "a"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "type": "inline",
+      "latex": "{}^a",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "{}^a",
+        "body": [
+          {
+            "type": "group",
+            "verbatimLatex": "{}",
+            "skipBoundary": true,
+            "body": []
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "a"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

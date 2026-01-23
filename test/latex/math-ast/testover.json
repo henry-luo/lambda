@@ -1,0 +1,299 @@
+{
+  "source": "testover.tex",
+  "generatedAt": "2026-01-23T09:55:46.841Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "a b c \\over d e f",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a b c \\over d e f",
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\over",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              },
+              {
+                "atoms": [
+                  "d",
+                  "e",
+                  "f"
+                ]
+              }
+            ],
+            "above": [
+              "a",
+              "b",
+              "c"
+            ],
+            "below": [
+              "d",
+              "e",
+              "f"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "a {b c \\over d e} f",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a {b c \\over d e} f",
+        "body": [
+          "a",
+          {
+            "type": "group",
+            "verbatimLatex": "{b c \\over d e}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\over",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "b",
+                      "c"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "d",
+                      "e"
+                    ]
+                  }
+                ],
+                "above": [
+                  "b",
+                  "c"
+                ],
+                "below": [
+                  "d",
+                  "e"
+                ]
+              }
+            ]
+          },
+          "f"
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "a {b c \\over d e\\egroup f",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a {b c \\over d e\\egroup f",
+        "body": [
+          "a",
+          {
+            "type": "group",
+            "verbatimLatex": "{b c \\over d e}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\over",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "b",
+                      "c"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "d",
+                      "e"
+                    ]
+                  }
+                ],
+                "above": [
+                  "b",
+                  "c"
+                ],
+                "below": [
+                  "d",
+                  "e"
+                ]
+              }
+            ]
+          },
+          "f"
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "a \\bgroup b c \\over d e\\egroup f",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\bgroup b c \\over d e\\egroup f",
+        "body": [
+          "a",
+          {
+            "type": "group",
+            "verbatimLatex": "{b c \\over d e}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\over",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "b",
+                      "c"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "d",
+                      "e"
+                    ]
+                  }
+                ],
+                "above": [
+                  "b",
+                  "c"
+                ],
+                "below": [
+                  "d",
+                  "e"
+                ]
+              }
+            ]
+          },
+          "f"
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "a \\beginfoo b c \\over d e\\endfoo f",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\beginfoo b c \\over d e\\endfoo f",
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\over",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "a",
+                  {
+                    "type": "error",
+                    "value": "\\beginfoo",
+                    "verbatimLatex": "\\beginfoo"
+                  },
+                  "b",
+                  "c"
+                ]
+              },
+              {
+                "atoms": [
+                  "d",
+                  "e",
+                  {
+                    "type": "error",
+                    "value": "\\endfoo",
+                    "verbatimLatex": "\\endfoo"
+                  },
+                  "f"
+                ]
+              }
+            ],
+            "above": [
+              "a",
+              {
+                "type": "error",
+                "value": "\\beginfoo",
+                "verbatimLatex": "\\beginfoo"
+              },
+              "b",
+              "c"
+            ],
+            "below": [
+              "d",
+              "e",
+              {
+                "type": "error",
+                "value": "\\endfoo",
+                "verbatimLatex": "\\endfoo"
+              },
+              "f"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "display",
+      "latex": "a { b c \\over d \\over e} f",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a { b c \\over d \\over e} f",
+        "body": [
+          "a",
+          {
+            "type": "group",
+            "verbatimLatex": "{ b c \\over d \\over e}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\over",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "b",
+                      "c"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "d",
+                      "e"
+                    ]
+                  }
+                ],
+                "above": [
+                  "b",
+                  "c"
+                ],
+                "below": [
+                  "d",
+                  "e"
+                ]
+              }
+            ]
+          },
+          "f"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,2173 @@
+{
+  "source": "test_all_operators.tex",
+  "generatedAt": "2026-01-23T09:55:46.816Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "a + b \\quad a - b \\quad a \\times b \\quad a \\div b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a + b \\quad a - b \\quad a \\times b \\quad a \\div b",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\times",
+            "value": "×",
+            "verbatimLatex": "\\times"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\div",
+            "value": "÷",
+            "verbatimLatex": "\\div"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "a \\cdot b \\quad a \\ast b \\quad a \\star b \\quad a \\circ b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\cdot b \\quad a \\ast b \\quad a \\star b \\quad a \\circ b",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\cdot",
+            "value": "⋅",
+            "verbatimLatex": "\\cdot"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\ast",
+            "value": "∗",
+            "verbatimLatex": "\\ast"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\star",
+            "value": "⋆",
+            "verbatimLatex": "\\star"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\circ",
+            "value": "∘",
+            "verbatimLatex": "\\circ"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "a \\pm b \\quad a \\mp b \\quad a \\setminus b \\quad a \\cap b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\pm b \\quad a \\mp b \\quad a \\setminus b \\quad a \\cap b",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\pm",
+            "value": "±",
+            "verbatimLatex": "\\pm"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\mp",
+            "value": "∓",
+            "verbatimLatex": "\\mp"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\setminus",
+            "value": "∖",
+            "verbatimLatex": "\\setminus"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\cap",
+            "value": "∩",
+            "verbatimLatex": "\\cap"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "a \\cup b \\quad a \\sqcap b \\quad a \\sqcup b \\quad a \\vee b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\cup b \\quad a \\sqcap b \\quad a \\sqcup b \\quad a \\vee b",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\cup",
+            "value": "∪",
+            "verbatimLatex": "\\cup"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "extensible-symbol",
+            "command": "\\sqcap",
+            "value": "⊓",
+            "verbatimLatex": "\\sqcap",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "⊓"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "extensible-symbol",
+            "command": "\\sqcup",
+            "value": "⊔",
+            "verbatimLatex": "\\sqcup",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "⊔"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\vee",
+            "value": "∨",
+            "verbatimLatex": "\\vee"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "a \\wedge b \\quad a \\oplus b \\quad a \\ominus b \\quad a \\otimes b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\wedge b \\quad a \\oplus b \\quad a \\ominus b \\quad a \\otimes b",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\wedge",
+            "value": "∧",
+            "verbatimLatex": "\\wedge"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\oplus",
+            "value": "⊕",
+            "verbatimLatex": "\\oplus"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\ominus",
+            "value": "⊖",
+            "verbatimLatex": "\\ominus"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\otimes",
+            "value": "⊗",
+            "verbatimLatex": "\\otimes"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "display",
+      "latex": "a \\oslash b \\quad a \\odot b \\quad a \\bullet b \\quad a \\diamond b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\oslash b \\quad a \\odot b \\quad a \\bullet b \\quad a \\diamond b",
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\oslash",
+            "value": "⊘",
+            "verbatimLatex": "\\oslash"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\odot",
+            "value": "⊙",
+            "verbatimLatex": "\\odot"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\bullet",
+            "value": "∙",
+            "verbatimLatex": "\\bullet"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mbin",
+            "command": "\\diamond",
+            "value": "⋄",
+            "verbatimLatex": "\\diamond"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "type": "display",
+      "latex": "a = b \\quad a \\neq b \\quad a < b \\quad a > b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a = b \\quad a \\neq b \\quad a < b \\quad a > b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\neq",
+            "verbatimLatex": "\\neq",
+            "captureSelection": true,
+            "args": [],
+            "body": [
+              {
+                "type": "overlap",
+                "command": "\\neq",
+                "skipBoundary": true,
+                "args": [],
+                "body": [
+                  {
+                    "value": ""
+                  }
+                ],
+                "align": "right",
+                "boxType": "rel"
+              },
+              {
+                "command": "\\neq",
+                "value": "=",
+                "args": []
+              }
+            ]
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 7,
+      "type": "display",
+      "latex": "a \\leq b \\quad a \\geq b \\quad a \\ll b \\quad a \\gg b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\leq b \\quad a \\geq b \\quad a \\ll b \\quad a \\gg b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\leq",
+            "value": "≤",
+            "verbatimLatex": "\\leq"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\geq",
+            "value": "≥",
+            "verbatimLatex": "\\geq"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\ll",
+            "value": "≪",
+            "verbatimLatex": "\\ll"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\gg",
+            "value": "≫",
+            "verbatimLatex": "\\gg"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 8,
+      "type": "display",
+      "latex": "a \\equiv b \\quad a \\sim b \\quad a \\simeq b \\quad a \\approx b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\equiv b \\quad a \\sim b \\quad a \\simeq b \\quad a \\approx b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\equiv",
+            "value": "≡",
+            "verbatimLatex": "\\equiv"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\sim",
+            "value": "∼",
+            "verbatimLatex": "\\sim"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\simeq",
+            "value": "≃",
+            "verbatimLatex": "\\simeq"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\approx",
+            "value": "≈",
+            "verbatimLatex": "\\approx"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 9,
+      "type": "display",
+      "latex": "a \\cong b \\quad a \\propto b \\quad a \\parallel b \\quad a \\perp b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\cong b \\quad a \\propto b \\quad a \\parallel b \\quad a \\perp b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\cong",
+            "value": "≅",
+            "verbatimLatex": "\\cong"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\propto",
+            "value": "∝",
+            "verbatimLatex": "\\propto"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\parallel",
+            "value": "∥",
+            "verbatimLatex": "\\parallel"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\perp",
+            "value": "⟂",
+            "verbatimLatex": "\\perp"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 10,
+      "type": "display",
+      "latex": "a \\subset b \\quad a \\supset b \\quad a \\subseteq b \\quad a \\supseteq b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\subset b \\quad a \\supset b \\quad a \\subseteq b \\quad a \\supseteq b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\subset",
+            "value": "⊂",
+            "verbatimLatex": "\\subset"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\supset",
+            "value": "⊃",
+            "verbatimLatex": "\\supset"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\subseteq",
+            "value": "⊆",
+            "verbatimLatex": "\\subseteq"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\supseteq",
+            "value": "⊇",
+            "verbatimLatex": "\\supseteq"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 11,
+      "type": "display",
+      "latex": "a \\in b \\quad a \\ni b \\quad a \\notin b \\quad a \\mid b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\in b \\quad a \\ni b \\quad a \\notin b \\quad a \\mid b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\in",
+            "value": "∈",
+            "verbatimLatex": "\\in"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\ni",
+            "value": "∋",
+            "verbatimLatex": "\\ni"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\notin",
+            "value": "∉",
+            "verbatimLatex": "\\notin"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\mid",
+            "value": "∣",
+            "verbatimLatex": "\\mid"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 12,
+      "type": "display",
+      "latex": "a \\prec b \\quad a \\succ b \\quad a \\preceq b \\quad a \\succeq b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a \\prec b \\quad a \\succ b \\quad a \\preceq b \\quad a \\succeq b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\prec",
+            "value": "≺",
+            "verbatimLatex": "\\prec"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\succ",
+            "value": "≻",
+            "verbatimLatex": "\\succ"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\preceq",
+            "value": "⪯",
+            "verbatimLatex": "\\preceq"
+          },
+          "b",
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\succeq",
+            "value": "⪰",
+            "verbatimLatex": "\\succeq"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 13,
+      "type": "display",
+      "latex": "\\leftarrow \\rightarrow \\leftrightarrow \\Leftarrow \\Rightarrow \\Leftrightarrow",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\leftarrow \\rightarrow \\leftrightarrow \\Leftarrow \\Rightarrow \\Leftrightarrow",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\leftarrow",
+            "value": "←",
+            "verbatimLatex": "\\leftarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\rightarrow",
+            "value": "→",
+            "verbatimLatex": "\\rightarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\leftrightarrow",
+            "value": "↔",
+            "verbatimLatex": "\\leftrightarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Leftarrow",
+            "value": "⇐",
+            "verbatimLatex": "\\Leftarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Rightarrow",
+            "value": "⇒",
+            "verbatimLatex": "\\Rightarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Leftrightarrow",
+            "value": "⇔",
+            "verbatimLatex": "\\Leftrightarrow"
+          }
+        ]
+      }
+    },
+    {
+      "index": 14,
+      "type": "display",
+      "latex": "\\uparrow \\downarrow \\updownarrow \\Uparrow \\Downarrow \\Updownarrow",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\uparrow \\downarrow \\updownarrow \\Uparrow \\Downarrow \\Updownarrow",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\uparrow",
+            "value": "↑",
+            "verbatimLatex": "\\uparrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\downarrow",
+            "value": "↓",
+            "verbatimLatex": "\\downarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\updownarrow",
+            "value": "↕",
+            "verbatimLatex": "\\updownarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Uparrow",
+            "value": "⇑",
+            "verbatimLatex": "\\Uparrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Downarrow",
+            "value": "⇓",
+            "verbatimLatex": "\\Downarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Updownarrow",
+            "value": "⇕",
+            "verbatimLatex": "\\Updownarrow"
+          }
+        ]
+      }
+    },
+    {
+      "index": 15,
+      "type": "display",
+      "latex": "\\longleftarrow \\longrightarrow \\longleftrightarrow \\Longleftarrow \\Longrightarrow \\Longleftrightarrow",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\longleftarrow \\longrightarrow \\longleftrightarrow \\Longleftarrow \\Longrightarrow \\Longleftrightarrow",
+        "body": [
+          {
+            "type": "overunder",
+            "command": "\\longleftarrow",
+            "verbatimLatex": "\\longleftarrow\\longrightarrow",
+            "subsupPlacement": "over-under",
+            "above": [
+              {
+                "type": "overunder",
+                "command": "\\longrightarrow",
+                "subsupPlacement": "over-under",
+                "below": [],
+                "skipBoundary": false,
+                "svgBody": "longrightarrow",
+                "boxType": "rel",
+                "paddedBody": true,
+                "paddedLabels": true
+              }
+            ],
+            "below": [],
+            "skipBoundary": false,
+            "svgBody": "longleftarrow",
+            "boxType": "rel",
+            "paddedBody": true,
+            "paddedLabels": true
+          },
+          {
+            "type": "overunder",
+            "command": "\\longleftrightarrow",
+            "verbatimLatex": "\\longleftrightarrow\\Longleftarrow",
+            "subsupPlacement": "over-under",
+            "above": [
+              {
+                "type": "mrel",
+                "command": "\\Longleftarrow",
+                "value": "⟸",
+                "verbatimLatex": "\\Longleftarrow"
+              }
+            ],
+            "below": [],
+            "skipBoundary": false,
+            "svgBody": "longleftrightarrow",
+            "boxType": "rel",
+            "paddedBody": true,
+            "paddedLabels": true
+          },
+          {
+            "type": "mrel",
+            "command": "\\Longrightarrow",
+            "value": "⟹",
+            "verbatimLatex": "\\Longrightarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\Longleftrightarrow",
+            "value": "⟺",
+            "verbatimLatex": "\\Longleftrightarrow"
+          }
+        ]
+      }
+    },
+    {
+      "index": 16,
+      "type": "display",
+      "latex": "\\nearrow \\searrow \\swarrow \\nwarrow",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\nearrow \\searrow \\swarrow \\nwarrow",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\nearrow",
+            "value": "↗",
+            "verbatimLatex": "\\nearrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\searrow",
+            "value": "↘",
+            "verbatimLatex": "\\searrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\swarrow",
+            "value": "↙",
+            "verbatimLatex": "\\swarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\nwarrow",
+            "value": "↖",
+            "verbatimLatex": "\\nwarrow"
+          }
+        ]
+      }
+    },
+    {
+      "index": 17,
+      "type": "display",
+      "latex": "\\mapsto \\longmapsto \\hookrightarrow \\hookleftarrow",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\mapsto \\longmapsto \\hookrightarrow \\hookleftarrow",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\mapsto",
+            "value": "↦",
+            "verbatimLatex": "\\mapsto"
+          },
+          {
+            "type": "mrel",
+            "command": "\\longmapsto",
+            "value": "⟼",
+            "verbatimLatex": "\\longmapsto"
+          },
+          {
+            "type": "mrel",
+            "command": "\\hookrightarrow",
+            "value": "↪",
+            "verbatimLatex": "\\hookrightarrow"
+          },
+          {
+            "type": "mrel",
+            "command": "\\hookleftarrow",
+            "value": "↩",
+            "verbatimLatex": "\\hookleftarrow"
+          }
+        ]
+      }
+    },
+    {
+      "index": 18,
+      "type": "display",
+      "latex": "\\rightharpoonup \\rightharpoondown \\leftharpoonup \\leftharpoondown",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\rightharpoonup \\rightharpoondown \\leftharpoonup \\leftharpoondown",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\rightharpoonup",
+            "value": "⇀",
+            "verbatimLatex": "\\rightharpoonup"
+          },
+          {
+            "type": "mrel",
+            "command": "\\rightharpoondown",
+            "value": "⇁",
+            "verbatimLatex": "\\rightharpoondown"
+          },
+          {
+            "type": "mrel",
+            "command": "\\leftharpoonup",
+            "value": "↼",
+            "verbatimLatex": "\\leftharpoonup"
+          },
+          {
+            "type": "mrel",
+            "command": "\\leftharpoondown",
+            "value": "↽",
+            "verbatimLatex": "\\leftharpoondown"
+          }
+        ]
+      }
+    },
+    {
+      "index": 19,
+      "type": "display",
+      "latex": "\\rightleftharpoons \\leadsto",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\rightleftharpoons \\leadsto",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\rightleftharpoons",
+            "value": "⇌",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\rightleftharpoons"
+          },
+          {
+            "type": "mrel",
+            "command": "\\leadsto",
+            "value": "⇝",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\leadsto"
+          }
+        ]
+      }
+    },
+    {
+      "index": 20,
+      "type": "display",
+      "latex": "\\sum \\prod \\coprod \\int \\oint \\iint \\iiint",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\sum \\prod \\coprod \\int \\oint \\iint \\iiint",
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\sum",
+            "value": "∑",
+            "verbatimLatex": "\\sum",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∑"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\prod",
+            "value": "∏",
+            "verbatimLatex": "\\prod",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∏"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\coprod",
+            "value": "∐",
+            "verbatimLatex": "\\coprod",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∐"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\int",
+            "value": "∫",
+            "verbatimLatex": "\\int",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "∫"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\oint",
+            "value": "∮",
+            "verbatimLatex": "\\oint",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "∮"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\iint",
+            "value": "∬",
+            "verbatimLatex": "\\iint",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "∬"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\iiint",
+            "value": "∭",
+            "verbatimLatex": "\\iiint",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "∭"
+          }
+        ]
+      }
+    },
+    {
+      "index": 21,
+      "type": "display",
+      "latex": "\\bigcup \\bigcap \\bigsqcup \\bigvee \\bigwedge",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\bigcup \\bigcap \\bigsqcup \\bigvee \\bigwedge",
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigcup",
+            "value": "⋃",
+            "verbatimLatex": "\\bigcup",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⋃"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigcap",
+            "value": "⋂",
+            "verbatimLatex": "\\bigcap",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⋂"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigsqcup",
+            "value": "⨆",
+            "verbatimLatex": "\\bigsqcup",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⨆"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigvee",
+            "value": "⋁",
+            "verbatimLatex": "\\bigvee",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⋁"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigwedge",
+            "value": "⋀",
+            "verbatimLatex": "\\bigwedge",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⋀"
+          }
+        ]
+      }
+    },
+    {
+      "index": 22,
+      "type": "display",
+      "latex": "\\bigoplus \\bigotimes \\bigodot \\biguplus",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\bigoplus \\bigotimes \\bigodot \\biguplus",
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigoplus",
+            "value": "⨁",
+            "verbatimLatex": "\\bigoplus",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⨁"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigotimes",
+            "value": "⨂",
+            "verbatimLatex": "\\bigotimes",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⨂"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\bigodot",
+            "value": "⨀",
+            "verbatimLatex": "\\bigodot",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⨀"
+          },
+          {
+            "type": "extensible-symbol",
+            "command": "\\biguplus",
+            "value": "⨄",
+            "verbatimLatex": "\\biguplus",
+            "subsupPlacement": "auto",
+            "args": [],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "⨄"
+          }
+        ]
+      }
+    },
+    {
+      "index": 23,
+      "type": "display",
+      "latex": "(a) \\quad [a] \\quad \\{a\\} \\quad |a| \\quad \\|a\\|",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "(a) \\quad [a] \\quad \\{a\\} \\quad |a| \\quad \\|a\\|",
+        "body": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "a",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          "a",
+          {
+            "type": "mclose",
+            "value": "]"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mopen",
+            "command": "\\{",
+            "value": "{",
+            "verbatimLatex": "\\{"
+          },
+          "a",
+          {
+            "type": "mclose",
+            "command": "\\}",
+            "value": "}",
+            "verbatimLatex": "\\}"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          "a",
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\|",
+            "value": "∥",
+            "verbatimLatex": "\\|"
+          },
+          "a",
+          {
+            "type": "mord",
+            "command": "\\|",
+            "value": "∥",
+            "verbatimLatex": "\\|"
+          }
+        ]
+      }
+    },
+    {
+      "index": 24,
+      "type": "display",
+      "latex": "\\langle a \\rangle \\quad \\lfloor a \\rfloor \\quad \\lceil a \\rceil",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\langle a \\rangle \\quad \\lfloor a \\rfloor \\quad \\lceil a \\rceil",
+        "body": [
+          {
+            "type": "mopen",
+            "command": "\\langle",
+            "value": "⟨",
+            "verbatimLatex": "\\langle"
+          },
+          "a",
+          {
+            "type": "mclose",
+            "command": "\\rangle",
+            "value": "⟩",
+            "verbatimLatex": "\\rangle"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mopen",
+            "command": "\\lfloor",
+            "value": "⌊",
+            "verbatimLatex": "\\lfloor"
+          },
+          "a",
+          {
+            "type": "mclose",
+            "command": "\\rfloor",
+            "value": "⌋",
+            "verbatimLatex": "\\rfloor"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mopen",
+            "command": "\\lceil",
+            "value": "⌈",
+            "verbatimLatex": "\\lceil"
+          },
+          "a",
+          {
+            "type": "mclose",
+            "command": "\\rceil",
+            "value": "⌉",
+            "verbatimLatex": "\\rceil"
+          }
+        ]
+      }
+    },
+    {
+      "index": 25,
+      "type": "display",
+      "latex": "\\hat{a} \\quad \\check{a} \\quad \\tilde{a} \\quad \\acute{a} \\quad \\grave{a}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\hat{a} \\quad \\check{a} \\quad \\tilde{a} \\quad \\acute{a} \\quad \\grave{a}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\hat",
+            "verbatimLatex": "\\hat{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 94
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\check",
+            "verbatimLatex": "\\check{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 711
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\tilde",
+            "verbatimLatex": "\\tilde{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 126
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\acute",
+            "verbatimLatex": "\\acute{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 714
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\grave",
+            "verbatimLatex": "\\grave{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 715
+          }
+        ]
+      }
+    },
+    {
+      "index": 26,
+      "type": "display",
+      "latex": "\\dot{a} \\quad \\ddot{a} \\quad \\breve{a} \\quad \\bar{a} \\quad \\vec{a}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\dot{a} \\quad \\ddot{a} \\quad \\breve{a} \\quad \\bar{a} \\quad \\vec{a}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\dot",
+            "verbatimLatex": "\\dot{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 729
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\ddot",
+            "verbatimLatex": "\\ddot{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 168
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\breve",
+            "verbatimLatex": "\\breve{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 728
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\bar",
+            "verbatimLatex": "\\bar{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 713
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\vec",
+            "verbatimLatex": "\\vec{a}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              "a"
+            ],
+            "accentChar": 8407
+          }
+        ]
+      }
+    },
+    {
+      "index": 27,
+      "type": "display",
+      "latex": "\\widehat{abc} \\quad \\widetilde{abc} \\quad \\overline{abc} \\quad \\underline{abc}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\widehat{abc} \\quad \\widetilde{abc} \\quad \\overline{abc} \\quad \\underline{abc}",
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\widehat",
+            "verbatimLatex": "\\widehat{abc}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              "b",
+              "c"
+            ],
+            "svgAccent": "widehat2"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "accent",
+            "command": "\\widetilde",
+            "verbatimLatex": "\\widetilde{abc}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              "b",
+              "c"
+            ],
+            "svgAccent": "widetilde2"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "command": "\\overline",
+            "verbatimLatex": "\\overline{abc}",
+            "args": [
+              {
+                "group": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              "b",
+              "c"
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "command": "\\underline",
+            "verbatimLatex": "\\underline{abc}",
+            "args": [
+              {
+                "group": [
+                  "a",
+                  "b",
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "index": 28,
+      "type": "display",
+      "latex": "\\overbrace{abc} \\quad \\underbrace{abc}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\overbrace{abc} \\quad \\underbrace{abc}",
+        "body": [
+          {
+            "type": "overunder",
+            "command": "\\overbrace",
+            "verbatimLatex": "\\overbrace{abc}",
+            "subsupPlacement": "over-under",
+            "body": [
+              "a",
+              "b",
+              "c"
+            ],
+            "skipBoundary": false,
+            "svgAbove": "overbrace",
+            "paddedBody": true
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "overunder",
+            "command": "\\underbrace",
+            "verbatimLatex": "\\underbrace{abc}",
+            "subsupPlacement": "over-under",
+            "body": [
+              "a",
+              "b",
+              "c"
+            ],
+            "skipBoundary": false,
+            "svgBelow": "underbrace",
+            "paddedBody": true
+          }
+        ]
+      }
+    },
+    {
+      "index": 29,
+      "type": "display",
+      "latex": "\\infty \\quad \\partial \\quad \\nabla \\quad \\forall \\quad \\exists",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\infty \\quad \\partial \\quad \\nabla \\quad \\forall \\quad \\exists",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\nabla",
+            "value": "∇",
+            "verbatimLatex": "\\nabla"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\forall",
+            "value": "∀",
+            "verbatimLatex": "\\forall"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\exists",
+            "value": "∃",
+            "verbatimLatex": "\\exists"
+          }
+        ]
+      }
+    },
+    {
+      "index": 30,
+      "type": "display",
+      "latex": "\\neg \\quad \\emptyset \\quad \\varnothing \\quad \\wp \\quad \\Re \\quad \\Im",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\neg \\quad \\emptyset \\quad \\varnothing \\quad \\wp \\quad \\Re \\quad \\Im",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\neg",
+            "value": "¬",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\neg"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\emptyset",
+            "value": "∅",
+            "verbatimLatex": "\\emptyset"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\varnothing",
+            "value": "∅",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\varnothing"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\wp",
+            "value": "℘",
+            "verbatimLatex": "\\wp"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "operator",
+            "command": "\\Re",
+            "value": "ℜ",
+            "verbatimLatex": "\\Re",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "fraktur",
+            "limits": "adjacent",
+            "symbol": "ℜ"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "operator",
+            "command": "\\Im",
+            "value": "ℑ",
+            "verbatimLatex": "\\Im",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "fraktur",
+            "limits": "adjacent",
+            "symbol": "ℑ"
+          }
+        ]
+      }
+    },
+    {
+      "index": 31,
+      "type": "display",
+      "latex": "\\aleph \\quad \\hbar \\quad \\ell \\quad \\imath \\quad \\jmath",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\aleph \\quad \\hbar \\quad \\ell \\quad \\imath \\quad \\jmath",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\aleph",
+            "value": "ℵ",
+            "verbatimLatex": "\\aleph"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\hbar",
+            "value": "ℏ",
+            "verbatimLatex": "\\hbar"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\ell",
+            "value": "ℓ",
+            "verbatimLatex": "\\ell"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\imath",
+            "value": "ı",
+            "verbatimLatex": "\\imath"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\jmath",
+            "value": "ȷ",
+            "verbatimLatex": "\\jmath"
+          }
+        ]
+      }
+    },
+    {
+      "index": 32,
+      "type": "display",
+      "latex": "\\prime \\quad \\angle \\quad \\triangle \\quad \\square \\quad \\clubsuit",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\prime \\quad \\angle \\quad \\triangle \\quad \\square \\quad \\clubsuit",
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\prime",
+            "value": "′",
+            "verbatimLatex": "\\prime"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\angle",
+            "value": "∠",
+            "verbatimLatex": "\\angle"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mrel",
+            "command": "\\triangle",
+            "value": "△",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\triangle"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\square",
+            "value": "□",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\square"
+          },
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\clubsuit",
+            "value": "♣",
+            "verbatimLatex": "\\clubsuit"
+          }
+        ]
+      }
+    }
+  ]
+}

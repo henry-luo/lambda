@@ -1,0 +1,185 @@
+{
+  "source": "array.tex",
+  "generatedAt": "2026-01-23T09:55:46.773Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "\\begin{array}{ccc}\n   a & b & c \\\\\n   c &  & d \\\\\n\\\\\n   e & f  \\\\\n   \\end{array}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\begin{array}{ccc}\n   a & b & c \\\\\n   c &  & d \\\\\n\\\\\n   e & f  \\\\\n   \\end{array}",
+        "body": [
+          {
+            "type": "array",
+            "environmentName": "array",
+            "array": [
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "a"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "b"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "c"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "c"
+                ],
+                [
+                  {
+                    "type": "first"
+                  }
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "d"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  }
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "e"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "f"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ]
+              ]
+            ],
+            "rowGaps": [
+              {
+                "dimension": 0
+              },
+              {
+                "dimension": 0
+              },
+              {
+                "dimension": 0
+              },
+              {
+                "dimension": 0
+              }
+            ],
+            "columns": [
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              }
+            ],
+            "minColumns": 1,
+            "minRows": 1,
+            "maxRows": null,
+            "mathstyleName": "textstyle"
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "\\matrix{a & b \\cr c & d}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\matrix{a & b \\cr c & d}",
+        "body": [
+          {
+            "type": "error",
+            "value": "\\matrix",
+            "verbatimLatex": "\\matrix"
+          },
+          {
+            "type": "group",
+            "verbatimLatex": "{a & b \\cr c & d}",
+            "skipBoundary": true,
+            "body": [
+              "a",
+              {
+                "type": "mord",
+                "command": "\\&",
+                "value": "&"
+              },
+              "b",
+              {
+                "type": "error",
+                "value": "\\cr",
+                "verbatimLatex": "\\cr"
+              },
+              "c",
+              {
+                "type": "mord",
+                "command": "\\&",
+                "value": "&"
+              },
+              "d"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,283 @@
+{
+  "source": "test_matrix.tex",
+  "generatedAt": "2026-01-23T09:55:46.833Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "inline",
+      "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+        "body": [
+          {
+            "type": "array",
+            "environmentName": "pmatrix",
+            "array": [
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "a"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "b"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "c"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "d"
+                ]
+              ]
+            ],
+            "rowGaps": [
+              {
+                "dimension": 0
+              }
+            ],
+            "columns": [
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              }
+            ],
+            "minColumns": 1,
+            "minRows": 1,
+            "maxRows": null,
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "mathstyleName": "textstyle"
+          }
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "inline",
+      "latex": "\\begin{vmatrix} 1 & 0 \\\\ 0 & 1 \\end{vmatrix} \\det",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\begin{vmatrix} 1 & 0 \\\\ 0 & 1 \\end{vmatrix} \\det",
+        "body": [
+          {
+            "type": "array",
+            "environmentName": "vmatrix",
+            "array": [
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "1"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "0"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "0"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "1"
+                ]
+              ]
+            ],
+            "rowGaps": [
+              {
+                "dimension": 0
+              }
+            ],
+            "columns": [
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              }
+            ],
+            "minColumns": 1,
+            "minRows": 1,
+            "maxRows": null,
+            "leftDelim": "\\vert",
+            "rightDelim": "\\vert",
+            "mathstyleName": "textstyle"
+          },
+          {
+            "type": "operator",
+            "command": "\\det",
+            "value": "det",
+            "verbatimLatex": "\\det",
+            "subsupPlacement": "over-under",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "limits": "over-under",
+            "symbol": "det"
+          }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "inline",
+      "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+        "body": [
+          {
+            "type": "array",
+            "environmentName": "pmatrix",
+            "array": [
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "a"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "b"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "c"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "d"
+                ]
+              ]
+            ],
+            "rowGaps": [
+              {
+                "dimension": 0
+              }
+            ],
+            "columns": [
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              },
+              {
+                "align": "c"
+              }
+            ],
+            "minColumns": 1,
+            "minRows": 1,
+            "maxRows": null,
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "mathstyleName": "textstyle"
+          }
+        ]
+      }
+    }
+  ]
+}

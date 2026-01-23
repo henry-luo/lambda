@@ -1,0 +1,227 @@
+{
+  "source": "ambiguous_relations.tex",
+  "generatedAt": "2026-01-23T09:55:46.771Z",
+  "generator": "MathLive",
+  "expressions": [
+    {
+      "index": 0,
+      "type": "display",
+      "latex": "x >= 0",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x >= 0",
+        "body": [
+          "x",
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "type": "display",
+      "latex": "x <= 0",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "x <= 0",
+        "body": [
+          "x",
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "type": "display",
+      "latex": "<x, y> = 0",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "<x, y> = 0",
+        "body": [
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "x",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "y",
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "type": "display",
+      "latex": "0 = <x,y>",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "0 = <x,y>",
+        "body": [
+          "0",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "x",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "y",
+          {
+            "type": "mrel",
+            "value": ">"
+          }
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "type": "display",
+      "latex": "2<x,y> = z",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "2<x,y> = z",
+        "body": [
+          "2",
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "x",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "y",
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "z"
+        ]
+      }
+    },
+    {
+      "index": 5,
+      "type": "display",
+      "latex": "0 = <x,y>A",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "0 = <x,y>A",
+        "body": [
+          "0",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "x",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "y",
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          "A"
+        ]
+      }
+    },
+    {
+      "index": 6,
+      "type": "display",
+      "latex": "a << b",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "a << b",
+        "body": [
+          "a",
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "b"
+        ]
+      }
+    },
+    {
+      "index": 7,
+      "type": "display",
+      "latex": "0 < <a,b> >1",
+      "ast": {
+        "type": "root",
+        "verbatimLatex": "0 < <a,b> >1",
+        "body": [
+          "0",
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          {
+            "type": "mrel",
+            "value": "<"
+          },
+          "a",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "b",
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          {
+            "type": "mrel",
+            "value": ">"
+          },
+          "1"
+        ]
+      }
+    }
+  ]
+}
