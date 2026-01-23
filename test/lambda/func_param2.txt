@@ -1,0 +1,13 @@
+{
+  test1_default: [15, 8],
+  test2_optional: [5, 8],
+  test3_multi_default: [[0, 0, 0], [1, 0, 0], [1, 2, 0], [1, 2, 3]],
+  test4_positional: [0, 0, 100, 50],
+  test5_all_named: [10, 20, 100, 50],
+  test6_reordered: [10, 20, 100, 50],
+  test7_mixed: [0, 0, 200, 100],
+  test8_named_with_defaults: [["localhost", 8080, false], ["localhost", 3000, false], ["localhost", 8080, true], ["example.com", 8080, true]],
+  test9_expr_default: [100, 15],
+  test10_typed_default: [10, 15],
+  test11_optional_typed: [10, 8]
+}

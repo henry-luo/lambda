@@ -69,6 +69,7 @@ extern "C" {
 #define SYM_IMPORT_MODULE sym_import_module
 
 #define SYM_COMMENT sym_comment
+#define SYM_NAMED_ARGUMENT sym_named_argument
 
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
@@ -90,6 +91,10 @@ extern "C" {
 #define FIELD_MODULE field_module
 #define FIELD_PUB field_pub
 #define FIELD_KIND field_kind
+#define FIELD_OPTIONAL field_optional
+#define FIELD_DEFAULT field_default
+#define FIELD_VALUE field_value
+#define FIELD_VARIADIC field_variadic
 
 #ifdef __cplusplus
 }
@@ -143,6 +148,7 @@ typedef enum AstNodeType {
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
+    AST_NODE_NAMED_ARG,     // named argument in function call
     AST_NODE_TYPE,  // base type
     AST_NODE_CONTENT_TYPE,
     AST_NODE_LIST_TYPE,

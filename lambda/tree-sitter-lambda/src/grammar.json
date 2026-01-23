@@ -3590,6 +3590,10 @@
                         "members": [
                           {
                             "type": "SYMBOL",
+                            "name": "named_argument"
+                          },
+                          {
+                            "type": "SYMBOL",
                             "name": "_expression"
                           },
                           {
@@ -3622,6 +3626,10 @@
                             "content": {
                               "type": "CHOICE",
                               "members": [
+                                {
+                                  "type": "SYMBOL",
+                                  "name": "named_argument"
+                                },
                                 {
                                   "type": "SYMBOL",
                                   "name": "_expression"
@@ -4543,6 +4551,98 @@
       }
     },
     "parameter": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "name",
+              "content": {
+                "type": "SYMBOL",
+                "name": "identifier"
+              }
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "optional",
+                  "content": {
+                    "type": "STRING",
+                    "value": "?"
+                  }
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": ":"
+                    },
+                    {
+                      "type": "FIELD",
+                      "name": "type",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_type_expr"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": "="
+                    },
+                    {
+                      "type": "FIELD",
+                      "name": "default",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_expression"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "BLANK"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "variadic",
+          "content": {
+            "type": "STRING",
+            "value": "..."
+          }
+        }
+      ]
+    },
+    "named_argument": {
       "type": "SEQ",
       "members": [
         {
@@ -4554,29 +4654,16 @@
           }
         },
         {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SEQ",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": ":"
-                },
-                {
-                  "type": "FIELD",
-                  "name": "type",
-                  "content": {
-                    "type": "SYMBOL",
-                    "name": "_type_expr"
-                  }
-                }
-              ]
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
         }
       ]
     },
