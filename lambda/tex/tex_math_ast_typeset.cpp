@@ -1288,13 +1288,14 @@ static TexNode* typeset_not_node(MathASTNode* node, MathContext& ctx) {
     slash->x = slash_offset;
     slash->y = 0;
     
-    // Add children in order: operand first, then slash overlay
-    result->first_child = operand;
-    operand->parent = result;
-    operand->next_sibling = slash;
-    slash->prev_sibling = operand;
+    // Add children in order: slash FIRST, then operand
+    // TeX outputs the negation slash before the operand character in DVI
+    result->first_child = slash;
     slash->parent = result;
-    result->last_child = slash;
+    slash->next_sibling = operand;
+    operand->prev_sibling = slash;
+    operand->parent = result;
+    result->last_child = operand;
     
     // The width is just the operand width (slash overlays, doesn't add width)
     log_debug("[TYPESET] not: operand_w=%.2f slash_w=%.2f result_w=%.2f", 
