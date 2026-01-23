@@ -26,6 +26,8 @@ typedef struct {
 } func_obj_t;
 
 func_obj_t func_list[] = {
+    // C library functions
+    {"memset", (fn_ptr) memset},
     // {"printf", (fn_ptr) printf}, // printf does not work
     {"array", (fn_ptr) array},
     {"array_int", (fn_ptr) array_int},
@@ -149,6 +151,10 @@ func_obj_t func_list[] = {
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
     {"fn_join", (fn_ptr) fn_join},
+    // variadic parameter access
+    {"set_vargs", (fn_ptr) set_vargs},
+    {"fn_varg0", (fn_ptr) fn_varg0},
+    {"fn_varg1", (fn_ptr) fn_varg1},
     // procedures
     {"pn_print", (fn_ptr) pn_print},
     {"pn_cmd", (fn_ptr) pn_cmd},

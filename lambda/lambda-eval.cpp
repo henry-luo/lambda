@@ -1103,3 +1103,41 @@ DateTime fn_datetime() {
 
     return static_dt;
 }
+
+// Thread-local storage for current variadic arguments list
+// Set by variadic function calls, accessed by fn_varg functions
+__thread List* current_vargs = NULL;
+
+// Set current variadic arguments (called before variadic function body)
+void set_vargs(List* vargs) {
+    current_vargs = vargs;
+}
+
+// varg() - returns all variadic arguments as a list
+Item fn_varg0() {
+    if (current_vargs == NULL) {
+        log_debug("fn_varg0: no variadic args, returning empty list");
+        // return an empty list - allocate directly without frame context
+        List* empty = (List*)heap_calloc(sizeof(List), LMD_TYPE_LIST);
+        empty->type_id = LMD_TYPE_LIST;
+        empty->length = 0;
+        empty->capacity = 0;
+        empty->items = NULL;
+        return {.list = empty};
+    }
+    return {.list = current_vargs};
+}
+
+// varg(n) - returns the nth variadic argument
+Item fn_varg1(Item index_item) {
+    int64_t index = it2l(index_item);
+    if (current_vargs == NULL) {
+        log_debug("fn_varg1: no variadic args available");
+        return ItemNull;
+    }
+    if (index < 0 || index >= current_vargs->length) {
+        log_debug("fn_varg1: index %lld out of bounds (length %lld)", index, current_vargs->length);
+        return ItemNull;
+    }
+    return current_vargs->items[index];
+}

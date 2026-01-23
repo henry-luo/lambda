@@ -407,6 +407,11 @@ typedef struct Context {
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
     DateTime fn_datetime();
 
+    // variadic parameter access
+    void set_vargs(List* vargs);  // set current variadic args
+    Item fn_varg0();              // varg() - get all variadic args as list
+    Item fn_varg1(Item index);    // varg(n) - get nth variadic arg
+
     // procedural functions
     Item pn_print(Item item);
     Item pn_cmd(Item cmd, Item args);
