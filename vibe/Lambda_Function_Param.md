@@ -527,3 +527,630 @@ All 73 baseline tests pass. The feature is fully functional with:
 - Type coercion working (int→float)
 - Null comparison working for optional parameter patterns
 - Error accumulation stopping at 10 errors
+
+---
+
+# Phase 2: Advanced Parameter Features (Proposed: January 23, 2026)
+
+## Overview
+
+This phase extends Lambda's function parameter handling with four major features:
+1. **Optional/Required Parameters**: Type-based optionality with `?` modifier (TypeScript-style)
+2. **Default Parameter Values**: Compile-time default value expressions with typed param support
+3. **Named Arguments**: Order-independent argument passing with parameter names
+4. **Variadic Parameters**: Variable argument lists with `...` and `varg()` accessor
+
+---
+
+## TypeScript Compatibility Note
+
+Lambda's optional parameter syntax follows TypeScript's semantics:
+
+| Lambda Syntax | TypeScript Equivalent | Meaning |
+|---------------|----------------------|---------|
+| `fn f(a?: T)` | `function f(a?: T)` | Parameter `a` is **optional**, caller can omit it. Inside function, `a` is `T \| null` |
+| `fn f(a: T?)` | `function f(a: T \| null)` | Type `T` is **nullable**, but parameter is **required**. Caller must pass something (even `null`) |
+
+**Example**:
+```lambda
+// Optional parameter - can call f() or f(5)
+fn f(a?: int) { a ?? 0 }
+f()         // OK, a is null
+f(5)        // OK, a is 5
+
+// Nullable type - must call g(val), even g(null)
+fn g(a: int?) { a ?? 0 }
+g()         // ERROR: missing required parameter
+g(null)     // OK, a is null
+g(5)        // OK, a is 5
+```
+
+---
+
+## 1. Optional and Required Parameters
+
+### Semantics
+
+| Declaration | Optionality | Behavior |
+|-------------|-------------|----------|
+| `fn f(a, b)` | All optional | Untyped params default to `null` if omitted |
+| `fn f(a: T, b: T)` | All required | Type annotation implies required |
+| `fn f(a?: T, b?: T)` | All optional | `?` before `:` makes typed param optional |
+| `fn f(a: T, b?: T)` | `a` required, `b` optional | Mixed: first required, second optional |
+| `fn f(a: T?)` | Required | Nullable type, but param must be provided |
+| `fn f(a: int = 5)` | Optional | Type + default value = optional |
+
+### Constraint
+**Optional parameters must come after all required parameters.**
+
+```lambda
+// Valid
+fn valid1(req: int, opt?: int) { ... }
+fn valid2(req1: int, req2: float, opt1?, opt2?) { ... }
+fn valid3(req: int, opt: int = 10) { ... }          // typed with default
+
+// Invalid - compile error
+fn invalid(opt?: int, req: int) { ... }  // Error: required after optional
+```
+
+### Grammar Changes (`grammar.js`)
+
+Current `parameter` rule:
+```javascript
+parameter: $ => seq(
+  field('name', $.identifier), optional(seq(':', field('type', $._type_expr))),
+),
+```
+
+Proposed change:
+```javascript
+parameter: $ => seq(
+  field('name', $.identifier),
+  optional(field('optional', '?')),  // optional marker BEFORE type
+  optional(seq(':', field('type', $._type_expr))),
+  optional(seq('=', field('default', $._expression))),
+),
+```
+
+**Note**: The `?` comes BEFORE the `:` to distinguish from nullable types:
+- `a?: int` - optional parameter of type `int`
+- `a: int?` - required parameter of nullable type `int?`
+
+### AST Changes (`ast.hpp`)
+
+Extend `TypeParam`:
+```cpp
+typedef struct TypeParam : Type {
+    struct TypeParam* next;
+    bool is_optional;        // New: whether parameter is optional
+    AstNode* default_value;  // New: default value expression (NULL if none)
+} TypeParam;
+```
+
+### Build Phase Changes (`build_ast.cpp`)
+
+In `build_param_expr()`:
+```cpp
+AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) {
+    // ... existing code ...
+    
+    // Check for optional marker '?' (before the colon)
+    TSNode optional_node = ts_node_child_by_field_id(param_node, FIELD_OPTIONAL);
+    TypeParam* type_param = (TypeParam*)ast_node->type;
+    
+    if (!ts_node_is_null(optional_node)) {
+        // Explicit '?' marker = optional
+        type_param->is_optional = true;
+    } else if (ts_node_is_null(type_node)) {
+        // No type annotation = optional (implicit)
+        type_param->is_optional = true;
+    } else {
+        // Has type annotation without '?' = required
+        type_param->is_optional = false;
+    }
+    
+    // Parse default value (implies optional)
+    TSNode default_node = ts_node_child_by_field_id(param_node, FIELD_DEFAULT);
+    if (!ts_node_is_null(default_node)) {
+        type_param->default_value = build_expr(tp, default_node);
+        type_param->is_optional = true;  // default implies optional
+    }
+    
+    // ... rest of existing code ...
+}
+```
+
+In `build_func()`, add validation:
+```cpp
+// After building all params, validate ordering
+TypeParam* param = fn_type->param;
+bool seen_optional = false;
+while (param) {
+    if (param->is_optional) {
+        seen_optional = true;
+    } else if (seen_optional) {
+        record_type_error(tp, line, 
+            "required parameter after optional parameter");
+    }
+    param = param->next;
+}
+```
+
+### Transpilation Changes (`transpile.cpp`)
+
+In `transpile_call_expr()`:
+```cpp
+// Fill missing arguments with default value or ITEM_NULL
+while (param_type) {
+    log_debug("param_mismatch: filling missing argument for param type %d", 
+        param_type->type_id);
+    if (has_output_arg) {
+        strbuf_append_char(tp->code_buf, ',');
+    }
+    
+    if (param_type->default_value) {
+        // Use default value expression
+        transpile_expr(tp, param_type->default_value);
+    } else if (param_type->is_optional) {
+        // Optional without default → null
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+    } else {
+        // Required parameter missing - error
+        log_error("missing_required_param: required parameter not provided");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+    }
+    has_output_arg = true;
+    param_type = param_type->next;
+}
+```
+
+---
+
+## 2. Default Parameter Values
+
+### Syntax
+
+Default values are supported for both untyped and typed parameters:
+
+```lambda
+// Untyped with default
+fn greet(name = "World") {
+    "Hello, " ++ name ++ "!"
+}
+
+// Typed with default (Type + Default syntax)
+fn add(a: int, b: int = 0) {
+    a + b
+}
+
+// Multiple defaults
+fn range_sum(start: int = 0, end: int = 10, step: int = 1) {
+    let sum = 0
+    for (i in start to end by step) { sum = sum + i }
+    sum
+}
+
+greet()                     // "Hello, World!"
+greet("Lambda")             // "Hello, Lambda!"
+add(5)                      // 5
+add(5, 3)                   // 8
+range_sum()                 // 45 (0+1+2+...+9)
+range_sum(5)                // 35 (5+6+7+8+9)
+range_sum(0, 5)             // 10 (0+1+2+3+4)
+```
+
+### Type + Default Syntax
+
+Lambda supports typed parameters with default values using `name: Type = value`:
+
+```lambda
+fn create_user(
+    name: string,           // required
+    age: int = 0,           // optional with type and default
+    active: bool = true     // optional with type and default
+) {
+    { name: name, age: age, active: active }
+}
+
+create_user("Alice")                    // {name: "Alice", age: 0, active: true}
+create_user("Bob", 30)                  // {name: "Bob", age: 30, active: true}
+create_user("Charlie", 25, false)       // {name: "Charlie", age: 25, active: false}
+```
+
+### Constraints
+
+1. **Default expressions evaluated at call site** (not definition site)
+   - Allows referencing earlier parameters
+   - Expressions re-evaluated each call
+
+2. **Defaults can reference earlier parameters**:
+```lambda
+fn make_rect(width: int, height = width) {  // height defaults to width
+    [width, height]
+}
+make_rect(10)       // [10, 10]
+make_rect(10, 20)   // [10, 20]
+```
+
+3. **Order constraint**: Parameters with defaults must come after required parameters (same as optional)
+
+### Default Value Evaluation in Transpiler
+
+When filling missing arguments, the default expression is transpiled inline:
+
+```cpp
+// In transpile_call_expr()
+if (param_type->default_value) {
+    // Transpile the default expression at the call site
+    transpile_expr(tp, param_type->default_value);
+}
+```
+
+For referencing earlier parameters in defaults:
+```cpp
+fn make_rect(width: int, height = width) { ... }
+
+// Transpiles to:
+Item fn_make_rect(Item _width, Item _height) {
+    // ...
+}
+
+// Call: make_rect(10) transpiles to:
+fn_make_rect(i2it(10), _width)  // height gets value of width
+```
+
+**Note**: This requires that earlier parameters are accessible during default value transpilation. The transpiler must track parameter bindings.
+
+---
+
+## 3. Variadic Parameters (Rest Parameters)
+
+### Syntax
+
+```lambda
+fn sum(...) {
+    let total = 0
+    for (x in varg()) { total = total + x }
+    total
+}
+
+sum(1, 2, 3)        // 6
+sum(1, 2, 3, 4, 5)  // 15
+sum()               // 0
+
+fn printf(fmt, ...) {
+    // fmt is required, rest are variadic
+    format(fmt, varg())
+}
+
+printf("Hello %s, you have %d messages", "Alice", 5)
+```
+
+### Grammar Changes
+
+```javascript
+// Add variadic marker
+parameter: $ => choice(
+    seq(
+      field('name', $.identifier),
+      optional(field('optional', '?')),
+      optional(seq(':', field('type', $._type_expr))),
+      optional(seq('=', field('default', $._expression))),
+    ),
+    field('variadic', '...'),  // variadic marker
+),
+```
+
+### System Functions: `varg()` and `arg()` (Future)
+
+**`varg()`** provides access to **variadic arguments only**:
+
+| Call | Return |
+|------|--------|
+| `varg()` | List of all variadic arguments |
+| `varg(0)` | First variadic argument |
+| `varg(1)` | Second variadic argument |
+| `varg().len` | Count of variadic arguments |
+
+**`arg()`** (Future Feature) will provide access to **all arguments**:
+
+| Call | Return |
+|------|--------|
+| `arg()` | List of all arguments (named + variadic) |
+| `arg(0)` | First argument |
+| `arg('name')` | Argument by parameter name |
+
+> **Note**: `arg()` is reserved for future implementation when full argument introspection is needed.
+
+### Implementation Strategy
+
+**Runtime Argument List (Recommended)**
+
+Store variadic arguments in a special runtime structure:
+
+```cpp
+// In lambda.h
+typedef struct VargList {
+    Item* items;      // array of Items
+    int count;        // number of items
+    int capacity;     // allocated capacity
+} VargList;
+
+// Thread-local or context-passed
+extern __thread VargList* current_varg_list;
+
+// System function implementation
+Item fn_varg0() {  // varg() - return all as list
+    return create_list_from_items(current_varg_list->items, current_varg_list->count);
+}
+
+Item fn_varg1(int index) {  // varg(n) - return nth
+    if (index < 0 || index >= current_varg_list->count) {
+        return ITEM_NULL;
+    }
+    return current_varg_list->items[index];
+}
+```
+
+**AST Changes**:
+```cpp
+typedef struct TypeFunc : Type {
+    TypeParam* param;
+    Type* returned;
+    int param_count;
+    int type_index;
+    bool is_anonymous;
+    bool is_public;
+    bool is_proc;
+    bool is_variadic;         // New: function accepts variadic args
+    int required_param_count; // New: non-variadic params before ...
+} TypeFunc;
+```
+
+**Transpilation**:
+
+For variadic function call:
+```cpp
+// sum(1, 2, 3) transpiles to:
+({
+    Item _varargs[] = {i2it(1), i2it(2), i2it(3)};
+    VargList _varglist = {_varargs, 3, 3};
+    current_varg_list = &_varglist;
+    Item _result = fn_sum();
+    current_varg_list = NULL;
+    _result;
+})
+```
+
+For function definition:
+```cpp
+// fn sum(...) { ... } transpiles to:
+Item fn_sum() {
+    // varg() accesses current_varg_list
+    ...
+}
+```
+
+---
+
+## 4. Named Arguments
+
+### Syntax
+
+Named arguments allow passing arguments by parameter name, making calls self-documenting and order-independent:
+
+```lambda
+fn create_rect(x: int, y: int, width: int, height: int) {
+    { x: x, y: y, width: width, height: height }
+}
+
+// Positional call (existing)
+create_rect(10, 20, 100, 50)
+
+// Named call - order independent
+create_rect(x: 10, y: 20, width: 100, height: 50)
+create_rect(width: 100, height: 50, x: 10, y: 20)  // Same result
+
+// Mixed positional and named (positional must come first)
+create_rect(10, 20, width: 100, height: 50)
+```
+
+### Benefits
+
+1. **Self-documenting code**: Parameter names visible at call site
+2. **Skip optional parameters**: Can skip middle optional params
+3. **Reduces errors**: No confusion with multiple same-type parameters
+4. **IDE support**: Better autocomplete and documentation
+
+### Skipping Optional Parameters
+
+Named arguments are especially useful when you want to skip optional parameters:
+
+```lambda
+fn connect(
+    host: string,
+    port: int = 80,
+    timeout: int = 30,
+    retries: int = 3,
+    ssl: bool = false
+) { ... }
+
+// Skip port and timeout, set only retries and ssl
+connect("example.com", retries: 5, ssl: true)
+
+// Equivalent to:
+connect("example.com", 80, 30, 5, true)
+```
+
+### Grammar Changes for Named Arguments
+
+The call expression grammar needs to support named arguments:
+
+```javascript
+// In grammar.js, modify call_expr arguments
+_argument: $ => choice(
+    $._expression,  // positional argument
+    $.named_argument,  // named argument
+),
+
+named_argument: $ => seq(
+    field('name', $.identifier),
+    ':',
+    field('value', $._expression),
+),
+```
+
+### Build Phase Changes
+
+In `build_call_expr()`:
+```cpp
+// Track named vs positional arguments
+bool seen_named = false;
+while (arg_node) {
+    if (is_named_argument(arg_node)) {
+        seen_named = true;
+        // Map argument to parameter by name
+        String* arg_name = get_argument_name(arg_node);
+        int param_index = find_param_by_name(fn_type, arg_name);
+        if (param_index < 0) {
+            record_type_error(tp, line, "unknown parameter name: %.*s",
+                (int)arg_name->len, arg_name->chars);
+        }
+        // Store mapping for transpilation
+    } else if (seen_named) {
+        record_type_error(tp, line, 
+            "positional argument after named argument");
+    }
+    // ... rest of argument processing
+}
+```
+
+### Transpilation Changes
+
+Named arguments are reordered to match parameter order during transpilation:
+
+```cpp
+// Call: create_rect(width: 100, height: 50, x: 10, y: 20)
+// Parameters: x, y, width, height
+// Transpiles to: fn_create_rect(i2it(10), i2it(20), i2it(100), i2it(50))
+```
+
+---
+
+## 5. Combined Features
+
+All four features work together:
+
+```lambda
+fn flexible(required: int, opt?: int, default_val: int = 10, ...) {
+    let base = required + (opt ?? 0) + default_val
+    let extra = 0
+    for (x in varg()) { extra = extra + x }
+    base + extra
+}
+
+// Positional calls
+flexible(1)                     // 1 + 0 + 10 + 0 = 11
+flexible(1, 2)                  // 1 + 2 + 10 + 0 = 13
+flexible(1, 2, 3)               // 1 + 2 + 3 + 0 = 6
+flexible(1, 2, 3, 4, 5)         // 1 + 2 + 3 + (4+5) = 15
+flexible(1, null, 5)            // 1 + 0 + 5 + 0 = 6
+
+// Named argument - skip opt, set default_val
+flexible(required: 1, default_val: 20)  // 1 + 0 + 20 + 0 = 21
+```
+
+### Parameter Order Constraint
+
+```
+required_typed → optional_typed (?) → defaults → variadic
+```
+
+Examples:
+```lambda
+fn valid(a: int, b?: int, c: int = 0, ...) { ... }   // Valid
+fn invalid1(..., a) { ... }                           // Error: ... must be last
+fn invalid2(a?: int, b: int) { ... }                  // Error: required after optional
+```
+
+---
+
+### 
+## Future Features
+
+### 1. Full Argument Introspection: `arg()` (Future)
+
+```lambda
+fn debug_call(...) {
+    let all_args = arg()     // Get all arguments as list
+    let first = arg(0)       // First argument by index
+    let by_name = arg('x')   // Argument by parameter name (if named)
+    ...
+}
+```
+
+> Reserved for future implementation when full argument introspection is needed.
+
+### 2. Typed Variadics (Future)
+
+```lambda
+fn sum_ints(...: int) {  // All varargs must be int
+    let total = 0
+    for (x in varg()) { total = total + x }
+    total
+}
+```
+
+### 3. Spread Operator (Future)
+
+```lambda
+fn inner(...) { varg().len }
+fn outer(...) { inner(varg()...) }  // Spread variadic args
+outer(1, 2, 3)              // 3
+```
+
+### 4. Parameter Destructuring (Future)
+
+```lambda
+fn process_point({x, y}: Point) {
+    x + y
+}
+
+fn first_two([a, b, ...rest]) {
+    [a, b]
+}
+```
+
+---
+
+## Risk Assessment
+
+| Feature                                   | Risk   | Notes                                                    |
+| ----------------------------------------- | ------ | -------------------------------------------------------- |
+| Optional params (`a?`)                    | Low    | Minimal grammar change, TypeScript-compatible semantics  |
+| Optional vs Nullable (`a?: T` vs `a: T?`) | Low    | Clear distinction, matches TypeScript                    |
+| Default values                            | Medium | Must handle scoping of earlier params in defaults        |
+| Type + Default (`a: int = 5`)             | Low    | Natural extension of default values                      |
+| Named arguments                           | Medium | Grammar change for call expressions, argument reordering |
+| Variadic (...)                            | Higher | Requires runtime support, thread-safety considerations   |
+| varg() system func                        | Medium | New system function, clear API                           |
+
+---
+
+## Open Questions
+
+1. ~~Should defaults support calling other functions?~~ **Resolved**: Yes, defaults are full expressions and can call functions
+2. ~~Should defaults be evaluated lazily (only when param is missing)?~~ **Resolved**: Yes, lazy evaluation at call site
+3. ~~For named arguments, should duplicate names be a compile error or runtime error?~~ **Resolved**: Compile error
+4. ~~Can named arguments be mixed with variadic?~~ **Resolved**: Yes, named args fill named params, remaining positional args go to variadic
+
+---
+
+## Design Decisions Summary
+
+| Decision | Resolution | Rationale |
+|----------|------------|-----------|
+| Default expressions | Full expressions allowed | Enables `fn f(a, b = compute(a))` patterns |
+| Default evaluation | Lazy (at call site) | Only evaluated when argument is missing |
+| Duplicate named args | Compile error | Catch errors early, no ambiguity |
+| Named + variadic mixing | Allowed | Named args match params, rest go to `...` |

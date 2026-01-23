@@ -7,6 +7,7 @@
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
+AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 
 // todo: properly define fn param types
 SysFuncInfo sys_funcs[] = {
@@ -2018,27 +2019,67 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
     return (AstNode*)ast_node;
 }
 
+// returns NULL for variadic marker (...)
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) {
     log_debug("build param expr");
+
+    // check for variadic marker (...)
+    TSNode variadic = ts_node_child_by_field_id(param_node, FIELD_VARIADIC);
+    if (!ts_node_is_null(variadic)) {
+        log_debug("build param: variadic marker found");
+        return NULL;  // special marker, will be handled by build_func
+    }
+
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_PARAM, param_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(param_node, FIELD_NAME);
     StrView name_str = ts_node_source(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
 
+    // allocate TypeParam for this parameter
+    TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
+    ast_node->type = (Type*)param_type;
+
+    // check optional marker (?)
+    TSNode optional_node = ts_node_child_by_field_id(param_node, FIELD_OPTIONAL);
+    param_type->is_optional = !ts_node_is_null(optional_node);
+
+    // check for default value expression
+    TSNode default_node = ts_node_child_by_field_id(param_node, FIELD_DEFAULT);
+    if (!ts_node_is_null(default_node)) {
+        param_type->default_value = build_expr(tp, default_node);
+        param_type->is_optional = true;  // param with default is implicitly optional
+    }
+
+    // determine the type of the parameter
     TSNode type_node = ts_node_child_by_field_id(param_node, FIELD_TYPE);
-    // determine the type of the field
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
     if (!ts_node_is_null(type_node)) {
         AstNode* type_expr = build_expr(tp, type_node);
-        *ast_node->type = *((TypeType*)type_expr->type)->type;
+        *(Type*)param_type = *((TypeType*)type_expr->type)->type;
     }
     else {
-        *ast_node->type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
+        *(Type*)param_type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
     }
 
     if (!is_type) { push_name(tp, ast_node, NULL); }
     return ast_node;
+}
+
+// build named argument in function call: name: value
+AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
+    log_debug("build named argument");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_NAMED_ARG, arg_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(arg_node, FIELD_NAME);
+    StrView name_str = ts_node_source(tp, name);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
+
+    TSNode value_node = ts_node_child_by_field_id(arg_node, FIELD_VALUE);
+    ast_node->as = build_expr(tp, value_node);
+    ast_node->type = ast_node->as ? ast_node->as->type : &TYPE_ANY;
+
+    log_debug("named argument: %s", ast_node->name);
+    return (AstNode*)ast_node;
 }
 
 // for both func expr and stam
@@ -2079,20 +2120,42 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNamedNode* prev_param = NULL;  int param_count = 0;
+    AstNamedNode* prev_param = NULL;  int param_count = 0;  int required_count = 0;
+    bool seen_optional = false;  // track if we've seen an optional param
     while (has_node) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_DECLARE) {  // param declaration
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNamedNode* param = build_param_expr(tp, child, false);
-            log_debug("got param type %d", param->node_type);
+
+            // check for variadic marker (NULL return from build_param_expr)
+            if (param == NULL) {
+                fn_type->is_variadic = true;
+                log_debug("function is variadic");
+                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                continue;
+            }
+
+            TypeParam* param_type = (TypeParam*)param->type;
+            log_debug("got param: %s, optional=%d", param->name, param_type->is_optional);
+
+            // validate param ordering: required params must come before optional
+            if (param_type->is_optional) {
+                seen_optional = true;
+            } else {
+                if (seen_optional) {
+                    log_error("required parameter '%s' cannot follow optional parameter", param->name);
+                }
+                required_count++;
+            }
+
             if (prev_param == NULL) {
                 ast_node->param = param;
-                fn_type->param = (TypeParam*)param->type;
+                fn_type->param = param_type;
             }
             else {
                 prev_param->next = (AstNode*)param;
-                ((TypeParam*)prev_param->type)->next = (TypeParam*)param->type;
+                ((TypeParam*)prev_param->type)->next = param_type;
             }
             prev_param = param;  param_count++;
         }
@@ -2105,6 +2168,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     }
     ts_tree_cursor_delete(&cursor);
     fn_type->param_count = param_count;
+    fn_type->required_param_count = required_count;
 
     // build the function body
     // ast_node->locals = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
@@ -2268,6 +2332,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_binary_type(tp, expr_node);
     case SYM_TYPE_OCCURRENCE:
         return build_occurrence_type(tp, expr_node);
+    case SYM_NAMED_ARGUMENT:
+        return build_named_argument(tp, expr_node);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;
