@@ -1,5 +1,6 @@
 
 #include "../lib/strbuf.h"
+#include <tree_sitter/api.h>
 #ifndef _WIN32
 #include <unistd.h>  // for isatty()
 #else
@@ -20,6 +21,152 @@
 
 // Include our custom command line editor
 #include "../lib/cmdedit.h"
+
+// Forward declarations for Tree-sitter parsing
+extern "C" {
+    TSParser* lambda_parser(void);
+    TSTree* lambda_parse_source(TSParser* parser, const char* source);
+}
+
+// Result of checking statement completeness
+enum StatementStatus {
+    STMT_COMPLETE,      // statement is syntactically complete
+    STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
+    STMT_ERROR          // statement has a syntax error
+};
+
+// Helper: count unclosed brackets/parens in source
+// Returns true if there are unclosed brackets (meaning incomplete)
+static bool has_unclosed_brackets(const char* source) {
+    int brace_count = 0;   // { }
+    int paren_count = 0;   // ( )
+    int bracket_count = 0; // [ ]
+    bool in_string = false;
+    bool in_line_comment = false;
+    bool in_block_comment = false;
+    char string_char = 0;
+    
+    for (const char* p = source; *p; p++) {
+        // handle comments
+        if (!in_string) {
+            if (!in_block_comment && p[0] == '/' && p[1] == '/') {
+                in_line_comment = true;
+                p++;
+                continue;
+            }
+            if (!in_line_comment && p[0] == '/' && p[1] == '*') {
+                in_block_comment = true;
+                p++;
+                continue;
+            }
+            if (in_block_comment && p[0] == '*' && p[1] == '/') {
+                in_block_comment = false;
+                p++;
+                continue;
+            }
+            if (in_line_comment && *p == '\n') {
+                in_line_comment = false;
+                continue;
+            }
+        }
+        
+        if (in_line_comment || in_block_comment) continue;
+        
+        // handle strings
+        if (!in_string && (*p == '"' || *p == '\'')) {
+            in_string = true;
+            string_char = *p;
+            continue;
+        }
+        if (in_string) {
+            if (*p == '\\' && p[1]) {
+                p++;  // skip escaped character
+                continue;
+            }
+            if (*p == string_char) {
+                in_string = false;
+            }
+            continue;
+        }
+        
+        // count brackets
+        switch (*p) {
+            case '{': brace_count++; break;
+            case '}': brace_count--; break;
+            case '(': paren_count++; break;
+            case ')': paren_count--; break;
+            case '[': bracket_count++; break;
+            case ']': bracket_count--; break;
+        }
+    }
+    
+    // if still in string or comment, that's incomplete
+    if (in_string || in_block_comment) return true;
+    
+    // if any bracket count is positive, we have unclosed brackets
+    return (brace_count > 0 || paren_count > 0 || bracket_count > 0);
+}
+
+// Helper: recursively check for MISSING nodes (but not ERROR nodes)
+static bool has_missing_nodes(TSNode node) {
+    // check if this node is missing (parser-inserted expected token)
+    if (ts_node_is_missing(node)) {
+        return true;
+    }
+    
+    // recurse into children
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        if (has_missing_nodes(child)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// Check if a statement is complete, incomplete (needs continuation), or has error
+StatementStatus check_statement_completeness(TSParser* parser, const char* source) {
+    if (!source || !*source) {
+        return STMT_COMPLETE;  // empty input is "complete"
+    }
+    
+    // First, do a quick lexical check for unclosed brackets
+    // This catches incomplete statements that Tree-sitter would report as ERROR
+    if (has_unclosed_brackets(source)) {
+        return STMT_INCOMPLETE;
+    }
+    
+    // Now use Tree-sitter for more sophisticated checking
+    TSTree* tree = lambda_parse_source(parser, source);
+    if (!tree) {
+        return STMT_ERROR;
+    }
+    
+    TSNode root = ts_tree_root_node(tree);
+    
+    // If no errors at all, statement is complete
+    if (!ts_node_has_error(root)) {
+        ts_tree_delete(tree);
+        return STMT_COMPLETE;
+    }
+    
+    // Tree has errors - check if there are MISSING nodes (incomplete)
+    if (has_missing_nodes(root)) {
+        ts_tree_delete(tree);
+        return STMT_INCOMPLETE;
+    }
+    
+    // ERROR nodes without MISSING nodes = syntax error
+    ts_tree_delete(tree);
+    return STMT_ERROR;
+}
+
+// Get the continuation prompt for multi-line input
+const char* get_continuation_prompt() {
+    return ".. ";
+}
 
 
 
