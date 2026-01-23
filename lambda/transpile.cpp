@@ -996,6 +996,62 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
     strbuf_append_str(tp->code_buf, ";\n}");
 }
 
+// procedural if statement - generates C-style if/else blocks
+// unlike transpile_if which generates ternary expressions, this supports
+// statements like break, continue, return in the branches
+void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
+    log_debug("transpile if stam (procedural)");
+    if (!if_node || !if_node->cond) {
+        log_error("Error: invalid if_node");
+        return;
+    }
+    
+    strbuf_append_str(tp->code_buf, "if (");
+    if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL) {
+        transpile_expr(tp, if_node->cond);
+    } else {
+        strbuf_append_str(tp->code_buf, "is_truthy(");
+        transpile_box_item(tp, if_node->cond);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    strbuf_append_str(tp->code_buf, ") {");
+    
+    // transpile then branch as procedural content
+    if (if_node->then) {
+        if (if_node->then->node_type == AST_NODE_CONTENT) {
+            transpile_proc_content(tp, (AstListNode*)if_node->then);
+        } else if (if_node->then->node_type == AST_NODE_IF_STAM) {
+            // nested if in then branch
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_if_stam(tp, (AstIfNode*)if_node->then);
+        } else {
+            // single expression - just execute it
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_expr(tp, if_node->then);
+            strbuf_append_char(tp->code_buf, ';');
+        }
+    }
+    strbuf_append_str(tp->code_buf, "\n}");
+    
+    // transpile else branch if present
+    if (if_node->otherwise) {
+        strbuf_append_str(tp->code_buf, " else {");
+        if (if_node->otherwise->node_type == AST_NODE_CONTENT) {
+            transpile_proc_content(tp, (AstListNode*)if_node->otherwise);
+        } else if (if_node->otherwise->node_type == AST_NODE_IF_STAM) {
+            // else if chain
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_if_stam(tp, (AstIfNode*)if_node->otherwise);
+        } else {
+            // single expression
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_expr(tp, if_node->otherwise);
+            strbuf_append_char(tp->code_buf, ';');
+        }
+        strbuf_append_str(tp->code_buf, "\n}");
+    }
+}
+
 // return statement (procedural only)
 void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
     log_debug("transpile return stam");
@@ -1140,7 +1196,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         scan = scan->next;
     }
     
-    strbuf_append_str(tp->code_buf, "({\n Item _result = ITEM_NULL;");
+    strbuf_append_str(tp->code_buf, "({\n Item result = ITEM_NULL;");
     
     while (item) {
         // handle declarations
@@ -1170,10 +1226,15 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_FOR_STAM) {
             transpile_for(tp, (AstForNode*)item);
         }
-        else if (item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_IF_STAM) {
-            // if expression - wrap value
+        else if (item->node_type == AST_NODE_IF_STAM) {
+            // procedural if statement - use C-style if/else blocks
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_if_stam(tp, (AstIfNode*)item);
+        }
+        else if (item->node_type == AST_NODE_IF_EXPR) {
+            // if expression - wrap value (ternary style)
             if (item == last_item) {
-                strbuf_append_str(tp->code_buf, "\n _result = ");
+                strbuf_append_str(tp->code_buf, "\n result = ");
             } else {
                 strbuf_append_str(tp->code_buf, "\n ");
             }
@@ -1183,7 +1244,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_CALL_EXPR) {
             // call expression - capture result if last
             if (item == last_item) {
-                strbuf_append_str(tp->code_buf, "\n _result = ");
+                strbuf_append_str(tp->code_buf, "\n result = ");
             } else {
                 strbuf_append_str(tp->code_buf, "\n ");
             }
@@ -1193,7 +1254,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         else {
             // other expressions - capture if last
             if (item == last_item) {
-                strbuf_append_str(tp->code_buf, "\n _result = ");
+                strbuf_append_str(tp->code_buf, "\n result = ");
                 transpile_box_item(tp, item);
                 strbuf_append_char(tp->code_buf, ';');
             } else {
@@ -1205,7 +1266,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         item = item->next;
     }
     
-    strbuf_append_str(tp->code_buf, "\n _result;})");
+    strbuf_append_str(tp->code_buf, "\n result;})" );
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
