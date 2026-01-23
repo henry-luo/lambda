@@ -1,1 +1,1 @@
-Test 1 - simple while: 5; Test 2 - return in while: 1; Test 3 - return value: 20; Test 4 - nested while: 9; Test 5 - multi var: 6; Test 6 - output json: json written; Test 7 - output yaml: yaml written
+T1:5 T2:1 T3:20 T4:9 T5:6 T6:1 T7:1 T8:3 T9:25 T10:1 T11:3
