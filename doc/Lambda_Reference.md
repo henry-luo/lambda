@@ -313,6 +313,36 @@ obj["field"]
 +x        // Positive (identity)
 ```
 
+### Vector Arithmetic (Implicit Element-wise Operations)
+
+Lambda supports NumPy-style element-wise arithmetic on vectors. When arithmetic operators are applied to arrays, they operate element-by-element.
+
+#### Scalar-Vector Operations
+
+```lambda
+1 + [2, 3, 4]              // [3, 4, 5]
+10 - [1, 2, 3]             // [9, 8, 7]
+3 * [1, 2, 3]              // [3, 6, 9]
+12 / [2, 3, 4]             // [6.0, 4.0, 3.0]
+2 ^ [1, 2, 3]              // [2, 4, 8]
+```
+
+#### Vector-Vector Operations
+
+```lambda
+[1, 2, 3] + [4, 5, 6]      // [5, 7, 9]
+[10, 20, 30] - [1, 2, 3]   // [9, 18, 27]
+[2, 3, 4] * [1, 2, 3]      // [2, 6, 12]
+[12, 15, 18] / [3, 5, 6]   // [4.0, 3.0, 3.0]
+```
+
+#### Broadcasting Rules
+
+- **Single-element broadcast**: `[5] + [1, 2, 3]` → `[6, 7, 8]`
+- **Size mismatch**: `[1, 2] + [3, 4, 5]` → Error
+
+See [Lambda_Type_Vector.md](../vibe/Lambda_Type_Vector.md) for detailed vector operation documentation.
+
 ### Comparison Expressions
 
 ```lambda
@@ -337,6 +367,57 @@ not true         // Logical NOT
 
 // Short-circuit evaluation
 (x > 0) and (y / x > 2)
+```
+
+### Truthy and Falsy Values
+
+Lambda Script uses truthy/falsy semantics in boolean contexts (`and`, `or`, `if`, `not`). A value is considered **falsy** if it is one of:
+
+| Falsy Value | Description |
+|-------------|-------------|
+| `null` | Null value |
+| `false` | Boolean false |
+
+All other values are **truthy**, including:
+
+| Truthy Value | Example |
+|--------------|--------|
+| `true` | Boolean true |
+| Non-zero numbers | `1`, `-1`, `0.5`, `42` |
+| Zero | `0`, `0.0` (Note: zero IS truthy in Lambda) |
+| Non-empty strings | `"hello"`, `" "` |
+| Empty string | `""` (Note: empty string IS truthy) |
+| Collections | `[]`, `{}`, `()` (all truthy, even if empty) |
+| Functions | Any function value |
+
+**Important**: Unlike many languages, Lambda considers `0`, `""`, and empty collections as truthy. Only `null` and `false` are falsy.
+
+```lambda
+// Truthy examples
+if (0) "yes" else "no"           // "yes" - 0 is truthy
+if ("") "yes" else "no"          // "yes" - empty string is truthy
+if ([]) "yes" else "no"          // "yes" - empty array is truthy
+
+// Falsy examples
+if (null) "yes" else "no"        // "no" - null is falsy
+if (false) "yes" else "no"       // "no" - false is falsy
+
+// Short-circuit with truthy values
+let x = null or "default"        // "default" - null is falsy, returns right
+let y = "value" or "default"     // "value" - string is truthy, returns left
+let z = "value" and "other"      // "other" - both truthy, returns right
+```
+
+### Null Comparisons
+
+Null can be compared with any type using `==` and `!=`:
+
+```lambda
+null == null        // true
+null == 42          // false (not an error)
+"hello" != null     // true
+let x = get_value()
+if (x == null) "missing" else x  // Idiomatic null check
 ```
 
 ### Type Expressions
@@ -457,21 +538,137 @@ fn process(data: [int]) -> [int] {
 
 ### Function Parameters
 
-```lambda
-// Required parameters
-fn greet(name: string) => "Hello, " + name
+Lambda supports flexible parameter handling with optional parameters, default values, named arguments, and variadic parameters.
 
-// Multiple parameters
-fn calculate(x: float, y: float, operation: string) => {
-    if (operation == "add") {
-        x + y
-    } else if (operation == "multiply") {
-        x * y
-    } else {
-        error("Unknown operation")
-    }
-}
+#### Required Parameters
+
+Parameters with type annotations are required by default:
+
+```lambda
+fn greet(name: string) => "Hello, " + name
+fn add(a: int, b: int) => a + b
+
+add(5, 3)       // 8
+add(5)          // Error: missing required parameter
 ```
+
+#### Optional Parameters
+
+Use `?` before the type annotation to make a parameter optional:
+
+```lambda
+fn greet(name: string, title?: string) => {
+    if (title) title + " " + name
+    else name
+}
+
+greet("Alice")              // "Alice"
+greet("Alice", "Dr.")       // "Dr. Alice"
+```
+
+**Note**: `a?: T` means parameter `a` is optional and may be omitted. Inside the function, `a` will be `null` if not provided. This is different from `a: T?` which means the type is nullable but the parameter is still required.
+
+#### Default Parameter Values
+
+Parameters can have default values, making them optional:
+
+```lambda
+fn greet(name = "World") => "Hello, " + name + "!"
+fn power(base: int, exp: int = 2) => base ^ exp
+
+greet()             // "Hello, World!"
+greet("Lambda")     // "Hello, Lambda!"
+power(3)            // 9 (3^2)
+power(2, 10)        // 1024 (2^10)
+```
+
+Default expressions are evaluated at call site (lazy evaluation) and can reference earlier parameters:
+
+```lambda
+fn make_rect(width: int, height = width) => {
+    width: width, height: height
+}
+
+make_rect(10)       // {width: 10, height: 10}
+make_rect(10, 20)   // {width: 10, height: 20}
+```
+
+#### Named Arguments
+
+Arguments can be passed by name, allowing any order:
+
+```lambda
+fn create_user(name: string, age: int, active: bool = true) => {
+    name: name, age: age, active: active
+}
+
+// All equivalent:
+create_user("Alice", 30, true)
+create_user(name: "Alice", age: 30, active: true)
+create_user(age: 30, name: "Alice")  // Order independent
+
+// Skip optional parameters
+create_user("Bob", 25)               // active defaults to true
+```
+
+**Rules for named arguments**:
+- Positional arguments must come before named arguments
+- Named arguments can appear in any order
+- Cannot provide the same argument both positionally and by name
+
+#### Variadic Parameters
+
+Use `...` to accept any number of additional arguments:
+
+```lambda
+fn sum_all(...) => sum(varg())
+fn printf(fmt: string, ...) => format(fmt, varg())
+
+sum_all(1, 2, 3, 4, 5)      // 15
+sum_all()                    // 0 (empty list)
+printf("%s is %d", "x", 42) // "x is 42"
+```
+
+Access variadic arguments with the `varg()` system function:
+
+| Call | Returns |
+|------|--------|
+| `varg()` | List of all variadic arguments |
+| `varg(n)` | The nth variadic argument (0-indexed) |
+
+```lambda
+fn first_or_default(default, ...) => {
+    if (len(varg()) > 0) varg(0)
+    else default
+}
+
+first_or_default(0, 1, 2, 3)   // 1
+first_or_default(0)             // 0
+```
+
+#### Parameter Order
+
+Parameters must be declared in this order:
+```
+required → optional (?) → defaults → variadic (...)
+```
+
+```lambda
+// Valid
+fn valid(req: int, opt?: int, def: int = 10, ...) => { ... }
+
+// Invalid - optional before required
+fn invalid(opt?: int, req: int) => { ... }  // Error
+```
+
+#### Parameter Count Mismatch Handling
+
+| Situation | Behavior |
+|-----------|----------|
+| Missing required argument | Compile-time error |
+| Missing optional argument | Filled with `null` |
+| Missing default argument | Evaluates default expression |
+| Extra arguments (no variadic) | Warning, arguments discarded |
 
 ### Function Calls
 
@@ -725,83 +922,64 @@ string+            // Array of one or more strings
 
 ## System Functions
 
-### Type Functions
+Lambda Script provides a comprehensive set of built-in system functions for type conversion, mathematical operations, collection manipulation, and I/O.
+
+> **Full Documentation**: See [Lambda_Sys_Func_Reference.md](Lambda_Sys_Func_Reference.md) for complete system function documentation.
+
+### Function Categories
+
+| Category | Functions | Description |
+|----------|-----------|-------------|
+| **Type** | `type`, `len`, `int`, `float`, `string`, `symbol`, ... | Type conversion and inspection |
+| **Math** | `abs`, `round`, `floor`, `ceil`, `sqrt`, `log`, `sin`, `cos`, ... | Mathematical operations |
+| **Statistical** | `sum`, `avg`, `mean`, `median`, `variance`, `deviation`, `quantile` | Statistical analysis |
+| **Collection** | `slice`, `set`, `all`, `any`, `reverse`, `sort`, `unique`, `concat`, ... | Collection manipulation |
+| **Vector** | `cumsum`, `cumprod`, `argmin`, `argmax`, `dot`, `norm`, `fill`, `range` | Vector operations |
+| **I/O** | `input`, `format`, `print`, `output`, `fetch` | Input/output operations |
+| **Date/Time** | `datetime`, `date`, `time`, `today`, `now`, `justnow` | Date and time functions |
+| **Error** | `error` | Error handling |
+| **Variadic** | `varg` | Variadic argument access |
+
+### Quick Examples
 
 ```lambda
-// Type conversion
-int("42")          // Parse string to int
-float("3.14")      // Parse string to float
-string(42)         // Convert to string
-symbol("text")     // Convert to symbol
+// Type functions
+type(42)               // 'int
+len([1, 2, 3])         // 3
+int("42")              // 42
+string(3.14)           // "3.14"
 
-// Type inspection
-type(42)           // Get type of value
-len([1, 2, 3])     // Get length of collection
-```
+// Math functions
+abs(-5)                // 5
+sqrt(16)               // 4
+round(3.7)             // 4
 
-### I/O Functions
+// Statistical functions
+sum([1, 2, 3])         // 6
+avg([1, 2, 3])         // 2.0
+median([1, 3, 2])      // 2
 
-```lambda
-// Input parsing
-input("file.json", 'json')           // Parse JSON file
-input("data.xml", 'xml')             // Parse XML file
-input("document.md", 'markdown')     // Parse Markdown file
+// Collection functions
+sort([3, 1, 2])        // [1, 2, 3]
+reverse([1, 2, 3])     // [3, 2, 1]
+concat([1, 2], [3])    // [1, 2, 3]
 
-// Output formatting
-print("Hello, world!")               // Print to console
-format(data, 'json')                 // Format as JSON
-format(data, 'yaml')                 // Format as YAML
-```
+// Vector functions
+cumsum([1, 2, 3])      // [1, 3, 6]
+dot([1, 2], [3, 4])    // 11
+norm([3, 4])           // 5
 
-### Mathematical Functions
+// I/O functions
+input("data.json", 'json)
+format(data, 'yaml)
+print("Hello!")
 
-```lambda
-// Basic math
-abs(-5)            // Absolute value: 5
-min(1, 2, 3)       // Minimum: 1  
-max(1, 2, 3)       // Maximum: 3
-sum([1, 2, 3])     // Sum: 6
-avg([1, 2, 3])     // Average: 2.0
+// Date/Time functions
+today()                // Current date
+datetime()             // Current date and time
 
-// Rounding
-round(3.7)         // Round: 4
-floor(3.7)         // Floor: 3
-ceil(3.2)          // Ceiling: 4
-```
-
-### Date/Time Functions
-
-```lambda
-// Current time
-datetime()         // Current date and time
-today()            // Current date
-justnow()          // Current time
-
-// Date operations  
-date(t'2025-01-01')    // Extract date part
-time(t'14:30:00')      // Extract time part
-```
-
-### Collection Functions
-
-```lambda
-// Array/list operations
-slice([1, 2, 3, 4], 1, 3)    // [2, 3]
-set([1, 1, 2, 2, 3])         // Remove duplicates
-
-// Aggregation
-all([true, true, false])     // false
-any([false, false, true])    // true
-```
-
-### Error Handling
-
-```lambda
-// Error creation
-error("Something went wrong")
-
-// Error handling in expressions
-if (x == 0) error("Division by zero") else (y / x)
+// Variadic access (inside variadic functions)
+fn sum_all(...) => sum(varg())
 ```
 
 ---
