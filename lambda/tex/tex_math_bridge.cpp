@@ -138,172 +138,6 @@ float mu_to_pt(float mu, MathContext& ctx) {
 }
 
 // ============================================================================
-// Simple Math String Parser
-// ============================================================================
-
-TexNode* typeset_math_string(const char* math_str, size_t len, MathContext& ctx) {
-    if (!math_str || len == 0) {
-        return make_hbox(ctx.arena);
-    }
-
-    Arena* arena = ctx.arena;
-    float size = ctx.font_size();
-
-    // Get TFM fonts
-    TFMFont* roman_tfm = ctx.fonts->get_font("cmr10");
-    TFMFont* italic_tfm = ctx.fonts->get_font("cmmi10");
-    TFMFont* symbol_tfm = ctx.fonts->get_font("cmsy10");
-
-    // Build list of math atoms
-    TexNode* first = nullptr;
-    TexNode* last = nullptr;
-    AtomType prev_type = AtomType::Ord;
-    bool is_first = true;
-
-    for (size_t i = 0; i < len; ) {
-        // Decode UTF-8 character
-        int32_t cp;
-        int char_len;
-
-        unsigned char c = (unsigned char)math_str[i];
-        if (c < 0x80) {
-            cp = c;
-            char_len = 1;
-        } else if (c < 0xE0) {
-            cp = ((c & 0x1F) << 6) | (math_str[i+1] & 0x3F);
-            char_len = 2;
-        } else if (c < 0xF0) {
-            cp = ((c & 0x0F) << 12) | ((math_str[i+1] & 0x3F) << 6) |
-                 (math_str[i+2] & 0x3F);
-            char_len = 3;
-        } else {
-            cp = ((c & 0x07) << 18) | ((math_str[i+1] & 0x3F) << 12) |
-                 ((math_str[i+2] & 0x3F) << 6) | (math_str[i+3] & 0x3F);
-            char_len = 4;
-        }
-        i += char_len;
-
-        // Skip whitespace
-        if (cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r') {
-            continue;
-        }
-
-        // Classify atom
-        AtomType atom_type = classify_codepoint(cp);
-
-        // Add inter-atom spacing (except before first atom)
-        if (!is_first) {
-            float spacing_mu = get_atom_spacing_mu(prev_type, atom_type, ctx.style);
-            if (spacing_mu > 0) {
-                float spacing_pt = mu_to_pt(spacing_mu, ctx);
-                TexNode* kern = make_kern(arena, spacing_pt);
-                if (last) {
-                    last->next_sibling = kern;
-                    kern->prev_sibling = last;
-                }
-                last = kern;
-            }
-        }
-        is_first = false;
-
-        // Determine font for this character
-        FontSpec font;
-        TFMFont* tfm;
-
-        if (cp >= '0' && cp <= '9') {
-            // Digits in roman
-            font = ctx.roman_font;
-            font.size_pt = size;
-            tfm = roman_tfm;
-        } else if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) {
-            // Letters in italic
-            font = ctx.italic_font;
-            font.size_pt = size;
-            tfm = italic_tfm;
-        } else if (cp < 128 && (atom_type == AtomType::Bin || atom_type == AtomType::Rel)) {
-            // ASCII operators like +, -, =, <, > use roman font
-            // (cmsy10 has different characters at these positions)
-            font = ctx.roman_font;
-            font.size_pt = size;
-            tfm = roman_tfm;
-        } else if (atom_type == AtomType::Bin || atom_type == AtomType::Rel) {
-            // Non-ASCII operators and relations from symbol font
-            font = ctx.symbol_font;
-            font.size_pt = size;
-            tfm = symbol_tfm;
-        } else {
-            // Default to roman
-            font = ctx.roman_font;
-            font.size_pt = size;
-            tfm = roman_tfm;
-        }
-
-        // Get character metrics
-        float width = 5.0f * size / 10.0f;  // Default
-        float height = ctx.x_height;
-        float depth = 0;
-        float italic_corr = 0;
-
-        // TFM stores metrics pre-scaled by design_size, so divide by it
-        if (tfm && cp < 256) {
-            float scale = size / tfm->design_size;
-            width = tfm->char_width((int)cp) * scale;
-            height = tfm->char_height((int)cp) * scale;
-            depth = tfm->char_depth((int)cp) * scale;
-            italic_corr = tfm->char_italic((int)cp) * scale;
-        }
-
-        // Create math character node
-        TexNode* node = make_math_char(arena, cp, atom_type, font);
-        node->width = width;
-        node->height = height;
-        node->depth = depth;
-        node->italic = italic_corr;
-
-        // Link into list
-        if (!first) {
-            first = node;
-        }
-        if (last) {
-            last->next_sibling = node;
-            node->prev_sibling = last;
-        }
-        last = node;
-        prev_type = atom_type;
-    }
-
-    // Wrap in HBox
-    TexNode* hbox = make_hbox(arena);
-    if (first) {
-        hbox->first_child = first;
-        hbox->last_child = last;
-        first->parent = hbox;
-        for (TexNode* n = first; n; n = n->next_sibling) {
-            n->parent = hbox;
-        }
-    }
-
-    // Measure total width
-    float total_width = 0;
-    float max_height = 0;
-    float max_depth = 0;
-    for (TexNode* n = first; n; n = n->next_sibling) {
-        total_width += n->width;
-        if (n->height > max_height) max_height = n->height;
-        if (n->depth > max_depth) max_depth = n->depth;
-    }
-
-    hbox->width = total_width;
-    hbox->height = max_height;
-    hbox->depth = max_depth;
-
-    log_debug("math_bridge: typeset_math_string '%.*s' -> width=%.2fpt",
-              (int)len, math_str, total_width);
-
-    return hbox;
-}
-
-// ============================================================================
 // LaTeX Math Parser
 // ============================================================================
 
@@ -546,12 +380,12 @@ TexNode* typeset_fraction_strings(const char* num_str, const char* denom_str,
     // Typeset numerator in script style
     MathContext num_ctx = ctx;
     num_ctx.style = sup_style(ctx.style);
-    TexNode* num = typeset_math_string(num_str, strlen(num_str), num_ctx);
+    TexNode* num = typeset_latex_math(num_str, strlen(num_str), num_ctx);
 
     // Typeset denominator in script style
     MathContext denom_ctx = ctx;
     denom_ctx.style = sup_style(ctx.style);
-    TexNode* denom = typeset_math_string(denom_str, strlen(denom_str), denom_ctx);
+    TexNode* denom = typeset_latex_math(denom_str, strlen(denom_str), denom_ctx);
 
     return typeset_fraction(num, denom, ctx.rule_thickness, ctx);
 }
@@ -640,7 +474,7 @@ TexNode* typeset_root(TexNode* degree, TexNode* radicand, MathContext& ctx) {
 }
 
 TexNode* typeset_sqrt_string(const char* content_str, MathContext& ctx) {
-    TexNode* radicand = typeset_math_string(content_str, strlen(content_str), ctx);
+    TexNode* radicand = typeset_latex_math(content_str, strlen(content_str), ctx);
     return typeset_sqrt(radicand, ctx);
 }
 
@@ -1086,7 +920,7 @@ InlineMathResult extract_inline_math(const char* text, size_t len, MathContext& 
                 size_t math_len = math_end - math_start;
 
                 // Typeset the math content
-                result.math = typeset_math_string(text + math_start, math_len, ctx);
+                result.math = typeset_latex_math(text + math_start, math_len, ctx);
 
                 // Build text before math
                 if (math_start > 1) {
@@ -1281,7 +1115,7 @@ TexNode* process_text_with_math(const char* text, size_t len, MathContext& ctx,
         }
 
         // Typeset the inline math
-        TexNode* math = typeset_math_string(r.content, r.content_len, ctx);
+        TexNode* math = typeset_latex_math(r.content, r.content_len, ctx);
         if (math) {
             if (!hlist->first_child) {
                 hlist->first_child = math;
@@ -1344,7 +1178,7 @@ TexNode* typeset_display_math(const char* math_str, MathContext& ctx,
     display_ctx.style = MathStyle::Display;
 
     // Typeset the math content
-    TexNode* content = typeset_math_string(math_str, strlen(math_str), display_ctx);
+    TexNode* content = typeset_latex_math(math_str, strlen(math_str), display_ctx);
 
     return typeset_display_math_node(content, ctx, params);
 }
@@ -1514,7 +1348,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
             // Single character symbol
             const char* value = get_map_string(math_node, "value");
             if (value && *value) {
-                return typeset_math_string(value, strlen(value), ctx);
+                return typeset_latex_math(value, strlen(value), ctx);
             }
             return make_hbox(ctx.arena);
         }
@@ -1522,7 +1356,7 @@ TexNode* convert_lambda_math(Item math_node, MathContext& ctx) {
         case MathNodeType::Number: {
             const char* value = get_map_string(math_node, "value");
             if (value) {
-                return typeset_math_string(value, strlen(value), ctx);
+                return typeset_latex_math(value, strlen(value), ctx);
             }
             return make_hbox(ctx.arena);
         }
