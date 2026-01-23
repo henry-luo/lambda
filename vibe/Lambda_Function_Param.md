@@ -90,25 +90,6 @@ This document analyzes Lambda's current function call parameter handling and pro
 - Fill missing arguments with `null` (ItemNull)
 - Add debug log for development visibility
 
-**Implementation**:
-```cpp
-// After transpiling provided arguments, fill missing with null
-while (param_type) {
-    if (arg) {
-        strbuf_append_char(tp->code_buf, ',');
-    } else {
-        // First missing param, add comma if we had any args
-        if (call_node->argument) {
-            strbuf_append_char(tp->code_buf, ',');
-        }
-    }
-    log_debug("param_mismatch: filling missing argument with null for param type %d", 
-        param_type->type_id);
-    strbuf_append_str(tp->code_buf, "ITEM_NULL");
-    param_type = param_type->next;
-}
-```
-
 #### 1.2 Extra Arguments (arg_count > param_count)
 
 **Location**: `transpile.cpp:transpile_call_expr()`
@@ -118,25 +99,6 @@ while (param_type) {
 **Proposed behavior**:
 - Log warning at transpile time
 - Discard extra arguments
-
-**Implementation**:
-```cpp
-// Track argument position
-int arg_index = 0;
-int expected_count = fn_type ? fn_type->param_count : -1;
-
-while (arg) {
-    if (expected_count >= 0 && arg_index >= expected_count) {
-        log_warning("param_mismatch: discarding extra argument %d (function expects %d params)",
-            arg_index + 1, expected_count);
-        arg = arg->next;
-        arg_index++;
-        continue;  // skip transpiling this argument
-    }
-    // ... existing transpilation logic ...
-    arg_index++;
-}
-```
 
 ### 2. Parameter Type Matching
 
@@ -159,65 +121,14 @@ struct Transpiler : Script {
     ArrayList* error_list;     // list of error messages for reporting
 };
 
-// Initialize in transpiler setup:
-tp->error_count = 0;
-tp->max_errors = 10;  // configurable threshold
-tp->error_list = arraylist_create(sizeof(char*));
-
 // Helper function to record type error:
 void record_type_error(Transpiler* tp, const char* format, ...) {
-    tp->error_count++;
-    
-    // Format and store error message
-    va_list args;
-    va_start(args, format);
-    char* error_msg = (char*)pool_alloc(tp->pool, 256);
-    vsnprintf(error_msg, 256, format, args);
-    va_end(args);
-    arraylist_append(tp->error_list, &error_msg);
-    
-    log_error("%s", error_msg);
-    
-    // Check threshold
-    if (tp->error_count >= tp->max_errors) {
-        log_error("error_threshold: max errors (%d) reached, stopping transpilation", 
-            tp->max_errors);
-    }
+    ...
 }
 
 // Check if should continue transpiling:
 bool should_continue_transpiling(Transpiler* tp) {
     return tp->error_count < tp->max_errors;
-}
-```
-
-**Type validation in build_call_expr()**:
-```cpp
-// After building argument, validate against corresponding param type
-TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
-TypeParam* expected_param = func_type ? func_type->param : NULL;
-AstNode* arg = ast_node->argument;
-int arg_index = 0;
-
-while (arg && expected_param) {
-    if (!types_compatible(arg->type, (Type*)expected_param)) {
-        record_type_error(tp, "type_error: argument %d has type %d, expected %d at line %d",
-            arg_index + 1, arg->type->type_id, expected_param->type_id,
-            ts_node_start_point(call_node).row + 1);
-        // Continue processing remaining arguments instead of returning immediately
-        if (!should_continue_transpiling(tp)) {
-            ast_node->type = &TYPE_ERROR;
-            return (AstNode*)ast_node;
-        }
-    }
-    arg = arg->next;
-    expected_param = expected_param->next;
-    arg_index++;
-}
-
-// Mark as error type if any errors were recorded for this call
-if (tp->error_count > 0 && ast_node->type != &TYPE_ERROR) {
-    // Keep original type for continued transpilation, errors are logged
 }
 ```
 
@@ -292,19 +203,6 @@ else if (param_type->type_id == LMD_TYPE_BOOL) {
 
 **Proposed enhancement**: Validate declared return type against body type
 
-**Implementation** (add after line 2009):
-```cpp
-// Validate return type if explicitly declared
-if (fn_type->returned && ast_node->body->type) {
-    if (!types_compatible(ast_node->body->type, fn_type->returned)) {
-        log_error("return_type_error: function '%.*s' body returns type %d, declared %d",
-            (int)ast_node->name->len, ast_node->name->chars,
-            ast_node->body->type->type_id, fn_type->returned->type_id);
-        // Keep the declared return type for interface consistency
-    }
-}
-```
-
 #### 3.2 Return Value Boxing
 
 **Location**: `transpile.cpp:define_func()`
@@ -329,16 +227,6 @@ if (fn_type->returned && fn_type->returned->type_id == LMD_TYPE_ANY) {
 ```
 
 ---
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `lambda/transpiler.hpp` | Add `error_count`, `max_errors`, `error_list` fields to Transpiler struct |
-| `lambda/build_ast.cpp` | Add `types_compatible()`, `record_type_error()`, `should_continue_transpiling()`, validate arg types in `build_call_expr()`, validate return type in `build_func()` |
-| `lambda/transpile.cpp` | Update `transpile_call_expr()` for param count handling, enhance boxing logic in `transpile_box_item()`, update `define_func()` for return boxing |
-| `lambda/lambda-data.hpp` | Add `it2b()` declaration if needed |
-| `lambda/lambda-data.cpp` | Implement `it2b()` if needed |
 
 ## Open Questions
 
@@ -695,12 +583,3 @@ greet("Charlie", 0)  // "Charlie is 0" - 0 is truthy in Lambda
 ```
 
 **Implementation**: Optional params are transpiled as `Item` type in C, allowing null. The `is_optional_param_ref()` helper prevents double-boxing when the param is used.
-
-### Test File
-
-`test/lambda/func_param2.ls` - 15 test cases covering all implemented features:
-- Tests 1-11: Optional params, defaults, typed params, named arguments
-- Test 12: `sum_all(...)` - variadic sum with `sum(varg())`
-- Test 13: `format_args(fmt, ...)` - regular param + variadic with `len(varg())`
-- Test 14: `first_or_default(default, ...)` - variadic indexed access with `varg(0)`
-- Test 15: `count_args(...)` - variadic length with `len(varg())`
