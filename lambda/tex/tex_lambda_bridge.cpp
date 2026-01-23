@@ -355,7 +355,7 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, Docume
         MathContext math_ctx = ctx.math_context();
         math_ctx.style = MathStyle::Text;  // Inline math
 
-        TexNode* math_hbox = typeset_math_string(sb->str->chars, sb->length, math_ctx);
+        TexNode* math_hbox = typeset_latex_math(sb->str->chars, sb->length, math_ctx);
         if (math_hbox) {
             hlist->append_child(math_hbox);
         }
@@ -779,7 +779,7 @@ TexNode* convert_math_block(const ElementReader& elem, DocumentContext& ctx) {
     MathContext math_ctx = ctx.math_context();
     math_ctx.style = MathStyle::Display;
 
-    TexNode* math_hbox = typeset_math_string(sb->str->chars, sb->length, math_ctx);
+    TexNode* math_hbox = typeset_latex_math(sb->str->chars, sb->length, math_ctx);
     if (!math_hbox) {
         stringbuf_free(sb);
         pool_destroy(pool);

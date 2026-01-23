@@ -215,7 +215,7 @@ TEST_F(MathExtendedTest, TypesetSimpleMathString) {
     MathContext ctx = create_context(10.0f);
 
     const char* input = "a + b";
-    TexNode* result = typeset_math_string(input, strlen(input), ctx);
+    TexNode* result = typeset_latex_math(input, strlen(input), ctx);
 
     if (result) {
         expect_positive_dimensions(result, "simple math");
@@ -489,7 +489,7 @@ TEST_F(MathExtendedTest, MathContextFonts) {
 TEST_F(MathExtendedTest, EmptyMathString) {
     MathContext ctx = create_context(10.0f);
 
-    TexNode* result = typeset_math_string("", 0, ctx);
+    TexNode* result = typeset_latex_math("", 0, ctx);
 
     // Empty string should return valid empty box or nullptr
     if (result) {
@@ -501,7 +501,7 @@ TEST_F(MathExtendedTest, WhitespaceMathString) {
     MathContext ctx = create_context(10.0f);
 
     const char* input = "   ";
-    TexNode* result = typeset_math_string(input, strlen(input), ctx);
+    TexNode* result = typeset_latex_math(input, strlen(input), ctx);
 
     // Whitespace in math mode is typically ignored
     if (result) {

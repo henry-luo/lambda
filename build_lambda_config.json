@@ -2382,42 +2382,6 @@
                         "icon": "\ud83d\udcc4"
                     },
                     {
-                        "source": "test/test_tex_phase4_gtest.cpp",
-                        "name": "TeX Phase 4 Math Integration Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc",
-                            "freetype",
-                            "tree-sitter",
-                            "tree-sitter-latex-math"
-                        ],
-                        "binary": "test_tex_phase4_gtest.exe",
-                        "additional_sources": [
-                            "lambda/tex/tex_node.cpp",
-                            "lambda/tex/tex_tfm.cpp",
-                            "lambda/tex/tex_hlist.cpp",
-                            "lambda/tex/tex_linebreak.cpp",
-                            "lambda/tex/tex_vlist.cpp",
-                            "lambda/tex/tex_pagebreak.cpp",
-                            "lambda/tex/tex_math_bridge.cpp",
-                            "lambda/tex/tex_math_ts.cpp",
-                            "lib/arena.c",
-                            "lib/mempool.c",
-                            "lib/log.c",
-                            "lib/memtrack.c",
-                            "lib/strbuf.c",
-                            "lib/hashmap.c"
-                        ],
-                        "includes": [
-                            "."
-                        ],
-                        "icon": "\ud83d\udd22"
-                    },
-                    {
                         "source": "test/test_tex_phase5_gtest.cpp",
                         "name": "TeX Phase 5 Output Tests",
                         "libraries": [

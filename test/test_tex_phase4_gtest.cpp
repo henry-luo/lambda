@@ -171,7 +171,7 @@ TEST_F(MathBridgeTest, MuToPoint) {
 TEST_F(MathBridgeTest, TypesetSimpleExpression) {
     auto ctx = create_context(10.0f);
 
-    TexNode* result = typeset_math_string("a+b", 3, ctx);
+    TexNode* result = typeset_latex_math("a+b", 3, ctx);
 
     ASSERT_NE(nullptr, result);
     EXPECT_EQ(NodeClass::HBox, result->node_class);
@@ -183,9 +183,9 @@ TEST_F(MathBridgeTest, TypesetWithSpacing) {
     auto ctx = create_context(10.0f);
 
     // "a + b" should have spacing around +
-    TexNode* spaced = typeset_math_string("a + b", 5, ctx);
+    TexNode* spaced = typeset_latex_math("a + b", 5, ctx);
     // "a+b" without explicit spaces should also get automatic spacing
-    TexNode* unspaced = typeset_math_string("a+b", 3, ctx);
+    TexNode* unspaced = typeset_latex_math("a+b", 3, ctx);
 
     ASSERT_NE(nullptr, spaced);
     ASSERT_NE(nullptr, unspaced);
@@ -197,7 +197,7 @@ TEST_F(MathBridgeTest, TypesetWithSpacing) {
 TEST_F(MathBridgeTest, TypesetEquation) {
     auto ctx = create_context(10.0f);
 
-    TexNode* result = typeset_math_string("x = y + z", 9, ctx);
+    TexNode* result = typeset_latex_math("x = y + z", 9, ctx);
 
     ASSERT_NE(nullptr, result);
     EXPECT_GT(result->width, 0);
@@ -213,7 +213,7 @@ TEST_F(MathBridgeTest, TypesetEquation) {
 TEST_F(MathBridgeTest, TypesetDigits) {
     auto ctx = create_context(10.0f);
 
-    TexNode* result = typeset_math_string("123", 3, ctx);
+    TexNode* result = typeset_latex_math("123", 3, ctx);
 
     ASSERT_NE(nullptr, result);
 
@@ -226,7 +226,7 @@ TEST_F(MathBridgeTest, TypesetDigits) {
 TEST_F(MathBridgeTest, TypesetEmpty) {
     auto ctx = create_context(10.0f);
 
-    TexNode* result = typeset_math_string("", 0, ctx);
+    TexNode* result = typeset_latex_math("", 0, ctx);
 
     ASSERT_NE(nullptr, result);
     EXPECT_EQ(NodeClass::HBox, result->node_class);
@@ -272,8 +272,8 @@ TEST_F(MathBridgeTest, FractionCentering) {
     auto ctx = create_context(10.0f);
 
     // Create fraction with numerator wider than denominator
-    TexNode* num = typeset_math_string("abcdef", 6, ctx);
-    TexNode* denom = typeset_math_string("x", 1, ctx);
+    TexNode* num = typeset_latex_math("abcdef", 6, ctx);
+    TexNode* denom = typeset_latex_math("x", 1, ctx);
 
     TexNode* result = typeset_fraction(num, denom, ctx.rule_thickness, ctx);
 
@@ -317,7 +317,7 @@ TEST_F(MathBridgeTest, SqrtWithExpression) {
 TEST_F(MathBridgeTest, SqrtClearance) {
     auto ctx = create_context(10.0f);
 
-    TexNode* radicand = typeset_math_string("x", 1, ctx);
+    TexNode* radicand = typeset_latex_math("x", 1, ctx);
     TexNode* result = typeset_sqrt(radicand, ctx);
 
     // Sqrt should have clearance above radicand
@@ -335,8 +335,8 @@ TEST_F(MathBridgeTest, SqrtClearance) {
 TEST_F(MathBridgeTest, Superscript) {
     auto ctx = create_context(10.0f);
 
-    TexNode* base = typeset_math_string("x", 1, ctx);
-    TexNode* sup = typeset_math_string("2", 1, ctx);
+    TexNode* base = typeset_latex_math("x", 1, ctx);
+    TexNode* sup = typeset_latex_math("2", 1, ctx);
 
     TexNode* result = typeset_scripts(base, nullptr, sup, ctx);
 
@@ -353,8 +353,8 @@ TEST_F(MathBridgeTest, Superscript) {
 TEST_F(MathBridgeTest, Subscript) {
     auto ctx = create_context(10.0f);
 
-    TexNode* base = typeset_math_string("x", 1, ctx);
-    TexNode* sub = typeset_math_string("i", 1, ctx);
+    TexNode* base = typeset_latex_math("x", 1, ctx);
+    TexNode* sub = typeset_latex_math("i", 1, ctx);
 
     TexNode* result = typeset_scripts(base, sub, nullptr, ctx);
 
@@ -370,9 +370,9 @@ TEST_F(MathBridgeTest, Subscript) {
 TEST_F(MathBridgeTest, BothScripts) {
     auto ctx = create_context(10.0f);
 
-    TexNode* base = typeset_math_string("x", 1, ctx);
-    TexNode* sub = typeset_math_string("i", 1, ctx);
-    TexNode* sup = typeset_math_string("2", 1, ctx);
+    TexNode* base = typeset_latex_math("x", 1, ctx);
+    TexNode* sub = typeset_latex_math("i", 1, ctx);
+    TexNode* sup = typeset_latex_math("2", 1, ctx);
 
     TexNode* result = typeset_scripts(base, sub, sup, ctx);
 
