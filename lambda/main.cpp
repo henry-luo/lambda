@@ -126,9 +126,18 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
 
 // Forward declare REPL functions from main-repl.cpp
 const char* get_repl_prompt();
+const char* get_continuation_prompt();
 char *lambda_repl_readline(const char *prompt);
 int lambda_repl_add_history(const char *line);
 void print_help();
+
+// Statement completeness check for multi-line REPL input
+enum StatementStatus {
+    STMT_COMPLETE,      // statement is syntactically complete
+    STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
+    STMT_ERROR          // statement has a syntax error
+};
+StatementStatus check_statement_completeness(TSParser* parser, const char* source);
 
 // Linux-specific compatibility functions
 #ifdef NATIVE_LINUX_BUILD
@@ -171,6 +180,7 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
     printf("Type .help for commands, .quit to exit\n");
+    printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
 
     // Initialize command line editor
     if (lambda_repl_init() != 0) {
@@ -178,46 +188,78 @@ void run_repl(Runtime *runtime, bool use_mir) {
     }
 
     // Get the best prompt for this system
-    const char* prompt = get_repl_prompt();
+    const char* main_prompt = get_repl_prompt();
+    const char* cont_prompt = get_continuation_prompt();
 
-    StrBuf *repl_history = strbuf_new_cap(1024);
+    StrBuf *repl_history = strbuf_new_cap(1024);  // accumulated script buffer
+    StrBuf *pending_input = strbuf_new_cap(256);  // current multi-line input
+    StrBuf *last_output = strbuf_new_cap(256);    // last output for incremental display
     char *line;
     int exec_count = 0;
 
-    while ((line = lambda_repl_readline(prompt)) != NULL) {
-        // Skip empty lines
-        if (strlen(line) == 0) {
+    while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
+        // Skip empty lines when not in multi-line mode
+        if (strlen(line) == 0 && pending_input->length == 0) {
             free(line);
             continue;
         }
 
-        // Add to command history
-        lambda_repl_add_history(line);
-
-        // Handle REPL commands
-        if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
-            free(line);
-            break;
+        // Add to command history (only for first line of multi-line input)
+        if (pending_input->length == 0) {
+            lambda_repl_add_history(line);
         }
 
-        if (strcmp(line, ".help") == 0 || strcmp(line, ".h") == 0) {
-            print_help();
-            free(line);
+        // Handle REPL commands (only when not in multi-line mode)
+        if (pending_input->length == 0) {
+            if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
+                free(line);
+                break;
+            }
+
+            if (strcmp(line, ".help") == 0 || strcmp(line, ".h") == 0) {
+                print_help();
+                free(line);
+                continue;
+            }
+
+            if (strcmp(line, ".clear") == 0) {
+                strbuf_reset(repl_history);
+                strbuf_reset(last_output);
+                printf("REPL history cleared\n");
+                free(line);
+                continue;
+            }
+        }
+
+        // Append line to pending input
+        if (pending_input->length > 0) {
+            strbuf_append_str(pending_input, "\n");
+        }
+        strbuf_append_str(pending_input, line);
+        free(line);
+
+        // Check if statement is complete using Tree-sitter
+        StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
+        
+        if (status == STMT_INCOMPLETE) {
+            // Need more input - continue with continuation prompt
+            continue;
+        }
+        
+        if (status == STMT_ERROR) {
+            // Syntax error - discard the pending input and let user retry
+            printf("Syntax error. Input discarded.\n");
+            strbuf_reset(pending_input);
             continue;
         }
 
-        if (strcmp(line, ".clear") == 0) {
-            strbuf_reset(repl_history);
-            printf("REPL history cleared\n");
-            free(line);
-            continue;
-        }
-
-        // Add current line to REPL history
+        // Statement is complete - add to history and execute
+        size_t saved_history_len = repl_history->length;
         if (repl_history->length > 0) {
             strbuf_append_str(repl_history, "\n");
         }
-        strbuf_append_str(repl_history, line);
+        strbuf_append_str(repl_history, pending_input->str);
+        strbuf_reset(pending_input);
 
         // Create a unique script path for each execution
         char script_path[64];
@@ -227,22 +269,45 @@ void run_repl(Runtime *runtime, bool use_mir) {
         Input* output_input = nullptr;
         if (use_mir) {
             // transpile using MIR
-            output_input = run_script_mir(runtime, repl_history->str, script_path, false);  // false for run_main in REPL
+            output_input = run_script_mir(runtime, repl_history->str, script_path, false);
         } else {
             // transpile using C2MIR
             output_input = run_script(runtime, repl_history->str, script_path, false);
         }
+        
         if (output_input) {
-            StrBuf *output = strbuf_new_cap(256);
-            print_root_item(output, output_input->root);
-            printf("%s", output->str);
-            strbuf_free(output);
-
-            // Note: Do NOT destroy output_input->pool here!
-            // The pool is shared with the Script, which is managed by the Runtime
-            // todo: free up output_input;
+            if (output_input->root.type_id() == LMD_TYPE_ERROR) {
+                // Runtime error - rollback the last input
+                printf("Error during execution. Last input rolled back.\n");
+                repl_history->str[saved_history_len] = '\0';
+                repl_history->length = saved_history_len;
+            } else {
+                // Success - print only new output (incremental display)
+                StrBuf *full_output = strbuf_new_cap(256);
+                print_root_item(full_output, output_input->root);
+                
+                // Print only the portion after last_output
+                if (full_output->length > last_output->length) {
+                    // check if prefix matches
+                    if (last_output->length == 0 || 
+                        strncmp(full_output->str, last_output->str, last_output->length) == 0) {
+                        // print only the new part
+                        printf("%s", full_output->str + last_output->length);
+                    } else {
+                        // output structure changed, print all
+                        printf("%s", full_output->str);
+                    }
+                } else if (full_output->length > 0) {
+                    // output got shorter or same - just print it
+                    printf("%s", full_output->str);
+                }
+                
+                // save for next incremental display
+                strbuf_reset(last_output);
+                strbuf_append_str(last_output, full_output->str);
+                strbuf_free(full_output);
+            }
         }
-        free(line);
     }
     printf("\n");  // print one last '\n', otherwise, may see '%' at the end of the line
 
@@ -250,6 +315,8 @@ void run_repl(Runtime *runtime, bool use_mir) {
     lambda_repl_cleanup();
 
     strbuf_free(repl_history);
+    strbuf_free(pending_input);
+    strbuf_free(last_output);
 }
 
 void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
