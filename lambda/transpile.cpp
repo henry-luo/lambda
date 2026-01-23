@@ -1465,6 +1465,14 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             transpile_call_argument(tp, resolved_arg, param_type, is_sys_func);
             param_type = param_type ? param_type->next : NULL;
         }
+
+        // add variadic args list for variadic functions
+        if (is_variadic) {
+            if (has_output_arg) strbuf_append_char(tp->code_buf, ',');
+            // collect any named args that exceed param_count into vargs
+            strbuf_append_str(tp->code_buf, "null");  // TODO: named variadic args not supported yet
+            has_output_arg = true;
+        }
         #undef MAX_PARAMS
     }
     else {
@@ -1473,16 +1481,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         TypeParam* param_type = fn_type ? fn_type->param : NULL;
         int arg_index = 0;
 
-        while (arg) {
-            // Check for extra arguments (more args than params, unless variadic)
-            if (expected_count >= 0 && arg_index >= expected_count && !is_variadic) {
-                log_warn("param_mismatch: discarding extra argument %d (function expects %d params)",
-                    arg_index + 1, expected_count);
-                arg = arg->next;
-                arg_index++;
-                continue;
-            }
-
+        // first pass: output regular parameters
+        while (arg && (expected_count < 0 || arg_index < expected_count)) {
             if (has_output_arg) {
                 strbuf_append_char(tp->code_buf, ',');
             }
@@ -1504,6 +1504,42 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             transpile_call_argument(tp, NULL, param_type, is_sys_func);
             has_output_arg = true;
             param_type = param_type->next;
+        }
+
+        // handle variadic arguments
+        if (is_variadic) {
+            if (has_output_arg) strbuf_append_char(tp->code_buf, ',');
+            
+            // count variadic args
+            int varg_count = 0;
+            AstNode* varg = arg;
+            while (varg) { varg_count++; varg = varg->next; }
+            
+            if (varg_count == 0) {
+                strbuf_append_str(tp->code_buf, "null");  // no variadic args
+            } else {
+                // build inline list: ({Item _va[]={...}; List _vl={...}; &_vl;})
+                strbuf_append_str(tp->code_buf, "({Item _va[]={");
+                bool first_varg = true;
+                while (arg) {
+                    if (!first_varg) strbuf_append_char(tp->code_buf, ',');
+                    transpile_box_item(tp, arg);
+                    arg = arg->next;
+                    first_varg = false;
+                }
+                strbuf_append_format(tp->code_buf, 
+                    "}; List _vl={.type_id=%d,.items=_va,.length=%d,.capacity=%d}; &_vl;})",
+                    LMD_TYPE_LIST, varg_count, varg_count);
+            }
+            has_output_arg = true;
+        } else {
+            // discard extra arguments with warning (non-variadic case)
+            while (arg) {
+                log_warn("param_mismatch: discarding extra argument %d (function expects %d params)",
+                    arg_index + 1, expected_count);
+                arg = arg->next;
+                arg_index++;
+            }
         }
     }
 
@@ -1655,8 +1691,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // write the params
     strbuf_append_char(tp->code_buf, '(');
     AstNamedNode *param = fn_node->param;
+    bool has_params = false;
     while (param) {
-        if (param != fn_node->param) strbuf_append_str(tp->code_buf, ",");
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
         // for optional params, use Item type to allow null
         TypeParam* param_type = (TypeParam*)param->type;
         if (param_type->is_optional) {
@@ -1667,12 +1704,26 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
         param = (AstNamedNode*)param->next;
+        has_params = true;
     }
+
+    // add hidden _vargs parameter for variadic functions
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+    if (fn_type && fn_type->is_variadic) {
+        if (has_params) strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_str(tp->code_buf, "List* _vargs");
+    }
+
     if (as_pointer) {
         strbuf_append_str(tp->code_buf, ");\n");  return;
     }
     // write fn body
-    strbuf_append_str(tp->code_buf, "){\n return ");
+    strbuf_append_str(tp->code_buf, "){\n");
+    // set vargs before function body for variadic functions
+    if (fn_type && fn_type->is_variadic) {
+        strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
+    }
+    strbuf_append_str(tp->code_buf, " return ");
     transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, ";\n}\n");
 }

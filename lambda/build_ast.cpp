@@ -79,6 +79,9 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false},
     {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true},  // is_overloaded: generates fn_range3
     {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false},
+    // variadic parameter access
+    {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true},   // is_overloaded: generates fn_varg0
+    {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true},   // is_overloaded: generates fn_varg1
     // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
     // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},
     {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false},
