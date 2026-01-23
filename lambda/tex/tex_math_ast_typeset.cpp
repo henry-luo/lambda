@@ -156,7 +156,8 @@ enum class SymFont : uint8_t {
     CMMI,   // cmmi10 - italic font
     CMR,    // cmr10 - roman font
     CMEX,   // cmex10 - extension font
-    MSBM    // msbm10 - AMS symbols (not yet supported, falls back to ?)
+    MSBM,   // msbm10 - AMS symbols (not yet supported, falls back to ?)
+    LASY    // lasy10 - LaTeX symbol font (latexsym package)
 };
 
 struct SymbolEntry {
@@ -220,10 +221,13 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"ni", 51, AtomType::Rel, SymFont::CMSY}, {"owns", 51, AtomType::Rel, SymFont::CMSY},
     {"notin", 54, AtomType::Rel, SymFont::CMSY},
     {"subseteq", 18, AtomType::Rel, SymFont::CMSY}, {"supseteq", 19, AtomType::Rel, SymFont::CMSY},
+    {"sqsubseteq", 118, AtomType::Rel, SymFont::CMSY}, // 0x76
+    {"sqsupseteq", 119, AtomType::Rel, SymFont::CMSY}, // 0x77
     {"ll", 28, AtomType::Rel, SymFont::CMSY}, {"gg", 29, AtomType::Rel, SymFont::CMSY},
-    {"prec", 31, AtomType::Rel, SymFont::CMSY}, {"succ", 30, AtomType::Rel, SymFont::CMSY},
+    {"prec", 30, AtomType::Rel, SymFont::CMSY}, {"succ", 31, AtomType::Rel, SymFont::CMSY}, // 0x1E, 0x1F
     {"preceq", 22, AtomType::Rel, SymFont::CMSY}, {"succeq", 23, AtomType::Rel, SymFont::CMSY},
     {"simeq", 39, AtomType::Rel, SymFont::CMSY}, {"cong", 25, AtomType::Rel, SymFont::CMSY},
+    {"asymp", 16, AtomType::Rel, SymFont::CMSY}, // 0x10
     {"propto", 47, AtomType::Rel, SymFont::CMSY},
     {"perp", 63, AtomType::Rel, SymFont::CMSY}, {"parallel", 107, AtomType::Rel, SymFont::CMSY},
     {"mid", 106, AtomType::Rel, SymFont::CMSY},
@@ -242,6 +246,18 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     // AMS symbols (msbm10) - not yet supported
     {"varkappa", 123, AtomType::Ord, SymFont::MSBM},
     {"varnothing", 59, AtomType::Ord, SymFont::CMSY},
+    // LaTeX symbols (lasy10) - latexsym package, positions from latexsym.sty
+    {"lhd", 0x01, AtomType::Bin, SymFont::LASY},      // "01
+    {"unlhd", 0x02, AtomType::Bin, SymFont::LASY},    // "02 (note: mathbin not mathrel in TeX)
+    {"rhd", 0x03, AtomType::Bin, SymFont::LASY},      // "03
+    {"unrhd", 0x04, AtomType::Bin, SymFont::LASY},    // "04 (note: mathbin not mathrel in TeX)
+    {"mho", 0x30, AtomType::Ord, SymFont::LASY},      // "30 (48 decimal)
+    {"Join", 0x31, AtomType::Rel, SymFont::LASY},     // "31 (49 decimal)
+    {"Box", 0x32, AtomType::Ord, SymFont::LASY},      // "32 (50 decimal)
+    {"Diamond", 0x33, AtomType::Ord, SymFont::LASY},  // "33 (51 decimal)
+    {"leadsto", 0x3B, AtomType::Rel, SymFont::LASY},  // "3B (59 decimal)
+    {"sqsubset", 0x3C, AtomType::Rel, SymFont::LASY}, // "3C (60 decimal)
+    {"sqsupset", 0x3D, AtomType::Rel, SymFont::LASY}, // "3D (61 decimal)
     {nullptr, 0, AtomType::Ord, SymFont::CMSY}
 };
 
@@ -250,9 +266,11 @@ static const SymbolEntry* lookup_symbol(const char* name) {
     size_t len = strlen(name);
     for (const SymbolEntry* s = SYMBOL_TABLE; s->name; s++) {
         if (strlen(s->name) == len && strncmp(s->name, name, len) == 0) {
+            log_debug("[TYPESET] lookup_symbol found: '%s' -> font=%d code=%d", name, (int)s->font, s->code);
             return s;
         }
     }
+    log_debug("[TYPESET] lookup_symbol not found: '%s'", name);
     return nullptr;
 }
 
@@ -351,6 +369,7 @@ struct TypesetContext {
     TFMFont* symbol_tfm;
     TFMFont* extension_tfm;
     TFMFont* msbm_tfm;  // AMS symbol font (msbm10)
+    TFMFont* lasy_tfm;  // LaTeX symbol font (lasy10 for latexsym)
     // Script style: 7pt fonts
     TFMFont* roman7_tfm;
     TFMFont* italic7_tfm;
@@ -367,6 +386,7 @@ struct TypesetContext {
         symbol_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy10") : nullptr;
         extension_tfm = ctx.fonts ? ctx.fonts->get_font("cmex10") : nullptr;
         msbm_tfm = ctx.fonts ? ctx.fonts->get_font("msbm10") : nullptr;
+        lasy_tfm = ctx.fonts ? ctx.fonts->get_font("lasy10") : nullptr;
         // Script style: 7pt fonts
         roman7_tfm = ctx.fonts ? ctx.fonts->get_font("cmr7") : nullptr;
         italic7_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi7") : nullptr;
@@ -376,8 +396,8 @@ struct TypesetContext {
         italic5_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi5") : nullptr;
         symbol5_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy5") : nullptr;
         
-        log_debug("[TYPESET] TypesetContext loaded script fonts: cmr7=%p cmmi7=%p cmsy7=%p",
-                  roman7_tfm, italic7_tfm, symbol7_tfm);
+        log_debug("[TYPESET] TypesetContext loaded script fonts: cmr7=%p cmmi7=%p cmsy7=%p lasy10=%p",
+                  roman7_tfm, italic7_tfm, symbol7_tfm, lasy_tfm);
     }
 
     float font_size() const { return math_ctx.font_size(); }
@@ -745,6 +765,13 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                     font.size_pt = size;
                     tfm = tc.msbm_tfm;
                     break;
+                case SymFont::LASY:
+                    // LaTeX symbols from lasy10 font (latexsym package)
+                    font.name = "lasy10";
+                    font.size_pt = size;
+                    tfm = tc.lasy_tfm;
+                    log_debug("[TYPESET] lasy10 symbol: cmd='%s' code=%d tfm=%p", cmd, sym->code, (void*)tfm);
+                    break;
             }
             font.size_pt = size;
             return make_char_with_metrics(tc.arena(), sym->code, atom, font, tfm, size);
@@ -863,9 +890,15 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
             break;
 
         case MathNodeType::REL:
-            if (cp == '=' || cp == '<' || cp == '>') {
+            if (cp == '=') {
+                // Equals sign from cmr10
                 font = tc.make_roman_font();
                 tfm = tc.get_roman_tfm();
+            } else if (cp == '<' || cp == '>') {
+                // Less-than and greater-than come from cmmi10 (letters)
+                // See fontmath.ltx: \DeclareMathSymbol{<}{\mathrel}{letters}{"3C}
+                font = tc.make_italic_font();
+                tfm = tc.get_italic_tfm();
             } else {
                 font = tc.make_symbol_font();
                 tfm = tc.get_symbol_tfm();
