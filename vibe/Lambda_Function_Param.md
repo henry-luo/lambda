@@ -343,9 +343,9 @@ if (fn_type->returned && fn_type->returned->type_id == LMD_TYPE_ANY) {
 ## Open Questions
 
 1. ~~Should type errors be hard errors or warnings with fallback?~~ **Resolved**: Record errors and continue, stop at threshold (default: 10)
-2. Should extra arguments be silently discarded or always warn? Should always warn.
+2. ~~Should extra arguments be silently discarded or always warn?~~ **Resolved**: Discard extra arguments and always emit a warning
 3. Should MIR transpiler (`transpile-mir.cpp`) also be updated? (Currently doesn't handle function calls) We'll update that part later.
-4. Should the error threshold be configurable via CLI flag (e.g., `--max-errors=20`)? Yes.
+4. ~~Should the error threshold be configurable via CLI flag (e.g., `--max-errors=20`)?~~ **Resolved**: Yes, configurable via `--max-errors=N` CLI flag
 
 ---
 
@@ -362,6 +362,7 @@ if (fn_type->returned && fn_type->returned->type_id == LMD_TYPE_ANY) {
 | Return type validation | ✅ Complete | `build_ast.cpp` |
 | Null comparison enhancement | ✅ Complete | `lambda-eval.cpp` |
 | Lambda test scripts | ✅ Complete | `test/lambda/func_param.ls`, `test/lambda/negative/func_param_negative.ls` |
+| CLI `--max-errors` flag | ✅ Complete | `main.cpp`, `main-repl.cpp`, `transpiler.hpp`, `runner.cpp` |
 
 ### Detailed Changes
 
@@ -379,23 +380,33 @@ if (fn_type->returned && fn_type->returned->type_id == LMD_TYPE_ANY) {
    - Discard extra arguments with warning
    - Fill missing arguments with `ITEM_NULL`
 
-4. **runner.cpp**: Initialize `error_count = 0`, `max_errors = 10` when creating Transpiler
+4. **runner.cpp**: 
+   - Initialize `error_count = 0`, `max_errors = 10` when creating Transpiler
+   - Use `runtime->max_errors` setting if configured
+   - Initialize `runtime->max_errors = 10` in `runtime_init()`
 
-5. **lambda-eval.cpp**: Modified `fn_eq()` to allow null comparisons with any type:
+5. **transpiler.hpp**: Added `max_errors` field to `Runtime` struct for global configuration
+
+6. **main.cpp**: Added CLI parsing for `--max-errors N` flag, applies to runtime settings
+
+7. **main-repl.cpp**: Updated help text to document `--max-errors` option
+
+8. **lambda-eval.cpp**: Modified `fn_eq()` to allow null comparisons with any type:
    - `null == x` returns `false` (not error) when x is non-null
    - `x != null` returns `true` (not error) when x is non-null
    - This enables idiomatic null checking patterns like `if (x == null) ...`
 
-6. **test/lambda/comp_expr_edge.ls** and **.txt**: Updated expected results to reflect new null comparison semantics
+9. **test/lambda/comp_expr_edge.ls** and **.txt**: Updated expected results to reflect new null comparison semantics
 
 ### Test Results
 
-All 73 baseline tests pass. The feature is fully functional with:
+All 79 baseline tests pass. The feature is fully functional with:
 - Missing arguments correctly filled with null
-- Extra arguments discarded with warnings
+- Extra arguments discarded with warnings (`log_warn`)
 - Type coercion working (int→float)
 - Null comparison working for optional parameter patterns
-- Error accumulation stopping at 10 errors
+- Error accumulation stopping at threshold (default: 10)
+- `--max-errors N` CLI flag to configure error threshold
 
 ---
 
