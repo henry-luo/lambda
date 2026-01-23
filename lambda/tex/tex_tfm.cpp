@@ -344,6 +344,15 @@ TFMFont* load_tfm_by_name(const char* name, Arena* arena) {
         "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/amsfonts/symbols",
         "/usr/local/texlive/2023/texmf-dist/fonts/tfm/public/amsfonts/symbols",
         "~/.texlive/texmf-dist/fonts/tfm/public/amsfonts/symbols",
+        // LaTeX fonts (lasy10 for latexsym symbols)
+        "/usr/share/texmf/fonts/tfm/public/latex-fonts",
+        "/usr/share/texlive/texmf-dist/fonts/tfm/public/latex-fonts",
+        "/opt/homebrew/share/texmf-dist/fonts/tfm/public/latex-fonts",
+        "/usr/local/texlive/texmf-dist/fonts/tfm/public/latex-fonts",
+        "/usr/local/texlive/2025basic/texmf-dist/fonts/tfm/public/latex-fonts",
+        "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/latex-fonts",
+        "/usr/local/texlive/2023/texmf-dist/fonts/tfm/public/latex-fonts",
+        "~/.texlive/texmf-dist/fonts/tfm/public/latex-fonts",
         nullptr
     };
 
