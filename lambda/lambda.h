@@ -184,11 +184,24 @@ void list_push(List *list, Item item);
 Item list_end(List *list);
 
 typedef void* (*fn_ptr)();
+
+// Function as first-class value
+// Supports both direct function references and closures (future)
 struct Function {
     uint8_t type_id;
-    void* fn;  // fn definition, TypeFunc
-    fn_ptr ptr;
+    uint8_t arity;        // number of parameters (0-255)
+    uint16_t ref_cnt;     // reference count for memory management
+    void* fn_type;        // fn type definition (TypeFunc*)
+    fn_ptr ptr;           // native function pointer
+    void* closure_env;    // closure environment (NULL if no captures)
 };
+
+// Dynamic function invocation for first-class functions
+Item fn_call(Function* fn, List* args);
+Item fn_call0(Function* fn);
+Item fn_call1(Function* fn, Item a);
+Item fn_call2(Function* fn, Item a, Item b);
+Item fn_call3(Function* fn, Item a, Item b, Item c);
 
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
@@ -392,6 +405,7 @@ typedef struct Context {
     Item fn_join(Item a, Item b);
 
     Function* to_fn(fn_ptr ptr);
+    Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
     Type* base_type(TypeId type_id);
     Type* const_type(int type_index);
 
