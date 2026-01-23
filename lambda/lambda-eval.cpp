@@ -243,17 +243,48 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
     return fn;
 }
 
+// Create a closure with captured environment
+Function* to_closure(fn_ptr ptr, int arity, void* env) {
+    log_debug("create closure %p with arity %d and env %p", ptr, arity, env);
+    Function* fn = (Function*)calloc(1, sizeof(Function));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->ref_cnt = 1;
+    fn->fn_type = NULL;
+    fn->arity = (uint8_t)arity;
+    fn->ptr = ptr;
+    fn->closure_env = env;
+    return fn;
+}
+
 // Dynamic function dispatch for first-class functions
-// Dispatches based on arity to appropriate typed function pointer
+// For closures, env is passed as the first argument
 Item fn_call(Function* fn, List* args) {
     if (!fn || !fn->ptr) {
         log_error("fn_call: null function or function pointer");
         return ItemError;
     }
     int arg_count = args ? (int)args->length : 0;
-    log_debug("fn_call: arity=%d, arg_count=%d", fn->arity, arg_count);
+    void* env = fn->closure_env;
+    log_debug("fn_call: arity=%d, arg_count=%d, env=%p", fn->arity, arg_count, env);
     
-    // dispatch based on argument count
+    // For closures, env is passed as first argument
+    if (env) {
+        switch (arg_count) {
+            case 0: return ((Item(*)(void*))fn->ptr)(env);
+            case 1: return ((Item(*)(void*,Item))fn->ptr)(env, args->items[0]);
+            case 2: return ((Item(*)(void*,Item,Item))fn->ptr)(env, args->items[0], args->items[1]);
+            case 3: return ((Item(*)(void*,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2]);
+            case 4: return ((Item(*)(void*,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3]);
+            case 5: return ((Item(*)(void*,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4]);
+            case 6: return ((Item(*)(void*,Item,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5]);
+            case 7: return ((Item(*)(void*,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]);
+            default:
+                log_error("fn_call: unsupported argument count %d for closure (max 7)", arg_count);
+                return ItemError;
+        }
+    }
+    
+    // Non-closure dispatch
     switch (arg_count) {
         case 0: return ((Item(*)())fn->ptr)();
         case 1: return ((Item(*)(Item))fn->ptr)(args->items[0]);
@@ -271,23 +302,28 @@ Item fn_call(Function* fn, List* args) {
 }
 
 // Convenience wrappers for common arities (avoid List allocation)
+// For closures, env is passed as the first argument
 Item fn_call0(Function* fn) {
     if (!fn || !fn->ptr) return ItemError;
+    if (fn->closure_env) return ((Item(*)(void*))fn->ptr)(fn->closure_env);
     return ((Item(*)())fn->ptr)();
 }
 
 Item fn_call1(Function* fn, Item a) {
     if (!fn || !fn->ptr) return ItemError;
+    if (fn->closure_env) return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
     return ((Item(*)(Item))fn->ptr)(a);
 }
 
 Item fn_call2(Function* fn, Item a, Item b) {
     if (!fn || !fn->ptr) return ItemError;
+    if (fn->closure_env) return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
     return ((Item(*)(Item,Item))fn->ptr)(a, b);
 }
 
 Item fn_call3(Function* fn, Item a, Item b, Item c) {
     if (!fn || !fn->ptr) return ItemError;
+    if (fn->closure_env) return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
     return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
 }
 

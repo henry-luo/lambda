@@ -4,6 +4,12 @@
 // Include standard integer types from system
 #include <stdint.h>
 
+// Define size_t only when compiled by MIR C compiler (not standard C/C++ compiler)
+// MIR doesn't include stddef.h so size_t won't be defined
+#if !defined(__cplusplus) && !defined(_SIZE_T) && !defined(_SIZE_T_) && !defined(__SIZE_T__) && !defined(_SYS__TYPES_H_)
+typedef uint64_t size_t;
+#endif
+
 #if !defined(__cplusplus) && !defined(_STDBOOL_H) && !defined(_STDBOOL_H_) && !defined(__bool_true_false_are_defined)
 #define bool uint8_t
 #define true 1
@@ -202,6 +208,14 @@ Item fn_call0(Function* fn);
 Item fn_call1(Function* fn, Item a);
 Item fn_call2(Function* fn, Item a, Item b);
 Item fn_call3(Function* fn, Item a, Item b, Item c);
+
+// Create function wrappers for first-class usage
+Function* to_fn(fn_ptr ptr);
+Function* to_fn_n(fn_ptr ptr, int arity);
+Function* to_closure(fn_ptr ptr, int arity, void* env);
+
+// Memory allocation for closure environments
+void* heap_calloc(size_t size, TypeId type_id);
 
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
