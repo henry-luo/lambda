@@ -343,9 +343,9 @@ if (fn_type->returned && fn_type->returned->type_id == LMD_TYPE_ANY) {
 ## Open Questions
 
 1. ~~Should type errors be hard errors or warnings with fallback?~~ **Resolved**: Record errors and continue, stop at threshold (default: 10)
-2. Should extra arguments be silently discarded or always warn?
-3. Should MIR transpiler (`transpile-mir.cpp`) also be updated? (Currently doesn't handle function calls)
-4. Should the error threshold be configurable via CLI flag (e.g., `--max-errors=20`)?
+2. Should extra arguments be silently discarded or always warn? Should always warn.
+3. Should MIR transpiler (`transpile-mir.cpp`) also be updated? (Currently doesn't handle function calls) We'll update that part later.
+4. Should the error threshold be configurable via CLI flag (e.g., `--max-errors=20`)? Yes.
 
 ---
 
@@ -606,22 +606,6 @@ fn first_two([a, b, ...rest]) {
     [a, b]
 }
 ```
-
----
-
-## Risk Assessment
-
-| Feature                                   | Risk   | Notes                                                    |
-| ----------------------------------------- | ------ | -------------------------------------------------------- |
-| Optional params (`a?`)                    | Low    | Minimal grammar change, TypeScript-compatible semantics  |
-| Optional vs Nullable (`a?: T` vs `a: T?`) | Low    | Clear distinction, matches TypeScript                    |
-| Default values                            | Medium | Must handle scoping of earlier params in defaults        |
-| Type + Default (`a: int = 5`)             | Low    | Natural extension of default values                      |
-| Named arguments                           | Medium | Grammar change for call expressions, argument reordering |
-| Variadic (...)                            | Higher | Requires runtime support, thread-safety considerations   |
-| varg() system func                        | Medium | New system function, clear API                           |
-
----
 
 ## Open Questions
 

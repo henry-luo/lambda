@@ -63,6 +63,33 @@ fn opt_typed(a: int, b?: int) => if (b) a + b else a * 2
 let o1 = opt_typed(5)      // 10 (b=0 which is falsy, so a*2=10)
 let o2 = opt_typed(5, 3)   // 8 (5 + 3)
 
+// Test 12: Variadic function - sum with varg()
+fn sum_all(...) => sum(varg())
+
+let v1 = sum_all()              // 0
+let v2 = sum_all(1)             // 1
+let v3 = sum_all(1, 2, 3)       // 6
+let v4 = sum_all(1, 2, 3, 4, 5) // 15
+
+// Test 13: Variadic with regular params  
+fn fmt_args(fmt, ...) => [fmt, len(varg())]
+
+let v5 = fmt_args("Hello")           // ["Hello", 0]
+let v6 = fmt_args("Hello %s", "World")  // ["Hello %s", 1]
+let v7 = fmt_args("%d + %d = %d", 1, 2, 3)  // ["%d + %d = %d", 3]
+
+// Test 14: Variadic with varg(n) index access
+fn first_varg(...) => varg(0)
+
+let v8 = first_varg(42)           // 42
+let v9 = first_varg(1, 2, 3)      // 1
+
+// Test 15: Variadic length check
+fn varg_len(...) => len(varg())
+
+let v10 = varg_len()              // 0
+let v11 = varg_len(1, 2, 3)       // 3
+
 // Output all results
 {
     "test1_default": [r1, r2],
@@ -75,5 +102,9 @@ let o2 = opt_typed(5, 3)   // 8 (5 + 3)
     "test8_named_with_defaults": [cfg1, cfg2, cfg3, cfg4],
     "test9_expr_default": [s1, s2],
     "test10_typed_default": [m1, m2],
-    "test11_optional_typed": [o1, o2]
+    "test11_optional_typed": [o1, o2],
+    "test12_variadic_sum": [v1, v2, v3, v4],
+    "test13_variadic_with_params": [v5, v6, v7],
+    "test14_variadic_first": [v8, v9],
+    "test15_variadic_len": [v10, v11]
 }
