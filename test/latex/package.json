@@ -1,0 +1,25 @@
+{
+    "name": "latex-math-tests",
+    "version": "1.0.0",
+    "description": "Multi-layered semantic comparison framework for LaTeX math typesetting",
+    "main": "test_math_comparison.js",
+    "type": "module",
+    "scripts": {
+        "test": "node test_math_comparison.js",
+        "test:baseline": "node test_math_comparison.js --suite baseline",
+        "test:extended": "node test_math_comparison.js --suite extended",
+        "test:verbose": "node test_math_comparison.js -v",
+        "test:json": "node test_math_comparison.js --json",
+        "generate:mathlive": "node mathlive_reference.mjs --all",
+        "generate:katex": "node katex_reference.mjs --all",
+        "generate:ast": "node generate_mathlive_ast.mjs"
+    },
+    "dependencies": {
+        "jsdom": "^24.0.0"
+    },
+    "devDependencies": {
+        "puppeteer": "^24.0.0"
+    },
+    "author": "Lambda Project",
+    "license": "MIT"
+}
