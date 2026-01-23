@@ -919,11 +919,11 @@ let ascii_formula = input("formula.txt", {'type': 'math', 'flavor': 'ascii'});
 
 ### Set Operators
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `\|` | Union | `set1 \| set2` |
-| `&` | Intersection | `set1 & set2` |
-| `!` | Exclusion | `set1 ! set2` |
+| Operator | Description  | Example       |
+| -------- | ------------ | ------------- |
+| \|       | Union        | set1 \| set2  |
+| `&`      | Intersection | `set1 & set2` |
+| `!`      | Exclusion    | `set1 ! set2` |
 
 ### Type Operators
 
