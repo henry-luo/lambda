@@ -714,8 +714,10 @@ pn counter() {
 |---------|-------------------|-------------------|
 | Mutable variables | No | Yes (`var`) |
 | Assignment | No | Yes (`x = value`) |
-| While loops | No | Yes |
+| While loops | No | Yes (`while`) |
+| Break/Continue | No | Yes (`break`, `continue`) |
 | Early return | No | Yes (`return`) |
+| File output | No | Yes (`output()`) |
 | Side effects | Discouraged | Allowed |
 
 #### Implicit Return Value
@@ -783,6 +785,69 @@ pn swap_values() {
     a = b
     b = temp
     (a, b)   // Returns (2, 1)
+}
+```
+
+#### Break and Continue
+
+Use `break` to exit a loop early, and `continue` to skip to the next iteration:
+
+```lambda
+// Break - exit loop when condition met
+pn find_first_negative(nums: [int]) {
+    var i = 0
+    var result = null
+    while (i < len(nums)) {
+        if (nums[i] < 0) {
+            result = nums[i]
+            break           // Exit the loop
+        }
+        i = i + 1
+    }
+    result
+}
+
+// Continue - skip even numbers
+pn sum_odd_numbers(n: int) {
+    var sum = 0
+    var i = 0
+    while (i < n) {
+        i = i + 1
+        if (i % 2 == 0) {
+            continue        // Skip to next iteration
+        }
+        sum = sum + i
+    }
+    sum   // 1 + 3 + 5 + ... 
+}
+```
+
+#### If Statements in Procedural Code
+
+Procedural functions support C-style if/else statements (the else clause is optional):
+
+```lambda
+pn classify(x: int) {
+    var result = ""
+    if (x > 0) {
+        result = "positive"
+    } else {
+        if (x < 0) {
+            result = "negative"
+        } else {
+            result = "zero"
+        }
+    }
+    result
+}
+
+// If without else
+pn abs_value(x: int) {
+    var result = x
+    if (x < 0) {
+        result = -x
+    }
+    result
 }
 ```
 
@@ -1042,118 +1107,6 @@ Lambda Script provides a comprehensive set of built-in system functions for type
 | **Date/Time** | `datetime`, `date`, `time`, `today`, `now`, `justnow` | Date and time functions |
 | **Error** | `error` | Error handling |
 | **Variadic** | `varg` | Variadic argument access |
-
-### Quick Examples
-
-```lambda
-// Type functions
-type(42)               // 'int
-len([1, 2, 3])         // 3
-int("42")              // 42
-string(3.14)           // "3.14"
-
-// Math functions
-abs(-5)                // 5
-sqrt(16)               // 4
-round(3.7)             // 4
-
-// Statistical functions
-sum([1, 2, 3])         // 6
-avg([1, 2, 3])         // 2.0
-median([1, 3, 2])      // 2
-
-// Collection functions
-sort([3, 1, 2])        // [1, 2, 3]
-reverse([1, 2, 3])     // [3, 2, 1]
-concat([1, 2], [3])    // [1, 2, 3]
-
-// Vector functions
-cumsum([1, 2, 3])      // [1, 3, 6]
-dot([1, 2], [3, 4])    // 11
-norm([3, 4])           // 5
-
-// I/O functions
-input("data.json", 'json)
-format(data, 'yaml)
-print("Hello!")
-
-// Date/Time functions
-today()                // Current date
-datetime()             // Current date and time
-
-// Variadic access (inside variadic functions)
-fn sum_all(...) => sum(varg())
-```
-
----
-
-## Input/Output and Parsing
-
-Lambda Script provides comprehensive support for parsing and formatting various document types.
-
-### Supported Input Formats
-
-| Format | Description | Example |
-|--------|-------------|---------|
-| JSON | JavaScript Object Notation | `input("data.json", 'json')` |
-| XML | Extensible Markup Language | `input("config.xml", 'xml')` |
-| HTML | HyperText Markup Language | `input("page.html", 'html')` |
-| YAML | YAML Ain't Markup Language | `input("config.yaml", 'yaml')` |
-| TOML | Tom's Obvious Minimal Language | `input("config.toml", 'toml')` |
-| Markdown | Markdown markup | `input("doc.md", 'markdown')` |
-| CSV | Comma-Separated Values | `input("data.csv", 'csv')` |
-| LaTeX | LaTeX markup | `input("doc.tex", 'latex')` |
-| RTF | Rich Text Format | `input("doc.rtf", 'rtf')` |
-| PDF | Portable Document Format | `input("doc.pdf", 'pdf')` |
-| CSS | Cascading Style Sheets | `input("style.css", 'css')` |
-| INI | Configuration files | `input("config.ini", 'ini')` |
-| Math | Mathematical expressions | `input("formula.txt", 'math')` |
-
-### Input Function Usage
-
-```lambda
-// Basic input parsing
-let data = input("file.json", 'json');
-let config = input("settings.yaml", 'yaml');
-
-// Input with options
-let math_expr = input("formula.txt", {'type': 'math', 'flavor': 'latex'});
-let csv_data = input("data.csv", {'type': 'csv', 'delimiter': ','});
-
-// Auto-detection (based on file extension)
-let auto_data = input("document.md");  // Automatically detects Markdown
-```
-
-### Output Formatting
-
-```lambda
-// Format data as different types
-let json_output = format(data, 'json');
-let yaml_output = format(data, 'yaml');
-let xml_output = format(data, 'xml');
-
-// Format with options
-let pretty_json = format(data, {'type': 'json', 'indent': 2});
-let compact_json = format(data, {'type': 'json', 'compact': true});
-```
-
-### Mathematical Expression Parsing
-
-Lambda Script includes a sophisticated mathematical expression parser supporting multiple syntaxes:
-
-```lambda
-// LaTeX syntax
-let latex_formula = input("formula.tex", {'type': 'math', 'flavor': 'latex'});
-// Supports: \frac{x}{y}, \sin(x), \alpha, \sum_{i=1}^{n}, etc.
-
-// Typst syntax  
-let typst_formula = input("formula.typ", {'type': 'math', 'flavor': 'typst'});
-// Supports: frac(x, y), sin(x), alpha, sum(i=1, n), etc.
-
-// ASCII syntax
-let ascii_formula = input("formula.txt", {'type': 'math', 'flavor': 'ascii'});
-// Supports: x/y, sin(x), alpha, sum(i=1 to n), etc.
-```
 
 ---
 

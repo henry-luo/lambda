@@ -12,7 +12,7 @@ This document provides comprehensive documentation for all built-in system funct
 6. [Vector Functions](#vector-functions)
 7. [Aggregation & Reduction Functions](#aggregation--reduction-functions)
 8. [Variadic Argument Functions](#variadic-argument-functions)
-9. [I/O Functions](#io-functions)
+9. [Input and Format Functions](#io-functions)
 10. [Procedural Functions](#procedural-functions)
 11. [Error Handling](#error-handling)
 
@@ -337,9 +337,9 @@ count_args(1, 2, 3)        // 3
 
 ---
 
-## I/O Functions
+## ## Input/Parsing and Formatting
 
-Functions for input parsing and output formatting.
+Lambda Script provides comprehensive support for parsing and formatting various document types.
 
 ### Input Functions
 
@@ -350,38 +350,137 @@ Functions for input parsing and output formatting.
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
 
-### Output Functions
+| Format | Description | Example |
+|--------|-------------|---------|
+| JSON | JavaScript Object Notation | `input("data.json", 'json')` |
+| XML | Extensible Markup Language | `input("config.xml", 'xml')` |
+| HTML | HyperText Markup Language | `input("page.html", 'html')` |
+| YAML | YAML Ain't Markup Language | `input("config.yaml", 'yaml')` |
+| TOML | Tom's Obvious Minimal Language | `input("config.toml", 'toml')` |
+| Markdown | Markdown markup | `input("doc.md", 'markdown')` |
+| CSV | Comma-Separated Values | `input("data.csv", 'csv')` |
+| LaTeX | LaTeX markup | `input("doc.tex", 'latex')` |
+| RTF | Rich Text Format | `input("doc.rtf", 'rtf')` |
+| PDF | Portable Document Format | `input("doc.pdf", 'pdf')` |
+| CSS | Cascading Style Sheets | `input("style.css", 'css')` |
+| INI | Configuration files | `input("config.ini", 'ini')` |
+| Math | Mathematical expressions | `input("formula.txt", 'math')` |
 
-| Function             | Description                          | Example                    |
-| -------------------- | ------------------------------------ | -------------------------- |
-| `format(data)`       | Format data as Lambda representation | `format(obj)`              |
-| `format(data, type)` | Format data as specified type        | `format(obj, 'json)`       |
+#### Input Function Usage
+
+```lambda
+// Basic input parsing
+let data = input("file.json", 'json');
+let config = input("settings.yaml", 'yaml');
+
+// Input with options
+let math_expr = input("formula.txt", {'type': 'math', 'flavor': 'latex'});
+let csv_data = input("data.csv", {'type': 'csv', 'delimiter': ','});
+
+// Auto-detection (based on file extension)
+let auto_data = input("document.md");  // Automatically detects Markdown
+```
+
+Lambda Script includes a sophisticated mathematical expression parser supporting multiple syntaxes:
+
+```lambda
+// LaTeX syntax
+let latex_formula = input("formula.tex", {'type': 'math', 'flavor': 'latex'});
+// Supports: \frac{x}{y}, \sin(x), \alpha, \sum_{i=1}^{n}, etc.
+
+// ASCII syntax
+let ascii_formula = input("formula.txt", {'type': 'math', 'flavor': 'ascii'});
+// Supports: x/y, sin(x), alpha, sum(i=1 to n), etc.
+```
+
+### Format Functions
+
+| Function             | Description                          | Example              |
+| -------------------- | ------------------------------------ | -------------------- |
+| `format(data)`       | Format data as Lambda representation | `format(obj)`        |
+| `format(data, type)` | Format data as specified type        | `format(obj, 'json)` |
+
+#### Format Function Usage
+
+```lambda
+// Format data as different types
+let json_output = format(data, 'json');
+let yaml_output = format(data, 'yaml');
+let xml_output = format(data, 'xml');
+
+// Format with options
+let pretty_json = format(data, {'type': 'json', 'indent': 2});
+let compact_json = format(data, {'type': 'json', 'compact': true});
+```
 
 ---
 ## Procedural Functions
 
-Functions that have side effects (I/O, state changes). These require procedural context.
+Functions that have side effects (I/O, state changes). These are only available in procedural functions (`pn`).
 
 | Function | Description | Example |
 |----------|-------------|---------|
 | `print(x)` | Print to console | `print("Hello!")` |
-| `now()` | Current timestamp | `now()` |
-| `today()` | Current date | `today()` |
-| `output(file, data)` | Write to file | `output("out.json", data)` |
+| `output(data, file)` | Write data to file (auto-detect format) | `output(data, "out.json")` |
+| `output(data, file, format)` | Write data to file with explicit format | `output(data, "out.txt", 'json')` |
 | `fetch(url, options)` | HTTP fetch | `fetch("https://api.example.com", {})` |
 | `cmd(command, args)` | Execute shell command | `cmd("ls", "-la")` |
 
+### print(x)
+
+Prints a value to the console (stdout).
+
 ```lambda
-// Print output
 print("Hello, world!")
+print(42)
+print([1, 2, 3])
+```
 
-// File output
-output("result.json", data)
+### output(data, file) / output(data, file, format)
 
-// HTTP fetch
+Writes data to a file in various formats. The format can be auto-detected from the file extension or explicitly specified.
+
+```lambda
+pn save_data() {
+    let data = {name: "Alice", age: 30, scores: [95, 87, 92]}
+    
+    // Auto-detect format from file extension
+    output(data, "result.json")     // Writes JSON
+    output(data, "result.yaml")     // Writes YAML
+    output(data, "result.xml")      // Writes XML
+    
+    // Explicit format specification
+    output(data, "data.txt", 'json')    // Force JSON format
+    output(data, "data.out", 'yaml')    // Force YAML format
+}
+```
+
+**Supported output formats:**
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| `json` | `.json` | JSON format |
+| `yaml` | `.yaml`, `.yml` | YAML format |
+| `xml` | `.xml` | XML format |
+| `html` | `.html`, `.htm` | HTML format |
+| `markdown` | `.md` | Markdown format |
+| `text` | `.txt` | Plain text |
+| `toml` | `.toml` | TOML format |
+| `ini` | `.ini` | INI configuration format |
+
+### fetch(url, options)
+
+Performs an HTTP request.
+
+```lambda
 let response = fetch("https://api.example.com/data", {})
+```
 
-// Execute command
+### cmd(command, args)
+
+Executes a shell command.
+
+```lambda
 let result = cmd("echo", "Hello")
 ```
 
