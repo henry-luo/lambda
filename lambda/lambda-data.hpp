@@ -324,16 +324,20 @@ typedef struct TypeUnary : Type {
 
 typedef struct TypeParam : Type {
     struct TypeParam* next;
+    bool is_optional;           // whether parameter is optional (? marker or default value)
+    struct AstNode* default_value;  // default value expression (NULL if none)
 } TypeParam;
 
 typedef struct TypeFunc : Type {
     TypeParam* param;
     Type* returned;
     int param_count;
+    int required_param_count;   // count of required (non-optional) parameters
     int type_index;
     bool is_anonymous;
     bool is_public;
     bool is_proc;
+    bool is_variadic;           // function accepts variadic args (...)
 } TypeFunc;
 
 typedef struct TypeSysFunc : Type {

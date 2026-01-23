@@ -448,7 +448,7 @@ module.exports = grammar({
 
     _arguments: $ => seq(
       '(', comma_sep(optional(
-      field('argument', choice($._expression, $.spread_argument)))), ')',
+      field('argument', choice($.named_argument, $._expression, $.spread_argument)))), ')',
     ),
 
     import: _ => token('import'),
@@ -489,8 +489,22 @@ module.exports = grammar({
     },
 
     // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
-    parameter: $ => seq(
-      field('name', $.identifier), optional(seq(':', field('type', $._type_expr))),
+    // Supports: name, name?, name: type, name?: type, name = default, name: type = default
+    parameter: $ => choice(
+      seq(
+        field('name', $.identifier),
+        optional(field('optional', '?')),  // optional marker BEFORE type
+        optional(seq(':', field('type', $._type_expr))),
+        optional(seq('=', field('default', $._expression))),
+      ),
+      field('variadic', '...'),  // variadic marker (must be last parameter)
+    ),
+
+    // Named argument in function call: name: value
+    named_argument: $ => seq(
+      field('name', $.identifier),
+      ':',
+      field('value', $._expression),
     ),
 
     // fn with stam body

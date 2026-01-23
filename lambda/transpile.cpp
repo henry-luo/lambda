@@ -39,6 +39,24 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
     strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
 }
 
+// check if an AST node is an optional parameter reference (already Item type at runtime)
+bool is_optional_param_ref(AstNode* item) {
+    // unwrap nested PRIMARY nodes
+    while (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (!pri->expr) return false;
+        if (pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
+            if (!ident_node->entry || !ident_node->entry->node) return false;
+            if (ident_node->entry->node->node_type != AST_NODE_PARAM) return false;
+            TypeParam* param_type = (TypeParam*)ident_node->entry->node->type;
+            return param_type->is_optional;
+        }
+        item = pri->expr;
+    }
+    return false;
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
@@ -75,6 +93,11 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_INT: {
+        // Check if this is an optional parameter (already Item type at runtime)
+        if (is_optional_param_ref(item)) {
+            transpile_expr(tp, item);
+            break;
+        }
         // Check if this is a variable that was declared as Item due to type coercion
         if (item->node_type == AST_NODE_PRIMARY) {
             AstPrimaryNode* pri = (AstPrimaryNode*)item;
@@ -137,6 +160,11 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         break;
     }
     case LMD_TYPE_INT64: 
+        // Check if this is an optional parameter (already Item type at runtime)
+        if (is_optional_param_ref(item)) {
+            transpile_expr(tp, item);
+            break;
+        }
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_l2it(");
             TypeConst *item_type = (TypeConst*)item->type;
@@ -153,6 +181,11 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         break;
     case LMD_TYPE_FLOAT: 
+        // Check if this is an optional parameter (already Item type at runtime)
+        if (is_optional_param_ref(item)) {
+            transpile_expr(tp, item);
+            break;
+        }
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_d2it(");
             TypeConst *item_type = (TypeConst*)item->type;
@@ -1172,6 +1205,137 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     }
 }
 
+// helper function to transpile a single argument with type coercion
+void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type, bool is_sys_func) {
+    if (!arg) {
+        // use default value if available
+        if (param_type && param_type->default_value) {
+            log_debug("using default value for param type=%d, default type=%d", 
+                param_type->type_id, param_type->default_value->type->type_id);
+            // for optional params with default, box since function expects Item type
+            if (param_type->is_optional) {
+                transpile_box_item(tp, param_type->default_value);
+            } else if (param_type->type_id == LMD_TYPE_ANY) {
+                transpile_box_item(tp, param_type->default_value);
+            } else {
+                transpile_expr(tp, param_type->default_value);
+            }
+        } else {
+            // No default value - use null for missing optional parameters
+            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        }
+        return;
+    }
+
+    // For named arguments, get the actual value
+    AstNode* value = arg;
+    if (arg->node_type == AST_NODE_NAMED_ARG) {
+        AstNamedNode* named_arg = (AstNamedNode*)arg;
+        value = named_arg->as;
+    }
+
+    log_debug("transpile_call_argument: type=%d, node_type=%d", 
+        value->type ? value->type->type_id : -1, value->node_type);
+
+    // For system functions, box DateTime arguments
+    if (is_sys_func && value->type->type_id == LMD_TYPE_DTIME) {
+        log_debug("transpile_call_argument: BOXING DateTime for sys func");
+        strbuf_append_str(tp->code_buf, "k2it(");
+        transpile_expr(tp, value);
+        strbuf_append_str(tp->code_buf, ")");
+    }
+    // for optional params, always box to Item since function expects Item type
+    else if (param_type && param_type->is_optional) {
+        transpile_box_item(tp, value);
+    }
+    // boxing based on arg type and fn definition type
+    else if (param_type) {
+        if (param_type->type_id == value->type->type_id) {
+            transpile_expr(tp, value);
+        }
+        else if (param_type->type_id == LMD_TYPE_FLOAT) {
+            if ((value->type->type_id == LMD_TYPE_INT || value->type->type_id == LMD_TYPE_INT64 || 
+                value->type->type_id == LMD_TYPE_FLOAT)) {
+                transpile_expr(tp, value);
+            }
+            else if (value->type->type_id == LMD_TYPE_ANY) {
+                strbuf_append_str(tp->code_buf, "it2d(");
+                transpile_expr(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else {
+                strbuf_append_str(tp->code_buf, "null");
+            }
+        }
+        else if (param_type->type_id == LMD_TYPE_INT64) {
+            if (value->type->type_id == LMD_TYPE_INT || value->type->type_id == LMD_TYPE_INT64) {
+                transpile_expr(tp, value);
+            }
+            else if (value->type->type_id == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "((int64_t)");
+                transpile_expr(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else if (value->type->type_id == LMD_TYPE_ANY) {
+                strbuf_append_str(tp->code_buf, "it2l(");
+                transpile_expr(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else {
+                log_error("Error: incompatible argument type for int64 parameter");
+                strbuf_append_str(tp->code_buf, "null");
+            }
+        }
+        else if (param_type->type_id == LMD_TYPE_INT) {
+            if (value->type->type_id == LMD_TYPE_INT) {
+                transpile_expr(tp, value);
+            }
+            else if (value->type->type_id == LMD_TYPE_INT64 || value->type->type_id == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "((int32_t)");
+                transpile_expr(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else if (value->type->type_id == LMD_TYPE_ANY) {
+                strbuf_append_str(tp->code_buf, "it2i(");
+                transpile_expr(tp, value);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else {
+                log_error("Error: incompatible argument type for int parameter");
+                strbuf_append_str(tp->code_buf, "null");
+            }
+        }
+        else {
+            transpile_box_item(tp, value);
+        }
+    }
+    else {
+        transpile_box_item(tp, value);
+    }
+}
+
+// find parameter by name in a function's parameter list
+AstNamedNode* find_param_by_name(AstFuncNode* fn_node, String* name) {
+    if (!name) return NULL;
+    AstNamedNode* param = fn_node->param;
+    while (param) {
+        if (param->name && strcmp(param->name->chars, name->chars) == 0) {
+            return param;
+        }
+        param = (AstNamedNode*)param->next;
+    }
+    return NULL;
+}
+
+// get parameter at index
+AstNamedNode* get_param_at_index(AstFuncNode* fn_node, int index) {
+    AstNamedNode* param = fn_node->param;
+    for (int i = 0; i < index && param; i++) {
+        param = (AstNamedNode*)param->next;
+    }
+    return param;
+}
+
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     log_debug("transpile call expr");
     // Defensive validation: ensure all required pointers and components are valid
@@ -1183,7 +1347,10 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     // write the function name/ptr
     TypeFunc *fn_type = NULL;
-    if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
+    AstFuncNode* fn_node = NULL;  // used for named args lookup
+    bool is_sys_func = (call_node->function->node_type == AST_NODE_SYS_FUNC);
+
+    if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
         StrView fn = ts_node_source(tp, call_node->function->node);
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
@@ -1193,18 +1360,19 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     else {
         if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
             fn_type = (TypeFunc*)call_node->function->type;
-            AstPrimaryNode *fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+            AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
                 (AstPrimaryNode*)call_node->function:null;
-            if (fn_node && fn_node->expr && fn_node->expr->node_type == AST_NODE_IDENT) {
-                AstIdentNode* ident_node = (AstIdentNode*)fn_node->expr;
+            if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
+                AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
                 AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
                 if (entry_node && (entry_node->node_type == AST_NODE_FUNC || 
                     entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC)) {
-                    write_fn_name(tp->code_buf, (AstFuncNode*)entry_node, 
+                    fn_node = (AstFuncNode*)entry_node;  // save for named args lookup
+                    write_fn_name(tp->code_buf, fn_node, 
                         (AstImportNode*)ident_node->entry->import);
                 } else { // variable
                     strbuf_append_char(tp->code_buf, '_');
-                    write_node_source(tp, fn_node->expr->node);
+                    write_node_source(tp, primary_fn_node->expr->node);
                 }
             }
             else {
@@ -1220,118 +1388,125 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         }       
     }
 
+    // count arguments and check for named arguments
+    int arg_count = 0;
+    bool has_named_args = false;
+    AstNode* arg = call_node->argument;
+    while (arg) {
+        if (arg->node_type == AST_NODE_NAMED_ARG) {
+            has_named_args = true;
+        }
+        arg_count++;
+        arg = arg->next;
+    }
+
+    int expected_count = fn_type ? fn_type->param_count : -1;
+    bool is_variadic = fn_type ? fn_type->is_variadic : false;
+
     // transpile the params
     strbuf_append_str(tp->code_buf, "(");
-    AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
-    int arg_index = 0;
-    int expected_count = fn_type ? fn_type->param_count : -1;
     bool has_output_arg = false;
-    
-    while (arg) {
-        // Check for extra arguments (more args than params)
-        if (expected_count >= 0 && arg_index >= expected_count) {
-            log_warn("param_mismatch: discarding extra argument %d (function expects %d params)",
-                arg_index + 1, expected_count);
+
+    if (has_named_args && fn_node) {
+        // named arguments: need to reorder arguments based on parameter names
+        log_debug("handling named arguments");
+
+        // create array to hold resolved arguments for each param position
+        // using stack allocation for reasonable param counts
+        #define MAX_PARAMS 32
+        AstNode* resolved_args[MAX_PARAMS] = {0};
+        
+        // first pass: collect positional args and named args
+        int positional_index = 0;
+        arg = call_node->argument;
+        while (arg) {
+            if (arg->node_type == AST_NODE_NAMED_ARG) {
+                // find the parameter by name
+                AstNamedNode* named_arg = (AstNamedNode*)arg;
+                AstNamedNode* param = find_param_by_name(fn_node, named_arg->name);
+                if (param) {
+                    // find the index of this param
+                    int param_index = 0;
+                    AstNamedNode* p = fn_node->param;
+                    while (p && p != param) {
+                        p = (AstNamedNode*)p->next;
+                        param_index++;
+                    }
+                    if (param_index < MAX_PARAMS) {
+                        if (resolved_args[param_index]) {
+                            log_error("Error: duplicate argument for parameter '%s'", named_arg->name->chars);
+                        }
+                        resolved_args[param_index] = arg;
+                        log_debug("named arg '%s' -> param index %d", named_arg->name->chars, param_index);
+                    }
+                } else {
+                    log_error("Error: unknown parameter name '%s'", named_arg->name->chars);
+                }
+            } else {
+                // positional argument
+                if (positional_index < MAX_PARAMS && !resolved_args[positional_index]) {
+                    resolved_args[positional_index] = arg;
+                    log_debug("positional arg -> param index %d", positional_index);
+                }
+                positional_index++;
+            }
             arg = arg->next;
+        }
+
+        // output arguments in parameter order
+        TypeParam* param_type = fn_type ? fn_type->param : NULL;
+        for (int i = 0; i < expected_count && i < MAX_PARAMS; i++) {
+            if (has_output_arg) {
+                strbuf_append_char(tp->code_buf, ',');
+            }
+            has_output_arg = true;
+
+            AstNode* resolved_arg = resolved_args[i];
+            transpile_call_argument(tp, resolved_arg, param_type, is_sys_func);
+            param_type = param_type ? param_type->next : NULL;
+        }
+        #undef MAX_PARAMS
+    }
+    else {
+        // no named arguments: simple positional processing
+        arg = call_node->argument;
+        TypeParam* param_type = fn_type ? fn_type->param : NULL;
+        int arg_index = 0;
+
+        while (arg) {
+            // Check for extra arguments (more args than params, unless variadic)
+            if (expected_count >= 0 && arg_index >= expected_count && !is_variadic) {
+                log_warn("param_mismatch: discarding extra argument %d (function expects %d params)",
+                    arg_index + 1, expected_count);
+                arg = arg->next;
+                arg_index++;
+                continue;
+            }
+
+            if (has_output_arg) {
+                strbuf_append_char(tp->code_buf, ',');
+            }
+            has_output_arg = true;
+
+            transpile_call_argument(tp, arg, param_type, is_sys_func);
+
+            arg = arg->next;
+            param_type = param_type ? param_type->next : NULL;
             arg_index++;
-            continue;  // skip transpiling this argument
         }
-        
-        if (has_output_arg) {
-            strbuf_append_char(tp->code_buf, ',');
+
+        // Fill missing arguments with default values or ITEM_NULL
+        while (param_type) {
+            log_debug("filling missing argument with default/null for param");
+            if (has_output_arg) {
+                strbuf_append_char(tp->code_buf, ',');
+            }
+            transpile_call_argument(tp, NULL, param_type, is_sys_func);
+            has_output_arg = true;
+            param_type = param_type->next;
         }
-        has_output_arg = true;
-        
-        log_debug("transpile arg: %p, &t: %p, type %d, node_type %d", arg, arg->type, arg->type ? arg->type->type_id : -1, arg->node_type);
-        // For system functions, box DateTime arguments
-        if (call_node->function->node_type == AST_NODE_SYS_FUNC && arg->type->type_id == LMD_TYPE_DTIME) {
-            log_debug("transpile_call_expr: BOXING DateTime for sys func");
-            strbuf_append_str(tp->code_buf, "k2it(");
-            transpile_expr(tp, arg);
-            strbuf_append_str(tp->code_buf, ")");
-        }
-        // boxing based on arg type and fn definition type
-        else if (param_type) {
-            if (param_type->type_id == arg->type->type_id) {
-                transpile_expr(tp, arg);
-            }
-            else if (param_type->type_id == LMD_TYPE_FLOAT) {
-                if ((arg->type->type_id == LMD_TYPE_INT || arg->type->type_id == LMD_TYPE_INT64 || 
-                    arg->type->type_id == LMD_TYPE_FLOAT)) {
-                    transpile_expr(tp, arg);
-                }
-                else if (arg->type->type_id == LMD_TYPE_ANY) {
-                    strbuf_append_str(tp->code_buf, "it2d(");
-                    transpile_expr(tp, arg);
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                else {
-                    // todo: raise error
-                    strbuf_append_str(tp->code_buf, "null");
-                }
-            }
-            else if (param_type->type_id == LMD_TYPE_INT64) {
-                if (arg->type->type_id == LMD_TYPE_INT || arg->type->type_id == LMD_TYPE_INT64) {
-                    transpile_expr(tp, arg);
-                }
-                else if (arg->type->type_id == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "((int64_t)");
-                    transpile_expr(tp, arg);
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                else if (arg->type->type_id == LMD_TYPE_ANY) {
-                    strbuf_append_str(tp->code_buf, "it2l(");
-                    transpile_expr(tp, arg);
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                else {
-                    log_error("Error: incompatible argument type for int64 parameter");
-                    strbuf_append_str(tp->code_buf, "null");
-                }
-            }
-            else if (param_type->type_id == LMD_TYPE_INT) {
-                if (arg->type->type_id == LMD_TYPE_INT) {
-                    transpile_expr(tp, arg);
-                }
-                else if (arg->type->type_id == LMD_TYPE_INT64 || arg->type->type_id == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "((int32_t)");  // downcast
-                    transpile_expr(tp, arg);
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                else if (arg->type->type_id == LMD_TYPE_ANY) {
-                    // todo: check it2i, as it may return error
-                    strbuf_append_str(tp->code_buf, "it2i(");
-                    transpile_expr(tp, arg);
-                    strbuf_append_char(tp->code_buf, ')');
-                }
-                else {
-                    log_error("Error: incompatible argument type for int64 parameter");
-                    strbuf_append_str(tp->code_buf, "null");
-                }
-            }
-            else { // all other types, pass as item
-                transpile_box_item(tp, arg);
-            }
-        }
-        else transpile_box_item(tp, arg);
-        
-        arg = arg->next;  
-        param_type = param_type ? param_type->next : NULL;
-        arg_index++;
     }
-    
-    // Fill missing arguments with ITEM_NULL
-    while (param_type) {
-        log_debug("param_mismatch: filling missing argument with null for param type %d", 
-            param_type->type_id);
-        if (has_output_arg) {
-            strbuf_append_char(tp->code_buf, ',');
-        }
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
-        has_output_arg = true;
-        param_type = param_type->next;
-    }
-    
+
     strbuf_append_char(tp->code_buf, ')');
 }
 
@@ -1482,7 +1657,13 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (param != fn_node->param) strbuf_append_str(tp->code_buf, ",");
-        write_type(tp->code_buf, param->type);
+        // for optional params, use Item type to allow null
+        TypeParam* param_type = (TypeParam*)param->type;
+        if (param_type->is_optional) {
+            strbuf_append_str(tp->code_buf, "Item");
+        } else {
+            write_type(tp->code_buf, param->type);
+        }
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
         param = (AstNamedNode*)param->next;
