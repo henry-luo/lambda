@@ -143,18 +143,6 @@ struct MathContext {
 AtomType classify_codepoint(int32_t cp);
 
 // ============================================================================
-// Simple Math String Parser
-// ============================================================================
-
-// Parse and typeset a simple math string like "a + b = c"
-// Returns an HBox containing the typeset math
-TexNode* typeset_math_string(
-    const char* math_str,
-    size_t len,
-    MathContext& ctx
-);
-
-// ============================================================================
 // LaTeX Math Parser
 // ============================================================================
 
