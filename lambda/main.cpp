@@ -1945,6 +1945,7 @@ int main(int argc, char *argv[]) {
     bool transpile_only = false;
     bool help_only = false;
     char* script_file = NULL;
+    int max_errors = 0;  // 0 means use default (10)
 
     // Parse arguments
     int ret_code = 0;
@@ -1958,6 +1959,16 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
         }
+        else if (strcmp(argv[i], "--max-errors") == 0) {
+            if (i + 1 < argc) {
+                max_errors = atoi(argv[++i]);
+                if (max_errors < 0) max_errors = 0;
+            } else {
+                printf("Error: --max-errors requires a number argument\n");
+                help_only = true;
+                ret_code = 1;
+            }
+        }
         else if (argv[i][0] != '-') {
             // This is a script file
             script_file = argv[i];
@@ -1969,6 +1980,11 @@ int main(int argc, char *argv[]) {
             help_only = true;
             ret_code = 1;
         }
+    }
+
+    // Apply max_errors setting to runtime
+    if (max_errors > 0) {
+        runtime.max_errors = max_errors;
     }
 
     if (help_only) {
