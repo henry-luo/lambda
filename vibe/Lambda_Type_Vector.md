@@ -282,11 +282,11 @@ Functions that reduce a vector to a scalar:
 
 | Function           | Description        | Example                    | Result     | Status |
 | ------------------ | ------------------ | -------------------------- | ---------- | ------ |
-| `mean(vec)`        | Alias for avg      | `mean([1, 2, 3])`          | `2.0`      | ❌ |
-| `median(vec)`      | Median value       | `median([1, 3, 2])`        | `2`        | ❌ |
-| `deviation(vec)`   | Standard deviation | `deviation([1, 2, 3])`     | `0.816...` | ❌ |
-| `variance(vec)`    | Variance           | `variance([1, 2, 3])`      | `0.666...` | ❌ |
-| `quantile(vec, p)` | p-th quantile      | `quantile([1,2,3,4], 0.5)` | `2.5`      | ❌ |
+| `mean(vec)`        | Alias for avg      | `mean([1, 2, 3])`          | `2.0`      | ✅ |
+| `median(vec)`      | Median value       | `median([1, 3, 2])`        | `2`        | ✅ |
+| `deviation(vec)`   | Standard deviation | `deviation([1, 2, 3])`     | `0.816...` | ✅ |
+| `variance(vec)`    | Variance           | `variance([1, 2, 3])`      | `0.666...` | ✅ |
+| `quantile(vec, p)` | p-th quantile      | `quantile([1,2,3,4], 0.5)` | `2.5`      | ✅ |
 
 ### Element-wise Math Functions
 
@@ -295,37 +295,37 @@ Functions that apply to each element and return a vector:
 | Function     | Description     | Example               | Result        | Status |
 | ------------ | --------------- | --------------------- | ------------- | ------ |
 | `abs(vec)`   | Absolute value  | `abs([-1, 2, -3])`    | `[1, 2, 3]`   | ✅ |
-| `sqrt(vec)`  | Square root     | `sqrt([1, 4, 9])`     | `[1, 2, 3]`   | ❌ |
-| `log(vec)`   | Natural log     | `log([1, e, e^2])`    | `[0, 1, 2]`   | ❌ |
-| `log10(vec)` | Base-10 log     | `log10([1, 10, 100])` | `[0, 1, 2]`   | ❌ |
-| `exp(vec)`   | Exponential     | `exp([0, 1, 2])`      | `[1, e, e^2]` | ❌ |
-| `sin(vec)`   | Sine            | `sin([0, π/2, π])`    | `[0, 1, 0]`   | ❌ |
-| `cos(vec)`   | Cosine          | `cos([0, π/2, π])`    | `[1, 0, -1]`  | ❌ |
-| `tan(vec)`   | Tangent         | `tan([0, π/4])`       | `[0, 1]`      | ❌ |
+| `sqrt(vec)`  | Square root     | `sqrt([1, 4, 9])`     | `[1, 2, 3]`   | ✅ |
+| `log(vec)`   | Natural log     | `log([1, e, e^2])`    | `[0, 1, 2]`   | ✅ |
+| `log10(vec)` | Base-10 log     | `log10([1, 10, 100])` | `[0, 1, 2]`   | ✅ |
+| `exp(vec)`   | Exponential     | `exp([0, 1, 2])`      | `[1, e, e^2]` | ✅ |
+| `sin(vec)`   | Sine            | `sin([0, π/2, π])`    | `[0, 1, 0]`   | ✅ |
+| `cos(vec)`   | Cosine          | `cos([0, π/2, π])`    | `[1, 0, -1]`  | ✅ |
+| `tan(vec)`   | Tangent         | `tan([0, π/4])`       | `[0, 1]`      | ✅ |
 | `floor(vec)` | Floor           | `floor([1.7, 2.3])`   | `[1, 2]`      | ✅ |
 | `ceil(vec)`  | Ceiling         | `ceil([1.2, 2.8])`    | `[2, 3]`      | ✅ |
 | `round(vec)` | Round           | `round([1.4, 1.6])`   | `[1, 2]`      | ✅ |
-| `sign(vec)`  | Sign (-1, 0, 1) | `sign([-5, 0, 3])`    | `[-1, 0, 1]`  | ❌ |
+| `sign(vec)`  | Sign (-1, 0, 1) | `sign([-5, 0, 3])`    | `[-1, 0, 1]`  | ✅ |
 
 ### Vector Construction Functions
 
 | Function            | Description             | Example           | Result            | Status |
 | ------------------- | ----------------------- | ----------------- | ----------------- | ------ |
 | `fill(n, v)`        | Vector of n copies of v | `fill(3, 5)`      | `[5, 5, 5]`       | ✅ |
-| `range(a, b, step)` | Range with step         | `range(0, 10, 2)` | `[0, 2, 4, 6, 8]` | ❌ |
+| `range(a, b, step)` | Range with step         | `range(0, 10, 2)` | `[0, 2, 4, 6, 8]` | ✅ |
 
 ### Vector Manipulation Functions
 
 | Function | Description | Example | Result | Status |
 |----------|-------------|---------|--------|--------|
-| `reverse(vec)` | Reverse order | `reverse([1, 2, 3])` | `[3, 2, 1]` | ❌ |
-| `sort(vec)` | Sort ascending | `sort([3, 1, 2])` | `[1, 2, 3]` | ❌ |
-| `sort(vec, 'desc')` | Sort descending | `sort([1, 2, 3], 'desc')` | `[3, 2, 1]` | ❌ |
-| `unique(vec)` | Remove duplicates | `unique([1, 2, 2, 3])` | `[1, 2, 3]` | ❌ |
-| `concat(v1, v2)` | Concatenate | `concat([1, 2], [3, 4])` | `[1, 2, 3, 4]` | ❌ |
+| `reverse(vec)` | Reverse order | `reverse([1, 2, 3])` | `[3, 2, 1]` | ✅ |
+| `sort(vec)` | Sort ascending | `sort([3, 1, 2])` | `[1, 2, 3]` | ✅ |
+| `sort(vec, 'desc')` | Sort descending | `sort([1, 2, 3], 'desc')` | `[3, 2, 1]` | ✅ |
+| `unique(vec)` | Remove duplicates | `unique([1, 2, 2, 3])` | `[1, 2, 3]` | ✅ |
+| `concat(v1, v2)` | Concatenate | `concat([1, 2], [3, 4])` | `[1, 2, 3, 4]` | ✅ |
 | `slice(vec, i, j)` | Extract slice | `slice([1,2,3,4], 1, 3)` | `[2, 3]` | ✅ |
-| `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` | ❌ |
-| `drop(vec, n)` | Drop first n | `drop([1, 2, 3], 1)` | `[2, 3]` | ❌ |
+| `take(vec, n)` | First n elements | `take([1, 2, 3], 2)` | `[1, 2]` | ✅ |
+| `drop(vec, n)` | Drop first n | `drop([1, 2, 3], 1)` | `[2, 3]` | ✅ |
 
 ### Reduction Functions
 
@@ -347,7 +347,7 @@ Functions that apply to each element and return a vector:
 | `map(vec, fn)` | Apply function | `map([1, 2, 3], fn(x) => x*2)` | `[2, 4, 6]` | ✅ |
 | `filter(vec, fn)` | Keep if true | `filter([1, 2, 3], fn(x) => x > 1)` | `[2, 3]` | ✅ |
 | `reduce(vec, fn, init)` | Fold left | `reduce([1,2,3], fn(a,b) => a+b, 0)` | `6` | ✅ |
-| `zip(v1, v2)` | Pair elements | `zip([1, 2], [3, 4])` | `[(1,3), (2,4)]` | ❌ |
+| `zip(v1, v2)` | Pair elements | `zip([1, 2], [3, 4])` | `[(1,3), (2,4)]` | ✅ |
 
 ---
 

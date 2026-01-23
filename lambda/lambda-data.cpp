@@ -411,16 +411,12 @@ void list_push(List *list, Item item) {
         log_debug("list_push: pushing nested list: %p, type_id: %d, length: %ld", item.list, type_id, item.list->length);
         // copy over the items
         List *nest_list = item.list;
-        fprintf(stderr, "DEBUG: nest_list pointer = %p, type_id=%d, item.item=%016lx\n", (void*)nest_list, type_id, item.item);
-        fflush(stderr);
         if (nest_list == NULL || (uintptr_t)nest_list < 0x1000) {
-            fprintf(stderr, "CRITICAL: Nested list pointer is invalid! type_id=%d, item.item=%016lx\n", type_id, item.item);
-            fflush(stderr);
+            log_error("list_push: nested list pointer is invalid! type_id=%d, item.item=%016lx", type_id, item.item);
             return;
         }
         if (nest_list->items == NULL) {
-            fprintf(stderr, "CRITICAL: Nested list has NULL items array! length=%ld, list=%p\n", nest_list->length, (void*)nest_list);
-            fflush(stderr);
+            log_error("list_push: nested list has NULL items array! length=%ld, list=%p", nest_list->length, (void*)nest_list);
             return;
         }
         for (int i = 0; i < nest_list->length; i++) {

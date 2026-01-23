@@ -356,6 +356,32 @@ typedef struct Context {
     Item fn_fill(Item n, Item value);
     Item fn_dot(Item a, Item b);
     Item fn_norm(Item a);
+    // statistical functions
+    Item fn_mean(Item a);
+    Item fn_median(Item a);
+    Item fn_variance(Item a);
+    Item fn_deviation(Item a);
+    // element-wise math functions
+    Item fn_sqrt(Item a);
+    Item fn_log(Item a);
+    Item fn_log10(Item a);
+    Item fn_exp(Item a);
+    Item fn_sin(Item a);
+    Item fn_cos(Item a);
+    Item fn_tan(Item a);
+    Item fn_sign(Item a);
+    // vector manipulation functions
+    Item fn_reverse(Item a);
+    Item fn_sort1(Item a);
+    Item fn_sort2(Item a, Item dir);
+    Item fn_unique(Item a);
+    Item fn_concat(Item a, Item b);
+    Item fn_take(Item a, Item n);
+    Item fn_drop(Item a, Item n);
+    Item fn_slice(Item a, Item start, Item end);
+    Item fn_zip(Item a, Item b);
+    Item fn_range3(Item start, Item end, Item step);
+    Item fn_quantile(Item a, Item p);
 
     Range* fn_to(Item a, Item b);
     String* fn_string(Item item);
