@@ -6849,25 +6849,7 @@ static FontSpec doc_style_to_font(const DocTextStyle& style, float base_size_pt,
     (void)ctx;  // May be used for font lookup later
     FontSpec font;
     
-    // Determine font name based on style flags
-    const char* font_name = "cmr10";  // default roman
-    if (style.has(DocTextStyle::MONOSPACE)) {
-        font_name = "cmtt10";  // typewriter
-    } else if (style.has(DocTextStyle::SANS_SERIF)) {
-        font_name = "cmss10";  // sans-serif
-    } else if (style.has(DocTextStyle::ITALIC) || style.has(DocTextStyle::SLANTED)) {
-        if (style.has(DocTextStyle::BOLD)) {
-            font_name = "cmbx10";  // bold extended (no bold italic in CM)
-        } else {
-            font_name = "cmti10";  // text italic
-        }
-    } else if (style.has(DocTextStyle::BOLD)) {
-        font_name = "cmbx10";  // bold extended
-    } else if (style.has(DocTextStyle::SMALLCAPS)) {
-        font_name = "cmcsc10";  // small caps
-    }
-    
-    // Determine size
+    // Determine size first (needed for optical size selection)
     float size_pt = base_size_pt;
     if (style.font_size_pt > 0) {
         size_pt = style.font_size_pt;
@@ -6886,6 +6868,36 @@ static FontSpec doc_style_to_font(const DocTextStyle& style, float base_size_pt,
             case FontSizeName::FONT_HUGE2:        size_pt = 24.88f; break;
             default: break;
         }
+    }
+    
+    // Helper to select optical size for bold fonts
+    // Computer Modern has cmbx5, cmbx6, cmbx7, cmbx8, cmbx9, cmbx10, cmbx12
+    auto select_bold_font = [size_pt]() -> const char* {
+        if (size_pt >= 12.0f) return "cmbx12";  // 12pt and above use cmbx12
+        if (size_pt >= 10.0f) return "cmbx10";  // 10-11.9pt use cmbx10
+        if (size_pt >= 9.0f) return "cmbx9";
+        if (size_pt >= 8.0f) return "cmbx8";
+        if (size_pt >= 7.0f) return "cmbx7";
+        if (size_pt >= 6.0f) return "cmbx6";
+        return "cmbx5";
+    };
+    
+    // Determine font name based on style flags
+    const char* font_name = "cmr10";  // default roman
+    if (style.has(DocTextStyle::MONOSPACE)) {
+        font_name = "cmtt10";  // typewriter
+    } else if (style.has(DocTextStyle::SANS_SERIF)) {
+        font_name = "cmss10";  // sans-serif
+    } else if (style.has(DocTextStyle::ITALIC) || style.has(DocTextStyle::SLANTED)) {
+        if (style.has(DocTextStyle::BOLD)) {
+            font_name = select_bold_font();  // bold italic uses bold (CM has no true bold italic)
+        } else {
+            font_name = "cmti10";  // text italic
+        }
+    } else if (style.has(DocTextStyle::BOLD)) {
+        font_name = select_bold_font();  // use optical size for bold
+    } else if (style.has(DocTextStyle::SMALLCAPS)) {
+        font_name = "cmcsc10";  // small caps
     }
     
     font.name = font_name;
