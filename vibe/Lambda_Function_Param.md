@@ -627,7 +627,7 @@ fn first_two([a, b, ...rest]) {
 | Typed defaults (`a: int = 10`) | ✅ Complete | `func_param2.ls` test10 |
 | Typed optional (`a?: int`) | ✅ Complete | `func_param2.ls` test11 |
 | Named arguments | ✅ Complete | `func_param2.ls` test5, test6, test7 |
-| Variadic (`...`) | ⏳ Pending | `varg()` system function not yet implemented |
+| Variadic (`...`) | ✅ Complete | `func_param2.ls` test12-15 |
 
 ### Key Implementation Details
 
@@ -656,9 +656,17 @@ typedef struct TypeFunc : Type {
 - `build_named_argument()`: Creates `AST_NODE_NAMED_ARG` for `name: value` syntax
 
 **Transpilation** (`transpile.cpp`):
-- `define_func()`: Optional typed params use `Item` C type (not primitive) to accept null
-- `transpile_call_expr()`: Reorders named args to match param order; fills missing with default or `ITEM_NULL`
+- `define_func()`: Optional typed params use `Item` C type (not primitive) to accept null; variadic functions receive hidden `List* _vargs` parameter
+- `transpile_call_expr()`: Reorders named args to match param order; fills missing with default or `ITEM_NULL`; builds inline list for variadic args
 - `is_optional_param_ref()`: Detects optional param references to skip redundant boxing
+
+**Variadic Runtime** (`lambda-eval.cpp`, `lambda.h`):
+- Thread-local `current_vargs` stores variadic args for current function call
+- `set_vargs(List*)`: Sets the thread-local vargs pointer (called at function entry)
+- `fn_varg0()`: Returns all variadic args as a List (empty list if none)
+- `fn_varg1(Item index)`: Returns nth variadic arg by index
+- Variadic args passed as inline stack-allocated list: `({Item _va[]={...}; List _vl={...}; &_vl;})`
+- C2MIR uses `null` (not `NULL`) for null pointer constants
 
 ### Typed Optional Parameter Behavior
 
@@ -679,4 +687,9 @@ greet("Charlie", 0)  // "Charlie is 0" - 0 is truthy in Lambda
 
 ### Test File
 
-`test/lambda/func_param2.ls` - 11 test cases covering all implemented features
+`test/lambda/func_param2.ls` - 15 test cases covering all implemented features:
+- Tests 1-11: Optional params, defaults, typed params, named arguments
+- Test 12: `sum_all(...)` - variadic sum with `sum(varg())`
+- Test 13: `format_args(fmt, ...)` - regular param + variadic with `len(varg())`
+- Test 14: `first_or_default(default, ...)` - variadic indexed access with `varg(0)`
+- Test 15: `count_args(...)` - variadic length with `len(varg())`
