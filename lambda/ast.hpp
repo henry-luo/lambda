@@ -48,6 +48,12 @@ extern "C" {
 #define SYM_PUB_STAM sym_pub_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
+#define SYM_WHILE_STAM sym_while_stam
+#define SYM_BREAK_STAM sym_break_stam
+#define SYM_CONTINUE_STAM sym_continue_stam
+#define SYM_RETURN_STAM sym_return_stam
+#define SYM_VAR_STAM sym_var_stam
+#define SYM_ASSIGN_STAM sym_assign_stam
 
 #define SYM_BASE_TYPE sym_base_type
 #define SYM_ARRAY_TYPE sym_array_type
@@ -95,6 +101,7 @@ extern "C" {
 #define FIELD_DEFAULT field_default
 #define FIELD_VALUE field_value
 #define FIELD_VARIADIC field_variadic
+#define FIELD_TARGET field_target
 
 #ifdef __cplusplus
 }
@@ -139,6 +146,12 @@ typedef enum AstNodeType {
     AST_NODE_IF_STAM,
     AST_NODE_FOR_EXPR,
     AST_NODE_FOR_STAM,
+    AST_NODE_WHILE_STAM,    // while statement (procedural only)
+    AST_NODE_BREAK_STAM,    // break statement (procedural only)
+    AST_NODE_CONTINUE_STAM, // continue statement (procedural only)
+    AST_NODE_RETURN_STAM,   // return statement (procedural only)
+    AST_NODE_VAR_STAM,      // var statement (procedural only)
+    AST_NODE_ASSIGN_STAM,   // assignment statement (procedural only)
     AST_NODE_LET_STAM,
     AST_NODE_PUB_STAM,
     AST_NODE_TYPE_STAM,
@@ -245,6 +258,24 @@ typedef struct AstIfNode : AstNode {
     AstNode *then;
     AstNode *otherwise;
 } AstIfNode;
+
+// while statement (procedural only)
+typedef struct AstWhileNode : AstNode {
+    AstNode *cond;
+    AstNode *body;
+    NameScope *vars;  // scope for the variables in the while
+} AstWhileNode;
+
+// return statement (procedural only)
+typedef struct AstReturnNode : AstNode {
+    AstNode *value;  // optional return value
+} AstReturnNode;
+
+// assignment statement (procedural only)
+typedef struct AstAssignStamNode : AstNode {
+    String* target;   // variable name to assign to
+    AstNode *value;   // value expression
+} AstAssignStamNode;
 
 typedef struct AstArrayNode : AstNode {
     AstNode *item;  // first item in the array

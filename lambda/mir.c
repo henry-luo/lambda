@@ -159,6 +159,8 @@ func_obj_t func_list[] = {
     {"pn_print", (fn_ptr) pn_print},
     {"pn_cmd", (fn_ptr) pn_cmd},
     {"pn_fetch", (fn_ptr) pn_fetch},
+    {"pn_output2", (fn_ptr) pn_output2},
+    {"pn_output3", (fn_ptr) pn_output3},
 };
 
 void *import_resolver(const char *name) {

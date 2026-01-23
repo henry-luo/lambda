@@ -88,7 +88,8 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false},
     {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false},
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false},
-    {SYSPROC_OUTPUT, "output", 2, &TYPE_ANY, true, false},
+    {SYSPROC_OUTPUT2, "output", 2, &TYPE_NULL, true, true},  // is_overloaded: generates pn_output2
+    {SYSPROC_OUTPUT3, "output", 3, &TYPE_NULL, true, true},  // is_overloaded: generates pn_output3
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false},
 };
 
@@ -1987,6 +1988,7 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
 
     ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = tp->current_scope->is_proc;  // inherit proc context
     tp->current_scope = ast_node->vars;
 
     // for can have multiple loop declarations
@@ -2019,6 +2021,157 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
     // for statement returns type
     ast_node->type = &TYPE_ANY;
     tp->current_scope = ast_node->vars->parent;
+    return (AstNode*)ast_node;
+}
+
+// while statement (procedural only)
+AstNode* build_while_stam(Transpiler* tp, TSNode while_node) {
+    log_debug("build while stam");
+    
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'while' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+    
+    AstWhileNode* ast_node = (AstWhileNode*)alloc_ast_node(tp, AST_NODE_WHILE_STAM, while_node, sizeof(AstWhileNode));
+
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = true;
+    tp->current_scope = ast_node->vars;
+
+    // build condition
+    TSNode cond_node = ts_node_child_by_field_id(while_node, FIELD_COND);
+    ast_node->cond = build_expr(tp, cond_node);
+    log_debug("got while cond type %d", ast_node->cond ? ast_node->cond->node_type : -1);
+
+    // build body
+    TSNode body_node = ts_node_child_by_field_id(while_node, FIELD_BODY);
+    ast_node->body = build_expr(tp, body_node);
+    log_debug("got while body type %d", ast_node->body ? ast_node->body->node_type : -1);
+
+    ast_node->type = &TYPE_ANY;
+    tp->current_scope = ast_node->vars->parent;
+    return (AstNode*)ast_node;
+}
+
+// break statement (procedural only)
+AstNode* build_break_stam(Transpiler* tp, TSNode break_node) {
+    log_debug("build break stam");
+    
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'break' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+    
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_BREAK_STAM, break_node, sizeof(AstNode));
+    ast_node->type = &TYPE_ANY;
+    return ast_node;
+}
+
+// continue statement (procedural only)
+AstNode* build_continue_stam(Transpiler* tp, TSNode continue_node) {
+    log_debug("build continue stam");
+    
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'continue' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+    
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CONTINUE_STAM, continue_node, sizeof(AstNode));
+    ast_node->type = &TYPE_ANY;
+    return ast_node;
+}
+
+// return statement (procedural only)
+AstNode* build_return_stam(Transpiler* tp, TSNode return_node) {
+    log_debug("build return stam");
+    
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'return' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+    
+    AstReturnNode* ast_node = (AstReturnNode*)alloc_ast_node(tp, AST_NODE_RETURN_STAM, return_node, sizeof(AstReturnNode));
+    
+    // build optional return value
+    TSNode value_node = ts_node_child_by_field_id(return_node, FIELD_VALUE);
+    if (!ts_node_is_null(value_node)) {
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+    } else {
+        ast_node->value = NULL;
+        ast_node->type = &TYPE_NULL;
+    }
+    
+    return (AstNode*)ast_node;
+}
+
+// var statement for mutable variables (procedural only)
+AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
+    log_debug("build var stam");
+    
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: 'var' statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+    
+    // Reuse the let statement builder but mark as VAR_STAM
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_VAR_STAM, var_node, sizeof(AstLetNode));
+    
+    // Build declarations (same logic as build_let_and_type_stam for let)
+    TSTreeCursor cursor = ts_tree_cursor_new(var_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode* prev_declare = NULL;
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode* assign = build_assign_expr(tp, child, false);
+            if (prev_declare == NULL) {
+                ast_node->declare = assign;
+            } else {
+                prev_declare->next = assign;
+            }
+            prev_declare = assign;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    ast_node->type = &TYPE_ANY;
+    return (AstNode*)ast_node;
+}
+
+// assignment statement for mutable variables (procedural only)
+AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
+    log_debug("build assign stam");
+    
+    // Check if we're in a procedural context
+    if (!tp->current_scope->is_proc) {
+        log_error("Error: assignment statement is only allowed in procedural functions (pn)");
+        return NULL;
+    }
+    
+    AstAssignStamNode* ast_node = (AstAssignStamNode*)alloc_ast_node(tp, AST_NODE_ASSIGN_STAM, assign_node, sizeof(AstAssignStamNode));
+    
+    // get target identifier
+    TSNode target_node = ts_node_child_by_field_id(assign_node, FIELD_TARGET);
+    StrView target_str = ts_node_source(tp, target_node);
+    ast_node->target = name_pool_create_strview(tp->name_pool, target_str);
+    
+    // build value expression
+    TSNode value_node = ts_node_child_by_field_id(assign_node, FIELD_VALUE);
+    ast_node->value = build_expr(tp, value_node);
+    ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+    
+    // TODO: Verify target is a mutable variable (var, not let)
+    
     return (AstNode*)ast_node;
 }
 
@@ -2261,6 +2414,18 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_for_expr(tp, expr_node);
     case SYM_FOR_STAM:
         return build_for_stam(tp, expr_node);
+    case SYM_WHILE_STAM:
+        return build_while_stam(tp, expr_node);
+    case SYM_BREAK_STAM:
+        return build_break_stam(tp, expr_node);
+    case SYM_CONTINUE_STAM:
+        return build_continue_stam(tp, expr_node);
+    case SYM_RETURN_STAM:
+        return build_return_stam(tp, expr_node);
+    case SYM_VAR_STAM:
+        return build_var_stam(tp, expr_node);
+    case SYM_ASSIGN_STAM:
+        return build_assign_stam(tp, expr_node);
     case SYM_IF_EXPR:
         return build_if_expr(tp, expr_node);
     case SYM_IF_STAM:

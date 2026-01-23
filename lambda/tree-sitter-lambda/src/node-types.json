@@ -157,6 +157,56 @@
     }
   },
   {
+    "type": "assign_stam",
+    "named": true,
+    "fields": {
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fn_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "attr",
     "named": true,
     "fields": {
@@ -475,6 +525,11 @@
     }
   },
   {
+    "type": "break_stam",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "call_expr",
     "named": true,
     "fields": {
@@ -545,7 +600,19 @@
       "required": true,
       "types": [
         {
+          "type": "assign_stam",
+          "named": true
+        },
+        {
           "type": "binary_expr",
+          "named": true
+        },
+        {
+          "type": "break_stam",
+          "named": true
+        },
+        {
+          "type": "continue_stam",
           "named": true
         },
         {
@@ -605,6 +672,10 @@
           "named": true
         },
         {
+          "type": "return_stam",
+          "named": true
+        },
+        {
           "type": "string",
           "named": true
         },
@@ -614,6 +685,14 @@
         },
         {
           "type": "unary_expr",
+          "named": true
+        },
+        {
+          "type": "var_stam",
+          "named": true
+        },
+        {
+          "type": "while_stam",
           "named": true
         }
       ]
@@ -641,6 +720,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "continue_stam",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "document",
@@ -2153,6 +2237,46 @@
     }
   },
   {
+    "type": "return_stam",
+    "named": true,
+    "fields": {
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fn_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "spread_argument",
     "named": true,
     "fields": {},
@@ -2338,6 +2462,72 @@
     }
   },
   {
+    "type": "var_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "while_stam",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "content",
+            "named": true
+          }
+        ]
+      },
+      "cond": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fn_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "!",
     "named": false
   },
@@ -2494,8 +2684,16 @@
     "named": false
   },
   {
+    "type": "break",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true
+  },
+  {
+    "type": "continue",
+    "named": false
   },
   {
     "type": "date",
@@ -2503,19 +2701,19 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
-  },
-  {
-    "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
     "named": false
+  },
+  {
+    "type": "decimal",
+    "named": true
   },
   {
     "type": "element",
@@ -2650,6 +2848,10 @@
     "named": false
   },
   {
+    "type": "return",
+    "named": false
+  },
+  {
     "type": "string",
     "named": false
   },
@@ -2687,6 +2889,14 @@
   },
   {
     "type": "type",
+    "named": false
+  },
+  {
+    "type": "var",
+    "named": false
+  },
+  {
+    "type": "while",
     "named": false
   },
   {

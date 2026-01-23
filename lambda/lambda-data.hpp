@@ -308,7 +308,8 @@ typedef enum SysFunc {
     SYSPROC_TODAY,
     SYSPROC_PRINT,
     SYSPROC_FETCH,
-    SYSPROC_OUTPUT,
+    SYSPROC_OUTPUT2,         // output(source, url) - auto-detect format
+    SYSPROC_OUTPUT3,         // output(source, url, format) - explicit format
     SYSPROC_CMD,
 } SysFunc;
 

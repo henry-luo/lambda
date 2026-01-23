@@ -326,7 +326,13 @@ module.exports = grammar({
       $.entity_type,
       $.if_stam,
       $.for_stam,
+      $.while_stam,
       $.fn_stam,
+      $.break_stam,
+      $.continue_stam,
+      $.return_stam,
+      $.var_stam,
+      $.assign_stam,
       seq($._content_expr, choice(linebreak, ';')),
     ),
 
@@ -535,18 +541,20 @@ module.exports = grammar({
         optional(seq(':', field('type', $._type_expr))),
         '{', field('body', $.content), '}'
       ),
-      seq(
+      // use prec.right so the expression body is consumed greedily
+      prec.right(seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         // return type
         optional(seq(':', field('type', $._type_expr))),
         '=>', field('body', $._expression)
-      ),
+      )),
     ),
 
-    assign_expr: $ => seq(
+    // use prec.right so the expression is consumed greedily
+    assign_expr: $ => prec.right(seq(
       field('name', $.identifier),
       optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
-    ),
+    )),
 
     let_expr: $ => seq(
       'let', field('declare', $.assign_expr)
@@ -575,16 +583,49 @@ module.exports = grammar({
       field('name', $.identifier), 'in', field('as', $._expression),
     ),
 
-    for_expr: $ => seq(
+    // use prec.right so the body expression is consumed greedily
+    for_expr: $ => prec.right(seq(
       'for', '(', field('declare', $.loop_expr),
       repeat(seq(',', field('declare', $.loop_expr))), ')',
       field('then', $._expression),
-    ),
+    )),
 
     for_stam: $ => seq(
       'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
       '{', field('then', $.content), '}'
     ),
+
+    // while statement (procedural only)
+    while_stam: $ => seq(
+      'while', '(', field('cond', $._expression), ')',
+      '{', field('body', $.content), '}'
+    ),
+
+    // break statement (procedural only)
+    break_stam: $ => seq('break', optional(';')),
+
+    // continue statement (procedural only)
+    continue_stam: $ => seq('continue', optional(';')),
+
+    // return statement (procedural only)
+    // use prec.right to prefer consuming expression when present
+    return_stam: $ => prec.right(seq(
+      'return',
+      optional(field('value', $._expression)),
+      optional(';')
+    )),
+
+    // var statement for mutable variables (procedural only)
+    var_stam: $ => seq(
+      'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    ),
+
+    // assignment statement for mutable variables (procedural only)
+    // use prec.right to prefer consuming expression when present
+    assign_stam: $ => prec.right(seq(
+      field('target', $.identifier), '=', field('value', $._expression),
+      optional(';')
+    )),
 
     // Type Definitions: ----------------------------------
 
