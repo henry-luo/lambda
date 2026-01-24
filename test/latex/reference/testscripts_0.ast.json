@@ -1,0 +1,82 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 102,
+        "value": "f"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 102,
+        "value": "f"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 102,
+        "value": "f"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 102,
+        "value": "f"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    }
+  ]
+}

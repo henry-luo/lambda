@@ -1,0 +1,88 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OPEN",
+      "codepoint": 40,
+      "value": "("
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 41,
+      "value": ")"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "OPEN",
+      "codepoint": 91,
+      "value": "["
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 93,
+      "value": "]"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "OPEN",
+      "codepoint": 123,
+      "command": "lbrace",
+      "value": "{"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 125,
+      "command": "rbrace",
+      "value": "}"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 124,
+      "value": "|"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 124,
+      "value": "|"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    }
+  ]
+}

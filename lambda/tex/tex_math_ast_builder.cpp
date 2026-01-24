@@ -165,7 +165,7 @@ MathASTNode* make_math_scripts(Arena* arena, MathASTNode* nucleus, MathASTNode* 
     node->body = nucleus;
     node->superscript = super;
     node->subscript = sub;
-    
+
     // Determine nucleus type
     if (nucleus) {
         switch (nucleus->type) {
@@ -281,10 +281,10 @@ MathASTNode* make_math_error(Arena* arena, const char* message) {
 
 void math_row_append(MathASTNode* row, MathASTNode* child) {
     if (!row || !child) return;
-    
+
     // Accept ROW, ARRAY, and ARRAY_ROW types
-    if (row->type != MathNodeType::ROW && 
-        row->type != MathNodeType::ARRAY && 
+    if (row->type != MathNodeType::ROW &&
+        row->type != MathNodeType::ARRAY &&
         row->type != MathNodeType::ARRAY_ROW) return;
 
     if (!row->body) {
@@ -307,8 +307,8 @@ void math_row_append(MathASTNode* row, MathASTNode* child) {
 
 int math_row_count(MathASTNode* row) {
     if (!row) return 0;
-    if (row->type != MathNodeType::ROW && 
-        row->type != MathNodeType::ARRAY && 
+    if (row->type != MathNodeType::ROW &&
+        row->type != MathNodeType::ARRAY &&
         row->type != MathNodeType::ARRAY_ROW) return 0;
     return row->row.child_count;
 }
@@ -596,7 +596,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (ts_node_is_null(node)) return nullptr;
 
     const char* type = ts_node_type(node);
-    
+
     log_debug("tex_math_ast_builder: build_ts_node type=%s", type);
 
     if (strcmp(type, "math") == 0) return build_math(node);
@@ -645,7 +645,7 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         const char* type = ts_node_type(child);
-        
+
         // Check for \not command followed by an operand
         if (strcmp(type, "command") == 0 || strcmp(type, "symbol_command") == 0) {
             int len;
@@ -668,13 +668,13 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
                 continue;
             }
         }
-        
+
         // Check for phantom commands followed by a group
         if (strcmp(type, "space_command") == 0) {
             int len;
             const char* text = node_text(child, &len);
             uint8_t phantom_type = 255;  // Invalid
-            
+
             if (len >= 8 && strncmp(text, "\\phantom", 8) == 0) {
                 phantom_type = 0;  // full phantom
             } else if (len >= 9 && strncmp(text, "\\hphantom", 9) == 0) {
@@ -682,7 +682,7 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
             } else if (len >= 9 && strncmp(text, "\\vphantom", 9) == 0) {
                 phantom_type = 2;  // vertical phantom
             }
-            
+
             if (phantom_type != 255 && i + 1 < child_count) {
                 // Look for following group
                 TSNode next = ts_node_named_child(node, i + 1);
@@ -697,7 +697,7 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
                 }
             }
         }
-        
+
         MathASTNode* child_node = build_ts_node(child);
         if (child_node) {
             math_row_append(row, child_node);
@@ -776,7 +776,7 @@ MathASTNode* MathASTBuilder::build_relation(TSNode node) {
 MathASTNode* MathASTBuilder::build_punctuation(TSNode node) {
     int len;
     const char* text = node_text(node, &len);
-    
+
     // Handle escaped braces \{ and \}
     if (len == 2 && text[0] == '\\') {
         if (text[1] == '{') {
@@ -790,7 +790,7 @@ MathASTNode* MathASTBuilder::build_punctuation(TSNode node) {
             return n;
         }
     }
-    
+
     // Handle \lbrace and \rbrace
     if (len >= 7 && text[0] == '\\') {
         if (strncmp(text + 1, "lbrace", 6) == 0) {
@@ -804,12 +804,12 @@ MathASTNode* MathASTBuilder::build_punctuation(TSNode node) {
             return n;
         }
     }
-    
+
     // Handle vertical bar as ORD (for absolute value/cardinality notation)
     if (len == 1 && text[0] == '|') {
         return make_math_ord(arena, '|', nullptr);
     }
-    
+
     // Handle parentheses and brackets as OPEN/CLOSE atoms
     if (len == 1) {
         if (text[0] == '(') {
@@ -825,7 +825,7 @@ MathASTNode* MathASTBuilder::build_punctuation(TSNode node) {
             return make_math_close(arena, ']');
         }
     }
-    
+
     return make_math_punct(arena, text[0]);
 }
 
@@ -885,17 +885,17 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
 MathASTNode* MathASTBuilder::build_subsup(TSNode node) {
     // subsup has fields: base, sub, sup
     // Use ts_node_child_by_field_name to get them
-    
+
     TSNode base_node = ts_node_child_by_field_name(node, "base", 4);
     TSNode sub_node = ts_node_child_by_field_name(node, "sub", 3);
     TSNode sup_node = ts_node_child_by_field_name(node, "sup", 3);
-    
+
     log_debug("tex_math_ast_builder: build_subsup base=%d sub=%d sup=%d",
               !ts_node_is_null(base_node), !ts_node_is_null(sub_node), !ts_node_is_null(sup_node));
 
     MathASTNode* base = ts_node_is_null(base_node) ? nullptr : build_ts_node(base_node);
     if (!base) return nullptr;
-    
+
     MathASTNode* super = ts_node_is_null(sup_node) ? nullptr : build_ts_node(sup_node);
     MathASTNode* sub = ts_node_is_null(sub_node) ? nullptr : build_ts_node(sub_node);
 
@@ -932,7 +932,7 @@ MathASTNode* MathASTBuilder::build_radical(TSNode node) {
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         const char* type = ts_node_type(child);
-        
+
         log_debug("tex_math_ast_builder: radical child %d: type=%s", i, type);
 
         if (strcmp(type, "index") == 0 || strcmp(type, "brack_group") == 0) {
@@ -966,7 +966,7 @@ MathASTNode* MathASTBuilder::build_delimiter_group(TSNode node) {
     // Get delimiters from field nodes using field names
     TSNode left_node = ts_node_child_by_field_name(node, "left_delim", 10);
     TSNode right_node = ts_node_child_by_field_name(node, "right_delim", 11);
-    
+
     if (!ts_node_is_null(left_node)) {
         int len;
         const char* text = node_text(left_node, &len);
@@ -983,7 +983,7 @@ MathASTNode* MathASTBuilder::build_delimiter_group(TSNode node) {
             }
         }
     }
-    
+
     if (!ts_node_is_null(right_node)) {
         int len;
         const char* text = node_text(right_node, &len);
@@ -997,14 +997,14 @@ MathASTNode* MathASTBuilder::build_delimiter_group(TSNode node) {
             }
         }
     }
-    
-    log_debug("tex_math_ast: delimiter_group left=%d '%c' right=%d '%c'", 
+
+    log_debug("tex_math_ast: delimiter_group left=%d '%c' right=%d '%c'",
               left_delim, left_delim, right_delim, right_delim);
 
     // Build content from the body children
     MathASTNode* content = nullptr;
     uint32_t named_count = ts_node_named_child_count(node);
-    
+
     // Skip the left_delim and right_delim nodes when counting content
     // Build from all named children except the delimiter nodes
     MathASTNode* row = make_math_row(arena);
@@ -1013,13 +1013,13 @@ MathASTNode* MathASTBuilder::build_delimiter_group(TSNode node) {
         const char* type = ts_node_type(child);
         // Skip delimiter nodes
         if (strcmp(type, "delimiter") == 0) continue;
-        
+
         MathASTNode* child_node = build_ts_node(child);
         if (child_node) {
             math_row_append(row, child_node);
         }
     }
-    
+
     // Unwrap single-element rows
     int count = math_row_count(row);
     if (count == 1) {
@@ -1034,7 +1034,7 @@ MathASTNode* MathASTBuilder::build_delimiter_group(TSNode node) {
 MathASTNode* MathASTBuilder::build_brack_group(TSNode node) {
     // Build content from children (inside the brackets)
     uint32_t named_count = ts_node_named_child_count(node);
-    
+
     MathASTNode* row = make_math_row(arena);
     for (uint32_t i = 0; i < named_count; i++) {
         TSNode child = ts_node_named_child(node, i);
@@ -1043,7 +1043,7 @@ MathASTNode* MathASTBuilder::build_brack_group(TSNode node) {
             math_row_append(row, child_node);
         }
     }
-    
+
     // Unwrap single-element rows
     MathASTNode* content = nullptr;
     int count = math_row_count(row);
@@ -1052,7 +1052,7 @@ MathASTNode* MathASTBuilder::build_brack_group(TSNode node) {
     } else if (count > 1) {
         content = row;
     }
-    
+
     // Wrap in square brackets as delimited group
     return make_math_delimited(arena, '[', content, ']');
 }
@@ -1087,8 +1087,8 @@ MathASTNode* MathASTBuilder::build_accent(TSNode node) {
     else if (cmd_len == 3 && strncmp(cmd, "vec", 3) == 0) accent_char = 0x2192;  // rightarrow
     else if (cmd_len == 3 && strncmp(cmd, "dot", 3) == 0) accent_char = '.';
 
-    return make_math_accent(arena, accent_char, 
-                            cmd ? arena_copy_str(cmd, cmd_len) : nullptr, 
+    return make_math_accent(arena, accent_char,
+                            cmd ? arena_copy_str(cmd, cmd_len) : nullptr,
                             base);
 }
 
@@ -1119,20 +1119,20 @@ static bool op_uses_limits_default(const char* cmd) {
 MathASTNode* MathASTBuilder::build_big_operator(TSNode node) {
     // big_operator has fields: op, lower, upper
     // Use ts_node_child_by_field_name to get them
-    
+
     TSNode op_node = ts_node_child_by_field_name(node, "op", 2);
     TSNode lower_node = ts_node_child_by_field_name(node, "lower", 5);
     TSNode upper_node = ts_node_child_by_field_name(node, "upper", 5);
-    
+
     log_debug("tex_math_ast_builder: build_big_operator op=%d lower=%d upper=%d",
               !ts_node_is_null(op_node), !ts_node_is_null(lower_node), !ts_node_is_null(upper_node));
 
     if (ts_node_is_null(op_node)) return nullptr;
-    
+
     // Build the operator node from the command text
     int len;
     const char* op_text = node_text(op_node, &len);
-    
+
     // Create an OP node for the big operator
     MathASTNode* op = alloc_math_node(arena, MathNodeType::OP);
     if (op_text && len > 1 && op_text[0] == '\\') {
@@ -1143,7 +1143,7 @@ MathASTNode* MathASTBuilder::build_big_operator(TSNode node) {
     }
     op->atom.codepoint = 0;  // Will be set during typesetting based on command
     op->atom.atom_class = (uint8_t)AtomType::Op;
-    
+
     // Only set FLAG_LIMITS for operators that use limits by default (not integrals)
     bool uses_limits = op_uses_limits_default(op->atom.command);
     if (uses_limits) {
@@ -1151,7 +1151,7 @@ MathASTNode* MathASTBuilder::build_big_operator(TSNode node) {
     } else {
         op->flags = 0;
     }
-    
+
     log_debug("tex_math_ast_builder: big_operator command='%s' uses_limits=%d", op->atom.command, uses_limits);
 
     MathASTNode* super = ts_node_is_null(upper_node) ? nullptr : build_ts_node(upper_node);
@@ -1175,7 +1175,7 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
     const char* env_name = nullptr;
     size_t env_name_len = 0;
-    
+
     if (!ts_node_is_null(name_node)) {
         int len;
         const char* text = node_text(name_node, &len);
@@ -1183,12 +1183,12 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
         env_name_len = len;
         log_debug("tex_math_ast: environment name='%.*s'", len, text);
     }
-    
+
     // Determine delimiter characters based on environment type
     int32_t left_delim = 0;
     int32_t right_delim = 0;
     bool is_cases = false;
-    
+
     if (env_name) {
         if (strncmp(env_name, "pmatrix", 7) == 0) {
             left_delim = '(';
@@ -1219,41 +1219,41 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
         }
         // matrix and smallmatrix have no delimiters
     }
-    
+
     // Get body content
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
-    
+
     // Build ARRAY node to hold the matrix structure
     MathASTNode* array_node = make_math_array(arena, "c", 0);  // Default column spec
-    
+
     if (!ts_node_is_null(body_node)) {
         // Parse the body - contains expressions, row_sep (\\), and col_sep (&)
         uint32_t child_count = ts_node_named_child_count(body_node);
-        
+
         // Current row and cell being built
         MathASTNode* current_row = make_math_array_row(arena);
         MathASTNode* current_cell_content = make_math_row(arena);
         int num_cols = 0;
         int max_cols = 0;
         int num_rows = 0;
-        
+
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_named_child(body_node, i);
             const char* type = ts_node_type(child);
-            
+
             log_debug("tex_math_ast: env body child %d: type=%s", i, type);
-            
+
             if (strcmp(type, "row_sep") == 0) {
                 // End current cell and row
                 MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
                 math_row_append(current_row, cell);
                 num_cols++;
                 if (num_cols > max_cols) max_cols = num_cols;
-                
+
                 // Add completed row to array
                 math_row_append(array_node, current_row);
                 num_rows++;
-                
+
                 // Start new row and cell
                 current_row = make_math_array_row(arena);
                 current_cell_content = make_math_row(arena);
@@ -1263,7 +1263,7 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
                 MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
                 math_row_append(current_row, cell);
                 num_cols++;
-                
+
                 // Start new cell
                 current_cell_content = make_math_row(arena);
             } else {
@@ -1274,7 +1274,7 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
                 }
             }
         }
-        
+
         // Don't forget the last cell and row (no trailing \\)
         if (math_row_count(current_cell_content) > 0 || num_cols > 0) {
             MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
@@ -1282,25 +1282,25 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
             num_cols++;
             if (num_cols > max_cols) max_cols = num_cols;
         }
-        
+
         if (math_row_count(current_row) > 0) {
             math_row_append(array_node, current_row);
             num_rows++;
         }
-        
+
         // Update array metadata
         array_node->array.num_cols = max_cols;
         array_node->array.num_rows = num_rows;
-        
+
         log_debug("tex_math_ast: built array with %d rows, %d cols", num_rows, max_cols);
     }
-    
+
     // Wrap in delimiters if needed
     // Matrix delimiters are NOT extensible - they use regular cmr10 parens
     if (left_delim != 0 || right_delim != 0) {
         return make_math_delimited(arena, left_delim, array_node, right_delim, false);
     }
-    
+
     return array_node;
 }
 
@@ -1308,7 +1308,7 @@ MathASTNode* MathASTBuilder::build_text_command(TSNode node) {
     // Get the content field which contains text_group
     TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
     if (ts_node_is_null(content_node)) return nullptr;
-    
+
     // text_group contains text_content as a child
     uint32_t child_count = ts_node_named_child_count(content_node);
     if (child_count >= 1) {
@@ -1317,7 +1317,7 @@ MathASTNode* MathASTBuilder::build_text_command(TSNode node) {
         const char* text = node_text(text_content, &len);
         return make_math_text(arena, arena_copy_str(text, len), len, true);
     }
-    
+
     // Empty text content - return empty row
     return make_math_text(arena, "", 0, true);
 }
@@ -1354,18 +1354,18 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
 // ============================================================================
 
 MathASTNode* parse_math_string_to_ast(const char* latex_src, size_t len, Arena* arena) {
-    log_info("[PARSE] parse_math_string_to_ast: BEGIN len=%zu src='%.*s'", 
+    log_info("[PARSE] parse_math_string_to_ast: BEGIN len=%zu src='%.*s'",
              len, (int)(len > 80 ? 80 : len), latex_src);
-    
+
     MathASTBuilder builder(arena, latex_src, len);
     MathASTNode* result = builder.build();
-    
+
     if (result) {
         log_info("[PARSE] parse_math_string_to_ast: END ast_type=%s", math_node_type_name(result->type));
     } else {
         log_info("[PARSE] parse_math_string_to_ast: END (null result)");
     }
-    
+
     return result;
 }
 
@@ -1376,10 +1376,10 @@ MathASTNode* parse_math_to_ast(const ::ItemReader& math_elem, Arena* arena) {
         log_debug("tex_math_ast: null math element");
         return make_math_row(arena);
     }
-    
+
     // Create ElementReader from Item
     ::ElementReader elem(math_elem.item());
-    
+
     // Try to get source from attribute
     const char* src = elem.get_attr_string("source");
     if (src) {
@@ -1459,7 +1459,7 @@ void math_ast_dump(MathASTNode* node, ::StrBuf* out, int depth) {
     if (node->body) {
         for (int i = 0; i < depth + 1; i++) ::strbuf_append_str(out, "  ");
         ::strbuf_append_str(out, "body:\n");
-        
+
         if (node->type == MathNodeType::ROW) {
             // For ROW, iterate through siblings
             for (MathASTNode* child = node->body; child; child = child->next_sibling) {
@@ -1493,6 +1493,157 @@ void math_ast_dump(MathASTNode* node, ::StrBuf* out, int depth) {
         ::strbuf_append_str(out, "subscript:\n");
         math_ast_dump(node->subscript, out, depth + 2);
     }
+}
+
+// ============================================================================
+// JSON Export (MathLive-compatible)
+// ============================================================================
+
+static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_in_array);
+
+static void json_escape_string(const char* str, ::StrBuf* out) {
+    ::strbuf_append_char(out, '"');
+    for (const char* p = str; *p; p++) {
+        switch (*p) {
+            case '"':  ::strbuf_append_str(out, "\\\""); break;
+            case '\\': ::strbuf_append_str(out, "\\\\"); break;
+            case '\n': ::strbuf_append_str(out, "\\n"); break;
+            case '\r': ::strbuf_append_str(out, "\\r"); break;
+            case '\t': ::strbuf_append_str(out, "\\t"); break;
+            default:
+                if ((unsigned char)*p < 32) {
+                    char hex[8];
+                    snprintf(hex, sizeof(hex), "\\u%04x", (unsigned char)*p);
+                    ::strbuf_append_str(out, hex);
+                } else {
+                    ::strbuf_append_char(out, *p);
+                }
+                break;
+        }
+    }
+    ::strbuf_append_char(out, '"');
+}
+
+static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_in_array) {
+    if (!node) {
+        ::strbuf_append_str(out, "null");
+        return;
+    }
+
+    if (!first_in_array) {
+        ::strbuf_append_str(out, ",");
+    }
+
+    ::strbuf_append_str(out, "{");
+
+    // Type
+    ::strbuf_append_str(out, "\"type\":");
+    json_escape_string(math_node_type_name(node->type), out);
+
+    // Type-specific fields
+    switch (node->type) {
+        case MathNodeType::ORD:
+        case MathNodeType::OP:
+        case MathNodeType::BIN:
+        case MathNodeType::REL:
+        case MathNodeType::OPEN:
+        case MathNodeType::CLOSE:
+        case MathNodeType::PUNCT:
+            ::strbuf_append_str(out, ",\"codepoint\":");
+            ::strbuf_append_int(out, node->atom.codepoint);
+            if (node->atom.command) {
+                ::strbuf_append_str(out, ",\"command\":");
+                json_escape_string(node->atom.command, out);
+            }
+            // Convert codepoint to character
+            if (node->atom.codepoint > 0 && node->atom.codepoint < 0x110000) {
+                char utf8[8];
+                int len = 0;
+                uint32_t cp = (uint32_t)node->atom.codepoint;
+                if (cp < 0x80) {
+                    utf8[len++] = (char)cp;
+                } else if (cp < 0x800) {
+                    utf8[len++] = (char)(0xC0 | (cp >> 6));
+                    utf8[len++] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    utf8[len++] = (char)(0xE0 | (cp >> 12));
+                    utf8[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    utf8[len++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    utf8[len++] = (char)(0xF0 | (cp >> 18));
+                    utf8[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    utf8[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    utf8[len++] = (char)(0x80 | (cp & 0x3F));
+                }
+                utf8[len] = '\0';
+                ::strbuf_append_str(out, ",\"value\":");
+                json_escape_string(utf8, out);
+            }
+            break;
+
+        case MathNodeType::TEXT:
+            if (node->text.text) {
+                ::strbuf_append_str(out, ",\"text\":");
+                json_escape_string(node->text.text, out);
+            }
+            break;
+
+        case MathNodeType::SPACE:
+            ::strbuf_append_str(out, ",\"width\":");
+            ::strbuf_append_format(out, "%.2f", node->space.width_mu);
+            break;
+
+        case MathNodeType::FRAC:
+            ::strbuf_append_str(out, ",\"ruleThickness\":");
+            ::strbuf_append_format(out, "%.2f", node->frac.rule_thickness);
+            break;
+
+        default:
+            break;
+    }
+
+    // Branches
+    if (node->body) {
+        ::strbuf_append_str(out, ",\"body\":");
+        if (node->type == MathNodeType::ROW) {
+            // Array of children
+            ::strbuf_append_str(out, "[");
+            bool first = true;
+            for (MathASTNode* child = node->body; child; child = child->next_sibling) {
+                math_ast_to_json_impl(child, out, first);
+                first = false;
+            }
+            ::strbuf_append_str(out, "]");
+        } else {
+            math_ast_to_json_impl(node->body, out, true);
+        }
+    }
+
+    if (node->above) {
+        ::strbuf_append_str(out, ",\"numer\":");
+        math_ast_to_json_impl(node->above, out, true);
+    }
+
+    if (node->below) {
+        ::strbuf_append_str(out, ",\"denom\":");
+        math_ast_to_json_impl(node->below, out, true);
+    }
+
+    if (node->superscript) {
+        ::strbuf_append_str(out, ",\"superscript\":");
+        math_ast_to_json_impl(node->superscript, out, true);
+    }
+
+    if (node->subscript) {
+        ::strbuf_append_str(out, ",\"subscript\":");
+        math_ast_to_json_impl(node->subscript, out, true);
+    }
+
+    ::strbuf_append_str(out, "}");
+}
+
+void math_ast_to_json(MathASTNode* node, ::StrBuf* out) {
+    math_ast_to_json_impl(node, out, true);
 }
 
 } // namespace tex

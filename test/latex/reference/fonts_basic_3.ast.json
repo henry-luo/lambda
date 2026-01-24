@@ -1,0 +1,20 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 65,
+      "value": "A"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 66,
+      "value": "B"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 67,
+      "value": "C"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 70,
+      "value": "F"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ORD",
+      "codepoint": 71,
+      "value": "G"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 109,
+              "value": "m"
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 49,
+              "value": "1"
+            }
+          },
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 109,
+              "value": "m"
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 50,
+              "value": "2"
+            }
+          }
+        ]
+      },
+      "denom": {
+        "type": "SCRIPTS",
+        "body": {
+          "type": "ORD",
+          "codepoint": 114,
+          "value": "r"
+        },
+        "superscript": {
+          "type": "ORD",
+          "codepoint": 50,
+          "value": "2"
+        }
+      }
+    }
+  ]
+}

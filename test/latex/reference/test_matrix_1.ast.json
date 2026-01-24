@@ -1,0 +1,29 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ARRAY",
+      "body": {
+        "type": "ARRAY_ROW",
+        "body": {
+          "type": "ARRAY_CELL",
+          "body": {
+            "type": "ROW",
+            "body": [
+              {
+                "type": "ORD",
+                "codepoint": 49,
+                "value": "1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "det"
+    }
+  ]
+}

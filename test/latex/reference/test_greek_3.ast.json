@@ -1,0 +1,24 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 25,
+      "command": "pi",
+      "value": "\u0019"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 114,
+        "value": "r"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 50,
+        "value": "2"
+      }
+    }
+  ]
+}

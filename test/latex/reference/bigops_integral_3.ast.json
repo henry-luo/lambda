@@ -1,0 +1,68 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "iint"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    },
+    {
+      "type": "OPEN",
+      "codepoint": 40,
+      "value": "("
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 121,
+      "value": "y"
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 41,
+      "value": ")"
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 100,
+      "value": "d"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 100,
+      "value": "d"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 121,
+      "value": "y"
+    }
+  ]
+}

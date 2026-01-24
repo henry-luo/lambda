@@ -1,0 +1,8 @@
+{
+  "type": "DELIMITED",
+  "body": {
+    "type": "ORD",
+    "codepoint": 97,
+    "value": "a"
+  }
+}

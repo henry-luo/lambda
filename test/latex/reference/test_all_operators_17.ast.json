@@ -1,0 +1,28 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "REL",
+      "codepoint": 55,
+      "command": "mapsto",
+      "value": "7"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "longmapsto"
+    },
+    {
+      "type": "REL",
+      "codepoint": 44,
+      "command": "hookrightarrow",
+      "value": ","
+    },
+    {
+      "type": "REL",
+      "codepoint": 45,
+      "command": "hookleftarrow",
+      "value": "-"
+    }
+  ]
+}

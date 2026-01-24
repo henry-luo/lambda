@@ -1,0 +1,60 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    },
+    {
+      "type": "OPEN",
+      "codepoint": 40,
+      "value": "("
+    },
+    {
+      "type": "ROW",
+      "body": [
+        {
+          "type": "ORD",
+          "codepoint": 49,
+          "value": "1"
+        },
+        {
+          "type": "ORD",
+          "codepoint": 50,
+          "value": "2"
+        },
+        {
+          "type": "ORD",
+          "codepoint": 51,
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 41,
+      "value": ")"
+    }
+  ]
+}

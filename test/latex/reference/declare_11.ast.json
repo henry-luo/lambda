@@ -1,0 +1,20 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "oddball{a}{j}"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 59,
+      "value": ";"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "oddball{abc}{j}"
+    }
+  ]
+}

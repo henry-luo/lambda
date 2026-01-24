@@ -1,0 +1,45 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 65,
+            "value": "A"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 66,
+            "value": "B"
+          }
+        ]
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 67,
+            "value": "C"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 68,
+            "value": "D"
+          }
+        ]
+      }
+    }
+  ]
+}
