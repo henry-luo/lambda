@@ -1,0 +1,23 @@
+{
+  "type": "FRAC",
+  "ruleThickness": -1,
+  "numer": {
+    "type": "FRAC",
+    "ruleThickness": -1,
+    "numer": {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    "denom": {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    }
+  },
+  "denom": {
+    "type": "ORD",
+    "codepoint": 99,
+    "value": "c"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "REL",
+      "codepoint": 17,
+      "command": "equiv",
+      "value": "\u0011"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 99,
+      "value": "c"
+    }
+  ]
+}

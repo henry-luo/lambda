@@ -1,0 +1,34 @@
+{
+  "type": "SCRIPTS",
+  "body": {
+    "type": "ORD",
+    "codepoint": 120,
+    "value": "x"
+  },
+  "superscript": {
+    "type": "SCRIPTS",
+    "body": {
+      "type": "ORD",
+      "codepoint": 107,
+      "value": "k"
+    },
+    "superscript": {
+      "type": "ORD",
+      "codepoint": 108,
+      "value": "l"
+    }
+  },
+  "subscript": {
+    "type": "SCRIPTS",
+    "body": {
+      "type": "ORD",
+      "codepoint": 105,
+      "value": "i"
+    },
+    "subscript": {
+      "type": "ORD",
+      "codepoint": 106,
+      "value": "j"
+    }
+  }
+}

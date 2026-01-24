@@ -1,0 +1,20 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "power{x}{2}"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "power{y}{3}"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "derive"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 50,
+      "value": "2"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "derive"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 51,
+      "value": "3"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 103,
+      "value": "g"
+    }
+  ]
+}

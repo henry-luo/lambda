@@ -1,0 +1,106 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "SCRIPTS",
+        "body": {
+          "type": "ORD",
+          "codepoint": 97,
+          "value": "a"
+        },
+        "superscript": {
+          "type": "FRAC",
+          "ruleThickness": -1,
+          "numer": {
+            "type": "ORD",
+            "codepoint": 49,
+            "value": "1"
+          },
+          "denom": {
+            "type": "ORD",
+            "codepoint": 50,
+            "value": "2"
+          }
+        }
+      },
+      "denom": {
+        "type": "SCRIPTS",
+        "body": {
+          "type": "ORD",
+          "codepoint": 98,
+          "value": "b"
+        },
+        "superscript": {
+          "type": "FRAC",
+          "ruleThickness": -1,
+          "numer": {
+            "type": "ORD",
+            "codepoint": 50,
+            "value": "2"
+          },
+          "denom": {
+            "type": "ORD",
+            "codepoint": 51,
+            "value": "3"
+          }
+        }
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "over"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "SCRIPTS",
+        "body": {
+          "type": "ORD",
+          "codepoint": 99,
+          "value": "c"
+        },
+        "superscript": {
+          "type": "FRAC",
+          "ruleThickness": -1,
+          "numer": {
+            "type": "ORD",
+            "codepoint": 49,
+            "value": "1"
+          },
+          "denom": {
+            "type": "ORD",
+            "codepoint": 50,
+            "value": "2"
+          }
+        }
+      },
+      "denom": {
+        "type": "SCRIPTS",
+        "body": {
+          "type": "ORD",
+          "codepoint": 100,
+          "value": "d"
+        },
+        "superscript": {
+          "type": "FRAC",
+          "ruleThickness": -1,
+          "numer": {
+            "type": "ORD",
+            "codepoint": 50,
+            "value": "2"
+          },
+          "denom": {
+            "type": "ORD",
+            "codepoint": 51,
+            "value": "3"
+          }
+        }
+      }
+    }
+  ]
+}

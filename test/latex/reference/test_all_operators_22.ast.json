@@ -1,0 +1,27 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigoplus"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigotimes"
+    },
+    {
+      "type": "OP",
+      "codepoint": 75,
+      "command": "bigodot",
+      "value": "K"
+    },
+    {
+      "type": "OP",
+      "codepoint": 93,
+      "command": "biguplus",
+      "value": "]"
+    }
+  ]
+}

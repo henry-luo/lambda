@@ -1,9 +1,9 @@
 /**
  * DVI Comparator for LaTeX Math Testing
- * 
+ *
  * Compares Lambda's DVI output against pdfTeX reference DVI files.
  * This layer accounts for 10% of the overall test score.
- * 
+ *
  * Normalization rules:
  * - Compare character codes and positions (with tolerance)
  * - Ignore font name variations (compare by metrics)
@@ -11,9 +11,9 @@
  * - Normalize special characters
  */
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
 
 // DVI command opcodes
 const DVI_OPCODES = {
@@ -93,20 +93,20 @@ const FONT_FAMILY_MAP = {
 
 /**
  * Parse a DVI file and extract glyphs with positions
- * 
+ *
  * This is a simplified DVI parser that extracts positioned glyphs.
  * For full DVI parsing, a proper dvi2text tool would be more appropriate.
  */
 function parseDVI(dviPath) {
     const glyphs = [];
-    
+
     try {
         // Use dvitype if available for more accurate parsing
         const dvitypeResult = tryDviType(dviPath);
         if (dvitypeResult) {
             return dvitypeResult;
         }
-        
+
         // Fall back to basic binary parsing
         const buffer = fs.readFileSync(dviPath);
         return parseDVIBinary(buffer);
@@ -128,7 +128,7 @@ function tryDviType(dviPath) {
             maxBuffer: 10 * 1024 * 1024,
             timeout: 5000
         }).toString();
-        
+
         return parseDviTypeOutput(output);
     } catch (error) {
         // dvitype not available or failed
@@ -142,11 +142,11 @@ function tryDviType(dviPath) {
 function parseDviTypeOutput(output) {
     const glyphs = [];
     const lines = output.split('\n');
-    
+
     let currentFont = null;
     let h = 0;  // horizontal position
     let v = 0;  // vertical position
-    
+
     for (const line of lines) {
         // Font selection
         const fontMatch = line.match(/selectfont\s+(\S+)/);
@@ -154,7 +154,7 @@ function parseDviTypeOutput(output) {
             currentFont = normalizeFontName(fontMatch[1]);
             continue;
         }
-        
+
         // Set character
         const setMatch = line.match(/setchar(\d+)/);
         if (setMatch) {
@@ -168,23 +168,23 @@ function parseDviTypeOutput(output) {
             });
             continue;
         }
-        
+
         // Position updates
         const rightMatch = line.match(/right\d?\s+(-?\d+)/);
         if (rightMatch) {
             h += parseInt(rightMatch[1], 10);
             continue;
         }
-        
+
         const downMatch = line.match(/down\d?\s+(-?\d+)/);
         if (downMatch) {
             v += parseInt(downMatch[1], 10);
             continue;
         }
-        
+
         // Reset position on push/pop would need stack tracking
     }
-    
+
     return { glyphs };
 }
 
@@ -198,11 +198,11 @@ function parseDVIBinary(buffer) {
     let h = 0, v = 0;
     let currentFont = 0;
     const stack = [];
-    
+
     // Skip preamble and find BOP
     while (pos < buffer.length) {
         const opcode = buffer[pos];
-        
+
         if (opcode >= 0 && opcode <= 127) {
             // set_char_0 to set_char_127
             glyphs.push({
@@ -269,7 +269,7 @@ function parseDVIBinary(buffer) {
             pos++;
         }
     }
-    
+
     return { glyphs };
 }
 
@@ -294,24 +294,24 @@ function readSignedInt(buffer, offset, bytes) {
 function parseFontDef(buffer, pos, opcode) {
     const bytes = opcode - DVI_OPCODES.FNT_DEF1 + 1;
     let offset = pos + 1;
-    
+
     // Read font number
     let fontNum = 0;
     for (let i = 0; i < bytes; i++) {
         fontNum = (fontNum << 8) | buffer[offset++];
     }
-    
+
     // Skip checksum, scale, design size (12 bytes)
     offset += 12;
-    
+
     // Read name lengths
     const areaLen = buffer[offset++];
     const nameLen = buffer[offset++];
-    
+
     // Read font name
     const fontName = buffer.slice(offset + areaLen, offset + areaLen + nameLen).toString('utf8');
     offset += areaLen + nameLen;
-    
+
     return {
         fontNum,
         fontName: normalizeFontName(fontName),
@@ -324,15 +324,15 @@ function parseFontDef(buffer, pos, opcode) {
  */
 function normalizeFontName(fontName) {
     if (!fontName) return 'unknown';
-    
+
     const lower = fontName.toLowerCase();
-    
+
     for (const [prefix, family] of Object.entries(FONT_FAMILY_MAP)) {
         if (lower.startsWith(prefix)) {
             return family;
         }
     }
-    
+
     return lower;
 }
 
@@ -350,27 +350,27 @@ function spToPoints(sp) {
 function findMatchingGlyph(glyphs, targetGlyph, tolerance) {
     for (let i = 0; i < glyphs.length; i++) {
         const glyph = glyphs[i];
-        
+
         // Must match character code
         if (glyph.charCode !== targetGlyph.charCode) continue;
-        
+
         // Check position within tolerance
         const dx = Math.abs(spToPoints(glyph.x) - spToPoints(targetGlyph.x));
         const dy = Math.abs(spToPoints(glyph.y) - spToPoints(targetGlyph.y));
-        
+
         if (dx <= tolerance && dy <= tolerance) {
             // Mark as matched to prevent reuse
             glyph._matched = true;
             return glyph;
         }
     }
-    
+
     return null;
 }
 
 /**
  * Compare two DVI files
- * 
+ *
  * @param {string} lambdaDVI - Path to Lambda's DVI output
  * @param {string} referenceDVI - Path to reference DVI file
  * @param {Object} options - Comparison options
@@ -378,18 +378,18 @@ function findMatchingGlyph(glyphs, targetGlyph, tolerance) {
  */
 function compareDVI(lambdaDVI, referenceDVI, options = {}) {
     const tolerance = options.tolerance || 0.5; // points
-    
+
     const results = {
         totalGlyphs: 0,
         matchedGlyphs: 0,
         positionTolerance: tolerance,
         differences: []
     };
-    
+
     // Parse both DVI files
     const lambdaResult = parseDVI(lambdaDVI);
     const refResult = parseDVI(referenceDVI);
-    
+
     if (lambdaResult.error) {
         results.differences.push({
             issue: 'Lambda DVI parse error',
@@ -397,7 +397,7 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
         });
         return { passRate: 0, ...results };
     }
-    
+
     if (refResult.error) {
         results.differences.push({
             issue: 'Reference DVI parse error',
@@ -405,24 +405,24 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
         });
         return { passRate: 0, ...results };
     }
-    
+
     const lambdaGlyphs = lambdaResult.glyphs;
     const refGlyphs = refResult.glyphs;
-    
+
     results.totalGlyphs = refGlyphs.length;
-    
+
     // Match reference glyphs against Lambda output
     for (let i = 0; i < refGlyphs.length; i++) {
         const refGlyph = refGlyphs[i];
         const match = findMatchingGlyph(lambdaGlyphs.filter(g => !g._matched), refGlyph, tolerance);
-        
+
         if (match) {
             results.matchedGlyphs++;
         } else {
             // Find closest match for error reporting
             let closest = null;
             let closestDist = Infinity;
-            
+
             for (const glyph of lambdaGlyphs) {
                 if (glyph.charCode === refGlyph.charCode && !glyph._matched) {
                     const dist = Math.sqrt(
@@ -435,7 +435,7 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
                     }
                 }
             }
-            
+
             results.differences.push({
                 glyphIndex: i,
                 char: refGlyph.char,
@@ -451,7 +451,7 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
             });
         }
     }
-    
+
     // Check for extra glyphs in Lambda output
     const extraGlyphs = lambdaGlyphs.filter(g => !g._matched);
     if (extraGlyphs.length > 0 && results.differences.length < 10) {
@@ -465,12 +465,12 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
             }))
         });
     }
-    
+
     // Calculate pass rate
     const passRate = results.totalGlyphs > 0
         ? (results.matchedGlyphs / results.totalGlyphs) * 100
         : 100;
-    
+
     return {
         passRate: Math.round(passRate * 10) / 10,
         totalGlyphs: results.totalGlyphs,
@@ -487,27 +487,27 @@ function validateDVI(dviPath) {
     if (!fs.existsSync(dviPath)) {
         return { valid: false, error: 'File not found' };
     }
-    
+
     try {
         const buffer = fs.readFileSync(dviPath);
-        
+
         // Check DVI signature (first byte should be 247 = PRE)
         if (buffer[0] !== 247) {
             return { valid: false, error: 'Invalid DVI signature' };
         }
-        
+
         // Check version (should be 2)
         if (buffer[1] !== 2) {
             return { valid: false, error: `Unsupported DVI version: ${buffer[1]}` };
         }
-        
+
         return { valid: true };
     } catch (error) {
         return { valid: false, error: error.message };
     }
 }
 
-module.exports = {
+export {
     compareDVI,
     parseDVI,
     validateDVI,

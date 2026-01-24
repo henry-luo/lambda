@@ -1,0 +1,35 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 105,
+      "value": "i"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 116,
+      "value": "t"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 108,
+      "value": "l"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 105,
+      "value": "i"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 99,
+      "value": "c"
+    }
+  ]
+}

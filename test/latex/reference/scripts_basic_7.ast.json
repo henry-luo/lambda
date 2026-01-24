@@ -1,0 +1,21 @@
+{
+  "type": "SCRIPTS",
+  "body": {
+    "type": "ORD",
+    "codepoint": 97,
+    "value": "a"
+  },
+  "subscript": {
+    "type": "SCRIPTS",
+    "body": {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    "subscript": {
+      "type": "ORD",
+      "codepoint": 99,
+      "value": "c"
+    }
+  }
+}

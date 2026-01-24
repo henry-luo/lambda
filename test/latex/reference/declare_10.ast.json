@@ -1,0 +1,50 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "plus"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 59,
+      "value": ";"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "baz"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "foo{x}"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "foo{j}"
+    }
+  ]
+}

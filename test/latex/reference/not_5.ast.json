@@ -1,0 +1,13 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "NOT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 82,
+        "value": "R"
+      }
+    }
+  ]
+}

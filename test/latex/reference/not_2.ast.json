@@ -1,0 +1,27 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "NOT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 11,
+        "command": "alpha",
+        "value": "\u000b"
+      }
+    }
+  ]
+}
