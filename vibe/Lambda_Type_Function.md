@@ -440,7 +440,7 @@ void free_closure_env(void* env_ptr, ClosureEnvMeta* meta) {
 ### Phase 1: First-Class Functions (No Closures)
 
 **Priority**: High  
-**Estimated Effort**: 2-3 days
+**Status**: ✅ COMPLETE
 
 | Task | Files | Description |
 |------|-------|-------------|
@@ -450,7 +450,7 @@ void free_closure_env(void* env_ptr, ClosureEnvMeta* meta) {
 | 1.4 | `mir.c` | Register `fn_call` in MIR import resolver |
 | 1.5 | `test/lambda/` | First-class function test cases |
 
-**Acceptance Criteria**:
+**Acceptance Criteria**: ✅ All passing
 ```lambda
 // All these should work
 let f = (x) => x * 2
@@ -467,7 +467,7 @@ apply((n) => n ^ 2, 5)  // 25
 ### Phase 2: Basic Closures (Immutable Captures)
 
 **Priority**: Medium  
-**Estimated Effort**: 3-4 days
+**Status**: ✅ COMPLETE (32 tests passing)
 
 | Task | Files | Description |
 |------|-------|-------------|
@@ -476,9 +476,9 @@ apply((n) => n ^ 2, 5)  // 25
 | 2.3 | `transpile.cpp` | Generate closure environment structs |
 | 2.4 | `transpile.cpp` | Modify closure function signatures |
 | 2.5 | `lambda-mem.cpp` | Closure memory allocation helpers |
-| 2.6 | `test/lambda/` | Closure test cases |
+| 2.6 | `test/lambda/` | Closure test cases (13 tests in `closure_advanced.ls`) |
 
-**Acceptance Criteria**:
+**Acceptance Criteria**: ✅ All passing
 ```lambda
 fn make_adder(n) => (x) => x + n
 let add10 = make_adder(10)
@@ -491,10 +491,25 @@ let triple = make_multiplier(3)
 triple(7)  // 21
 ```
 
+**Additional Tests Passing** (added 2026-01-24):
+```lambda
+// Typed parameter capture
+fn make_adder(base: int) { fn adder(y) => base + y; adder }
+make_adder(10)(5)  // 15
+
+// Conditional in closure
+fn make_abs(threshold: int) { fn f(x) => if (x < threshold) -x else x; f }
+make_abs(0)(-5)  // 5
+
+// Let variable capture  
+fn make_counter(start: int) { let count = start * 2; fn f(step) => count + step; f }
+make_counter(5)(3)  // 13
+```
+
 ### Phase 3: Mutable Closures
 
 **Priority**: Medium-Low  
-**Estimated Effort**: 2-3 days
+**Status**: 🔲 NOT STARTED
 
 | Task | Files | Description |
 |------|-------|-------------|
@@ -518,7 +533,7 @@ c()  // 3
 ### Phase 4: Optimizations & Refinements
 
 **Priority**: Low  
-**Estimated Effort**: Ongoing
+**Status**: 🔲 NOT STARTED
 
 | Task | Description |
 |------|-------------|
@@ -529,9 +544,108 @@ c()  // 3
 
 ---
 
-## Part 4: Additional Function Enhancements
+## Part 4: Closure Implementation Details
 
-### 4.1 Partial Application
+This section documents key implementation details discovered during Phase 2 development.
+
+### 4.1 Closure Type Requirements
+
+**Critical Rule**: Closures MUST use `Item` type for all parameters and return values.
+
+This is required because `fn_call()` dispatches dynamically and passes `Item` arguments:
+```c
+// fn_call() signature - all args are Item
+Item fn_call1(Function* fn, Item a);
+Item fn_call2(Function* fn, Item a, Item b);
+```
+
+**Transpilation for Closures**:
+```c
+// Regular function: uses native types
+int _square(int _x) { return _x * _x; }
+
+// Closure: uses Item types for fn_call compatibility  
+Item _adder(Env_adder* _env, Item _y) {
+    return fn_add(_env->base, _y);  // both are Items
+}
+```
+
+### 4.2 Key Helper Functions in `transpile.cpp`
+
+| Function | Purpose |
+|----------|---------|
+| `is_closure_param_ref(tp, item)` | Check if identifier is a parameter of the CURRENT closure |
+| `is_captured_var_ref(tp, item)` | Check if identifier is a captured variable (in closure env) |
+| `emit_captured_var_item(tp, item)` | Emit `_env->varname` for captured variable access |
+| `transpile_box_capture(tp, cap, from_outer)` | Box a captured variable when building closure env |
+
+### 4.3 Distinguishing Closure Params vs Captured Vars
+
+**Problem Solved**: When transpiling `base + y` inside a closure where `base` is captured from outer scope and `y` is the closure's own parameter, the transpiler must handle them differently:
+
+- `y` (closure param): Already an `Item` at runtime, use directly
+- `base` (captured var): Access via `_env->base`, already an `Item`
+
+**Key Fix**: `is_closure_param_ref()` must verify the parameter belongs to the CURRENT closure's parameter list, not just any outer function's parameter:
+
+```cpp
+bool is_closure_param_ref(Transpiler* tp, AstNode* item) {
+    if (!tp->current_closure) return false;
+    // ... unwrap PRIMARY nodes to get IDENT ...
+    AstNamedNode* param = (AstNamedNode*)ident_node->entry->node;
+    // Check if this param is in CURRENT closure's param list
+    AstNamedNode* closure_param = tp->current_closure->param;
+    while (closure_param) {
+        if (closure_param == param) return true;
+        closure_param = (AstNamedNode*)closure_param->next;
+    }
+    return false;  // This is a param from outer function (captured)
+}
+```
+
+### 4.4 Boxing for Runtime Functions
+
+When closure body calls runtime functions like `fn_add()`, captured variables are already `Item` type in the env, so they should NOT be unboxed:
+
+```c
+// WRONG: fn_add(it2i(_env->base), _y)  -- unboxes captured var
+// RIGHT: fn_add(_env->base, _y)        -- passes Item directly
+```
+
+The `transpile_box_item()` function checks `is_captured_var_ref()` and emits `_env->varname` directly without boxing/unboxing.
+
+### 4.5 Closure Struct Pre-definition
+
+Closure environment structs must be defined BEFORE any function that references them. The transpiler runs `pre_define_closure_envs()` to emit all struct definitions first:
+
+```c
+// Pre-defined before functions
+typedef struct Env_adder { Item base; } Env_adder;
+
+// Function can now reference the struct
+Item _adder(Env_adder* _env, Item _y) { ... }
+```
+
+### 4.6 Closure Context Tracking
+
+The transpiler maintains `current_closure` pointer during body transpilation:
+
+```cpp
+AstFuncNode* prev_closure = tp->current_closure;
+if (is_closure) {
+    tp->current_closure = fn_node;
+}
+// ... transpile body ...
+tp->current_closure = prev_closure;  // restore
+```
+
+This allows `is_closure_param_ref()` and `is_captured_var_ref()` to know which closure context they're operating in.
+
+---
+
+## Part 5: Additional Function Enhancements (Future)
+
+### 5.1 Partial Application
 
 **Syntax Option A** (explicit):
 ```lambda
@@ -549,7 +663,7 @@ add5(3)  // 8
 
 **Implementation**: Partial application creates a closure capturing provided arguments.
 
-### 4.2 Function Composition
+### 5.2 Function Composition
 
 **Built-in Operators**:
 ```lambda
@@ -564,7 +678,7 @@ h2(5)  // 11
 
 **Implementation**: `>>` and `<<` create new closure combining both functions.
 
-### 4.3 Method Binding
+### 5.3 Method Binding
 
 For element/map method-like calls:
 ```lambda
@@ -580,7 +694,7 @@ let bound = obj::double   // binds 'obj' as first arg
 bound()  // 20
 ```
 
-### 4.4 Recursive Anonymous Functions
+### 5.4 Recursive Anonymous Functions
 
 **Problem**: Anonymous functions cannot easily refer to themselves.
 
@@ -600,9 +714,9 @@ let factorial = (
 
 ---
 
-## Part 5: Type System Considerations
+## Part 6: Type System Considerations
 
-### 5.1 Function Type Syntax (Existing)
+### 6.1 Function Type Syntax (Existing)
 
 Lambda already supports function types:
 ```lambda
@@ -611,7 +725,7 @@ type Mapper = (a: any) => any
 type Reducer = (acc: int, x: int) => int
 ```
 
-### 5.2 Generic Function Types (Future)
+### 6.2 Generic Function Types (Future)
 
 ```lambda
 type Mapper<T, U> = (T) => U
@@ -620,7 +734,7 @@ type Predicate<T> = (T) => bool
 fn map<T, U>(arr: T*, f: Mapper<T, U>) => ...
 ```
 
-### 5.3 Closure Type Inference
+### 6.3 Closure Type Inference
 
 The type system should infer captured variable types:
 ```lambda
@@ -632,9 +746,9 @@ fn make_adder(n: int) {
 
 ---
 
-## Part 6: MIR/JIT Considerations
+## Part 7: MIR/JIT Considerations
 
-### 6.1 Current MIR Integration
+### 7.1 Current MIR Integration
 
 Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
 1. `transpile.cpp` generates C code string
@@ -642,7 +756,7 @@ Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
 3. MIR generates native code
 4. Function pointers are registered in `func_list[]`
 
-### 6.2 Closure Handling in MIR
+### 7.2 Closure Handling in MIR
 
 **Challenge**: Closures need runtime-generated environment structs.
 
@@ -651,7 +765,7 @@ Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
 - Environment structs are plain C structs - MIR handles them normally
 - Closure allocation happens at runtime via standard `malloc`
 
-### 6.3 Dynamic Dispatch Performance
+### 7.3 Dynamic Dispatch Performance
 
 **Concern**: `fn_call()` adds indirection overhead.
 
