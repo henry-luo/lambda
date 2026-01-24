@@ -685,13 +685,120 @@ let doubled = (for (x in numbers) multiply(x, 2))
 
 ### Closures
 
-Functions can capture variables from their enclosing scope:
+A **closure** is a function that captures variables from its enclosing scope. The captured variables are preserved even after the outer function returns, allowing the inner function to access them later.
+
+#### Basic Closure
 
 ```lambda
-let multiplier = 3;
-let triple = fn(x: int) => x * multiplier;
-triple(5)  // Returns 15
+let multiplier = 3
+let triple = (x) => x * multiplier
+triple(5)  // 15
 ```
+
+#### Factory Functions (Closures Returning Functions)
+
+Closures are commonly used in factory functions that return customized functions:
+
+```lambda
+fn make_adder(base: int) {
+    fn adder(y) => base + y  // captures 'base' from outer scope
+    adder
+}
+
+let add10 = make_adder(10)
+let add100 = make_adder(100)
+
+add10(5)    // 15
+add100(5)   // 105
+```
+
+Each call to `make_adder` creates a new closure with its own captured `base` value.
+
+#### Capturing Multiple Variables
+
+Closures can capture multiple variables from their enclosing scope:
+
+```lambda
+fn make_linear(slope: int, intercept: int) {
+    fn eval(x) => slope * x + intercept  // captures both slope and intercept
+    eval
+}
+
+let line = make_linear(2, 10)
+line(5)   // 20 (2*5 + 10)
+line(10)  // 30 (2*10 + 10)
+```
+
+#### Nested Closures
+
+Closures can be nested multiple levels deep, with each level capturing from its parent:
+
+```lambda
+fn level1(a) {
+    fn level2(b) {
+        fn level3(c) {
+            fn level4(d) => a + b + c + d  // captures a, b, c from outer scopes
+            level4
+        }
+        level3
+    }
+    level2
+}
+
+level1(1)(2)(3)(4)  // 10
+```
+
+#### Capturing Let Variables
+
+Closures can capture `let` bindings computed in the outer scope:
+
+```lambda
+fn make_counter(start: int) {
+    let initial = start * 2    // computed value
+    fn count(step) => initial + step  // captures 'initial'
+    count
+}
+
+let counter = make_counter(5)
+counter(3)  // 13 (5*2 + 3)
+```
+
+#### Closures with Conditionals
+
+Closures can contain any expression, including conditionals:
+
+```lambda
+fn make_threshold_checker(threshold: int) {
+    fn check(x) => if (x < threshold) -x else x
+    check
+}
+
+let abs_zero = make_threshold_checker(0)
+abs_zero(-5)  // 5
+abs_zero(5)   // 5
+```
+
+#### Higher-Order Functions with Closures
+
+Closures work seamlessly with higher-order functions:
+
+```lambda
+fn apply(f, x) => f(x)
+fn compose(f, g) => (x) => g(f(x))
+
+let add1 = (x) => x + 1
+let double = (x) => x * 2
+
+apply(add1, 5)           // 6
+compose(add1, double)(5) // 12 (double(add1(5)) = double(6) = 12)
+```
+
+#### Closure Limitations
+
+Current limitations (may be addressed in future versions):
+
+- **Immutable captures only**: Closures capture values, not references. Modifying a captured variable in the outer scope after closure creation does not affect the closure.
+- **No mutable state**: Closures cannot maintain mutable state between calls. Use procedural functions (`pn`) if mutable state is needed.
 
 ### Procedural Functions
 
