@@ -201,6 +201,8 @@ typedef struct SysFuncInfo {
     Type* return_type;
     bool is_proc;   // is procedural
     bool is_overloaded;
+    bool is_method_eligible;    // can be called as obj.method() style
+    TypeId first_param_type;    // expected type of first param (LMD_TYPE_ANY for any)
 } SysFuncInfo;
 
 typedef struct AstSysFuncNode : AstNode {

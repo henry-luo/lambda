@@ -1,0 +1,46 @@
+"Test 1 - len as method:arr.len() ="
+5
+"len(arr) ="
+5
+"Test 2 - string() as method:num.string() =42Test 3 - type() as method:"hello".type() ="
+string
+"Test 4 - math methods:x.abs() ="
+5
+"y.round() ="
+4
+"y.floor() ="
+3
+"y.ceil() ="
+4
+"Test 5 - array methods:nums.sum() ="
+31
+"nums.min() ="
+1
+"nums.max() ="
+9
+"Test 6 - string methods:s.len() ="
+13
+"s.contains("World") ="
+true
+"s.starts_with("Hello") ="
+true
+"s.slice(0, 5) =HelloTest 7 - methods with args:data.take(3) ="
+10
+20
+30
+"data.drop(2) ="
+30
+40
+50
+"Test 8 - chained methods:[5,3,1,4,2].sort() ="
+[1, 2, 3, 4, 5]
+"[5,3,1,4,2].sort().reverse() ="
+[5, 4, 3, 2, 1]
+"Test 9 - equivalence:len(test) ="
+3
+"test.len() ="
+3
+"sum(test) ="
+6
+"test.sum() ="
+6
