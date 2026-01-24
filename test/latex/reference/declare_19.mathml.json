@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "x_\\WildCard",
+  "mathml": "<msub><mi>x</mi><merror></merror></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      }
+    ]
+  }
+}

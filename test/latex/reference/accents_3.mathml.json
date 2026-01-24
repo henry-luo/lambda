@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\widehat{xyz} \\quad \\widetilde{abc}",
+  "mathml": "<mrow><mover accent=\"true\"><mrow><mi>x</mi><mo>&#8290;</mo><mi>y</mi><mo>&#8290;</mo><mi>z</mi></mrow><mo>undefined</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mrow><mi>a</mi><mo>&#8290;</mo><mi>b</mi><mo>&#8290;</mo><mi>c</mi></mrow><mo>undefined</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "z"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      }
+    ]
+  }
+}

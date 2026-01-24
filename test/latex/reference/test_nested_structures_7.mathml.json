@@ -1,0 +1,106 @@
+{
+  "format": "mathml",
+  "latex": "\\int_0^1 \\prod_{i=1}^n \\left( \\sum_{j=1}^m a_{ij} x^j \\right) dx",
+  "mathml": "<mrow><msubsup><mo>∫</mo><mn>0</mn><mn>1</mn></msubsup><msubsup><mo>∏</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></msubsup><mrow><mo>(</mo><mrow><msubsup><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>1</mn></mrow><mi>m</mi></msubsup><msub><mi>a</mi><mrow><mi>i</mi><mo>&#8290;</mo><mi>j</mi></mrow></msub><msup><mi>x</mi><mi>j</mi></msup></mrow><mo>)</mo></mrow><mi>d</mi><mo>&#8290;</mo><mi>x</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∫"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": "∏"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mo",
+        "content": "∑"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

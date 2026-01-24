@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "a = b \\quad a \\neq b \\quad a < b \\quad a > b",
+  "mathml": "<mrow><mi>a</mi><mo>=</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>&ne;</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>&lt;</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>&gt;</mo><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&ne;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&lt;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

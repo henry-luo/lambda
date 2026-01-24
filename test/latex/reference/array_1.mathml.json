@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\matrix{a & b \\cr c & d}",
+  "mathml": "<mrow><merror></merror><mrow><mi>a</mi><mo>&#8290;</mo><mi>&</mi><mo>&#8290;</mo><mi>b</mi><merror></merror><mi>c</mi><mo>&#8290;</mo><mi>&</mi><mo>&#8290;</mo><mi>d</mi></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "&"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "&"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      }
+    ]
+  }
+}

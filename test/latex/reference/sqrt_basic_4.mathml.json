@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt[n]{x}",
+  "mathml": "<mroot><mi>x</mi><mi>n</mi></mroot>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      }
+    ]
+  }
+}

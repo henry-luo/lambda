@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\alpha^2 + \\beta^2 = \\gamma^2",
+  "mathml": "<mrow><msup><mi>&#x03b1;</mi><mn>2</mn></msup><mo>+</mo><msup><mi>β</mi><mn>2</mn></msup><mo>=</mo><msup><mi>γ</mi><mn>2</mn></msup></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "&#x03b1;"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "β"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "γ"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

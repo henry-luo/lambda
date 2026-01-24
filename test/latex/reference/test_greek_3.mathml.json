@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\pi r^2",
+  "mathml": "<mrow><mi>&#x03c0;</mi><msup><mi>r</mi><mn>2</mn></msup></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "&#x03c0;"
+      },
+      {
+        "tag": "mi",
+        "content": "r"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

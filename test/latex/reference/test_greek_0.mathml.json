@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\alpha \\beta \\gamma \\delta",
+  "mathml": "<mrow><mi>&#x03b1;</mi><mo>&#8290;</mo><mi>β</mi><mo>&#8290;</mo><mi>γ</mi><mo>&#8290;</mo><mi>δ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "&#x03b1;"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "β"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "γ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "δ"
+      }
+    ]
+  }
+}

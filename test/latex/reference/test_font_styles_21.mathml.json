@@ -1,0 +1,86 @@
+{
+  "format": "mathml",
+  "latex": "\\max\\{a, b\\}, \\min\\{a, b\\}, \\sup S, \\inf S",
+  "mathml": "<mrow><mo>max</mo><mo>{</mo><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi><mo>}</mo><mo separator=\"true\">,</mo><mo>min</mo><mo>{</mo><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi><mo>}</mo><mo separator=\"true\">,</mo><mo>sup</mo><mi>S</mi><mo separator=\"true\">,</mo><mo>inf</mo><mi>S</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "max"
+      },
+      {
+        "tag": "mo",
+        "content": "{"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "}"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "min"
+      },
+      {
+        "tag": "mo",
+        "content": "{"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "}"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "sup"
+      },
+      {
+        "tag": "mi",
+        "content": "S"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "inf"
+      },
+      {
+        "tag": "mi",
+        "content": "S"
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "x_{n+1}",
+  "mathml": "<msub><mi>x</mi><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      }
+    ]
+  }
+}

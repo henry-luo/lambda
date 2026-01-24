@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\left[ \\begin{array}{c} a \\\\ b \\\\ c \\end{array} \\right]",
+  "mathml": "<mrow><mo>[</mo><mtable columnalign=\"center \"><mtr><mtd><mi>a</mi></mtd></mtr><mtr><mtd><mi>b</mi></mtd></mtr><mtr><mtd><mi>c</mi></mtd></mtr></mtable><mo>]</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "["
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "]"
+      }
+    ]
+  }
+}

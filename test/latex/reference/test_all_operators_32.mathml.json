@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\prime \\quad \\angle \\quad \\triangle \\quad \\square \\quad \\clubsuit",
+  "mathml": "<mrow><mi>′</mi><mspace width=\"1em\"/><mi>∠</mi><mspace width=\"1em\"/><mo>△</mo><mspace width=\"1em\"/><mi>□</mi><mspace width=\"1em\"/><mi>♣</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "′"
+      },
+      {
+        "tag": "mi",
+        "content": "∠"
+      },
+      {
+        "tag": "mo",
+        "content": "△"
+      },
+      {
+        "tag": "mi",
+        "content": "□"
+      },
+      {
+        "tag": "mi",
+        "content": "♣"
+      }
+    ]
+  }
+}

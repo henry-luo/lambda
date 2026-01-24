@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\begin{matrix} a & b \\\\ c & d \\end{matrix}",
+  "mathml": "<mtable columnalign=\"center center center center center center center center center center \"><mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd></mtr><mtr><mtd><mi>c</mi></mtd><mtd><mi>d</mi></mtd></mtr></mtable>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      }
+    ]
+  }
+}

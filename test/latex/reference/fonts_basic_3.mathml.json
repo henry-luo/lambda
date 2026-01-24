@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\mathcal{ABC}",
+  "mathml": "<mrow><mi>A</mi><mi>B</mi><mi>C</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "A"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      }
+    ]
+  }
+}

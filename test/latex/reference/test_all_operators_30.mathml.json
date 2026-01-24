@@ -1,0 +1,34 @@
+{
+  "format": "mathml",
+  "latex": "\\neg \\quad \\emptyset \\quad \\varnothing \\quad \\wp \\quad \\Re \\quad \\Im",
+  "mathml": "<mrow><mo>¬</mo><mspace width=\"1em\"/><mi>∅</mi><mspace width=\"1em\"/><mi>∅</mi><mspace width=\"1em\"/><mi>℘</mi><mspace width=\"1em\"/><mo>ℜ</mo><mspace width=\"1em\"/><mo>ℑ</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "¬"
+      },
+      {
+        "tag": "mi",
+        "content": "∅"
+      },
+      {
+        "tag": "mi",
+        "content": "∅"
+      },
+      {
+        "tag": "mi",
+        "content": "℘"
+      },
+      {
+        "tag": "mo",
+        "content": "ℜ"
+      },
+      {
+        "tag": "mo",
+        "content": "ℑ"
+      }
+    ]
+  }
+}

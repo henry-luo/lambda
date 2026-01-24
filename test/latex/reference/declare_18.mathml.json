@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "x'",
+  "mathml": "<msup><mi>x</mi><mi>′</mi></msup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "′"
+      }
+    ]
+  }
+}

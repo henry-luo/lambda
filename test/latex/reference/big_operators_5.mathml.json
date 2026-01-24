@@ -1,0 +1,66 @@
+{
+  "format": "mathml",
+  "latex": "\\bigcup_{i=1}^{n} A_i \\quad \\bigcap_{j=1}^{m} B_j",
+  "mathml": "<mrow><msubsup><mo>⋃</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></msubsup><msub><mi>A</mi><mi>i</mi></msub><mspace width=\"1em\"/><msubsup><mo>⋂</mo><mrow><mi>j</mi><mo>=</mo><mn>1</mn></mrow><mi>m</mi></msubsup><msub><mi>B</mi><mi>j</mi></msub></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "⋃"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "A"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "⋂"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      }
+    ]
+  }
+}

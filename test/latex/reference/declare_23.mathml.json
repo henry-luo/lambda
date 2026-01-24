@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "q",
+  "mathml": "<mi>q</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "q"
+      }
+    ]
+  }
+}

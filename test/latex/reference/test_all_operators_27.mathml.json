@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\widehat{abc} \\quad \\widetilde{abc} \\quad \\overline{abc} \\quad \\underline{abc}",
+  "mathml": "<mrow><mover accent=\"true\"><mrow><mi>a</mi><mo>&#8290;</mo><mi>b</mi><mo>&#8290;</mo><mi>c</mi></mrow><mo>undefined</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mrow><mi>a</mi><mo>&#8290;</mo><mi>b</mi><mo>&#8290;</mo><mi>c</mi></mrow><mo>undefined</mo></mover><mspace width=\"1em\"/><mspace width=\"1em\"/></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      }
+    ]
+  }
+}

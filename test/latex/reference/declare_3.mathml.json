@@ -1,0 +1,126 @@
+{
+  "format": "mathml",
+  "latex": "f, f(a), f(q), f(a,b), \\mbox{ but } f(a+b)",
+  "mathml": "<mrow><mi>f</mi><mo>&#x2061;</mo><mo separator=\"true\">,</mo><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>a</mi><mo>)</mo></mrow><mo separator=\"true\">,</mo><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>q</mi><mo>)</mo></mrow><mo separator=\"true\">,</mo><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mrow><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi></mrow><mo>)</mo></mrow><mo separator=\"true\">,</mo><mi>f</mi><mrow><mo>(</mo><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><mo>)</mo></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "q"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

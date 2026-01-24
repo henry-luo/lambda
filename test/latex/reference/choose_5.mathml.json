@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "a + \\begingroup b \\choose c \\endgroup + d",
+  "mathml": "<mrow><mo>(</mo><mtable><mtr><mrow><mi>a</mi><mo>+</mo><merror></merror><mi>b</mi></mrow></mtr><mtr><mrow><mi>c</mi><merror></merror><mo>+</mo><mi>d</mi></mrow></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

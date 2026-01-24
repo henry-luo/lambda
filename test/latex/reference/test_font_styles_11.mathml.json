@@ -1,0 +1,114 @@
+{
+  "format": "mathml",
+  "latex": "\\mathbb{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+  "mathml": "<mrow><mi>𝔸</mi><mi>𝔹</mi><mi>ℂ</mi><mi>𝔻</mi><mi>𝔼</mi><mi>𝔽</mi><mi>𝔾</mi><mi>ℍ</mi><mi>𝕀</mi><mi>𝕁</mi><mi>𝕂</mi><mi>𝕃</mi><mi>𝕄</mi><mi>ℕ</mi><mi>𝕆</mi><mi>ℙ</mi><mi>ℚ</mi><mi>ℝ</mi><mi>𝕊</mi><mi>𝕋</mi><mi>𝕌</mi><mi>𝕍</mi><mi>𝕎</mi><mi>𝕏</mi><mi>𝕐</mi><mi>ℤ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "𝔸"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔹"
+      },
+      {
+        "tag": "mi",
+        "content": "ℂ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔻"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔼"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔽"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔾"
+      },
+      {
+        "tag": "mi",
+        "content": "ℍ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕀"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕁"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕂"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕃"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕄"
+      },
+      {
+        "tag": "mi",
+        "content": "ℕ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕆"
+      },
+      {
+        "tag": "mi",
+        "content": "ℙ"
+      },
+      {
+        "tag": "mi",
+        "content": "ℚ"
+      },
+      {
+        "tag": "mi",
+        "content": "ℝ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕊"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕋"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕌"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕍"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕎"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕏"
+      },
+      {
+        "tag": "mi",
+        "content": "𝕐"
+      },
+      {
+        "tag": "mi",
+        "content": "ℤ"
+      }
+    ]
+  }
+}

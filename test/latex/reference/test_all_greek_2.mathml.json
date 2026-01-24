@@ -1,0 +1,94 @@
+{
+  "format": "mathml",
+  "latex": "\\rho \\varrho \\sigma \\varsigma \\tau \\upsilon \\phi \\varphi \\chi \\psi \\omega",
+  "mathml": "<mrow><mi>ρ</mi><mo>&#8290;</mo><mi>ϱ</mi><mo>&#8290;</mo><mi>σ</mi><mo>&#8290;</mo><mi>ς</mi><mo>&#8290;</mo><mi>τ</mi><mo>&#8290;</mo><mi>υ</mi><mo>&#8290;</mo><mi>ϕ</mi><mo>&#8290;</mo><mi>φ</mi><mo>&#8290;</mo><mi>χ</mi><mo>&#8290;</mo><mi>ψ</mi><mo>&#8290;</mo><mi>ω</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ρ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ϱ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "σ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ς"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "τ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "υ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ϕ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "φ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "χ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ψ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ω"
+      }
+    ]
+  }
+}

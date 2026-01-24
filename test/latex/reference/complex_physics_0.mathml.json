@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "E = mc^2",
+  "mathml": "<mrow><mi>E</mi><mo>=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "E"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

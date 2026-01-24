@@ -1,0 +1,70 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{\\partial^2 u}{\\partial x^2} + \\frac{\\partial^2 u}{\\partial y^2} = 0",
+  "mathml": "<mrow><mfrac><mrow><msup><mi>∂</mi><mn>2</mn></msup><mi>u</mi></mrow><mrow><mi>∂</mi><msup><mi>x</mi><mn>2</mn></msup></mrow></mfrac><mo>+</mo><mfrac><mrow><msup><mi>∂</mi><mn>2</mn></msup><mi>u</mi></mrow><mrow><mi>∂</mi><msup><mi>y</mi><mn>2</mn></msup></mrow></mfrac><mo>=</mo><mn>0</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mi",
+        "content": "u"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mi",
+        "content": "u"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      }
+    ]
+  }
+}

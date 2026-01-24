@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "a \\pm b \\quad a \\mp b \\quad a \\setminus b \\quad a \\cap b",
+  "mathml": "<mrow><mi>a</mi><mo>&#177;</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>∓</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>∖</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>∩</mo><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#177;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "∓"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "∖"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "∩"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}
