@@ -1,0 +1,30 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 76,
+      "value": "L"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 72,
+      "value": "H"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 70,
+      "value": "F"
+    }
+  ]
+}

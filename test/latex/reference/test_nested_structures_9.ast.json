@@ -1,0 +1,166 @@
+{
+  "type": "DELIMITED",
+  "body": {
+    "type": "ROW",
+    "body": [
+      {
+        "type": "FRAC",
+        "ruleThickness": -1,
+        "numer": {
+          "type": "ORD",
+          "codepoint": 0,
+          "command": "partial"
+        },
+        "denom": {
+          "type": "ROW",
+          "body": [
+            {
+              "type": "ORD",
+              "codepoint": 0,
+              "command": "partial"
+            },
+            {
+              "type": "ORD",
+              "codepoint": 120,
+              "value": "x"
+            }
+          ]
+        }
+      },
+      {
+        "type": "DELIMITED",
+        "body": {
+          "type": "ROW",
+          "body": [
+            {
+              "type": "OVERUNDER",
+              "body": {
+                "type": "OP",
+                "codepoint": 0,
+                "command": "sum"
+              },
+              "numer": {
+                "type": "ORD",
+                "codepoint": 49,
+                "command": "infty",
+                "value": "1"
+              },
+              "denom": {
+                "type": "ROW",
+                "body": [
+                  {
+                    "type": "ORD",
+                    "codepoint": 110,
+                    "value": "n"
+                  },
+                  {
+                    "type": "REL",
+                    "codepoint": 61,
+                    "value": "="
+                  },
+                  {
+                    "type": "ORD",
+                    "codepoint": 48,
+                    "value": "0"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "FRAC",
+              "ruleThickness": -1,
+              "numer": {
+                "type": "ORD",
+                "codepoint": 49,
+                "value": "1"
+              },
+              "denom": {
+                "type": "ROW",
+                "body": [
+                  {
+                    "type": "ORD",
+                    "codepoint": 110,
+                    "value": "n"
+                  },
+                  {
+                    "type": "REL",
+                    "codepoint": 33,
+                    "value": "!"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "SCRIPTS",
+              "body": {
+                "type": "DELIMITED",
+                "body": {
+                  "type": "ROW",
+                  "body": [
+                    {
+                      "type": "SCRIPTS",
+                      "body": {
+                        "type": "OP",
+                        "codepoint": 0,
+                        "command": "int"
+                      },
+                      "superscript": {
+                        "type": "ORD",
+                        "codepoint": 98,
+                        "value": "b"
+                      },
+                      "subscript": {
+                        "type": "ORD",
+                        "codepoint": 97,
+                        "value": "a"
+                      }
+                    },
+                    {
+                      "type": "ORD",
+                      "codepoint": 102,
+                      "value": "f"
+                    },
+                    {
+                      "type": "OPEN",
+                      "codepoint": 40,
+                      "value": "("
+                    },
+                    {
+                      "type": "ORD",
+                      "codepoint": 116,
+                      "value": "t"
+                    },
+                    {
+                      "type": "CLOSE",
+                      "codepoint": 41,
+                      "value": ")"
+                    },
+                    {
+                      "type": "SPACE",
+                      "width": 3
+                    },
+                    {
+                      "type": "ORD",
+                      "codepoint": 100,
+                      "value": "d"
+                    },
+                    {
+                      "type": "ORD",
+                      "codepoint": 116,
+                      "value": "t"
+                    }
+                  ]
+                }
+              },
+              "superscript": {
+                "type": "ORD",
+                "codepoint": 110,
+                "value": "n"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "int"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "limits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 49,
+        "value": "1"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 48,
+        "value": "0"
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    },
+    {
+      "type": "OPEN",
+      "codepoint": 40,
+      "value": "("
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 41,
+      "value": ")"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 100,
+      "value": "d"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    }
+  ]
+}

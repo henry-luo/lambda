@@ -1,0 +1,63 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OVERUNDER",
+      "body": {
+        "type": "OP",
+        "codepoint": 0,
+        "command": "sum"
+      },
+      "numer": {
+        "type": "ORD",
+        "codepoint": 49,
+        "command": "infty",
+        "value": "1"
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 107,
+            "value": "k"
+          },
+          {
+            "type": "REL",
+            "codepoint": 61,
+            "value": "="
+          },
+          {
+            "type": "ORD",
+            "codepoint": 48,
+            "value": "0"
+          }
+        ]
+      }
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ORD",
+        "codepoint": 49,
+        "value": "1"
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 107,
+            "value": "k"
+          },
+          {
+            "type": "REL",
+            "codepoint": 33,
+            "value": "!"
+          }
+        ]
+      }
+    }
+  ]
+}

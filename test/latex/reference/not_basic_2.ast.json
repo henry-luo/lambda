@@ -1,0 +1,14 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 50,
+        "command": "in",
+        "value": "2"
+      }
+    }
+  ]
+}

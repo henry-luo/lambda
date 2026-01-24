@@ -1,0 +1,25 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "rightharpoonup"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "rightharpoondown"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "leftharpoonup"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "leftharpoondown"
+    }
+  ]
+}

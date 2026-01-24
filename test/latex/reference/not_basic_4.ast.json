@@ -1,0 +1,14 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 17,
+        "command": "equiv",
+        "value": "\u0011"
+      }
+    }
+  ]
+}

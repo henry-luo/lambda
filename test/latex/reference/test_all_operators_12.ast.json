@@ -1,0 +1,81 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 30,
+      "command": "prec",
+      "value": "\u001e"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 31,
+      "command": "succ",
+      "value": "\u001f"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 22,
+      "command": "preceq",
+      "value": "\u0016"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 23,
+      "command": "succeq",
+      "value": "\u0017"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    }
+  ]
+}

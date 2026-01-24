@@ -1,0 +1,18 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 102,
+        "value": "f"
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    }
+  ]
+}

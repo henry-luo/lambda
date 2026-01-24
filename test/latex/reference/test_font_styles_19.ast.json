@@ -1,0 +1,90 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "sin"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "cos"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "tan"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "log"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "ln"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "exp"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    }
+  ]
+}

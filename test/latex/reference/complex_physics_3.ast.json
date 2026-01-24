@@ -1,0 +1,64 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 105,
+      "value": "i"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "hbar"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "partial"
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 116,
+            "value": "t"
+          }
+        ]
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 9,
+      "command": "Psi",
+      "value": "\t"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 72,
+        "value": "H"
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 9,
+      "command": "Psi",
+      "value": "\t"
+    }
+  ]
+}

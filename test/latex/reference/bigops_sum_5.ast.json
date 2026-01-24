@@ -1,0 +1,43 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "sum"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "limits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      },
+      "subscript": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 105,
+            "value": "i"
+          },
+          {
+            "type": "REL",
+            "codepoint": 61,
+            "value": "="
+          },
+          {
+            "type": "ORD",
+            "codepoint": 49,
+            "value": "1"
+          }
+        ]
+      }
+    }
+  ]
+}

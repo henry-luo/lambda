@@ -1,0 +1,81 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 1,
+      "command": "cdot",
+      "value": "\u0001"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 3,
+      "command": "ast",
+      "value": "\u0003"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 5,
+      "command": "star",
+      "value": "\u0005"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 14,
+      "command": "circ",
+      "value": "\u000e"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    }
+  ]
+}

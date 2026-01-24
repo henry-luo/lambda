@@ -1,0 +1,49 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 98,
+        "value": "b"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 99,
+        "value": "c"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 100,
+        "value": "d"
+      }
+    }
+  ]
+}

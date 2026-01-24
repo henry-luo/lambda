@@ -1,0 +1,44 @@
+{
+    "source": "fonts_basic.json",
+    "description": "Math font styles - \\mathbf, \\mathrm, \\mathit, \\mathcal",
+    "category": "fonts",
+    "generatedAt": "2026-01-24T00:00:00.000Z",
+    "expressions": [
+        {
+            "index": 0,
+            "type": "display",
+            "latex": "\\mathbf{x}",
+            "description": "Bold math"
+        },
+        {
+            "index": 1,
+            "type": "display",
+            "latex": "\\mathrm{text}",
+            "description": "Roman (upright) math"
+        },
+        {
+            "index": 2,
+            "type": "display",
+            "latex": "\\mathit{italic}",
+            "description": "Italic math"
+        },
+        {
+            "index": 3,
+            "type": "display",
+            "latex": "\\mathcal{ABC}",
+            "description": "Calligraphic"
+        },
+        {
+            "index": 4,
+            "type": "display",
+            "latex": "\\mathbb{R}",
+            "description": "Blackboard bold"
+        },
+        {
+            "index": 5,
+            "type": "display",
+            "latex": "\\mathfrak{g}",
+            "description": "Fraktur"
+        }
+    ]
+}

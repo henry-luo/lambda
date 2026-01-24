@@ -1,0 +1,58 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OVERUNDER",
+      "body": {
+        "type": "OP",
+        "codepoint": 0,
+        "command": "prod"
+      },
+      "numer": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 107,
+            "value": "k"
+          },
+          {
+            "type": "REL",
+            "codepoint": 61,
+            "value": "="
+          },
+          {
+            "type": "ORD",
+            "codepoint": 49,
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 107,
+      "value": "k"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ORD",
+      "codepoint": 110,
+      "value": "n"
+    },
+    {
+      "type": "REL",
+      "codepoint": 33,
+      "value": "!"
+    }
+  ]
+}
