@@ -1,0 +1,98 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 113,
+      "value": "q"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 113,
+        "value": "q"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 113,
+        "value": "q"
+      },
+      "subscript": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 97,
+            "value": "a"
+          },
+          {
+            "type": "PUNCT",
+            "codepoint": 44,
+            "value": ","
+          },
+          {
+            "type": "ORD",
+            "codepoint": 98,
+            "value": "b"
+          }
+        ]
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "TEXT",
+      "text": " but accidentally "
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 113,
+        "value": "q"
+      },
+      "subscript": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 97,
+            "value": "a"
+          },
+          {
+            "type": "BIN",
+            "codepoint": 43,
+            "value": "+"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 98,
+            "value": "b"
+          }
+        ]
+      }
+    }
+  ]
+}

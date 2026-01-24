@@ -1,0 +1,163 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 114,
+      "command": "nabla",
+      "value": "r"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 1,
+      "command": "cdot",
+      "value": "\u0001"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 70,
+      "value": "F"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 70,
+              "value": "F"
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 120,
+              "value": "x"
+            }
+          }
+        ]
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 120,
+            "value": "x"
+          }
+        ]
+      }
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 70,
+              "value": "F"
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 121,
+              "value": "y"
+            }
+          }
+        ]
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 121,
+            "value": "y"
+          }
+        ]
+      }
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 70,
+              "value": "F"
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 122,
+              "value": "z"
+            }
+          }
+        ]
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 122,
+            "value": "z"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 83,
+      "value": "S"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 107,
+        "value": "k"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 66,
+        "value": "B"
+      }
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "ln"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 10,
+      "command": "Omega",
+      "value": "\n"
+    }
+  ]
+}

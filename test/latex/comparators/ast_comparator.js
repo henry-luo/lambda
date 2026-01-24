@@ -1,9 +1,9 @@
 /**
  * AST Comparator for LaTeX Math Testing
- * 
+ *
  * Compares Lambda's parsed AST against MathLive's reference AST.
  * This layer accounts for 50% of the overall test score.
- * 
+ *
  * Normalization rules:
  * - Ignore node IDs and internal metadata
  * - Normalize whitespace in text content
@@ -30,7 +30,7 @@ const NORMALIZED_NODE_TYPES = {
     'mpunct': 'punctuation',
     'inner': 'inner',
     'minner': 'inner',
-    
+
     // Structures
     'frac': 'fraction',
     'genfrac': 'fraction',
@@ -43,7 +43,7 @@ const NORMALIZED_NODE_TYPES = {
     'msubsup': 'scripts',
     'msup': 'superscript',
     'msub': 'subscript',
-    
+
     // Layout
     'mrow': 'row',
     'group': 'row',
@@ -51,20 +51,20 @@ const NORMALIZED_NODE_TYPES = {
     'spacing': 'space',
     'mphantom': 'phantom',
     'phantom': 'phantom',
-    
+
     // Big operators
     'largeop': 'largeop',
     'bigop': 'largeop',
-    
+
     // Delimiters
     'leftright': 'delimited',
     'delim': 'delimited',
-    
+
     // Arrays/matrices
     'array': 'array',
     'matrix': 'array',
     'environment': 'environment',
-    
+
     // Text
     'text': 'text',
     'mtext': 'text'
@@ -124,7 +124,7 @@ function extractValue(node) {
  */
 function getChildren(node) {
     if (Array.isArray(node)) return node;
-    
+
     const children = [];
     for (const branch of CHILD_BRANCHES) {
         if (node[branch]) {
@@ -144,21 +144,21 @@ function getChildren(node) {
 function flattenNode(node) {
     if (typeof node === 'string') return node;
     if (!node || typeof node !== 'object') return node;
-    
+
     const type = normalizeNodeType(node.type);
     const children = getChildren(node);
-    
+
     // Flatten single-child wrapper nodes
     if ((type === 'row' || type === 'root') && children.length === 1) {
         return flattenNode(children[0]);
     }
-    
+
     return node;
 }
 
 /**
  * Compare two AST nodes recursively
- * 
+ *
  * @param {Object} lambdaNode - Node from Lambda's AST
  * @param {Object} refNode - Node from MathLive's reference AST
  * @param {string} path - Current path in the tree (for error reporting)
@@ -166,13 +166,13 @@ function flattenNode(node) {
  */
 function compareNodes(lambdaNode, refNode, path, results) {
     results.totalNodes++;
-    
+
     // Handle null/undefined
     if (!lambdaNode && !refNode) {
         results.matchedNodes++;
         return;
     }
-    
+
     if (!lambdaNode || !refNode) {
         results.differences.push({
             path,
@@ -182,7 +182,7 @@ function compareNodes(lambdaNode, refNode, path, results) {
         });
         return;
     }
-    
+
     // Handle string atoms (leaf nodes)
     if (typeof lambdaNode === 'string' && typeof refNode === 'string') {
         if (normalizeText(lambdaNode) === normalizeText(refNode)) {
@@ -197,12 +197,12 @@ function compareNodes(lambdaNode, refNode, path, results) {
         }
         return;
     }
-    
+
     // Handle mixed types (string vs object)
     if (typeof lambdaNode === 'string' || typeof refNode === 'string') {
         const lambdaVal = extractValue(lambdaNode);
         const refVal = extractValue(refNode);
-        
+
         if (normalizeText(lambdaVal) === normalizeText(refVal)) {
             results.matchedNodes++;
         } else {
@@ -215,13 +215,13 @@ function compareNodes(lambdaNode, refNode, path, results) {
         }
         return;
     }
-    
+
     // Compare node types
     const lambdaType = normalizeNodeType(lambdaNode.type);
     const refType = normalizeNodeType(refNode.type);
-    
+
     let typeMatch = (lambdaType === refType);
-    
+
     // Allow certain type equivalences
     if (!typeMatch) {
         // fraction variants are equivalent
@@ -230,7 +230,7 @@ function compareNodes(lambdaNode, refNode, path, results) {
         if (['scripts', 'superscript', 'subscript'].includes(lambdaType) &&
             ['scripts', 'superscript', 'subscript'].includes(refType)) typeMatch = true;
     }
-    
+
     if (!typeMatch) {
         results.differences.push({
             path,
@@ -242,11 +242,11 @@ function compareNodes(lambdaNode, refNode, path, results) {
     } else {
         results.matchedNodes += 0.4; // 40% weight for type match
     }
-    
+
     // Compare values if present
     const lambdaVal = extractValue(lambdaNode);
     const refVal = extractValue(refNode);
-    
+
     if (lambdaVal !== null || refVal !== null) {
         if (normalizeText(lambdaVal) === normalizeText(refVal)) {
             results.matchedNodes += 0.1; // 10% weight for value match
@@ -259,11 +259,11 @@ function compareNodes(lambdaNode, refNode, path, results) {
             });
         }
     }
-    
+
     // Compare children
     const lambdaChildren = getChildren(lambdaNode);
     const refChildren = getChildren(refNode);
-    
+
     // Check children count
     if (lambdaChildren.length !== refChildren.length) {
         results.differences.push({
@@ -272,12 +272,12 @@ function compareNodes(lambdaNode, refNode, path, results) {
             expected: `${refChildren.length} children`,
             got: `${lambdaChildren.length} children`
         });
-        results.matchedNodes += 0.2 * Math.min(lambdaChildren.length, refChildren.length) / 
+        results.matchedNodes += 0.2 * Math.min(lambdaChildren.length, refChildren.length) /
                                 Math.max(lambdaChildren.length, refChildren.length, 1);
     } else {
         results.matchedNodes += 0.2; // 20% weight for children count match
     }
-    
+
     // Recursively compare children
     const maxChildren = Math.max(lambdaChildren.length, refChildren.length);
     for (let i = 0; i < maxChildren; i++) {
@@ -289,7 +289,7 @@ function compareNodes(lambdaNode, refNode, path, results) {
             results
         );
     }
-    
+
     // Add remaining weight for children match
     if (maxChildren > 0) {
         results.matchedNodes += 0.3; // 30% weight distributed across children comparison
@@ -304,22 +304,22 @@ function compareNodes(lambdaNode, refNode, path, results) {
 function summarizeNode(node) {
     if (!node) return null;
     if (typeof node === 'string') return node;
-    
+
     const summary = { type: node.type || 'unknown' };
     const value = extractValue(node);
     if (value) summary.value = value;
-    
+
     const children = getChildren(node);
     if (children.length > 0) {
         summary.childCount = children.length;
     }
-    
+
     return summary;
 }
 
 /**
  * Compare two ASTs and return comparison results
- * 
+ *
  * @param {Object} lambdaAST - AST from Lambda's parser
  * @param {Object} mathLiveAST - Reference AST from MathLive
  * @returns {Object} Comparison results with passRate and differences
@@ -330,19 +330,19 @@ function compareAST(lambdaAST, mathLiveAST) {
         matchedNodes: 0,
         differences: []
     };
-    
+
     // Flatten root wrappers before comparison
     const flatLambda = flattenNode(lambdaAST);
     const flatRef = flattenNode(mathLiveAST);
-    
+
     // Start recursive comparison
     compareNodes(flatLambda, flatRef, 'root', results);
-    
+
     // Calculate pass rate (clamp to 0-100%)
-    const passRate = results.totalNodes > 0 
+    const passRate = results.totalNodes > 0
         ? Math.min(100, Math.max(0, (results.matchedNodes / results.totalNodes) * 100))
         : 100;
-    
+
     return {
         passRate: Math.round(passRate * 10) / 10,
         totalNodes: Math.round(results.totalNodes),
@@ -353,7 +353,7 @@ function compareAST(lambdaAST, mathLiveAST) {
 
 /**
  * Calculate weighted node matching criteria
- * 
+ *
  * | Property        | Weight | Notes                    |
  * |-----------------|--------|--------------------------|
  * | Node type       | 40%    | frac, sqrt, sup, etc.    |
@@ -368,7 +368,7 @@ function calculateNodeScore(typeMatch, countMatch, childrenMatch, attributesMatc
            (attributesMatch ? 0.1 : 0);
 }
 
-module.exports = {
+export {
     compareAST,
     normalizeNodeType,
     getChildren,

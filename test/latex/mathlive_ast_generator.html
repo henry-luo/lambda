@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>MathLive AST Generator</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+        .error { background: #ffcccc; }
+        .success { background: #ccffcc; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; max-height: 400px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        #results { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>MathLive AST Generator</h1>
+    <div class="status" id="status">Loading MathLive...</div>
+    
+    <div id="controls" style="display: none;">
+        <button onclick="generateAll()">Generate All AST Files</button>
+        <button onclick="downloadAll()">Download All as ZIP</button>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script type="module">
+        // Input data from .tex files
+        const inputData = [
+  {
+    "filename": "accents.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}"
+      },
+      {
+        "type": "display",
+        "latex": "\\grave{e} \\quad \\dot{f} \\quad \\ddot{g} \\quad \\breve{h}"
+      },
+      {
+        "type": "display",
+        "latex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}"
+      },
+      {
+        "type": "display",
+        "latex": "\\widehat{xyz} \\quad \\widetilde{abc}"
+      },
+      {
+        "type": "display",
+        "latex": "\\hat{x+y} \\quad \\bar{a+b}"
+      },
+      {
+        "type": "display",
+        "latex": "\\overline{a+b} \\quad \\underline{x+y}"
+      },
+      {
+        "type": "display",
+        "latex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}"
+      },
+      {
+        "type": "display",
+        "latex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}"
+      },
+      {
+        "type": "display",
+        "latex": "\\hat{\\bar{x}} \\quad \\dot{\\hat{y}}"
+      }
+    ]
+  },
+  {
+    "filename": "ambiguous_relations.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "x >= 0"
+      },
+      {
+        "type": "display",
+        "latex": "x <= 0"
+      },
+      {
+        "type": "display",
+        "latex": "<x, y> = 0"
+      },
+      {
+        "type": "display",
+        "latex": "0 = <x,y>"
+      },
+      {
+        "type": "display",
+        "latex": "2<x,y> = z"
+      },
+      {
+        "type": "display",
+        "latex": "0 = <x,y>A"
+      },
+      {
+        "type": "display",
+        "latex": "a << b"
+      },
+      {
+        "type": "display",
+        "latex": "0 < <a,b> >1"
+      }
+    ]
+  },
+  {
+    "filename": "array.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\begin{array}{ccc}\n   a & b & c \\\\\n   c &  & d \\\\\n\\\\\n   e & f  \\\\\n   \\end{array}"
+      },
+      {
+        "type": "display",
+        "latex": "\\matrix{a & b \\cr c & d}"
+      }
+    ]
+  },
+  {
+    "filename": "arrows.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\underrightarrow{\\mathrm{word}} \\rightarrow  \\underleftarrow{\\mathrm{word}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\overleftrightarrow{\\mathrm{word}} \\leftarrow  \\underleftrightarrow{\\mathrm{word}}"
+      },
+      {
+        "type": "display",
+        "latex": "a^2 \\xrightarrow{\\mathrm{over}} b  \\xleftarrow{\\mathrm{over}} c"
+      },
+      {
+        "type": "display",
+        "latex": "a \\xrightarrow[\\mathrm{under}]{\\mathrm{over}} b  \\xleftarrow[\\mathrm{under}]{\\mathrm{over}} c"
+      },
+      {
+        "type": "display",
+        "latex": "a \\overset{\\mathrm{over}}{\\rightarrow} b \\underset{\\mathrm{under}}{\\leftarrow} c"
+      }
+    ]
+  },
+  {
+    "filename": "big_operators.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\sum_{i=1}^{n} x_i"
+      },
+      {
+        "type": "display",
+        "latex": "\\prod_{k=1}^{n} k = n!"
+      },
+      {
+        "type": "display",
+        "latex": "\\int_0^1 x^2 \\, dx = \\frac{1}{3}"
+      },
+      {
+        "type": "display",
+        "latex": "\\iint_D f(x,y) \\, dA"
+      },
+      {
+        "type": "display",
+        "latex": "\\oint_C F \\cdot dr"
+      },
+      {
+        "type": "display",
+        "latex": "\\bigcup_{i=1}^{n} A_i \\quad \\bigcap_{j=1}^{m} B_j"
+      },
+      {
+        "type": "display",
+        "latex": "\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1"
+      },
+      {
+        "type": "display",
+        "latex": "\\sum_{i=1}^{n} \\sum_{j=1}^{m} a_{ij}"
+      },
+      {
+        "type": "display",
+        "latex": "\\sum\\nolimits_{i=1}^{n} x_i"
+      },
+      {
+        "type": "display",
+        "latex": "\\int\\limits_0^1 f(x) dx"
+      },
+      {
+        "type": "inline",
+        "latex": "\\sum_{i=1}^{n} x_i"
+      }
+    ]
+  },
+  {
+    "filename": "choose.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "a +  b"
+      },
+      {
+        "type": "inline",
+        "latex": "a \\choose b"
+      },
+      {
+        "type": "inline",
+        "latex": "a + {b \\choose c} + d"
+      },
+      {
+        "type": "inline",
+        "latex": "a + \\bgroup b \\choose c \\egroup + d"
+      },
+      {
+        "type": "inline",
+        "latex": "a + \\foo b \\choose c \\bar + d"
+      },
+      {
+        "type": "inline",
+        "latex": "a + \\begingroup b \\choose c \\endgroup + d"
+      },
+      {
+        "type": "inline",
+        "latex": "a + { b \\choose c \\egroup + d"
+      },
+      {
+        "type": "inline",
+        "latex": "a + \\bgroup b \\choose c } + d"
+      },
+      {
+        "type": "inline",
+        "latex": "a + \\frac{b \\choose c}{d \\choose e} + f"
+      },
+      {
+        "type": "inline",
+        "latex": "a + \\open b \\choose c \\close + d"
+      }
+    ]
+  },
+  {
+    "filename": "compact_dual.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "\\power{x}{2}+\\power{y}{3}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\derive2{f}+\\derive3{g}"
+      }
+    ]
+  },
+  {
+    "filename": "declare.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "x, x', x_1, x_n, x_{2n-1}, \\hat{x}, \\widehat{x}, \\mathbf{x}"
+      },
+      {
+        "type": "display",
+        "latex": "y, y', y_1, y_n, y_{2n-1}, \\hat{y}, \\widehat{y}"
+      },
+      {
+        "type": "display",
+        "latex": "q, q_{a}, q_{a,b}, \\mbox{ but accidentally }q_{a+b}"
+      },
+      {
+        "type": "display",
+        "latex": "f, f(a), f(q), f(a,b), \\mbox{ but } f(a+b)"
+      },
+      {
+        "type": "display",
+        "latex": "g, g(a), g(a)(b)"
+      },
+      {
+        "type": "display",
+        "latex": "z(a+b), \\widehat{z}(a)"
+      },
+      {
+        "type": "display",
+        "latex": "f(x) = \\sum_{i=0}^\\infty f_i x^i"
+      },
+      {
+        "type": "display",
+        "latex": "a, b, c, ab, bc, abc"
+      },
+      {
+        "type": "display",
+        "latex": "\\varepsilon, \\varepsilon_1,\n  \\mathcal{T}_{\\varepsilon},\n  \\mathcal{T}_{\\varepsilon_1},\n  \\mathcal{T}_{\\varepsilon_1, \\varepsilon_2, \\varepsilon_3}"
+      },
+      {
+        "type": "display",
+        "latex": "\\varepsilon, \\varepsilon_1,\n  \\mathcal{T}_{\\varepsilon},\n  \\mathcal{T}_{\\varepsilon_1},\n  \\mathcal{T}_{\\varepsilon_1, \\varepsilon_2, \\varepsilon_3}"
+      },
+      {
+        "type": "display",
+        "latex": "a\\plus b; \\baz, \\foo{x}, \\foo{j}"
+      },
+      {
+        "type": "display",
+        "latex": "\\oddball{a}{j}; \\oddball{abc}{j}"
+      },
+      {
+        "type": "display",
+        "latex": "\\weird{a}{j}; \\weird{abc}{j}"
+      },
+      {
+        "type": "display",
+        "latex": "f(x) = \\sum_{i=0}^\\infty f_i x^i"
+      },
+      {
+        "type": "inline",
+        "latex": "n"
+      },
+      {
+        "type": "inline",
+        "latex": "\\hat{\\WildCard}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\widehat{\\WildCard}"
+      },
+      {
+        "type": "inline",
+        "latex": "x"
+      },
+      {
+        "type": "inline",
+        "latex": "x'"
+      },
+      {
+        "type": "inline",
+        "latex": "x_\\WildCard"
+      },
+      {
+        "type": "inline",
+        "latex": "x_1"
+      },
+      {
+        "type": "inline",
+        "latex": "\\hat{x}"
+      },
+      {
+        "type": "inline",
+        "latex": "y"
+      },
+      {
+        "type": "inline",
+        "latex": "q"
+      },
+      {
+        "type": "inline",
+        "latex": "q_{\\WildCard}"
+      },
+      {
+        "type": "inline",
+        "latex": "q_{\\WildCard,\\WildCard}"
+      },
+      {
+        "type": "inline",
+        "latex": "f"
+      },
+      {
+        "type": "inline",
+        "latex": "f\\WildCard[(\\WildCard)]"
+      },
+      {
+        "type": "inline",
+        "latex": "f\\WildCard[(\\WildCard,\\WildCard)]"
+      },
+      {
+        "type": "inline",
+        "latex": "z"
+      },
+      {
+        "type": "inline",
+        "latex": "\\widehat{\\WildCard}"
+      },
+      {
+        "type": "inline",
+        "latex": "g"
+      },
+      {
+        "type": "inline",
+        "latex": "g\\WildCard[(\\WildCard)]"
+      },
+      {
+        "type": "inline",
+        "latex": "x"
+      },
+      {
+        "type": "inline",
+        "latex": "i"
+      },
+      {
+        "type": "inline",
+        "latex": "f"
+      },
+      {
+        "type": "inline",
+        "latex": "f_\\WildCard"
+      },
+      {
+        "type": "inline",
+        "latex": "\\WildCard[a]b"
+      },
+      {
+        "type": "inline",
+        "latex": "\\WildCard[ab]c"
+      },
+      {
+        "type": "inline",
+        "latex": "\\mathcal{T}_\\WildCard"
+      },
+      {
+        "type": "inline",
+        "latex": "\\varepsilon_\\WildCard"
+      },
+      {
+        "type": "inline",
+        "latex": "\\varepsilon_\\WildCard"
+      },
+      {
+        "type": "inline",
+        "latex": "\\mathcal{T}_\\WildCard"
+      },
+      {
+        "type": "inline",
+        "latex": "\\weird{\\WildCard}{\\WildCard}"
+      },
+      {
+        "type": "inline",
+        "latex": "x"
+      },
+      {
+        "type": "inline",
+        "latex": "x"
+      },
+      {
+        "type": "inline",
+        "latex": "i"
+      },
+      {
+        "type": "inline",
+        "latex": "i"
+      },
+      {
+        "type": "inline",
+        "latex": "f(x)"
+      },
+      {
+        "type": "inline",
+        "latex": "f"
+      },
+      {
+        "type": "inline",
+        "latex": "f_i"
+      },
+      {
+        "type": "inline",
+        "latex": "f_\\WildCard"
+      }
+    ]
+  },
+  {
+    "filename": "extensible_delims.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\left( \\frac{a}{b} \\right)"
+      },
+      {
+        "type": "display",
+        "latex": "\\left( \\frac{\\frac{a}{b}}{\\frac{c}{d}} \\right)"
+      },
+      {
+        "type": "display",
+        "latex": "\\left[ \\begin{array}{c} a \\\\ b \\\\ c \\end{array} \\right]"
+      },
+      {
+        "type": "display",
+        "latex": "\\left\\{ \\frac{x^2}{y^2} \\right\\}"
+      },
+      {
+        "type": "display",
+        "latex": "\\left| \\sum_{i=1}^{n} x_i \\right|"
+      },
+      {
+        "type": "display",
+        "latex": "\\left( x \\right]"
+      },
+      {
+        "type": "display",
+        "latex": "\\left( \\frac{\\frac{\\frac{a}{b}}{c}}{d} \\right)"
+      },
+      {
+        "type": "display",
+        "latex": "\\left\\| \\vec{v} \\right\\|"
+      },
+      {
+        "type": "display",
+        "latex": "\\left\\lfloor x \\right\\rfloor \\quad \\left\\lceil y \\right\\rceil"
+      }
+    ]
+  },
+  {
+    "filename": "fracs.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\frac{a}{b}"
+      },
+      {
+        "type": "display",
+        "latex": "\\tfrac{a}{b}"
+      },
+      {
+        "type": "display",
+        "latex": "\\dfrac{a}{b}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a^n}{b^n}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a_{n+1}}{b^n}"
+      },
+      {
+        "type": "display",
+        "latex": "a^n \\over b^n"
+      },
+      {
+        "type": "display",
+        "latex": "a^{n+1} \\over b^n"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{\\frac{a^n}{b^m}}{\\frac{c^n}{d^m}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a^n}{b^m} \\over \\frac{c^n}{d^m}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{{a^n \\over b^m}}{{c^n \\over d^m}}"
+      },
+      {
+        "type": "display",
+        "latex": "{a^n \\over b^m} \\over {c^n \\over d^m}"
+      },
+      {
+        "type": "display",
+        "latex": "{a^{n+1} \\over b^m} \\over {c^n \\over d^m}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}"
+      },
+      {
+        "type": "display",
+        "latex": "a^{\\frac{1}{2}} \\over b^{\\frac{2}{3}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a^{1 \\over 2}}{b^{2 \\over 3}}"
+      },
+      {
+        "type": "display",
+        "latex": "a^{1 \\over 2} \\over b^{2 \\over 3}"
+      },
+      {
+        "type": "display",
+        "latex": "a^{{1+2} \\over 2} \\over b^{2 \\over 3}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}}{\\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}} \\over \\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}"
+      },
+      {
+        "type": "display",
+        "latex": "{a^{\\frac{1}{2}} \\over b^{\\frac{2}{3}}} \\over {c^{\\frac{1}{2}} \\over d^{\\frac{2}{3}}}"
+      },
+      {
+        "type": "display",
+        "latex": "{a^{1 \\over 2} \\over b^{2 \\over 3}} \\over {c^{1 \\over 2} \\over d^{2 \\over 3}}"
+      },
+      {
+        "type": "display",
+        "latex": "{a^{{1+2} \\over 2} \\over b^{2 \\over 3}} \\over {c^{1 \\over 2} \\over d^{2 \\over 3}}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\frac{a}{b}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\tfrac{a}{b}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\dfrac{a}{b}"
+      }
+    ]
+  },
+  {
+    "filename": "not.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\not=, \\not<,\\not\\le,\\not\\ll,\n   \\not\\prec,\\not\\preceq,\n   \\not\\subset,\\not\\subseteq,\\not\\sqsubseteq,\n   \\not\\lhd,\\not\\unlhd,\n   \\not\\asymp"
+      },
+      {
+        "type": "display",
+        "latex": "\\not\\equiv, \\not>,\\not\\ge,\\not\\gg,\n   \\not\\succ,\\not\\succeq,\n   \\not\\supset,\\not\\supseteq,\\not\\sqsupseteq,\n   \\not\\rhd,\\not\\unrhd,\n   \\not\\approx,"
+      },
+      {
+        "type": "display",
+        "latex": "\\not a,  \\not\\alpha"
+      },
+      {
+        "type": "display",
+        "latex": "\\not+, \\not 4"
+      },
+      {
+        "type": "display",
+        "latex": "\\not\\sin"
+      },
+      {
+        "type": "display",
+        "latex": "\\not\\operatorname{R}"
+      },
+      {
+        "type": "display",
+        "latex": "\\not\\sqrt{x}"
+      },
+      {
+        "type": "display",
+        "latex": "\\not\\frac{1}{2}"
+      },
+      {
+        "type": "display",
+        "latex": "a/b c \\not"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{a\\not}{b}"
+      }
+    ]
+  },
+  {
+    "filename": "phantoms.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "a + \\phantom{b} + c"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{1}{\\hphantom{+}2}"
+      },
+      {
+        "type": "display",
+        "latex": "\\sqrt{\\vphantom{y}x} = \\sqrt{y}"
+      },
+      {
+        "type": "display",
+        "latex": "\\sqrt{\\smash{y}} \\quad \\sqrt{y}"
+      },
+      {
+        "type": "display",
+        "latex": "a \\! b \\quad a b"
+      },
+      {
+        "type": "display",
+        "latex": "\\sqrt{x} + \\sqrt{y} \\quad \\sqrt{x} + \\sqrt{\\vphantom{x}y}"
+      }
+    ]
+  },
+  {
+    "filename": "sampler.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "#2"
+      }
+    ]
+  },
+  {
+    "filename": "simplemath.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "a + b + 123"
+      },
+      {
+        "type": "display",
+        "latex": "a + b + f(123)"
+      },
+      {
+        "type": "display",
+        "latex": "f_D f(a+b)"
+      },
+      {
+        "type": "display",
+        "latex": "f_1(a+b)"
+      },
+      {
+        "type": "display",
+        "latex": "\\hat{f} a"
+      },
+      {
+        "type": "display",
+        "latex": "a(x) + b(x) + 123"
+      },
+      {
+        "type": "inline",
+        "latex": "a + b"
+      }
+    ]
+  },
+  {
+    "filename": "test_all_greek.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta"
+      },
+      {
+        "type": "display",
+        "latex": "\\iota \\kappa \\varkappa \\lambda \\mu \\nu \\xi o \\pi \\varpi"
+      },
+      {
+        "type": "display",
+        "latex": "\\rho \\varrho \\sigma \\varsigma \\tau \\upsilon \\phi \\varphi \\chi \\psi \\omega"
+      },
+      {
+        "type": "display",
+        "latex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega"
+      },
+      {
+        "type": "display",
+        "latex": "\\alpha^2 + \\beta^2 = \\gamma^2"
+      },
+      {
+        "type": "display",
+        "latex": "e^{i\\pi} + 1 = 0"
+      },
+      {
+        "type": "display",
+        "latex": "\\Gamma(n+1) = n!"
+      },
+      {
+        "type": "display",
+        "latex": "\\Delta x = x_2 - x_1"
+      },
+      {
+        "type": "display",
+        "latex": "\\Sigma = \\sum_{i=1}^{n} x_i"
+      },
+      {
+        "type": "display",
+        "latex": "\\Phi(x) = \\int_{-\\infty}^{x} \\phi(t) \\, dt"
+      },
+      {
+        "type": "display",
+        "latex": "\\nabla \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t}"
+      },
+      {
+        "type": "display",
+        "latex": "\\boldsymbol{\\alpha}, \\boldsymbol{\\beta}, \\boldsymbol{\\gamma}"
+      },
+      {
+        "type": "display",
+        "latex": "\\sigma_\\alpha \\quad \\tau_\\beta \\quad \\omega_\\gamma"
+      },
+      {
+        "type": "display",
+        "latex": "x^\\alpha \\quad y^\\beta \\quad z^\\gamma"
+      }
+    ]
+  },
+  {
+    "filename": "test_all_operators.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "a + b \\quad a - b \\quad a \\times b \\quad a \\div b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\cdot b \\quad a \\ast b \\quad a \\star b \\quad a \\circ b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\pm b \\quad a \\mp b \\quad a \\setminus b \\quad a \\cap b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\cup b \\quad a \\sqcap b \\quad a \\sqcup b \\quad a \\vee b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\wedge b \\quad a \\oplus b \\quad a \\ominus b \\quad a \\otimes b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\oslash b \\quad a \\odot b \\quad a \\bullet b \\quad a \\diamond b"
+      },
+      {
+        "type": "display",
+        "latex": "a = b \\quad a \\neq b \\quad a < b \\quad a > b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\leq b \\quad a \\geq b \\quad a \\ll b \\quad a \\gg b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\equiv b \\quad a \\sim b \\quad a \\simeq b \\quad a \\approx b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\cong b \\quad a \\propto b \\quad a \\parallel b \\quad a \\perp b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\subset b \\quad a \\supset b \\quad a \\subseteq b \\quad a \\supseteq b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\in b \\quad a \\ni b \\quad a \\notin b \\quad a \\mid b"
+      },
+      {
+        "type": "display",
+        "latex": "a \\prec b \\quad a \\succ b \\quad a \\preceq b \\quad a \\succeq b"
+      },
+      {
+        "type": "display",
+        "latex": "\\leftarrow \\rightarrow \\leftrightarrow \\Leftarrow \\Rightarrow \\Leftrightarrow"
+      },
+      {
+        "type": "display",
+        "latex": "\\uparrow \\downarrow \\updownarrow \\Uparrow \\Downarrow \\Updownarrow"
+      },
+      {
+        "type": "display",
+        "latex": "\\longleftarrow \\longrightarrow \\longleftrightarrow \\Longleftarrow \\Longrightarrow \\Longleftrightarrow"
+      },
+      {
+        "type": "display",
+        "latex": "\\nearrow \\searrow \\swarrow \\nwarrow"
+      },
+      {
+        "type": "display",
+        "latex": "\\mapsto \\longmapsto \\hookrightarrow \\hookleftarrow"
+      },
+      {
+        "type": "display",
+        "latex": "\\rightharpoonup \\rightharpoondown \\leftharpoonup \\leftharpoondown"
+      },
+      {
+        "type": "display",
+        "latex": "\\rightleftharpoons \\leadsto"
+      },
+      {
+        "type": "display",
+        "latex": "\\sum \\prod \\coprod \\int \\oint \\iint \\iiint"
+      },
+      {
+        "type": "display",
+        "latex": "\\bigcup \\bigcap \\bigsqcup \\bigvee \\bigwedge"
+      },
+      {
+        "type": "display",
+        "latex": "\\bigoplus \\bigotimes \\bigodot \\biguplus"
+      },
+      {
+        "type": "display",
+        "latex": "(a) \\quad [a] \\quad \\{a\\} \\quad |a| \\quad \\|a\\|"
+      },
+      {
+        "type": "display",
+        "latex": "\\langle a \\rangle \\quad \\lfloor a \\rfloor \\quad \\lceil a \\rceil"
+      },
+      {
+        "type": "display",
+        "latex": "\\hat{a} \\quad \\check{a} \\quad \\tilde{a} \\quad \\acute{a} \\quad \\grave{a}"
+      },
+      {
+        "type": "display",
+        "latex": "\\dot{a} \\quad \\ddot{a} \\quad \\breve{a} \\quad \\bar{a} \\quad \\vec{a}"
+      },
+      {
+        "type": "display",
+        "latex": "\\widehat{abc} \\quad \\widetilde{abc} \\quad \\overline{abc} \\quad \\underline{abc}"
+      },
+      {
+        "type": "display",
+        "latex": "\\overbrace{abc} \\quad \\underbrace{abc}"
+      },
+      {
+        "type": "display",
+        "latex": "\\infty \\quad \\partial \\quad \\nabla \\quad \\forall \\quad \\exists"
+      },
+      {
+        "type": "display",
+        "latex": "\\neg \\quad \\emptyset \\quad \\varnothing \\quad \\wp \\quad \\Re \\quad \\Im"
+      },
+      {
+        "type": "display",
+        "latex": "\\aleph \\quad \\hbar \\quad \\ell \\quad \\imath \\quad \\jmath"
+      },
+      {
+        "type": "display",
+        "latex": "\\prime \\quad \\angle \\quad \\triangle \\quad \\square \\quad \\clubsuit"
+      }
+    ]
+  },
+  {
+    "filename": "test_complex_formula.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"
+      }
+    ]
+  },
+  {
+    "filename": "test_delimiters.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "(a)"
+      },
+      {
+        "type": "inline",
+        "latex": "\\left(a\\right)"
+      },
+      {
+        "type": "inline",
+        "latex": "\\left(\\frac{a}{b}\\right)"
+      },
+      {
+        "type": "inline",
+        "latex": "\\left[\\frac{x}{y}\\right]"
+      },
+      {
+        "type": "inline",
+        "latex": "\\left\\{\\sum_{i=1}^{n} x_i\\right\\}"
+      }
+    ]
+  },
+  {
+    "filename": "test_font_styles.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "abcdefghijklmnopqrstuvwxyz"
+      },
+      {
+        "type": "display",
+        "latex": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathrm{abcdefghijklmnopqrstuvwxyz}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathrm{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathbf{abcdefghijklmnopqrstuvwxyz}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathbf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathsf{abcdefghijklmnopqrstuvwxyz}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathsf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathtt{abcdefghijklmnopqrstuvwxyz}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathtt{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathcal{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathbb{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathfrak{abcdefghijklmnopqrstuvwxyz}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathfrak{ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathcal{L}, \\mathcal{H}, \\mathcal{F}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathbb{R}^n \\to \\mathbb{C}^m"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathcal{L}\\{f(t)\\} = F(s)"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathfrak{g} \\text{ is a Lie algebra}"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathrm{d}x \\quad \\mathrm{e}^x \\quad \\mathrm{i}\\theta"
+      },
+      {
+        "type": "display",
+        "latex": "\\sin x, \\cos x, \\tan x, \\log x, \\ln x, \\exp x"
+      },
+      {
+        "type": "display",
+        "latex": "\\det A, \\dim V, \\ker T, \\mathrm{im}\\, T"
+      },
+      {
+        "type": "display",
+        "latex": "\\max\\{a, b\\}, \\min\\{a, b\\}, \\sup S, \\inf S"
+      },
+      {
+        "type": "display",
+        "latex": "\\lim_{n \\to \\infty} a_n, \\limsup a_n, \\liminf a_n"
+      },
+      {
+        "type": "display",
+        "latex": "\\gcd(a, b), \\lcm(a, b)"
+      },
+      {
+        "type": "display",
+        "latex": "123456789 \\quad \\mathbf{123456789} \\quad \\mathrm{123456789}"
+      }
+    ]
+  },
+  {
+    "filename": "test_fraction.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "\\frac{a}{b}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\frac{x+1}{y-2}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\frac{\\frac{1}{2}}{3}"
+      }
+    ]
+  },
+  {
+    "filename": "test_greek.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "\\alpha \\beta \\gamma \\delta"
+      },
+      {
+        "type": "inline",
+        "latex": "\\epsilon \\zeta \\eta \\theta"
+      },
+      {
+        "type": "inline",
+        "latex": "\\Gamma \\Delta \\Theta \\Lambda"
+      },
+      {
+        "type": "inline",
+        "latex": "\\pi r^2"
+      }
+    ]
+  },
+  {
+    "filename": "test_matrix.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\begin{vmatrix} 1 & 0 \\\\ 0 & 1 \\end{vmatrix} \\det"
+      },
+      {
+        "type": "inline",
+        "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}"
+      }
+    ]
+  },
+  {
+    "filename": "test_nested1.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\frac{1}{1 + \\frac{1}{2}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3}}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{\\sqrt{a + \\frac{b}{c}}}{\\sqrt{f + \\frac{g}{h}}}"
+      }
+    ]
+  },
+  {
+    "filename": "test_nested2.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\left[\\left(\\left\\{\\left|\\frac{a}{b}\\right|\\right\\}\\right)\\right]"
+      },
+      {
+        "type": "display",
+        "latex": "x_{i_j}^{k^{l}}"
+      },
+      {
+        "type": "display",
+        "latex": "a_{b_{c_{d}}}^{f^{g^{h}}}"
+      }
+    ]
+  },
+  {
+    "filename": "test_nested_structures.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "\\cfrac{1}{1 + \\cfrac{1}{2 + \\cfrac{1}{3 + \\cfrac{1}{4 + \\cfrac{1}{5}}}}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{\\sqrt{a + \\frac{b}{c + \\frac{d}{e}}}}{\\sqrt{f + \\frac{g}{h + \\frac{i}{j}}}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\left[\\left(\\left\\{\\left|\\frac{a}{b}\\right|\\right\\}\\right)\\right]"
+      },
+      {
+        "type": "display",
+        "latex": "x_{i_j}^{k^{l^m}}"
+      },
+      {
+        "type": "display",
+        "latex": "a_{b_{c_{d_e}}}^{f^{g^{h^i}}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\frac{\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}}{\\begin{pmatrix} e & f \\\\ g & h \\end{pmatrix}}"
+      },
+      {
+        "type": "display",
+        "latex": "\\int_0^1 \\prod_{i=1}^n \\left( \\sum_{j=1}^m a_{ij} x^j \\right) dx"
+      },
+      {
+        "type": "display",
+        "latex": "\\lim_{x \\to \\lim_{y \\to 0} f(y)} g(x)"
+      },
+      {
+        "type": "display",
+        "latex": "\\left\\| \\frac{\\partial}{\\partial x} \\left[ \\sum_{n=0}^{\\infty} \\frac{1}{n!} \\left( \\int_a^b f(t) \\, dt \\right)^n \\right] \\right\\|"
+      },
+      {
+        "type": "display",
+        "latex": "\\begin{pmatrix}\n\\begin{array}{cc} a & b \\\\ c & d \\end{array} &\n\\begin{array}{cc} e & f \\\\ g & h \\end{array} \\\\\n\\begin{array}{cc} i & j \\\\ k & l \\end{array} &\n\\begin{array}{cc} m & n \\\\ o & p \\end{array}\n\\end{pmatrix}"
+      },
+      {
+        "type": "display",
+        "latex": "f(x) = \\begin{cases}\n\\begin{cases} a & x > 0 \\\\ b & x = 0 \\end{cases} & \\text{if } y > 0 \\\\\n\\begin{cases} c & x > 0 \\\\ d & x = 0 \\end{cases} & \\text{if } y \\leq 0\n\\end{cases}"
+      }
+    ]
+  },
+  {
+    "filename": "test_sqrt.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "\\sqrt{2}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\sqrt{x+y}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\sqrt[3]{x}"
+      },
+      {
+        "type": "inline",
+        "latex": "\\sqrt{\\sqrt{x}}"
+      }
+    ]
+  },
+  {
+    "filename": "test_subscript_superscript.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "x^2"
+      },
+      {
+        "type": "inline",
+        "latex": "x_i"
+      },
+      {
+        "type": "inline",
+        "latex": "x_i^2"
+      },
+      {
+        "type": "inline",
+        "latex": "a^{b+c}"
+      },
+      {
+        "type": "inline",
+        "latex": "x_{n+1}"
+      }
+    ]
+  },
+  {
+    "filename": "test_sum_integral.tex",
+    "expressions": [
+      {
+        "type": "inline",
+        "latex": "\\sum_{i=1}^{n} x_i"
+      },
+      {
+        "type": "inline",
+        "latex": "\\int_0^1 f(x) dx"
+      },
+      {
+        "type": "inline",
+        "latex": "\\prod_{k=1}^{n} a_k"
+      },
+      {
+        "type": "inline",
+        "latex": "\\lim_{n \\to \\infty} \\frac{1}{n}"
+      }
+    ]
+  },
+  {
+    "filename": "testover.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "a b c \\over d e f"
+      },
+      {
+        "type": "display",
+        "latex": "a {b c \\over d e} f"
+      },
+      {
+        "type": "display",
+        "latex": "a {b c \\over d e\\egroup f"
+      },
+      {
+        "type": "display",
+        "latex": "a \\bgroup b c \\over d e\\egroup f"
+      },
+      {
+        "type": "display",
+        "latex": "a \\beginfoo b c \\over d e\\endfoo f"
+      },
+      {
+        "type": "display",
+        "latex": "a { b c \\over d \\over e} f"
+      }
+    ]
+  },
+  {
+    "filename": "testscripts.tex",
+    "expressions": [
+      {
+        "type": "display",
+        "latex": "f_a,  f^a, f_a^a, f^a_a"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathop{A}\\limits_B\\limits^C \\qquad\n   \\mathop{A}\\limits^C \\limits_B \\qquad\n   \\mathop{A}\\nolimits_B\\limits^C \\qquad\n   \\mathop{A}\\nolimits^C \\limits_B"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathop{A}\\limits_B\\nolimits^C \\qquad\n   \\mathop{A}\\limits^C \\nolimits_B \\qquad\n   \\mathop{A}\\nolimits_B\\nolimits^C\\qquad\n   \\mathop{A}\\nolimits^C\\nolimits_B"
+      },
+      {
+        "type": "display",
+        "latex": "\\mathop{\\mathop{A}\\limits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\limits_B}\\nolimits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\nolimits^C"
+      },
+      {
+        "type": "display",
+        "latex": "\\stackrel{C}{{\\stackrel{B}{A}}}"
+      },
+      {
+        "type": "inline",
+        "latex": "{}_a"
+      },
+      {
+        "type": "inline",
+        "latex": "{}^a"
+      }
+    ]
+  }
+];
+        
+        // Import MathLive
+        import * as MathLive from '../../mathlive/dist/mathlive.mjs';
+        
+        // Store results globally
+        window.astResults = {};
+        
+        // Helper to convert atom to JSON recursively
+        function atomToJson(atom) {
+            if (!atom) return null;
+            
+            const result = {
+                type: atom.type || 'unknown',
+                command: atom.command || undefined,
+                value: atom.value || undefined
+            };
+            
+            // Add style info if present
+            if (atom.style) {
+                const style = {};
+                if (atom.style.color) style.color = atom.style.color;
+                if (atom.style.backgroundColor) style.backgroundColor = atom.style.backgroundColor;
+                if (atom.style.fontSize) style.fontSize = atom.style.fontSize;
+                if (atom.style.fontFamily) style.fontFamily = atom.style.fontFamily;
+                if (Object.keys(style).length > 0) result.style = style;
+            }
+            
+            // Add branches (body, superscript, subscript, etc.)
+            const branches = ['body', 'above', 'below', 'superscript', 'subscript'];
+            for (const branch of branches) {
+                if (atom[branch] && Array.isArray(atom[branch]) && atom[branch].length > 0) {
+                    result[branch] = atom[branch].map(a => atomToJson(a)).filter(a => a);
+                }
+            }
+            
+            // For array atoms, add cells
+            if (atom.cells && Array.isArray(atom.cells)) {
+                result.cells = atom.cells.map(row => 
+                    row.map(cell => cell.map(a => atomToJson(a)))
+                );
+            }
+            
+            // Use toJson if available (more complete)
+            if (typeof atom.toJson === 'function') {
+                try {
+                    return atom.toJson();
+                } catch (e) {
+                    // Fall back to our manual conversion
+                }
+            }
+            
+            return result;
+        }
+        
+        // Parse LaTeX and get AST
+        function parseLatex(latex) {
+            try {
+                // Create a temporary mathfield to parse
+                const mf = new MathLive.MathfieldElement();
+                mf.style.position = 'absolute';
+                mf.style.left = '-9999px';
+                document.body.appendChild(mf);
+                
+                mf.value = latex;
+                
+                // Access internal model and root atom
+                const model = mf._mathfield?.model;
+                const root = model?.root;
+                
+                let ast;
+                if (root && typeof root.toJson === 'function') {
+                    ast = root.toJson();
+                } else if (root) {
+                    ast = atomToJson(root);
+                } else {
+                    ast = { error: 'Could not access atom tree' };
+                }
+                
+                document.body.removeChild(mf);
+                return ast;
+            } catch (error) {
+                return { error: error.message, latex: latex };
+            }
+        }
+        
+        // Generate AST for all files
+        window.generateAll = function() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<h2>Processing...</h2>';
+            
+            const allResults = [];
+            
+            for (const file of inputData) {
+                const fileResult = {
+                    source: file.filename,
+                    generatedAt: new Date().toISOString(),
+                    generator: 'MathLive',
+                    expressions: []
+                };
+                
+                for (let i = 0; i < file.expressions.length; i++) {
+                    const expr = file.expressions[i];
+                    const ast = parseLatex(expr.latex);
+                    
+                    fileResult.expressions.push({
+                        index: i,
+                        type: expr.type,
+                        latex: expr.latex,
+                        ast: ast
+                    });
+                }
+                
+                window.astResults[file.filename] = fileResult;
+                allResults.push(fileResult);
+            }
+            
+            // Display results
+            resultsDiv.innerHTML = '<h2>Results</h2>';
+            for (const result of allResults) {
+                const div = document.createElement('div');
+                div.innerHTML = `
+                    <h3>${result.source}</h3>
+                    <p>${result.expressions.length} expressions</p>
+                    <details>
+                        <summary>View JSON</summary>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    </details>
+                    <button onclick="downloadFile('${result.source}')">Download JSON</button>
+                `;
+                resultsDiv.appendChild(div);
+            }
+            
+            document.getElementById('status').textContent = 
+                'Done! Processed ' + allResults.length + ' files.';
+            document.getElementById('status').className = 'status success';
+            
+            // For puppeteer: signal completion
+            window.generationComplete = true;
+        };
+        
+        // Download single file
+        window.downloadFile = function(filename) {
+            const result = window.astResults[filename];
+            if (!result) return;
+            
+            const jsonStr = JSON.stringify(result, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename.replace('.tex', '.json');
+            a.click();
+            
+            URL.revokeObjectURL(url);
+        };
+        
+        // Download all files
+        window.downloadAll = function() {
+            for (const filename of Object.keys(window.astResults)) {
+                window.downloadFile(filename);
+            }
+        };
+        
+        // Get all results (for puppeteer)
+        window.getAllResults = function() {
+            return window.astResults;
+        };
+        
+        // Initialize
+        document.getElementById('status').textContent = 'MathLive loaded. Ready to generate AST.';
+        document.getElementById('status').className = 'status success';
+        document.getElementById('controls').style.display = 'block';
+        
+        // Auto-generate for headless mode
+        if (window.autoGenerate) {
+            window.generateAll();
+        }
+    </script>
+</body>
+</html>

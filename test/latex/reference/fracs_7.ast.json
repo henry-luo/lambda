@@ -1,0 +1,64 @@
+{
+  "type": "FRAC",
+  "ruleThickness": -1,
+  "numer": {
+    "type": "FRAC",
+    "ruleThickness": -1,
+    "numer": {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    },
+    "denom": {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 98,
+        "value": "b"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 109,
+        "value": "m"
+      }
+    }
+  },
+  "denom": {
+    "type": "FRAC",
+    "ruleThickness": -1,
+    "numer": {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 99,
+        "value": "c"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    },
+    "denom": {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 100,
+        "value": "d"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 109,
+        "value": "m"
+      }
+    }
+  }
+}

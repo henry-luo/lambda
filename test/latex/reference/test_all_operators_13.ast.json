@@ -1,0 +1,41 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "REL",
+      "codepoint": 32,
+      "command": "leftarrow",
+      "value": " "
+    },
+    {
+      "type": "REL",
+      "codepoint": 33,
+      "command": "rightarrow",
+      "value": "!"
+    },
+    {
+      "type": "REL",
+      "codepoint": 36,
+      "command": "leftrightarrow",
+      "value": "$"
+    },
+    {
+      "type": "REL",
+      "codepoint": 40,
+      "command": "Leftarrow",
+      "value": "("
+    },
+    {
+      "type": "REL",
+      "codepoint": 41,
+      "command": "Rightarrow",
+      "value": ")"
+    },
+    {
+      "type": "REL",
+      "codepoint": 44,
+      "command": "Leftrightarrow",
+      "value": ","
+    }
+  ]
+}

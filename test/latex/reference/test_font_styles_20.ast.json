@@ -1,0 +1,74 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "det"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 65,
+      "value": "A"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "dim"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 86,
+      "value": "V"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "ker"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 84,
+      "value": "T"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ROW",
+      "body": [
+        {
+          "type": "ORD",
+          "codepoint": 105,
+          "value": "i"
+        },
+        {
+          "type": "ORD",
+          "codepoint": 109,
+          "value": "m"
+        }
+      ]
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 84,
+      "value": "T"
+    }
+  ]
+}

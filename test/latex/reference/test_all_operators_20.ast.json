@@ -1,0 +1,40 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "sum"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "prod"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "coprod"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "int"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "oint"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "iint"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "iiint"
+    }
+  ]
+}

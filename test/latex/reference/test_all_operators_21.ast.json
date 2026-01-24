@@ -1,0 +1,30 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigcup"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigcap"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigsqcup"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigvee"
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "bigwedge"
+    }
+  ]
+}

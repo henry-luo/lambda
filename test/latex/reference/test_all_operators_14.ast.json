@@ -1,0 +1,39 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "REL",
+      "codepoint": 34,
+      "command": "uparrow",
+      "value": "\""
+    },
+    {
+      "type": "REL",
+      "codepoint": 35,
+      "command": "downarrow",
+      "value": "#"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "updownarrow"
+    },
+    {
+      "type": "REL",
+      "codepoint": 42,
+      "command": "Uparrow",
+      "value": "*"
+    },
+    {
+      "type": "REL",
+      "codepoint": 43,
+      "command": "Downarrow",
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "Updownarrow"
+    }
+  ]
+}

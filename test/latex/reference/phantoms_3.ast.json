@@ -1,0 +1,25 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "SQRT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "smash{y}"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "SQRT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 121,
+        "value": "y"
+      }
+    }
+  ]
+}

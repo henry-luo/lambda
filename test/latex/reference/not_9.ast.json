@@ -1,0 +1,22 @@
+{
+  "type": "FRAC",
+  "ruleThickness": -1,
+  "numer": {
+    "type": "ROW",
+    "body": [
+      {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      {
+        "type": "NOT"
+      }
+    ]
+  },
+  "denom": {
+    "type": "ORD",
+    "codepoint": 98,
+    "value": "b"
+  }
+}

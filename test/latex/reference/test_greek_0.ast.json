@@ -1,0 +1,29 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 11,
+      "command": "alpha",
+      "value": "\u000b"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 12,
+      "command": "beta",
+      "value": "\f"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 13,
+      "command": "gamma",
+      "value": "\r"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 14,
+      "command": "delta",
+      "value": "\u000e"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "BIN",
+            "codepoint": 45,
+            "value": "-"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 98,
+            "value": "b"
+          },
+          {
+            "type": "BIN",
+            "codepoint": 6,
+            "command": "pm",
+            "value": "\u0006"
+          },
+          {
+            "type": "SQRT",
+            "body": {
+              "type": "ROW",
+              "body": [
+                {
+                  "type": "SCRIPTS",
+                  "body": {
+                    "type": "ORD",
+                    "codepoint": 98,
+                    "value": "b"
+                  },
+                  "superscript": {
+                    "type": "ORD",
+                    "codepoint": 50,
+                    "value": "2"
+                  }
+                },
+                {
+                  "type": "BIN",
+                  "codepoint": 45,
+                  "value": "-"
+                },
+                {
+                  "type": "ORD",
+                  "codepoint": 52,
+                  "value": "4"
+                },
+                {
+                  "type": "ORD",
+                  "codepoint": 97,
+                  "value": "a"
+                },
+                {
+                  "type": "ORD",
+                  "codepoint": 99,
+                  "value": "c"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 50,
+            "value": "2"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 97,
+            "value": "a"
+          }
+        ]
+      }
+    }
+  ]
+}
