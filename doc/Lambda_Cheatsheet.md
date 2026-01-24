@@ -2,7 +2,8 @@
 ```bash
 lambda                    # Start REPL
 // REPL Commands: .quit, .help, .clear
-lambda script.ls          # Run script  
+lambda script.ls          # Eval functional script  
+lambda run script.ls      # Run procedual script  
 lambda --transpile-only script.ls # Transpile only
 lambda --help             # Show help
 ```
@@ -40,6 +41,13 @@ int+             // One or more
 (a: int, b: string) => bool   // Function type
 {a: int, b: bool}             // Map type
 <div id:symbol; <br>>         // Element type
+```
+
+**Type Declarations:**
+```lambda
+type User = {name: string, age: int};   // Object type
+type Point = (float, float);            // Tuple type
+type Result = int | error;              // Union type
 ```
 
 ## Literals
@@ -122,6 +130,11 @@ and  or  not
 is  in  to  |  &  !
 ```
 
+**Vector Arithmetic:** scalar broadcast, element-wise ops
+```lambda
+1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]
+```
+
 ## Control Flow
 
 **If Expressions (require else):**
@@ -149,6 +162,12 @@ for (x in data) if (x > 0) x else 0  // Conditional
 for item in collection { transform(item) }
 ```
 
+**Procedural Control (in `pn`):** 
+```lambda
+var x=0;   // Mutable variable
+while(c) { break;  continue;  return x; } 
+```
+
 ## Functions
 
 **Function Declaration:**
@@ -158,64 +177,51 @@ fn add(a: int, b: int) -> int { a + b }
 // Function  with expression body
 fn multiply(x: int, y: int) => x * y    
 // Anonymous function   
-let square = (x) => x * x;                 
+let square = (x) => x * x;     
+// Procedural function         
+pn f(n) { var x=0; while(x<n) {x=x+1}; x }    
 ```
 
-**Function Calls:**
+**Advanced Features:** 
 ```lambda
-add(5, 3)         // Function call
+fn f(x?:int)    // optional param
+fn f(x=10)      // default param value
+fn f(...)       // variadic args
+f(b:2, a:1)     // named param call
+fn outer(n) { fn inner(x)=>x+n; inner } // closure
 ```
 
 ## System Functions
 
-**Type Conversion:**
-```lambda
-int("42")         // String to int
-float("3.14")     // String to float  
-string(42)        // Value to string
-symbol("text")    // String to symbol
-```
+**Type:** 
 
-**Type Inspection:**
-```lambda
-type(value)       // Get type of value
-len(collection)   // Get length
-```
+`int(v)` `int64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
 
-**Math Functions:**
-```lambda
-abs(x)            // Absolute value
-min(a, b, c)      // Minimum value
-max(a, b, c)      // Maximum value
-sum([1, 2, 3])    // Sum of array
-avg([1, 2, 3])    // Average of array
-round(x)  floor(x)  ceil(x)  // Rounding
-```
+**Math:** 
 
-**Date/Time Functions:**
-```lambda
-datetime()        // Current date/time
-today()           // Current date
-justnow()         // Current time
-date(dt)          // Extract date part
-time(dt)          // Extract time part
-```
+`abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `sqrt(x)` `log(x)` `log10(x)` `exp(x)` `sin(x)` `cos(x)` `tan(x)`
 
-**Collection Functions:**
-```lambda
-slice(arr, start, end)    // Array slice
-set(arr)                  // Remove duplicates
-all([true, false])        // All true?
-any([false, true])        // Any true?
-```
+**Stats:** 
 
-**I/O Functions:**
-```lambda
-input(file, format)       // Parse file
-print(value)              // Print to console
-format(data, type)        // Format output
-error(message)            // Create error
-```
+`sum(v)` `avg(v)` `mean(v)` `median(v)` `variance(v)` `deviation(v)` `quantile(v,p)` `prod(v)`
+
+**Date/Time:** 
+
+`datetime()` `today()` `now()` `justnow()` `date(dt)` `time(dt)`
+
+**Collection:** 
+
+`slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `concat(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(a,b,s)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
+
+**Vector:** 
+
+`dot(a,b)` `norm(v)` `cumsum(v)` `cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
+
+**I/O:** 
+
+`input(file,fmt)` `format(data,fmt)` `print(v)` `output(data,file)` `fetch(url,opts)` `cmd(c,args)` `error(msg)` `varg()`
+
+\vspace{1em}
 
 ## Input/Output Formats
 
@@ -268,23 +274,6 @@ if (result is error) { print("Error:", result) }
 else { print("Success:", result) }
 ```
 
-## Advanced Features
-
-**Type Declarations:**
-```lambda
-type User = {name: string, age: int};   // Object type
-type Point = (float, float);            // Tuple type
-type Result = int | error;              // Union type
-```
-
-**Comprehensions - Complex data processing:**
-```lambda
-(let data = [1, 2, 3, 4, 5],
- let filtered = (for (x in data) 
-   if (x % 2 == 0) x else 0),
- let doubled = (for (x in filtered) x * 2), doubled)
-```
-
 ## Operator Precedence (High to Low)
 1. `()` `[]` `.` - Primary expressions
 2. `-` `+` `not` - Unary operators
@@ -325,4 +314,12 @@ let article = <article title:"My Article"
     <p "Content goes here.">
 >
 format(article, 'html')
+```
+
+**Comprehensions - Complex data processing:**
+```lambda
+(let data = [1, 2, 3, 4, 5],
+ let filtered = (for (x in data) 
+   if (x % 2 == 0) x else 0),
+ let doubled = (for (x in filtered) x * 2), doubled)
 ```
