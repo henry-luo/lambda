@@ -44,7 +44,20 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true},
     {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true},
     {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false},
-    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false},
+    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true},   // is_overloaded: fn_normalize1
+    {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true},  // is_overloaded: fn_normalize2
+    // string functions
+    {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false},
+    {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false},
+    {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false},
+    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false},
+    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false},
+    {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, false},
+    {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_STRING, false, false},
+    {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, false},
     // vector functions
     {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false},
     {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false},
