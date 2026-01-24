@@ -1,0 +1,71 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 26,
+      "command": "rho",
+      "value": "\u001a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 37,
+      "command": "varrho",
+      "value": "%"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 27,
+      "command": "sigma",
+      "value": "\u001b"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 38,
+      "command": "varsigma",
+      "value": "&"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 28,
+      "command": "tau",
+      "value": "\u001c"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 29,
+      "command": "upsilon",
+      "value": "\u001d"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 30,
+      "command": "phi",
+      "value": "\u001e"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 39,
+      "command": "varphi",
+      "value": "'"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 31,
+      "command": "chi",
+      "value": "\u001f"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 32,
+      "command": "psi",
+      "value": " "
+    },
+    {
+      "type": "ORD",
+      "codepoint": 33,
+      "command": "omega",
+      "value": "!"
+    }
+  ]
+}

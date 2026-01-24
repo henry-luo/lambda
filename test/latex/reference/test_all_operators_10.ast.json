@@ -1,0 +1,81 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 26,
+      "command": "subset",
+      "value": "\u001a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 27,
+      "command": "supset",
+      "value": "\u001b"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 18,
+      "command": "subseteq",
+      "value": "\u0012"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 19,
+      "command": "supseteq",
+      "value": "\u0013"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    }
+  ]
+}

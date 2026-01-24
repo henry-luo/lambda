@@ -1,0 +1,34 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 105,
+        "value": "i"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 118,
+        "value": "v"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathring{o}"
+    }
+  ]
+}

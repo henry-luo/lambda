@@ -1,0 +1,135 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 39,
+      "value": "'"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 49,
+        "value": "1"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      },
+      "subscript": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 50,
+            "value": "2"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 110,
+            "value": "n"
+          },
+          {
+            "type": "BIN",
+            "codepoint": 45,
+            "value": "-"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 49,
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    }
+  ]
+}

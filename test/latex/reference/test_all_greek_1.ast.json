@@ -1,0 +1,64 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 19,
+      "command": "iota",
+      "value": "\u0013"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 20,
+      "command": "kappa",
+      "value": "\u0014"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 123,
+      "command": "varkappa",
+      "value": "{"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 21,
+      "command": "lambda",
+      "value": "\u0015"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 22,
+      "command": "mu",
+      "value": "\u0016"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 23,
+      "command": "nu",
+      "value": "\u0017"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 24,
+      "command": "xi",
+      "value": "\u0018"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 111,
+      "value": "o"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 25,
+      "command": "pi",
+      "value": "\u0019"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 36,
+      "command": "varpi",
+      "value": "$"
+    }
+  ]
+}

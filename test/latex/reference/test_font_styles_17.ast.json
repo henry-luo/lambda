@@ -1,0 +1,14 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 103,
+      "value": "g"
+    },
+    {
+      "type": "TEXT",
+      "text": " is a Lie algebra"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 6,
+      "command": "pm",
+      "value": "\u0006"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 7,
+      "command": "mp",
+      "value": "\u0007"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 99,
+      "value": "c"
+    }
+  ]
+}
