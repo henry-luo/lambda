@@ -256,11 +256,24 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
     return fn;
 }
 
+// Helper to validate that an Item is actually a function
+static inline bool is_valid_function(Function* fn) {
+    if (!fn) return false;
+    // Check that the pointer looks like a Function by verifying type_id
+    // Function struct starts with TypeId type_id which should be LMD_TYPE_FUNC
+    TypeId type_id = *(TypeId*)fn;
+    return type_id == LMD_TYPE_FUNC;
+}
+
 // Dynamic function dispatch for first-class functions
 // For closures, env is passed as the first argument
 Item fn_call(Function* fn, List* args) {
-    if (!fn || !fn->ptr) {
-        log_error("fn_call: null function or function pointer");
+    if (!is_valid_function(fn)) {
+        log_error("fn_call: invalid function (null or wrong type)");
+        return ItemError;
+    }
+    if (!fn->ptr) {
+        log_error("fn_call: null function pointer");
         return ItemError;
     }
     int arg_count = args ? (int)args->length : 0;
@@ -304,25 +317,41 @@ Item fn_call(Function* fn, List* args) {
 // Convenience wrappers for common arities (avoid List allocation)
 // For closures, env is passed as the first argument
 Item fn_call0(Function* fn) {
-    if (!fn || !fn->ptr) return ItemError;
+    if (!is_valid_function(fn)) {
+        log_error("fn_call0: invalid function (null or wrong type)");
+        return ItemError;
+    }
+    if (!fn->ptr) return ItemError;
     if (fn->closure_env) return ((Item(*)(void*))fn->ptr)(fn->closure_env);
     return ((Item(*)())fn->ptr)();
 }
 
 Item fn_call1(Function* fn, Item a) {
-    if (!fn || !fn->ptr) return ItemError;
+    if (!is_valid_function(fn)) {
+        log_error("Error: attempting to call non-function value");
+        return ItemError;
+    }
+    if (!fn->ptr) return ItemError;
     if (fn->closure_env) return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
     return ((Item(*)(Item))fn->ptr)(a);
 }
 
 Item fn_call2(Function* fn, Item a, Item b) {
-    if (!fn || !fn->ptr) return ItemError;
+    if (!is_valid_function(fn)) {
+        log_error("Error: attempting to call non-function value");
+        return ItemError;
+    }
+    if (!fn->ptr) return ItemError;
     if (fn->closure_env) return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
     return ((Item(*)(Item,Item))fn->ptr)(a, b);
 }
 
 Item fn_call3(Function* fn, Item a, Item b, Item c) {
-    if (!fn || !fn->ptr) return ItemError;
+    if (!is_valid_function(fn)) {
+        log_error("Error: attempting to call non-function value");
+        return ItemError;
+    }
+    if (!fn->ptr) return ItemError;
     if (fn->closure_env) return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
     return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
 }

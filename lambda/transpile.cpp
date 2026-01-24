@@ -727,9 +727,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 }
             }
             else {
-                // handle the case where entry is null - perhaps write the identifier directly
-                log_error("Error: identifier '%.*s' missing name entry", (int)ident_node->name->len, ident_node->name->chars);
-                write_node_source(tp, ident_node->node);
+                // handle the case where entry is null - identifier is undefined
+                // emit error value instead of raw identifier name to prevent crash
+                log_error("Error: undefined identifier '%.*s'", (int)ident_node->name->len, ident_node->name->chars);
+                tp->error_count++;
+                strbuf_append_str(tp->code_buf, "ItemError");
             }
         } else { 
             transpile_expr(tp, pri_node->expr);
@@ -1928,6 +1930,20 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         bool is_callable_call_expr = false; // callee is a call expression (e.g., make_adder(10)(5))
         AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
             (AstPrimaryNode*)call_node->function : null;
+        
+        // Early check for undefined function call - prevents crash
+        if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
+            if (!ident_node->entry) {
+                // Calling an undefined identifier - emit error
+                log_error("Error: call to undefined function '%.*s'", 
+                    (int)ident_node->name->len, ident_node->name->chars);
+                tp->error_count++;
+                strbuf_append_str(tp->code_buf, "ItemError");
+                return;
+            }
+        }
+        
         if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
