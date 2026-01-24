@@ -1285,7 +1285,15 @@ Item fn_drop(Item vec, Item n_item) {
 }
 
 // slice(vec, start, end) - extract elements from start (inclusive) to end (exclusive)
+// Works for arrays, lists, and strings
 Item fn_slice(Item vec, Item start_item, Item end_item) {
+    TypeId type = get_type_id(vec);
+    
+    // Handle strings - delegate to fn_substring
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+        return fn_substring(vec, start_item, end_item);
+    }
+    
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
     
@@ -1300,13 +1308,16 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     int64_t start = (start_type == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
     int64_t end = (end_type == LMD_TYPE_INT) ? end_item.get_int56() : end_item.get_int64();
     
+    // Handle negative indices
+    if (start < 0) start = len + start;
+    if (end < 0) end = len + end;
+    
     // Clamp indices to valid range
     if (start < 0) start = 0;
     if (end > len) end = len;
     if (start > end) start = end;
     
     int64_t new_len = end - start;
-    TypeId type = get_type_id(vec);
     
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(new_len);

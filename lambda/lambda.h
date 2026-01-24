@@ -414,9 +414,21 @@ typedef struct Context {
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
     Item fn_normalize(Item str, Item type);
+    Item fn_normalize1(Item str);           // normalize with default NFC
     Item fn_substring(Item str, Item start, Item end);
     Item fn_contains(Item str, Item substr);
     Item fn_join(Item a, Item b);
+    // string functions
+    Item fn_starts_with(Item str, Item prefix);
+    Item fn_ends_with(Item str, Item suffix);
+    int64_t fn_index_of(Item str, Item sub);
+    int64_t fn_last_index_of(Item str, Item sub);
+    Item fn_trim(Item str);
+    Item fn_trim_start(Item str);
+    Item fn_trim_end(Item str);
+    Item fn_split(Item str, Item sep);
+    Item fn_str_join(Item list, Item sep);
+    Item fn_replace(Item str, Item old_str, Item new_str);
 
     Function* to_fn(fn_ptr ptr);
     Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
