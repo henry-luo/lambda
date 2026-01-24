@@ -1,0 +1,35 @@
+"===== STRING FUNCTIONS TEST =====Test starts_with:1. expect true:"
+true
+"2. expect false:"
+false
+"3. expect false (prefix longer):"
+false
+"Test ends_with:4. expect true:"
+true
+"5. expect false:"
+false
+"6. expect true (.txt):"
+true
+"Test index_of:7. expect 4:"
+4
+"8. expect -1 (not found):"
+-1
+"9. expect 6:"
+6
+"Test last_index_of:10. expect 7 (second o):"
+7
+"11. expect 9 (last l):"
+9
+"12. expect -1:"
+-1
+"Test trim:13. expect 'hello world':hello world14. expect 'hello':helloTest trim_start:15. expect 'hello  ':hello  Test trim_end:16. expect '  hello':  helloTest split:17. expect ['a', 'b', 'c']:abc18. expect ['hello']:hello19. expect ['a', 'b', 'c']:abcTest str_join:20. expect 'a, b, c':a, b, c21. expect 'hello':helloTest replace:22. expect 'hello there':hello there23. expect 'hexxo':hexxo24. expect 'hello' (no match):helloTest contains:25. expect true:"
+true
+"26. expect false:"
+false
+"Test slice on strings:27. expect 'ell':ell28. expect 'he':heTest with symbols:29. expect true:"
+true
+"30. expect true:"
+true
+"Test Unicode:31. index_of UTF-8:"
+7
+"32. slice UTF-8:éll===== ALL TESTS PASSED ====="

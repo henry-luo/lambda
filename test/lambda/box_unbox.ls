@@ -5,8 +5,8 @@ fn add_f2(a, b:float) { a + b }
 
 add(1, 1)
 add_i(1, 2)
-add_i(1, 3.0)
-add_i(1, 4.6)
+// add_i(1, 3.0)  // type error
+// add_i(1, 4.6)  // type error
 add_f(1, 1.5)
 add_f(1.0, 2.0)
 add_f2(1.0, 3.5)
