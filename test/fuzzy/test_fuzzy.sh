@@ -224,8 +224,12 @@ if [ ${#SEED_PROGRAMS[@]} -eq 0 ]; then
     SEED_PROGRAMS+=("fn f(x) => x + 1")
 fi
 
+# Allocate 70% of time to mutation, 30% to random generation
+MUTATION_END_TIME=$((START_TIME + DURATION_SEC * 70 / 100))
+RANDOM_END_TIME=$((START_TIME + DURATION_SEC))
+
 MUTATION_TESTS=0
-while [ $(($(date +%s) - START_TIME)) -lt "$DURATION_SEC" ]; do
+while [ $(($(date +%s))) -lt "$MUTATION_END_TIME" ]; do
     # Pick random seed
     seed_idx=$((RANDOM % ${#SEED_PROGRAMS[@]}))
     program="${SEED_PROGRAMS[$seed_idx]}"
@@ -249,7 +253,7 @@ echo ""
 # Phase 3: Random generation
 echo "Phase 3: Random generation testing..."
 RANDOM_TESTS=0
-while [ $(($(date +%s) - START_TIME)) -lt "$DURATION_SEC" ]; do
+while [ $(($(date +%s))) -lt "$RANDOM_END_TIME" ]; do
     # Generate random code of varying length
     length=$((5 + RANDOM % 50))
     code=$(generate_random_code $length)

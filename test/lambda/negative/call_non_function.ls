@@ -13,14 +13,14 @@ fn make_counter(start: int) {
 let counter = make_counter(100);
 counter(5)
 
-// Test 2: Calling a number
-let num = 42;
-// num(5)  // Would error: calling non-function
+// Test 2: Operator mutation creating ItemError then calling it
+// Found by fuzzy testing: make_multiplier/(3) returns ItemError from division
+// Then calling ItemError as function crashes
+fn mult(x) => x * 2;
+let triple = mult / 3;  // returns ItemError (can't divide function by int)
+triple(5)  // Would crash: calling ItemError as function
 
-// Test 3: Calling a string
-let str = "hello";
-// str(1)  // Would error: calling non-function
-
-// Test 4: Calling a list
-let lst = [1, 2, 3];
-// lst(0)  // Would error: calling non-function
+// Test 3: Power operator mutation
+fn add(x) => x + 1;
+let bad = add ^ 2;  // returns ItemError (can't power function)
+bad(5)  // Would crash: calling ItemError as function
