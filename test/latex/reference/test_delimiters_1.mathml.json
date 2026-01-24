@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\left(a\\right)",
+  "mathml": "<mrow><mo>(</mo><mi>a</mi><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "format": "mathml",
+  "latex": "(a) \\quad [a] \\quad \\{a\\} \\quad |a| \\quad \\|a\\|",
+  "mathml": "<mrow><mrow><mo>(</mo><mi>a</mi><mo>)</mo></mrow><mspace width=\"1em\"/><mrow><mo>[</mo><mi>a</mi><mo>]</mo></mrow><mspace width=\"1em\"/><mo>{</mo><mi>a</mi><mo>}</mo><mspace width=\"1em\"/><mi>∣</mi><mo>&#8290;</mo><mi>a</mi><mo>&#8290;</mo><mi>∣</mi><mspace width=\"1em\"/><mi>∥</mi><mo>&#8290;</mo><mi>a</mi><mo>&#8290;</mo><mi>∥</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "["
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "]"
+      },
+      {
+        "tag": "mo",
+        "content": "{"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "}"
+      },
+      {
+        "tag": "mi",
+        "content": "∣"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "∣"
+      },
+      {
+        "tag": "mi",
+        "content": "∥"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "∥"
+      }
+    ]
+  }
+}

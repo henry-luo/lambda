@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\theta \\vartheta",
+  "mathml": "<mrow><mi>θ</mi><mo>&#8290;</mo><mi>ϑ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "θ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ϑ"
+      }
+    ]
+  }
+}

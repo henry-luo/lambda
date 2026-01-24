@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\epsilon \\varepsilon",
+  "mathml": "<mrow><mi>ϵ</mi><mo>&#8290;</mo><mi>ε</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ϵ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      }
+    ]
+  }
+}

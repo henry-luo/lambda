@@ -1,0 +1,78 @@
+{
+  "format": "mathml",
+  "latex": "\\iota \\kappa \\varkappa \\lambda \\mu \\nu \\xi o \\pi \\varpi",
+  "mathml": "<mrow><mi>ι</mi><mo>&#8290;</mo><mi>κ</mi><mi>ϰ</mi><mi>λ</mi><mo>&#8290;</mo><mi>μ</mi><mo>&#8290;</mo><mi>ν</mi><mo>&#8290;</mo><mi>ξ</mi><mo>&#8290;</mo><mi>o</mi><mo>&#8290;</mo><mi>&#x03c0;</mi><mo>&#8290;</mo><mi>ϖ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ι"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "κ"
+      },
+      {
+        "tag": "mi",
+        "content": "ϰ"
+      },
+      {
+        "tag": "mi",
+        "content": "λ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "μ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ν"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ξ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "o"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x03c0;"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ϖ"
+      }
+    ]
+  }
+}

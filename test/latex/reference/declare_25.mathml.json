@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "q_{\\WildCard,\\WildCard}",
+  "mathml": "<msub><mi>q</mi><mrow><merror></merror><mo separator=\"true\">,</mo><merror></merror></mrow></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "q"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "merror",
+        "content": null
+      }
+    ]
+  }
+}

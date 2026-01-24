@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "\\grave{e} \\quad \\dot{f} \\quad \\ddot{g} \\quad \\breve{h}",
+  "mathml": "<mrow><mover accent=\"true\"><mi>e</mi><mo>&#x0060;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>f</mi><mo>&#x2061;</mo><mo>&#x02d9;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>g</mi><mo>&#x2061;</mo><mo>&#x00a8;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>h</mi><mo>&#x02d8;</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x0060;"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x02d9;"
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00a8;"
+      },
+      {
+        "tag": "mi",
+        "content": "h"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x02d8;"
+      }
+    ]
+  }
+}

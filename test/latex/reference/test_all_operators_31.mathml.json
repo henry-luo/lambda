@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\aleph \\quad \\hbar \\quad \\ell \\quad \\imath \\quad \\jmath",
+  "mathml": "<mrow><mi>ℵ</mi><mspace width=\"1em\"/><mi>ℏ</mi><mspace width=\"1em\"/><mi>ℓ</mi><mspace width=\"1em\"/><mi>ı</mi><mspace width=\"1em\"/><mi>ȷ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ℵ"
+      },
+      {
+        "tag": "mi",
+        "content": "ℏ"
+      },
+      {
+        "tag": "mi",
+        "content": "ℓ"
+      },
+      {
+        "tag": "mi",
+        "content": "ı"
+      },
+      {
+        "tag": "mi",
+        "content": "ȷ"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\vec{a}",
+  "mathml": "<mover accent=\"true\"><mi>a</mi><mo>&#x20d7;</mo></mover>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x20d7;"
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "{n \\choose k}",
+  "mathml": "<mrow><mo>(</mo><mtable><mtr><mi>n</mi></mtr><mtr><mi>k</mi></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

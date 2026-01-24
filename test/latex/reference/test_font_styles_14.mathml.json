@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\mathcal{L}, \\mathcal{H}, \\mathcal{F}",
+  "mathml": "<mrow><mi>L</mi><mo separator=\"true\">,</mo><mi>H</mi><mo separator=\"true\">,</mo><mi>F</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "L"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "H"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "F"
+      }
+    ]
+  }
+}

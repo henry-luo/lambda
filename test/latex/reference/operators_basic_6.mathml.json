@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "a \\in B \\subset C",
+  "mathml": "<mrow><mi>a</mi><mo>∈</mo><mi>B</mi><mo>⊂</mo><mi>C</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "∈"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mo",
+        "content": "⊂"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      }
+    ]
+  }
+}

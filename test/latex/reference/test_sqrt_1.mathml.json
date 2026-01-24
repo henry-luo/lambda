@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{x+y}",
+  "mathml": "<msqrt><mrow><mi>x</mi><mo>+</mo><mi>y</mi></mrow></msqrt>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      }
+    ]
+  }
+}

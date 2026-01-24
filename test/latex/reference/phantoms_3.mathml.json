@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{\\smash{y}} \\quad \\sqrt{y}",
+  "mathml": "<mrow><msqrt></msqrt><mspace width=\"1em\"/><msqrt><mi>y</mi></msqrt></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "msqrt",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      }
+    ]
+  }
+}

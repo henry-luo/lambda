@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "a + { b \\choose c \\egroup + d",
+  "mathml": "<mrow><mi>a</mi><mo>+</mo><mrow><mo>(</mo><mtable><mtr><mi>b</mi></mtr><mtr><mi>c</mi></mtr></mtable><mo>)</mo></mrow><mo>+</mo><mi>d</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      }
+    ]
+  }
+}

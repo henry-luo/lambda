@@ -1,0 +1,54 @@
+{
+  "format": "mathml",
+  "latex": "a\\plus b; \\baz, \\foo{x}, \\foo{j}",
+  "mathml": "<mrow><mi>a</mi><merror></merror><mi>b</mi><mo separator=\"true\">;</mo><merror></merror><mo separator=\"true\">,</mo><merror></merror><mi>x</mi><mo separator=\"true\">,</mo><merror></merror><mi>j</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ";"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{x}",
+  "mathml": "<msqrt><mi>x</mi></msqrt>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

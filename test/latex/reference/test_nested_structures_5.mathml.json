@@ -1,0 +1,54 @@
+{
+  "format": "mathml",
+  "latex": "a_{b_{c_{d_e}}}^{f^{g^{h^i}}}",
+  "mathml": "<msubsup><mi>a</mi><msub><mi>b</mi><msub><mi>c</mi><msub><mi>d</mi><mi>e</mi></msub></msub></msub><msup><mi>f</mi><mo>&#x2061;</mo><msup><mi>g</mi><mo>&#x2061;</mo><msup><mi>h</mi><mi>i</mi></msup></msup></msup></msubsup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "h"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      }
+    ]
+  }
+}
