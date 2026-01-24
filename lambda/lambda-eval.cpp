@@ -257,10 +257,22 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
 }
 
 // Helper to validate that an Item is actually a function
+// When Items are passed to fn_call*, they get cast to Function*
+// We need to check if this is a valid pointer to a Function struct
 static inline bool is_valid_function(Function* fn) {
     if (!fn) return false;
-    // Check that the pointer looks like a Function by verifying type_id
-    // Function struct starts with TypeId type_id which should be LMD_TYPE_FUNC
+    
+    // Check if this looks like a tagged Item value rather than a real pointer
+    // Tagged Items have the type_id in the high byte (bits 56-63)
+    // Valid heap pointers have the high byte as 0 on most platforms
+    uint64_t val = (uint64_t)fn;
+    uint8_t high_byte = (val >> 56) & 0xFF;
+    if (high_byte != 0) {
+        // This is a tagged value (like ItemError), not a valid pointer
+        return false;
+    }
+    
+    // Now safe to dereference - check that type_id matches Function
     TypeId type_id = *(TypeId*)fn;
     return type_id == LMD_TYPE_FUNC;
 }
