@@ -1915,9 +1915,10 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
-        StrView fn = ts_node_source(tp, call_node->function->node);
+        // Use the sys func name from fn_info, not from TSNode source
+        // This correctly handles method-style calls (obj.method()) which are desugared to sys func calls
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
-        strbuf_append_str_n(tp->code_buf, fn.str, fn.length);
+        strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->name);
         if (sys_fn_node->fn_info->is_overloaded) { strbuf_append_int(tp->code_buf, sys_fn_node->fn_info->arg_count); }
     }
     else {
