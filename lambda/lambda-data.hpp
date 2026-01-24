@@ -266,6 +266,19 @@ typedef enum SysFunc {
     SYSFUNC_FORMAT2,
     SYSFUNC_ERROR,
     SYSFUNC_NORMALIZE,
+    SYSFUNC_NORMALIZE2,     // normalize(str, form) with 2 args
+    // string functions
+    SYSFUNC_CONTAINS,
+    SYSFUNC_STARTS_WITH,
+    SYSFUNC_ENDS_WITH,
+    SYSFUNC_INDEX_OF,
+    SYSFUNC_LAST_INDEX_OF,
+    SYSFUNC_TRIM,
+    SYSFUNC_TRIM_START,
+    SYSFUNC_TRIM_END,
+    SYSFUNC_SPLIT,
+    SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
+    SYSFUNC_REPLACE,
     // vector functions
     SYSFUNC_PROD,
     SYSFUNC_CUMSUM,
