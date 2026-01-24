@@ -1,0 +1,78 @@
+{
+  "format": "mathml",
+  "latex": "f_a,  f^a, f_a^a, f^a_a",
+  "mathml": "<mrow><msub><mi>f</mi><mo>&#x2061;</mo><mi>a</mi></msub><mo separator=\"true\">,</mo><msup><mi>f</mi><mo>&#x2061;</mo><mi>a</mi></msup><mo separator=\"true\">,</mo><msubsup><mi>f</mi><mo>&#x2061;</mo><mi>a</mi><mi>a</mi></msubsup><mo separator=\"true\">,</mo><msubsup><mi>f</mi><mo>&#x2061;</mo><mi>a</mi><mi>a</mi></msubsup></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      }
+    ]
+  }
+}

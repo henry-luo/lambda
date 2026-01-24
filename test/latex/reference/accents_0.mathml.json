@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}",
+  "mathml": "<mrow><mover accent=\"true\"><mi>a</mi><mo>&#x005e;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>b</mi><mo>&#x02c7;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>c</mi><mo>&#x007e;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>d</mi><mo>&#x00b4;</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x02c7;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x007e;"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00b4;"
+      }
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\int\\limits_0^1 f(x) dx",
+  "mathml": "<mrow><munderover><mo>∫</mo><mn>0</mn><mn>1</mn></munderover><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>x</mi><mo>)</mo></mrow><mo>&#8290;</mo><mi>d</mi><mo>&#8290;</mo><mi>x</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∫"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

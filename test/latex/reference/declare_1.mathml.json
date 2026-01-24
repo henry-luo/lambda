@@ -1,0 +1,102 @@
+{
+  "format": "mathml",
+  "latex": "y, y', y_1, y_n, y_{2n-1}, \\hat{y}, \\widehat{y}",
+  "mathml": "<mrow><mi>y</mi><mo separator=\"true\">,</mo><msup><mi>y</mi><mi>′</mi></msup><mo separator=\"true\">,</mo><msub><mi>y</mi><mn>1</mn></msub><mo separator=\"true\">,</mo><msub><mi>y</mi><mi>n</mi></msub><mo separator=\"true\">,</mo><msub><mi>y</mi><mrow><mn>2</mn><mo>&#8290;</mo><mi>n</mi><mo>−</mo><mn>1</mn></mrow></msub><mo separator=\"true\">,</mo><mover accent=\"true\"><mi>y</mi><mo>&#x005e;</mo></mover><mo separator=\"true\">,</mo><mover accent=\"true\"><mi>y</mi><mo>undefined</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mi",
+        "content": "′"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "−"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      }
+    ]
+  }
+}

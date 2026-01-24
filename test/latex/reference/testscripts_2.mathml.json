@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\mathop{A}\\limits_B\\nolimits^C \\qquad\n   \\mathop{A}\\limits^C \\nolimits_B \\qquad\n   \\mathop{A}\\nolimits_B\\nolimits^C\\qquad\n   \\mathop{A}\\nolimits^C\\nolimits_B",
+  "mathml": "<mrow><msubsup><mo>&#x2061;</mo><mi>B</mi><mi>C</mi></msubsup><mspace width=\"2em\"/><msubsup><mo>&#x2061;</mo><mi>B</mi><mi>C</mi></msubsup><mspace width=\"2em\"/><msubsup><mo>&#x2061;</mo><mi>B</mi><mi>C</mi></msubsup><mspace width=\"2em\"/><msubsup><mo>&#x2061;</mo><mi>B</mi><mi>C</mi></msubsup></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      }
+    ]
+  }
+}

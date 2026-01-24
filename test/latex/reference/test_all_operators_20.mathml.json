@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\sum \\prod \\coprod \\int \\oint \\iint \\iiint",
+  "mathml": "<mrow><mo>∑</mo><mo>∏</mo><mo>∐</mo><mo>∫</mo><mo>∮</mo><mo>∬</mo><mo>∭</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∑"
+      },
+      {
+        "tag": "mo",
+        "content": "∏"
+      },
+      {
+        "tag": "mo",
+        "content": "∐"
+      },
+      {
+        "tag": "mo",
+        "content": "∫"
+      },
+      {
+        "tag": "mo",
+        "content": "∮"
+      },
+      {
+        "tag": "mo",
+        "content": "∬"
+      },
+      {
+        "tag": "mo",
+        "content": "∭"
+      }
+    ]
+  }
+}

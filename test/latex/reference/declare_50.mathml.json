@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "f_i",
+  "mathml": "<msub><mi>f</mi><mo>&#x2061;</mo><mi>i</mi></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      }
+    ]
+  }
+}

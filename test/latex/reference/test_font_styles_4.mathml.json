@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\mathbf{abcdefghijklmnopqrstuvwxyz}",
+  "mathml": "<mi mathvariant=\"bold\">abcdefghijklmnopqrstuvwxyz</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "abcdefghijklmnopqrstuvwxyz"
+      }
+    ]
+  }
+}

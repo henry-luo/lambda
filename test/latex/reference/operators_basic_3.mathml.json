@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "a < b > c",
+  "mathml": "<mrow><mi>a</mi><mo>&lt;</mo><mi>b</mi><mo>&gt;</mo><mi>c</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&lt;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "format": "mathml",
+  "latex": "a + \\frac{b \\choose c}{d \\choose e} + f",
+  "mathml": "<mrow><mi>a</mi><mo>+</mo><mfrac><mrow><mo>(</mo><mtable><mtr><mi>b</mi></mtr><mtr><mi>c</mi></mtr></mtable><mo>)</mo></mrow><mrow><mo>(</mo><mtable><mtr><mi>d</mi></mtr><mtr><mi>e</mi></mtr></mtable><mo>)</mo></mrow></mfrac><mo>+</mo><mi>f</mi><mo>&#x2061;</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      }
+    ]
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "format": "mathml",
+  "latex": "\\nabla \\cdot \\mathbf{F} = \\frac{\\partial F_x}{\\partial x} + \\frac{\\partial F_y}{\\partial y} + \\frac{\\partial F_z}{\\partial z}",
+  "mathml": "<mrow><mi>∇</mi><mo>⋅</mo><mi mathvariant=\"bold\">F</mi><mo>=</mo><mfrac><mrow><mi>∂</mi><msub><mi>F</mi><mi>x</mi></msub></mrow><mrow><mi>∂</mi><mo>&#8290;</mo><mi>x</mi></mrow></mfrac><mo>+</mo><mfrac><mrow><mi>∂</mi><msub><mi>F</mi><mi>y</mi></msub></mrow><mrow><mi>∂</mi><mo>&#8290;</mo><mi>y</mi></mrow></mfrac><mo>+</mo><mfrac><mrow><mi>∂</mi><msub><mi>F</mi><mi>z</mi></msub></mrow><mrow><mi>∂</mi><mo>&#8290;</mo><mi>z</mi></mrow></mfrac></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "∇"
+      },
+      {
+        "tag": "mo",
+        "content": "⋅"
+      },
+      {
+        "tag": "mi",
+        "content": "F"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "F"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "F"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "F"
+      },
+      {
+        "tag": "mi",
+        "content": "z"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "z"
+      }
+    ]
+  }
+}

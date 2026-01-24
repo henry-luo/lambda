@@ -1,0 +1,94 @@
+{
+  "format": "mathml",
+  "latex": "\\varepsilon, \\varepsilon_1,\n  \\mathcal{T}_{\\varepsilon},\n  \\mathcal{T}_{\\varepsilon_1},\n  \\mathcal{T}_{\\varepsilon_1, \\varepsilon_2, \\varepsilon_3}",
+  "mathml": "<mrow><mi>ε</mi><mo separator=\"true\">,</mo><msub><mi>ε</mi><mn>1</mn></msub><mo separator=\"true\">,</mo><msub><mi>T</mi><mi>ε</mi></msub><mo separator=\"true\">,</mo><msub><mi>T</mi><msub><mi>ε</mi><mn>1</mn></msub></msub><mo separator=\"true\">,</mo><msub><mi>T</mi><mrow><msub><mi>ε</mi><mn>1</mn></msub><mo separator=\"true\">,</mo><msub><mi>ε</mi><mn>2</mn></msub><mo separator=\"true\">,</mo><msub><mi>ε</mi><mn>3</mn></msub></mrow></msub></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "T"
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "T"
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "T"
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      }
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "format": "mathml",
+  "latex": "\\begin{pmatrix}\n\\begin{array}{cc} a & b \\\\ c & d \\end{array} &\n\\begin{array}{cc} e & f \\\\ g & h \\end{array} \\\\\n\\begin{array}{cc} i & j \\\\ k & l \\end{array} &\n\\begin{array}{cc} m & n \\\\ o & p \\end{array}\n\\end{pmatrix}",
+  "mathml": "<mrow><mo>(</mo><mtable columnalign=\"center center center center center center center center center center \"><mtr><mtd><mtable columnalign=\"center center \"><mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd></mtr><mtr><mtd><mi>c</mi></mtd><mtd><mi>d</mi></mtd></mtr></mtable></mtd><mtd><mtable columnalign=\"center center \"><mtr><mtd><mi>e</mi></mtd><mtd><mi>f</mi><mo>&#x2061;</mo></mtd></mtr><mtr><mtd><mi>g</mi><mo>&#x2061;</mo></mtd><mtd><mi>h</mi></mtd></mtr></mtable></mtd></mtr><mtr><mtd><mtable columnalign=\"center center \"><mtr><mtd><mi>i</mi></mtd><mtd><mi>j</mi></mtd></mtr><mtr><mtd><mi>k</mi></mtd><mtd><mi>l</mi></mtd></mtr></mtable></mtd><mtd><mtable columnalign=\"center center \"><mtr><mtd><mi>m</mi></mtd><mtd><mi>n</mi></mtd></mtr><mtr><mtd><mi>o</mi></mtd><mtd><mi>p</mi></mtd></mtr></mtable></mtd></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "h"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mi",
+        "content": "l"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "o"
+      },
+      {
+        "tag": "mi",
+        "content": "p"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

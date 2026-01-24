@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}",
+  "mathml": "<mrow><msup><mover >⏞</mover><mi>n</mi></msup><mspace width=\"1em\"/><msub><munder >⏟</munder><mi>m</mi></msub></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mover",
+        "content": "⏞"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "munder",
+        "content": "⏟"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      }
+    ]
+  }
+}

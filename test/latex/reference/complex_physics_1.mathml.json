@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "F = ma",
+  "mathml": "<mrow><mi>F</mi><mo>=</mo><mi>m</mi><mo>&#8290;</mo><mi>a</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "F"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      }
+    ]
+  }
+}
