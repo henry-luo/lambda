@@ -225,12 +225,77 @@ bool is_optional_param_ref(AstNode* item) {
     return false;
 }
 
+// check if an AST node is a parameter reference in the current closure (already Item type at runtime)
+bool is_closure_param_ref(Transpiler* tp, AstNode* item) {
+    if (!tp->current_closure) return false;
+    // unwrap nested PRIMARY nodes
+    while (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (!pri->expr) return false;
+        if (pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
+            if (!ident_node->entry || !ident_node->entry->node) return false;
+            if (ident_node->entry->node->node_type != AST_NODE_PARAM) return false;
+            // Make sure this param belongs to the CURRENT closure, not an outer function
+            AstNamedNode* param = (AstNamedNode*)ident_node->entry->node;
+            // Check if this parameter is in the current closure's parameter list
+            AstNamedNode* closure_param = tp->current_closure->param;
+            while (closure_param) {
+                if (closure_param == param) return true;
+                closure_param = (AstNamedNode*)closure_param->next;
+            }
+            return false;  // This is a param from an outer function (captured)
+        }
+        item = pri->expr;
+    }
+    return false;
+}
+
+// check if an AST node is a captured variable reference (stored as Item in closure env)
+bool is_captured_var_ref(Transpiler* tp, AstNode* item) {
+    if (!tp->current_closure) return false;
+    // unwrap nested PRIMARY nodes
+    while (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (!pri->expr) return false;
+        if (pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
+            CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
+            return cap != nullptr;
+        }
+        item = pri->expr;
+    }
+    return false;
+}
+
+// emit env access for a captured variable (without unboxing) - returns true if successful
+bool emit_captured_var_item(Transpiler* tp, AstNode* item) {
+    if (!tp->current_closure) return false;
+    // unwrap nested PRIMARY nodes
+    while (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (!pri->expr) return false;
+        if (pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
+            CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
+            if (cap) {
+                // emit _env->varname directly (this is already an Item)
+                strbuf_append_str(tp->code_buf, "_env->");
+                strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
+                return true;
+            }
+            return false;
+        }
+        item = pri->expr;
+    }
+    return false;
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
         return;
     }
-    // log_debug("transpile box item: %d", item->type->type_id);
 
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
@@ -243,14 +308,29 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         break;
     case LMD_TYPE_BOOL:
+        // Check if this is a closure parameter (already Item type at runtime)
+        if (is_closure_param_ref(tp, item)) {
+            transpile_expr(tp, item);
+            break;
+        }
+        // Check if this is a captured variable reference (already Item in closure env)
+        if (is_captured_var_ref(tp, item)) {
+            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            break;
+        }
         strbuf_append_str(tp->code_buf, "b2it(");
         transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_INT: {
-        // Check if this is an optional parameter (already Item type at runtime)
-        if (is_optional_param_ref(item)) {
+        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
+        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
             transpile_expr(tp, item);
+            break;
+        }
+        // Check if this is a captured variable reference (already Item in closure env)
+        if (is_captured_var_ref(tp, item)) {
+            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
             break;
         }
         // Check if this is a variable that was declared as Item due to type coercion
@@ -315,9 +395,14 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         break;
     }
     case LMD_TYPE_INT64: 
-        // Check if this is an optional parameter (already Item type at runtime)
-        if (is_optional_param_ref(item)) {
+        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
+        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
             transpile_expr(tp, item);
+            break;
+        }
+        // Check if this is a captured variable reference (already Item in closure env)
+        if (is_captured_var_ref(tp, item)) {
+            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
             break;
         }
         if (item->type->is_literal) {
@@ -336,9 +421,14 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         break;
     case LMD_TYPE_FLOAT: 
-        // Check if this is an optional parameter (already Item type at runtime)
-        if (is_optional_param_ref(item)) {
+        // Check if this is an optional parameter or closure parameter (already Item type at runtime)
+        if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
             transpile_expr(tp, item);
+            break;
+        }
+        // Check if this is a captured variable reference (already Item in closure env)
+        if (is_captured_var_ref(tp, item)) {
+            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
             break;
         }
         if (item->type->is_literal) {
@@ -386,6 +476,11 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);
         break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+        // Check if this is a captured variable reference (already Item in closure env)
+        if (is_captured_var_ref(tp, item)) {
+            emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
+            break;
+        }
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
             item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
@@ -468,9 +563,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);  // raw pointer treated as Item
         strbuf_append_char(tp->code_buf, ')');
         break;
-    case LMD_TYPE_ANY:
+    case LMD_TYPE_ANY: {
         transpile_expr(tp, item);  // no boxing needed
         break;
+    }
     default:
         log_debug("unknown box item type: %d", item->type->type_id);
     }
@@ -483,12 +579,12 @@ void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
             item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
             item = item->next;  continue;
         }
-        strbuf_append_format(tp->code_buf, " list_push(%s, ", is_elmt ? "el" : "ls");
+        strbuf_append_format(tp->code_buf, "\n list_push(%s, ", is_elmt ? "el" : "ls");
         transpile_box_item(tp, item);
-        strbuf_append_str(tp->code_buf, ");\n");
+        strbuf_append_str(tp->code_buf, ");");
         item = item->next;
     }
-    strbuf_append_format(tp->code_buf, " list_end(%s);})", is_elmt ? "el" : "ls");
+    strbuf_append_format(tp->code_buf, "\n list_end(%s);})", is_elmt ? "el" : "ls");
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
@@ -535,6 +631,39 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             }
             
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
+            
+            // check if this is a parameter in the current closure (need to unbox since params are Item)
+            if (tp->current_closure && entry_node && entry_node->node_type == AST_NODE_PARAM) {
+                // parameter in closure - needs unboxing from Item
+                TypeId type_id = pri_node->type->type_id;
+                if (type_id == LMD_TYPE_INT) {
+                    strbuf_append_str(tp->code_buf, "it2i(_");
+                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (type_id == LMD_TYPE_INT64) {
+                    strbuf_append_str(tp->code_buf, "it2l(_");
+                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (type_id == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "it2f(_");
+                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (type_id == LMD_TYPE_BOOL) {
+                    strbuf_append_str(tp->code_buf, "it2b(_");
+                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
+                    strbuf_append_str(tp->code_buf, "it2s(_");
+                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else {
+                    // for Item or container types, return directly (already Item)
+                    strbuf_append_char(tp->code_buf, '_');
+                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                }
+                return;
+            }
+            
             if (entry_node) {
                 if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC) {
                     // Function reference - check if it's a closure
@@ -1382,16 +1511,16 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
             continue;
         }
         transpile_assign_expr(tp, (AstNamedNode*)declare);
-        strbuf_append_char(tp->code_buf, ' ');
+        strbuf_append_str(tp->code_buf, "\n");  // ensure declarations are on separate lines
         declare = declare->next;
     }
     if (type->length == 0) {
         log_debug("transpile_list_expr: type->length is 0, outputting null");
-        strbuf_append_str(tp->code_buf, "list_end(ls);})");
+        strbuf_append_str(tp->code_buf, " list_end(ls);})");
         return;
     }
     if (type->length < 10) {
-        strbuf_append_str(tp->code_buf, " list_fill(ls,");
+        strbuf_append_str(tp->code_buf, "\n list_fill(ls,");
         strbuf_append_int(tp->code_buf, type->length);
         strbuf_append_char(tp->code_buf, ',');
         transpile_items(tp, list_node->item);
@@ -2257,8 +2386,13 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
     
     strbuf_append_char(tp->code_buf, '\n');
-    Type *ret_type = fn_node->body->type;
-    write_type(tp->code_buf, ret_type);
+    // closures must return Item to be compatible with fn_call*
+    if (is_closure) {
+        strbuf_append_str(tp->code_buf, "Item");
+    } else {
+        Type *ret_type = fn_node->body->type;
+        write_type(tp->code_buf, ret_type);
+    }
     strbuf_append_char(tp->code_buf, ' ');
     write_fn_name(tp->code_buf, fn_node, NULL);
     strbuf_append_char(tp->code_buf, '(');
@@ -2274,7 +2408,8 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
         TypeParam* param_type = (TypeParam*)param->type;
-        if (param_type->is_optional) {
+        // closures receive all params as Item from fn_call*
+        if (is_closure || param_type->is_optional) {
             strbuf_append_str(tp->code_buf, "Item");
         } else {
             write_type(tp->code_buf, param->type);
@@ -2300,9 +2435,13 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // Note: closure env struct is defined in pre_define_closure_envs()
     
     strbuf_append_char(tp->code_buf, '\n');
-    // use function body type as the return type for the time being
+    // closures must return Item to be compatible with fn_call*
     Type *ret_type = fn_node->body->type;
-    write_type(tp->code_buf, ret_type);
+    if (is_closure) {
+        strbuf_append_str(tp->code_buf, "Item");
+    } else {
+        write_type(tp->code_buf, ret_type);
+    }
 
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, as_pointer ? " (*" :" ");
@@ -2322,9 +2461,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
-        // for optional params, use Item type to allow null
+        // closures receive all params as Item from fn_call*
         TypeParam* param_type = (TypeParam*)param->type;
-        if (param_type->is_optional) {
+        if (is_closure || param_type->is_optional) {
             strbuf_append_str(tp->code_buf, "Item");
         } else {
             write_type(tp->code_buf, param->type);
@@ -2376,7 +2515,12 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, ";\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");
-        transpile_expr(tp, fn_node->body);
+        // closures must box their return value
+        if (is_closure) {
+            transpile_box_item(tp, fn_node->body);
+        } else {
+            transpile_expr(tp, fn_node->body);
+        }
         strbuf_append_str(tp->code_buf, ";\n}\n");
     }
     
@@ -2880,7 +3024,6 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     
     // Pre-define all closure environment structs before any function definitions
     // This ensures structs are available when functions reference them
-    log_debug("pre-defining closure env structs...");
     AstNode* child = script->child;
     while (child) {
         if (child->node_type == AST_NODE_CONTENT) {
@@ -2932,6 +3075,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             break;  // already handled
         default:
             // AST_NODE_PRIMARY, AST_NODE_BINARY, etc.
+            log_debug("transpile main(): boxing child, node_type=%d, type=%d", child->node_type, child->type ? child->type->type_id : -1);
             transpile_box_item(tp, child);
             has_content = true;            
         }
