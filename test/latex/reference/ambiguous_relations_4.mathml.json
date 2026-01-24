@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "2<x,y> = z",
+  "mathml": "<mrow><mn>2</mn><mo>&lt;</mo><mi>x</mi><mo separator=\"true\">,</mo><mi>y</mi><mo>&gt;</mo><mo>=</mo><mi>z</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "&lt;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "z"
+      }
+    ]
+  }
+}

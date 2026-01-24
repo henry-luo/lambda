@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\stackrel{C}{{\\stackrel{B}{A}}}",
+  "mathml": "<munderover ><munderover ><mi>A</mi><mi>B</mi></munderover><mi>C</mi></munderover>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "A"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      }
+    ]
+  }
+}

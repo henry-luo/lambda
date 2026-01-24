@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{a}{b}",
+  "mathml": "<mfrac><mi>a</mi><mi>b</mi></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

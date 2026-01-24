@@ -1,0 +1,82 @@
+{
+  "format": "mathml",
+  "latex": "g, g(a), g(a)(b)",
+  "mathml": "<mrow><mi>g</mi><mo>&#x2061;</mo><mo separator=\"true\">,</mo><mi>g</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>a</mi><mo>)</mo></mrow><mo separator=\"true\">,</mo><mi>g</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>a</mi><mo>)</mo></mrow><mo>&#8290;</mo><mrow><mo>(</mo><mi>b</mi><mo>)</mo></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

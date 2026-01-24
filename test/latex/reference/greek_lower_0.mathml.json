@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\alpha",
+  "mathml": "<mi>&#x03b1;</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "&#x03b1;"
+      }
+    ]
+  }
+}

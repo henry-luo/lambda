@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "a \\overset{\\mathrm{over}}{\\rightarrow} b \\underset{\\mathrm{under}}{\\leftarrow} c",
+  "mathml": "<mrow><mi>a</mi><mover ><mo>→</mo><mi mathvariant=\"normal\">over</mi></mover><mi>b</mi><munder ><mo>←</mo><mi mathvariant=\"normal\">under</mi></munder><mi>c</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "→"
+      },
+      {
+        "tag": "mi",
+        "content": "over"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "←"
+      },
+      {
+        "tag": "mi",
+        "content": "under"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

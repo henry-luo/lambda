@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\mathfrak{g} \\text{ is a Lie algebra}",
+  "mathml": "<mrow><mi>𝔤</mi><mtext > is a Lie algebra</mtext></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "𝔤"
+      },
+      {
+        "tag": "mtext",
+        "content": " is a Lie algebra"
+      }
+    ]
+  }
+}

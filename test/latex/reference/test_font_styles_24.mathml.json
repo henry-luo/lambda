@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "123456789 \\quad \\mathbf{123456789} \\quad \\mathrm{123456789}",
+  "mathml": "<mrow><mn>123456789</mn><mspace width=\"1em\"/><mn>123456789</mn><mspace width=\"1em\"/><mn>123456789</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "123456789"
+      },
+      {
+        "tag": "mn",
+        "content": "123456789"
+      },
+      {
+        "tag": "mn",
+        "content": "123456789"
+      }
+    ]
+  }
+}

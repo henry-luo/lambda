@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "x^2_n",
+  "mathml": "<msubsup><mi>x</mi><mi>n</mi><mn>2</mn></msubsup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{\\vphantom{y}x} = \\sqrt{y}",
+  "mathml": "<mrow><msqrt><mi>x</mi></msqrt><mo>=</mo><msqrt><mi>y</mi></msqrt></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      }
+    ]
+  }
+}

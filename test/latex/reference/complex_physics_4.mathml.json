@@ -1,0 +1,54 @@
+{
+  "format": "mathml",
+  "latex": "\\nabla \\times \\mathbf{E} = -\\frac{\\partial \\mathbf{B}}{\\partial t}",
+  "mathml": "<mrow><mi>∇</mi><mo>&#215;</mo><mi mathvariant=\"bold\">E</mi><mo>=</mo><mo>−</mo><mfrac><mrow><mi>∂</mi><mo>&#8290;</mo><mi mathvariant=\"bold\">B</mi></mrow><mrow><mi>∂</mi><mo>&#8290;</mo><mi>t</mi></mrow></mfrac></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "∇"
+      },
+      {
+        "tag": "mo",
+        "content": "&#215;"
+      },
+      {
+        "tag": "mi",
+        "content": "E"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mo",
+        "content": "−"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "t"
+      }
+    ]
+  }
+}

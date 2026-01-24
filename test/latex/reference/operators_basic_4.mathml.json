@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "a \\leq b \\geq c",
+  "mathml": "<mrow><mi>a</mi><mo>≤</mo><mi>b</mi><mo>≥</mo><mi>c</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "≤"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "≥"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

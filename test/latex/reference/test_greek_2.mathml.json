@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\Gamma \\Delta \\Theta \\Lambda",
+  "mathml": "<mrow><mi>Γ</mi><mo>&#8290;</mo><mi>Δ</mi><mo>&#8290;</mo><mi>Θ</mi><mo>&#8290;</mo><mi>Λ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "Γ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Δ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Θ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Λ"
+      }
+    ]
+  }
+}

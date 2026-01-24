@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "x^2",
+  "mathml": "<msup><mi>x</mi><mn>2</mn></msup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

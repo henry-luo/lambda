@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{a^n}{b^n}",
+  "mathml": "<mfrac><msup><mi>a</mi><mi>n</mi></msup><msup><mi>b</mi><mi>n</mi></msup></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      }
+    ]
+  }
+}

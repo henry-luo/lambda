@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "a \\leq b \\quad a \\geq b \\quad a \\ll b \\quad a \\gg b",
+  "mathml": "<mrow><mi>a</mi><mo>≤</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>≥</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>≪</mo><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>≫</mo><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "≤"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "≥"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "≪"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "≫"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}
