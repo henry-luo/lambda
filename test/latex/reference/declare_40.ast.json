@@ -1,0 +1,14 @@
+{
+  "type": "SCRIPTS",
+  "body": {
+    "type": "ORD",
+    "codepoint": 34,
+    "command": "varepsilon",
+    "value": "\""
+  },
+  "subscript": {
+    "type": "ORD",
+    "codepoint": 0,
+    "command": "WildCard"
+  }
+}

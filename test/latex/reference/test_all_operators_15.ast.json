@@ -1,0 +1,35 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "longleftarrow"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "longrightarrow"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "longleftrightarrow"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "Longleftarrow"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "Longrightarrow"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "Longleftrightarrow"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "type": "FRAC",
+  "ruleThickness": -1,
+  "numer": {
+    "type": "SCRIPTS",
+    "body": {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    "superscript": {
+      "type": "ORD",
+      "codepoint": 110,
+      "value": "n"
+    }
+  },
+  "denom": {
+    "type": "SCRIPTS",
+    "body": {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    "superscript": {
+      "type": "ORD",
+      "codepoint": 110,
+      "value": "n"
+    }
+  }
+}

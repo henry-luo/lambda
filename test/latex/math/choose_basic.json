@@ -1,0 +1,32 @@
+{
+    "source": "choose_basic.json",
+    "description": "Binomial coefficients - \\binom, \\choose",
+    "category": "choose",
+    "generatedAt": "2026-01-24T00:00:00.000Z",
+    "expressions": [
+        {
+            "index": 0,
+            "type": "display",
+            "latex": "\\binom{n}{k}",
+            "description": "Simple binomial coefficient"
+        },
+        {
+            "index": 1,
+            "type": "display",
+            "latex": "{n \\choose k}",
+            "description": "Choose notation"
+        },
+        {
+            "index": 2,
+            "type": "display",
+            "latex": "\\binom{n+1}{k+1}",
+            "description": "Binomial with expressions"
+        },
+        {
+            "index": 3,
+            "type": "display",
+            "latex": "\\binom{\\binom{n}{k}}{m}",
+            "description": "Nested binomial"
+        }
+    ]
+}

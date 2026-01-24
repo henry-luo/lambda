@@ -2,17 +2,17 @@
 
 /**
  * LaTeX Math Test Runner
- * 
+ *
  * Multi-layered semantic comparison framework for LaTeX math typesetting.
  * Compares Lambda's output against references at three abstraction levels:
- * 
+ *
  * 1. AST Layer (50% weight): Structural/semantic correctness
- * 2. HTML Layer (40% weight): Visual representation correctness  
+ * 2. HTML Layer (40% weight): Visual representation correctness
  * 3. DVI Layer (10% weight): Precise typographic correctness
- * 
+ *
  * Usage:
  *   node test_math_comparison.js [options]
- * 
+ *
  * Options:
  *   --suite <name>        Test suite: 'baseline', 'extended', or 'all' (default)
  *   --test <file>         Run specific test file
@@ -25,14 +25,19 @@
  *   --help, -h            Show help
  */
 
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+
+// ES module __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Import comparators
-const { compareAST } = require('./comparators/ast_comparator');
-const { compareHTML } = require('./comparators/html_comparator');
-const { compareDVI, validateDVI } = require('./comparators/dvi_comparator');
+import { compareAST } from './comparators/ast_comparator.js';
+import { compareHTML } from './comparators/html_comparator.js';
+import { compareDVI, validateDVI } from './comparators/dvi_comparator.js';
 
 // Configuration
 const CONFIG = {
@@ -55,7 +60,7 @@ const PROJECT_ROOT = path.join(TEST_DIR, '..', '..');
 
 // Feature group prefixes
 const FEATURE_GROUPS = [
-    'accents', 'arrows', 'bigops', 'choose', 'delims', 
+    'accents', 'arrows', 'bigops', 'choose', 'delims',
     'fonts', 'fracs', 'greek', 'matrix', 'not',
     'operators', 'scripts', 'spacing', 'sqrt', 'complex'
 ];
@@ -75,11 +80,11 @@ function parseArgs() {
         json: false,
         threshold: CONFIG.defaultThreshold
     };
-    
+
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
         const next = args[i + 1];
-        
+
         switch (arg) {
             case '--suite':
                 options.suite = next;
@@ -118,7 +123,7 @@ function parseArgs() {
                 process.exit(0);
         }
     }
-    
+
     return options;
 }
 
@@ -156,7 +161,7 @@ Examples:
  */
 function collectTestFiles(options) {
     const tests = [];
-    
+
     // Single test mode
     if (options.test) {
         const testPath = findTestFile(options.test);
@@ -167,7 +172,7 @@ function collectTestFiles(options) {
         }
         return tests;
     }
-    
+
     // Baseline tests
     if (options.suite === 'baseline' || options.suite === 'all') {
         if (fs.existsSync(BASELINE_DIR)) {
@@ -177,26 +182,44 @@ function collectTestFiles(options) {
             tests.push(...baselineTests);
         }
     }
-    
-    // Extended tests (from math-ast directory)
+
+    // Extended tests (from math and math-ast directories)
     if (options.suite === 'extended' || options.suite === 'all') {
+        // Check math directory
+        if (fs.existsSync(MATH_DIR)) {
+            let mathTests = fs.readdirSync(MATH_DIR)
+                .filter(f => f.endsWith('.json'))
+                .map(f => ({ file: f, path: path.join(MATH_DIR, f), suite: 'extended' }));
+
+            // Filter by group if specified
+            if (options.group) {
+                mathTests = mathTests.filter(t =>
+                    t.file.startsWith(options.group + '_') ||
+                    t.file.startsWith(options.group + '.')
+                );
+            }
+
+            tests.push(...mathTests);
+        }
+
+        // Check math-ast directory
         if (fs.existsSync(MATH_AST_DIR)) {
             let extendedTests = fs.readdirSync(MATH_AST_DIR)
                 .filter(f => f.endsWith('.json'))
                 .map(f => ({ file: f, path: path.join(MATH_AST_DIR, f), suite: 'extended' }));
-            
+
             // Filter by group if specified
             if (options.group) {
-                extendedTests = extendedTests.filter(t => 
-                    t.file.startsWith(options.group + '_') || 
+                extendedTests = extendedTests.filter(t =>
+                    t.file.startsWith(options.group + '_') ||
                     t.file.startsWith(options.group + '.')
                 );
             }
-            
+
             tests.push(...extendedTests);
         }
     }
-    
+
     return tests;
 }
 
@@ -204,18 +227,24 @@ function collectTestFiles(options) {
  * Find a test file by name
  */
 function findTestFile(name) {
-    // Check math-ast directory first
-    const jsonPath = path.join(MATH_AST_DIR, name.endsWith('.json') ? name : `${name}.json`);
-    if (fs.existsSync(jsonPath)) {
-        return { file: path.basename(jsonPath), path: jsonPath, suite: 'extended' };
-    }
-    
-    // Check baseline directory
+    // Check baseline directory for .tex files
     const texPath = path.join(BASELINE_DIR, name.endsWith('.tex') ? name : `${name}.tex`);
     if (fs.existsSync(texPath)) {
         return { file: path.basename(texPath), path: texPath, suite: 'baseline' };
     }
-    
+
+    // Check math directory for .json files
+    const mathJsonPath = path.join(MATH_DIR, name.endsWith('.json') ? name : `${name}.json`);
+    if (fs.existsSync(mathJsonPath)) {
+        return { file: path.basename(mathJsonPath), path: mathJsonPath, suite: 'extended' };
+    }
+
+    // Check math-ast directory for .json files
+    const jsonPath = path.join(MATH_AST_DIR, name.endsWith('.json') ? name : `${name}.json`);
+    if (fs.existsSync(jsonPath)) {
+        return { file: path.basename(jsonPath), path: jsonPath, suite: 'extended' };
+    }
+
     return null;
 }
 
@@ -232,17 +261,109 @@ function loadTestData(testPath) {
 }
 
 /**
- * Run Lambda's LaTeX parser on an expression
+ * Run Lambda's LaTeX math typesetter on an expression
  */
-async function runLambdaParser(latex) {
-    return new Promise((resolve) => {
-        // For now, return a placeholder - actual Lambda integration would go here
-        // This would call lambda.exe with appropriate arguments to parse LaTeX
-        resolve({
+async function runLambdaParser(latex, options = {}) {
+    const lambdaExe = path.join(PROJECT_ROOT, 'lambda.exe');
+
+    // Check if lambda.exe exists
+    if (!fs.existsSync(lambdaExe)) {
+        return {
             ast: null,
             html: null,
             dvi: null,
-            error: 'Lambda parser integration not yet implemented'
+            error: 'lambda.exe not found. Run "make build" first.'
+        };
+    }
+
+    return new Promise((resolve) => {
+        const tempDir = path.join(PROJECT_ROOT, 'temp', 'math_tests');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const testId = Math.random().toString(36).substring(7);
+        const astFile = path.join(tempDir, `${testId}.ast.json`);
+        const htmlFile = path.join(tempDir, `${testId}.html`);
+        const dviFile = path.join(tempDir, `${testId}.dvi`);
+
+        // Build Lambda command
+        const args = [
+            'typeset-math',
+            latex,
+            '--output-ast', astFile,
+            '--output-html', htmlFile,
+            '--output-dvi', dviFile
+        ];
+
+        const child = spawn(lambdaExe, args, {
+            cwd: PROJECT_ROOT,
+            timeout: 10000 // 10 second timeout
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+            stdout += data.toString();
+        });
+
+        child.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        child.on('close', (code) => {
+            if (code !== 0) {
+                resolve({
+                    ast: null,
+                    html: null,
+                    dvi: null,
+                    error: `Lambda exited with code ${code}: ${stderr || stdout}`
+                });
+                return;
+            }
+
+            // Read output files
+            const result = {
+                ast: null,
+                html: null,
+                dvi: null,
+                error: null
+            };
+
+            try {
+                if (fs.existsSync(astFile)) {
+                    const astContent = fs.readFileSync(astFile, 'utf-8');
+                    result.ast = JSON.parse(astContent);
+                }
+
+                if (fs.existsSync(htmlFile)) {
+                    result.html = fs.readFileSync(htmlFile, 'utf-8');
+                }
+
+                if (fs.existsSync(dviFile)) {
+                    result.dvi = dviFile; // Return path to DVI file
+                }
+
+                // Clean up temp files
+                if (fs.existsSync(astFile)) fs.unlinkSync(astFile);
+                if (fs.existsSync(htmlFile)) fs.unlinkSync(htmlFile);
+                // Keep DVI for comparison if needed
+
+            } catch (err) {
+                result.error = `Failed to read output files: ${err.message}`;
+            }
+
+            resolve(result);
+        });
+
+        child.on('error', (err) => {
+            resolve({
+                ast: null,
+                html: null,
+                dvi: null,
+                error: `Failed to spawn Lambda: ${err.message}`
+            });
         });
     });
 }
@@ -252,22 +373,22 @@ async function runLambdaParser(latex) {
  */
 function calculateTestScore(astResult, htmlResult, dviResult, compareMode) {
     let weights = { ...CONFIG.weights };
-    
+
     // Adjust weights if only comparing specific layer
     if (compareMode !== 'all') {
         weights = { ast: 0, html: 0, dvi: 0 };
         weights[compareMode] = 1.0;
     }
-    
+
     const astScore = astResult ? astResult.passRate : 0;
     const htmlScore = htmlResult ? htmlResult.passRate : 0;
     const dviScore = dviResult ? dviResult.passRate : 0;
-    
-    const overall = 
+
+    const overall =
         astScore * weights.ast +
         htmlScore * weights.html +
         dviScore * weights.dvi;
-    
+
     return {
         overall: Math.round(overall * 10) / 10,
         breakdown: {
@@ -283,7 +404,7 @@ function calculateTestScore(astResult, htmlResult, dviResult, compareMode) {
  */
 async function runExtendedTest(testInfo, options) {
     const testData = loadTestData(testInfo.path);
-    
+
     if (testData.error) {
         return {
             name: testInfo.file,
@@ -292,32 +413,104 @@ async function runExtendedTest(testInfo, options) {
             score: { overall: 0 }
         };
     }
-    
+
     const expressionResults = [];
-    
+
     for (const expr of (testData.expressions || [])) {
+        // Run Lambda to get output
+        const lambdaOutput = await runLambdaParser(expr.latex);
+
+        if (lambdaOutput.error) {
+            expressionResults.push({
+                latex: expr.latex,
+                type: expr.type,
+                error: lambdaOutput.error,
+                score: { overall: 0 }
+            });
+            continue;
+        }
+
+        // Load reference files
+        const testBaseName = path.basename(testInfo.file, '.json');
+        const refBaseName = `${testBaseName}_${expr.index}`;
+
         // Compare AST
         let astResult = null;
         if (options.compare === 'all' || options.compare === 'ast') {
-            // Lambda AST would be obtained from running Lambda parser
-            // For now, compare reference AST structure validity
-            astResult = {
-                passRate: expr.ast && !expr.ast.error ? 100 : 0,
-                differences: expr.ast?.error ? [{ issue: expr.ast.error }] : []
-            };
+            const refAstPath = path.join(REFERENCE_DIR, `${refBaseName}.ast.json`);
+            if (fs.existsSync(refAstPath) && lambdaOutput.ast) {
+                const refAst = JSON.parse(fs.readFileSync(refAstPath, 'utf-8'));
+                astResult = compareAST(lambdaOutput.ast, refAst);
+            } else if (lambdaOutput.ast) {
+                // If no reference but Lambda produced AST, give partial credit
+                astResult = { passRate: 50, differences: [{ issue: 'No reference AST available' }] };
+            } else {
+                astResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce AST' }] };
+            }
         }
-        
-        // HTML comparison would require Lambda's HTML output
+
+        // HTML comparison with cross-reference
         let htmlResult = null;
         if (options.compare === 'all' || options.compare === 'html') {
-            htmlResult = { passRate: 0, differences: [{ issue: 'Lambda HTML output not available' }] };
+            const refMathLiveHtml = path.join(REFERENCE_DIR, `${refBaseName}.mathlive.html`);
+            const refKatexHtml = path.join(REFERENCE_DIR, `${refBaseName}.katex.html`);
+            const refLambdaHtml = path.join(REFERENCE_DIR, `${refBaseName}.lambda.html`);
+
+            if (lambdaOutput.html) {
+                let mathLiveScore = null;
+                let katexScore = null;
+                let lambdaScore = null;
+
+                if (fs.existsSync(refMathLiveHtml)) {
+                    const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
+                    mathLiveScore = compareHTML(lambdaOutput.html, refHtml, 'mathlive');
+                }
+
+                if (fs.existsSync(refKatexHtml)) {
+                    const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
+                    katexScore = compareHTML(lambdaOutput.html, refHtml, 'katex');
+                }
+
+                // Also check Lambda's own reference for consistency testing
+                if (fs.existsSync(refLambdaHtml)) {
+                    const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
+                    lambdaScore = compareHTML(lambdaOutput.html, refHtml, 'lambda');
+                }
+
+                // Take best score if we have both MathLive and KaTeX
+                if (mathLiveScore && katexScore) {
+                    htmlResult = {
+                        passRate: Math.max(mathLiveScore.passRate, katexScore.passRate),
+                        bestReference: mathLiveScore.passRate >= katexScore.passRate ? 'mathlive' : 'katex',
+                        mathliveScore: mathLiveScore.passRate,
+                        katexScore: katexScore.passRate,
+                        differences: mathLiveScore.passRate >= katexScore.passRate ?
+                            mathLiveScore.differences : katexScore.differences
+                    };
+                } else if (mathLiveScore || katexScore) {
+                    htmlResult = mathLiveScore || katexScore;
+                } else if (lambdaScore) {
+                    // Use Lambda's own reference for consistency testing
+                    htmlResult = lambdaScore;
+                } else {
+                    htmlResult = { passRate: 50, differences: [{ issue: 'No HTML reference available' }] };
+                }
+            } else {
+                htmlResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce HTML' }] };
+            }
         }
-        
-        // DVI comparison for baseline tests only
+
+        // DVI comparison (optional for extended tests)
         let dviResult = null;
-        
+        if (options.compare === 'all' || options.compare === 'dvi') {
+            const refDviPath = path.join(REFERENCE_DIR, `${refBaseName}.dvi`);
+            if (lambdaOutput.dvi && fs.existsSync(refDviPath)) {
+                dviResult = compareDVI(lambdaOutput.dvi, refDviPath, { tolerance: options.tolerance });
+            }
+        }
+
         const score = calculateTestScore(astResult, htmlResult, dviResult, options.compare);
-        
+
         expressionResults.push({
             latex: expr.latex,
             type: expr.type,
@@ -327,12 +520,12 @@ async function runExtendedTest(testInfo, options) {
             dvi: dviResult
         });
     }
-    
+
     // Calculate overall test score
     const avgScore = expressionResults.length > 0
         ? expressionResults.reduce((sum, r) => sum + r.score.overall, 0) / expressionResults.length
         : 0;
-    
+
     return {
         name: testInfo.file,
         suite: testInfo.suite,
@@ -351,31 +544,55 @@ async function runExtendedTest(testInfo, options) {
 async function runBaselineTest(testInfo, options) {
     const testName = path.basename(testInfo.file, '.tex');
     const referenceDVI = path.join(REFERENCE_DIR, `${testName}.dvi`);
-    
+
     // Check if reference DVI exists
     if (!fs.existsSync(referenceDVI)) {
         return {
             name: testInfo.file,
             suite: 'baseline',
             status: 'skipped',
-            error: 'Reference DVI not found',
+            error: 'Reference DVI not found. Run "make test-tex-reference" first.',
             score: { overall: 0 }
         };
     }
-    
-    // Lambda DVI output path (would be generated by Lambda)
-    const lambdaDVI = `/tmp/lambda_${testName}.dvi`;
-    
-    // Run DVI comparison
-    let dviResult = { passRate: 0, differences: [{ issue: 'Lambda DVI output not available' }] };
-    
-    if (fs.existsSync(lambdaDVI)) {
-        dviResult = compareDVI(lambdaDVI, referenceDVI, { tolerance: options.tolerance });
+
+    // Read the .tex file to get the LaTeX content
+    const texContent = fs.readFileSync(testInfo.path, 'utf-8');
+
+    // Extract math content between \[ and \] or $ and $
+    const displayMatch = texContent.match(/\\\[(.*?)\\\]/s) || texContent.match(/\$\$(.*?)\$\$/s);
+    const inlineMatch = texContent.match(/\$(.*?)\$/);
+    const latex = displayMatch ? displayMatch[1].trim() : (inlineMatch ? inlineMatch[1].trim() : null);
+
+    if (!latex) {
+        return {
+            name: testInfo.file,
+            suite: 'baseline',
+            status: 'error',
+            error: 'Could not extract LaTeX math from .tex file',
+            score: { overall: 0 }
+        };
     }
-    
+
+    // Run Lambda parser
+    const lambdaOutput = await runLambdaParser(latex);
+
+    if (lambdaOutput.error || !lambdaOutput.dvi) {
+        return {
+            name: testInfo.file,
+            suite: 'baseline',
+            status: 'failed',
+            error: lambdaOutput.error || 'Lambda did not produce DVI output',
+            score: { overall: 0 }
+        };
+    }
+
+    // Run DVI comparison
+    const dviResult = compareDVI(lambdaOutput.dvi, referenceDVI, { tolerance: options.tolerance });
+
     // Baseline tests require 100% DVI match
     const passed = dviResult.passRate === 100;
-    
+
     return {
         name: testInfo.file,
         suite: 'baseline',
@@ -392,7 +609,7 @@ async function runBaselineTest(testInfo, options) {
  */
 function groupResultsByFeature(results) {
     const groups = {};
-    
+
     for (const result of results) {
         // Extract feature group from filename
         let group = 'other';
@@ -402,13 +619,13 @@ function groupResultsByFeature(results) {
                 break;
             }
         }
-        
+
         if (!groups[group]) {
             groups[group] = [];
         }
         groups[group].push(result);
     }
-    
+
     return groups;
 }
 
@@ -418,115 +635,115 @@ function groupResultsByFeature(results) {
 function printResults(results, options) {
     const baselineResults = results.filter(r => r.suite === 'baseline');
     const extendedResults = results.filter(r => r.suite === 'extended');
-    
+
     console.log('');
     console.log('================================================================================');
     console.log('📊 LaTeX Math Test Results');
     console.log('================================================================================');
     console.log('');
-    
+
     // Baseline results
     if (baselineResults.length > 0) {
         console.log('📂 Baseline Tests (DVI must pass 100%)');
         console.log('--------------------------------------------------------------------------------');
-        
+
         for (const result of baselineResults) {
-            const icon = result.status === 'passed' ? '✅' : 
+            const icon = result.status === 'passed' ? '✅' :
                         result.status === 'skipped' ? '⏭️' : '❌';
             const dviScore = result.score.dvi ? result.score.dvi.passRate.toFixed(1) : 'N/A';
             console.log(`  ${icon} ${result.name.padEnd(30)} DVI: ${dviScore}%`);
-            
+
             if (options.verbose && result.score.dvi?.differences?.length > 0) {
                 for (const diff of result.score.dvi.differences.slice(0, 3)) {
                     console.log(`     └─ ${diff.issue || JSON.stringify(diff)}`);
                 }
             }
         }
-        
+
         const baselinePassed = baselineResults.filter(r => r.status === 'passed').length;
         console.log('--------------------------------------------------------------------------------');
         console.log(`  Baseline: ${baselinePassed}/${baselineResults.length} passed (${(baselinePassed / baselineResults.length * 100).toFixed(0)}%)`);
         console.log('');
     }
-    
+
     // Extended results by feature group
     if (extendedResults.length > 0) {
         console.log('📂 Extended Tests by Feature Group');
         console.log('--------------------------------------------------------------------------------');
-        
+
         const groups = groupResultsByFeature(extendedResults);
         const groupScores = {};
-        
+
         for (const [group, groupResults] of Object.entries(groups).sort()) {
             console.log(`  📁 ${group} (${groupResults.length} tests)`);
-            
+
             for (const result of groupResults) {
-                const icon = result.status === 'passed' ? '✅' : 
+                const icon = result.status === 'passed' ? '✅' :
                             result.status === 'skipped' ? '⏭️' : '❌';
-                
+
                 // Show component scores if available
                 const ast = result.score.breakdown?.ast?.rate ?? 'N/A';
                 const html = result.score.breakdown?.html?.rate ?? 'N/A';
                 const dvi = result.score.breakdown?.dvi?.rate ?? 'N/A';
                 const overall = result.score.overall;
-                
+
                 if (options.verbose) {
                     console.log(`     ${icon} ${result.name.padEnd(25)} AST: ${String(ast).padStart(5)}%  HTML: ${String(html).padStart(5)}%  DVI: ${String(dvi).padStart(5)}%  → ${overall.toFixed(1)}%`);
                 } else {
                     console.log(`     ${icon} ${result.name.padEnd(25)} → ${overall.toFixed(1)}%`);
                 }
             }
-            
+
             // Group average
             const groupAvg = groupResults.reduce((sum, r) => sum + r.score.overall, 0) / groupResults.length;
             groupScores[group] = groupAvg;
             console.log(`     Group Average: ${groupAvg.toFixed(1)}%`);
             console.log('');
         }
-        
+
         // Feature group summary
         console.log('--------------------------------------------------------------------------------');
         console.log('📊 Feature Group Summary');
         console.log('--------------------------------------------------------------------------------');
-        
+
         for (const [group, score] of Object.entries(groupScores).sort((a, b) => b[1] - a[1])) {
             const bar = '█'.repeat(Math.floor(score / 5)) + '░'.repeat(20 - Math.floor(score / 5));
             console.log(`  ${group.padEnd(12)} ${score.toFixed(1).padStart(5)}%  ${bar}`);
         }
     }
-    
+
     // Overall summary
     console.log('');
     console.log('================================================================================');
     console.log('📈 OVERALL SUMMARY');
     console.log('================================================================================');
-    
+
     const totalTests = results.length;
     const passedTests = results.filter(r => r.status === 'passed').length;
     const failedTests = results.filter(r => r.status === 'failed').length;
     const skippedTests = results.filter(r => r.status === 'skipped').length;
-    
+
     console.log(`  Total Tests: ${totalTests}`);
     console.log(`  Passed: ${passedTests} (${(passedTests / totalTests * 100).toFixed(1)}%)`);
     console.log(`  Failed: ${failedTests} (${(failedTests / totalTests * 100).toFixed(1)}%)`);
     if (skippedTests > 0) {
         console.log(`  Skipped: ${skippedTests}`);
     }
-    
+
     // Component averages
     const validResults = results.filter(r => r.score.breakdown);
     if (validResults.length > 0) {
         const astAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.ast?.rate || 0), 0) / validResults.length;
         const htmlAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.html?.rate || 0), 0) / validResults.length;
         const dviAvg = validResults.reduce((sum, r) => sum + (r.score.breakdown?.dvi?.rate || 0), 0) / validResults.length;
-        
+
         console.log('');
         console.log('  Component Averages:');
         console.log(`    AST:  ${astAvg.toFixed(1)}%  (target: 95%)`);
         console.log(`    HTML: ${htmlAvg.toFixed(1)}%  (target: 90%)`);
         console.log(`    DVI:  ${dviAvg.toFixed(1)}%  (target: 80%)`);
     }
-    
+
     const overallAvg = results.reduce((sum, r) => sum + r.score.overall, 0) / totalTests;
     console.log('');
     console.log(`  Weighted Average Score: ${overallAvg.toFixed(1)}%`);
@@ -547,7 +764,7 @@ function printResultsJSON(results) {
         averageScore: results.reduce((sum, r) => sum + r.score.overall, 0) / results.length,
         results
     };
-    
+
     console.log(JSON.stringify(summary, null, 2));
 }
 
@@ -559,7 +776,7 @@ function printFailureReport(result) {
     console.log('================================================================================');
     console.log(`❌ DETAILED FAILURE REPORT: ${result.name}`);
     console.log('================================================================================');
-    
+
     if (result.score.ast && result.score.ast.differences?.length > 0) {
         console.log('');
         console.log(`[AST COMPARISON] Score: ${result.score.ast.passRate}%`);
@@ -567,24 +784,24 @@ function printFailureReport(result) {
         console.log(`├─ Total Nodes: ${result.score.ast.totalNodes || 'N/A'}`);
         console.log(`├─ Matched: ${result.score.ast.matchedNodes || 'N/A'}`);
         console.log('└─ Differences:');
-        
+
         for (const diff of result.score.ast.differences) {
             console.log(`   ${diff.path || ''}: ${diff.issue || JSON.stringify(diff)}`);
             if (diff.expected) console.log(`      Expected: ${JSON.stringify(diff.expected)}`);
             if (diff.got) console.log(`      Got:      ${JSON.stringify(diff.got)}`);
         }
     }
-    
+
     if (result.score.html && result.score.html.differences?.length > 0) {
         console.log('');
         console.log(`[HTML COMPARISON] Score: ${result.score.html.passRate}%`);
         console.log('--------------------------------------------------------------------------------');
-        
+
         for (const diff of result.score.html.differences) {
             console.log(`   ${diff.path || ''}: ${diff.issue || JSON.stringify(diff)}`);
         }
     }
-    
+
     if (result.score.dvi && result.score.dvi.differences?.length > 0) {
         console.log('');
         console.log(`[DVI COMPARISON] Score: ${result.score.dvi.passRate}%`);
@@ -593,7 +810,7 @@ function printFailureReport(result) {
         console.log(`├─ Matched: ${result.score.dvi.matchedGlyphs || 'N/A'}`);
         console.log(`├─ Tolerance: ${result.score.dvi.positionTolerance || 'N/A'}pt`);
         console.log('└─ Differences:');
-        
+
         for (const diff of result.score.dvi.differences) {
             if (diff.char) {
                 console.log(`   Glyph '${diff.char}':`);
@@ -604,7 +821,7 @@ function printFailureReport(result) {
             }
         }
     }
-    
+
     console.log('================================================================================');
 }
 
@@ -613,42 +830,42 @@ function printFailureReport(result) {
  */
 async function main() {
     const options = parseArgs();
-    
+
     // Collect test files
     const tests = collectTestFiles(options);
-    
+
     if (tests.length === 0) {
         console.error('No tests found. Check your --suite, --test, or --group options.');
         process.exit(1);
     }
-    
+
     // Run tests
     const results = [];
-    
+
     for (const test of tests) {
         let result;
-        
+
         if (test.suite === 'baseline') {
             result = await runBaselineTest(test, options);
         } else {
             result = await runExtendedTest(test, options);
         }
-        
+
         results.push(result);
-        
+
         // Print detailed failure report in verbose mode
         if (options.verbose && result.status === 'failed') {
             printFailureReport(result);
         }
     }
-    
+
     // Output results
     if (options.json) {
         printResultsJSON(results);
     } else {
         printResults(results, options);
     }
-    
+
     // Exit with error code if any tests failed
     const failed = results.filter(r => r.status === 'failed').length;
     process.exit(failed > 0 ? 1 : 0);

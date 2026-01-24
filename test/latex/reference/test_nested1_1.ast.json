@@ -1,0 +1,44 @@
+{
+  "type": "SQRT",
+  "body": {
+    "type": "ROW",
+    "body": [
+      {
+        "type": "ORD",
+        "codepoint": 49,
+        "value": "1"
+      },
+      {
+        "type": "BIN",
+        "codepoint": 43,
+        "value": "+"
+      },
+      {
+        "type": "SQRT",
+        "body": {
+          "type": "ROW",
+          "body": [
+            {
+              "type": "ORD",
+              "codepoint": 50,
+              "value": "2"
+            },
+            {
+              "type": "BIN",
+              "codepoint": 43,
+              "value": "+"
+            },
+            {
+              "type": "SQRT",
+              "body": {
+                "type": "ORD",
+                "codepoint": 51,
+                "value": "3"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

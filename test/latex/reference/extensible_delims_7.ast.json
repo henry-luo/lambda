@@ -1,0 +1,11 @@
+{
+  "type": "DELIMITED",
+  "body": {
+    "type": "ACCENT",
+    "body": {
+      "type": "ORD",
+      "codepoint": 118,
+      "value": "v"
+    }
+  }
+}

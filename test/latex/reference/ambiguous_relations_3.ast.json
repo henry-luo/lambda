@@ -1,0 +1,40 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 48,
+      "value": "0"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "REL",
+      "codepoint": 60,
+      "value": "<"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "ORD",
+      "codepoint": 121,
+      "value": "y"
+    },
+    {
+      "type": "REL",
+      "codepoint": 62,
+      "value": ">"
+    }
+  ]
+}

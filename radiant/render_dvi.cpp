@@ -195,7 +195,7 @@ int render_latex_to_dvi(const char* latex_file, const char* dvi_file) {
 
 /**
  * Render a single math formula to DVI format
- * 
+ *
  * @param math_formula LaTeX math formula (without $ delimiters)
  * @param dvi_file Path to output DVI file (NULL for stdout dump)
  * @param dump_ast If true, dump AST to stderr instead of rendering
@@ -247,7 +247,7 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
         tex::math_ast_dump(ast, buf, 0);
         fprintf(stderr, "=== Math AST ===\n%s\n", buf->str);
         strbuf_free(buf);
-        
+
         if (!dvi_file && !dump_boxes) {
             // Only AST dump was requested, we're done
             arena_destroy(arena);
@@ -258,11 +258,11 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
 
     // Step 2: Typeset AST to TexNode (Phase B)
     log_info("[MATH] Phase B: Typesetting AST to TexNode...");
-    
+
     // Create math context using the proper factory method
     tex::MathContext math_ctx = tex::MathContext::create(arena, fonts, 10.0f);
     math_ctx.style = tex::MathStyle::Display;  // Display style for standalone formula
-    
+
     tex::TexNode* tex_node = tex::typeset_math_ast(ast, math_ctx);
     if (!tex_node) {
         log_error("[MATH] Failed to typeset math formula");
@@ -280,7 +280,7 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
         fprintf(stderr, "Root: node_class=%d, width=%.2fpt, height=%.2fpt, depth=%.2fpt\n",
                 (int)tex_node->node_class, tex_node->width, tex_node->height, tex_node->depth);
         // TODO: Add recursive box dump
-        
+
         if (!dvi_file) {
             // Only box dump was requested, we're done
             arena_destroy(arena);
@@ -292,7 +292,7 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
     // Step 3: Write to DVI if output file specified
     if (dvi_file) {
         log_info("[MATH] Phase C: Writing DVI to '%s'...", dvi_file);
-        
+
         tex::DVIParams dvi_params = tex::DVIParams::defaults();
         dvi_params.comment = "Lambda Math Formula";
 
@@ -311,7 +311,7 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
             pool_destroy(pool);
             return 1;
         }
-        
+
         log_info("[MATH] Successfully wrote DVI: %s", dvi_file);
         fprintf(stderr, "Math formula rendered to: %s\n", dvi_file);
     }
@@ -319,7 +319,91 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
     // Cleanup
     arena_destroy(arena);
     pool_destroy(pool);
-    
+
+    return 0;
+}
+
+/**
+ * Render a math formula to AST JSON format (MathLive-compatible)
+ *
+ * @param math_formula LaTeX math formula string
+ * @param json_file Path to output JSON file
+ * @return 0 on success, non-zero on error
+ */
+int render_math_to_ast_json(const char* math_formula, const char* json_file) {
+    log_info("[MATH_AST] render_math_to_ast_json: formula='%s', json='%s'",
+             math_formula, json_file ? json_file : "(stdout)");
+
+    // Create memory pool and arena
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("[MATH_AST] Failed to create memory pool");
+        return 1;
+    }
+
+    Arena* arena = arena_create_default(pool);
+    if (!arena) {
+        log_error("[MATH_AST] Failed to create arena");
+        pool_destroy(pool);
+        return 1;
+    }
+
+    // Parse math formula to AST
+    log_info("[MATH_AST] Parsing formula to AST...");
+    tex::MathASTNode* ast = tex::parse_math_string_to_ast(math_formula, strlen(math_formula), arena);
+    if (!ast) {
+        log_error("[MATH_AST] Failed to parse math formula: %s", math_formula);
+        fprintf(stderr, "Error: Failed to parse math formula\n");
+        arena_destroy(arena);
+        pool_destroy(pool);
+        return 1;
+    }
+    log_info("[MATH_AST] Parse complete: AST node type=%s", tex::math_node_type_name(ast->type));
+
+    // Convert AST to JSON (MathLive-compatible format)
+    log_info("[MATH_AST] Converting AST to JSON...");
+    StrBuf* json_buf = strbuf_new_cap(1024);
+    tex::math_ast_to_json(ast, json_buf);
+
+    const char* json = json_buf->str;
+    log_info("[MATH_AST] JSON conversion complete: length=%zu", strlen(json));
+
+    // Write to file or stdout
+    if (json_file) {
+        FILE* f = fopen(json_file, "w");
+        if (!f) {
+            log_error("[MATH_AST] Failed to open output file: %s", json_file);
+            fprintf(stderr, "Error: Failed to open output file: %s\n", json_file);
+            strbuf_free(json_buf);
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 1;
+        }
+
+        size_t len = strlen(json);
+        size_t written = fwrite(json, 1, len, f);
+        fclose(f);
+
+        if (written != len) {
+            log_error("[MATH_AST] Failed to write JSON file");
+            fprintf(stderr, "Error: Failed to write JSON file\n");
+            strbuf_free(json_buf);
+            arena_destroy(arena);
+            pool_destroy(pool);
+            return 1;
+        }
+
+        log_info("[MATH_AST] Successfully wrote JSON: %s", json_file);
+    } else {
+        // Output to stdout
+        printf("%s\n", json);
+    }
+
+    // Cleanup
+    strbuf_free(json_buf);
+    arena_destroy(arena);
+    pool_destroy(pool);
+
     return 0;
 }
 #include "../lambda/tex/tex_html_render.hpp"
@@ -373,10 +457,10 @@ int render_math_to_html(const char* math_formula, const char* html_file, bool st
 
     // Step 2: Typeset AST to TexNode
     log_info("[MATH_HTML] Phase B: Typesetting AST to TexNode...");
-    
+
     tex::MathContext math_ctx = tex::MathContext::create(arena, fonts, 10.0f);
     math_ctx.style = tex::MathStyle::Display;
-    
+
     tex::TexNode* tex_node = tex::typeset_math_ast(ast, math_ctx);
     if (!tex_node) {
         log_error("[MATH_HTML] Failed to typeset math formula");
@@ -390,19 +474,19 @@ int render_math_to_html(const char* math_formula, const char* html_file, bool st
 
     // Step 3: Render TexNode to HTML
     log_info("[MATH_HTML] Phase C: Rendering to HTML...");
-    
+
     tex::HtmlRenderOptions opts;
     opts.base_font_size_px = 16.0f;
     opts.include_styles = true;
     opts.standalone = standalone;
-    
+
     const char* html;
     if (standalone) {
         html = tex::render_texnode_to_html_document(tex_node, arena, opts);
     } else {
         html = tex::render_texnode_to_html(tex_node, arena, opts);
     }
-    
+
     if (!html) {
         log_error("[MATH_HTML] Failed to render HTML");
         fprintf(stderr, "Error: Failed to render HTML\n");
@@ -410,7 +494,7 @@ int render_math_to_html(const char* math_formula, const char* html_file, bool st
         pool_destroy(pool);
         return 1;
     }
-    
+
     log_info("[MATH_HTML] Phase C complete: HTML length=%zu", strlen(html));
 
     // Step 4: Write to file or stdout
@@ -423,11 +507,11 @@ int render_math_to_html(const char* math_formula, const char* html_file, bool st
             pool_destroy(pool);
             return 1;
         }
-        
+
         size_t len = strlen(html);
         size_t written = fwrite(html, 1, len, f);
         fclose(f);
-        
+
         if (written != len) {
             log_error("[MATH_HTML] Failed to write HTML file");
             fprintf(stderr, "Error: Failed to write HTML file\n");
@@ -435,7 +519,7 @@ int render_math_to_html(const char* math_formula, const char* html_file, bool st
             pool_destroy(pool);
             return 1;
         }
-        
+
         log_info("[MATH_HTML] Successfully wrote HTML: %s", html_file);
     } else {
         // Output to stdout
@@ -445,6 +529,6 @@ int render_math_to_html(const char* math_formula, const char* html_file, bool st
     // Cleanup
     arena_destroy(arena);
     pool_destroy(pool);
-    
+
     return 0;
 }

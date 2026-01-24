@@ -1,0 +1,31 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ACCENT",
+        "body": {
+          "type": "ORD",
+          "codepoint": 120,
+          "value": "x"
+        }
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ACCENT",
+        "body": {
+          "type": "ORD",
+          "codepoint": 121,
+          "value": "y"
+        }
+      }
+    }
+  ]
+}

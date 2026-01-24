@@ -1,0 +1,89 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{\\mathop{A}\\limits_B}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "limits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{\\mathop{A}\\nolimits_B}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "limits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{\\mathop{A}\\limits_B}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{\\mathop{A}\\nolimits_B}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    }
+  ]
+}

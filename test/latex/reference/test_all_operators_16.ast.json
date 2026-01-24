@@ -1,0 +1,29 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "REL",
+      "codepoint": 37,
+      "command": "nearrow",
+      "value": "%"
+    },
+    {
+      "type": "REL",
+      "codepoint": 38,
+      "command": "searrow",
+      "value": "&"
+    },
+    {
+      "type": "REL",
+      "codepoint": 46,
+      "command": "swarrow",
+      "value": "."
+    },
+    {
+      "type": "REL",
+      "codepoint": 47,
+      "command": "nwarrow",
+      "value": "/"
+    }
+  ]
+}

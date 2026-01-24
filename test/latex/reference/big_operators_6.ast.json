@@ -1,0 +1,68 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OVERUNDER",
+      "body": {
+        "type": "OP",
+        "codepoint": 0,
+        "command": "lim"
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 120,
+            "value": "x"
+          },
+          {
+            "type": "REL",
+            "codepoint": 33,
+            "command": "to",
+            "value": "!"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 48,
+            "value": "0"
+          }
+        ]
+      }
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "OP",
+            "codepoint": 0,
+            "command": "sin"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 120,
+            "value": "x"
+          }
+        ]
+      },
+      "denom": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      }
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ORD",
+      "codepoint": 49,
+      "value": "1"
+    }
+  ]
+}

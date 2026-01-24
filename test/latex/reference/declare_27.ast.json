@@ -1,0 +1,15 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "WildCard[(\\WildCard)]"
+    }
+  ]
+}

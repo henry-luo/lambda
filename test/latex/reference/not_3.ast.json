@@ -1,0 +1,26 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "NOT",
+      "body": {
+        "type": "BIN",
+        "codepoint": 43,
+        "value": "+"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 52,
+        "value": "4"
+      }
+    }
+  ]
+}

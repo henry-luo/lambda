@@ -1,0 +1,94 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OVERUNDER",
+      "body": {
+        "type": "OP",
+        "codepoint": 0,
+        "command": "lim"
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 110,
+            "value": "n"
+          },
+          {
+            "type": "REL",
+            "codepoint": 33,
+            "command": "to",
+            "value": "!"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 49,
+            "command": "infty",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "limsup"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "liminf"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 97,
+        "value": "a"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    }
+  ]
+}

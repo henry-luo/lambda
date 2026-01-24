@@ -1,0 +1,59 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 98,
+            "value": "b"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 99,
+            "value": "c"
+          }
+        ]
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 100,
+            "value": "d"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 101,
+            "value": "e"
+          }
+        ]
+      }
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    }
+  ]
+}
