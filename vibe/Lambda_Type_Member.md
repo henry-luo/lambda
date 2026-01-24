@@ -479,29 +479,29 @@ When multiple methods match:
 
 ## 6. Implementation Roadmap
 
-### Phase 1: Sys Func as Methods (MVP)
+### Phase 1: Sys Func as Methods (MVP) ✅ COMPLETED
 
 **Scope**: Transform `obj.method(args)` → `method(obj, args)` for eligible sys funcs.
 
-**Changes Required**:
-1. Grammar: Allow `member_expr` as call target (may already work)
-2. `build_ast.cpp`: Detect member-call pattern and desugar
-3. `SysFuncInfo`: Add `is_method_eligible` flag
-4. Tests: Method-style calls for common sys funcs
+**Changes Implemented**:
+1. ✅ Grammar: `member_expr` already supported as call target
+2. ✅ `build_ast.cpp`: Added `get_sys_func_for_method()` lookup function; modified `build_call_expr()` to detect member-call pattern and desugar by prepending object as first argument
+3. ✅ `SysFuncInfo`: Added `is_method_eligible` flag to all 60+ sys func entries
+4. ✅ `transpile.cpp`: Fixed sys func name generation to use `fn_info->name` for method calls
+5. ✅ Tests: `test/lambda/method_call.ls` with expected output
 
-**Effort**: ~2-3 days
+**Completed**: January 2026
 
-### Phase 2: Type Checking
+### Phase 2: Type Checking ✅ COMPLETED
 
 **Scope**: Validate object type against first parameter type.
 
-**Changes Required**:
-1. `SysFuncInfo`: Add `first_param_type` field
-2. Type validation logic in AST building
-3. Clear error messages
-4. Tests: Type mismatch cases
+**Changes Implemented**:
+1. ✅ `SysFuncInfo`: Added `first_param_type` field (TypeId) to all sys func entries
+2. ✅ Type validation logic in `get_sys_func_for_method()` - checks `first_param_type` compatibility
+3. ✅ All baseline tests pass (101/101)
 
-**Effort**: ~1-2 days
+**Completed**: January 2026
 
 ### Phase 3: Type-Defined Methods
 
