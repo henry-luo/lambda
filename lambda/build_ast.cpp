@@ -1508,7 +1508,16 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
             }
             else {
                 AstNode* type_expr = build_expr(tp, type_node);
-                ast_node->type = ((TypeType*)type_expr->type)->type;
+                // validate that type_expr is actually a type (TypeType)
+                if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                    ast_node->type = ((TypeType*)type_expr->type)->type;
+                } else {
+                    StrView type_str = ts_node_source(tp, type_node);
+                    log_error("Error: invalid type annotation '%.*s' - not a valid type",
+                        (int)type_str.length, type_str.str);
+                    tp->error_count++;
+                    ast_node->type = &TYPE_ANY;
+                }
             }
         }
     }
@@ -1921,7 +1930,16 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
         else if (field_id == FIELD_TYPE) {  // return type
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode* type_expr = build_expr(tp, child);
-            fn_type->returned = ((TypeType*)type_expr->type)->type;
+            // validate that type_expr is actually a type (TypeType)
+            if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                fn_type->returned = ((TypeType*)type_expr->type)->type;
+            } else {
+                StrView type_str = ts_node_source(tp, child);
+                log_error("Error: invalid return type '%.*s' - not a valid type",
+                    (int)type_str.length, type_str.str);
+                tp->error_count++;
+                fn_type->returned = &TYPE_ANY;
+            }
         }
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
@@ -2453,7 +2471,19 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     TSNode type_node = ts_node_child_by_field_id(param_node, FIELD_TYPE);
     if (!ts_node_is_null(type_node)) {
         AstNode* type_expr = build_expr(tp, type_node);
-        *(Type*)param_type = *((TypeType*)type_expr->type)->type;
+        // validate that type_expr is actually a type (TypeType)
+        if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* type_type = (TypeType*)type_expr->type;
+            if (type_type->type) {
+                *(Type*)param_type = *type_type->type;
+            }
+        } else {
+            // invalid type annotation - log error but continue with ANY type
+            StrView type_str = ts_node_source(tp, type_node);
+            log_error("Error: invalid type annotation '%.*s' - not a valid type",
+                (int)type_str.length, type_str.str);
+            tp->error_count++;
+        }
     }
     else {
         *(Type*)param_type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
@@ -2560,7 +2590,16 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
         else if (field_id == FIELD_TYPE) {  // return type
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode* type_expr = build_expr(tp, child);
-            fn_type->returned = ((TypeType*)type_expr->type)->type;
+            // validate that type_expr is actually a type (TypeType)
+            if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                fn_type->returned = ((TypeType*)type_expr->type)->type;
+            } else {
+                StrView type_str = ts_node_source(tp, child);
+                log_error("Error: invalid return type '%.*s' - not a valid type",
+                    (int)type_str.length, type_str.str);
+                tp->error_count++;
+                fn_type->returned = &TYPE_ANY;
+            }
         }
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }

@@ -130,6 +130,7 @@ test/venv/
 test/layout/data/css2.1
 test/wpt
 test/pdf/output
+test/fuzzy/crashes/
 
 test/event/
 test/events/

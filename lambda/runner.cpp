@@ -246,6 +246,13 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     tp->ast_root = build_script(tp, root_node);
     get_time(&end);
     print_elapsed_time("building AST", start, end);
+    
+    // Check for errors during AST building
+    if (tp->error_count > 0) {
+        log_error("compiled '%s' with error!!", script_path);
+        return;
+    }
+    
     // print the AST for debugging
     log_debug("AST: %s ---------", tp->reference);
     print_ast_root(tp);
@@ -257,6 +264,13 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     transpile_ast_root(tp, (AstScript*)tp->ast_root);
     get_time(&end);
     print_elapsed_time("transpiling", start, end);
+    
+    // Check for errors during transpilation
+    if (tp->error_count > 0) {
+        log_error("compiled '%s' with error!!", script_path);
+        strbuf_free(tp->code_buf);  tp->code_buf = NULL;
+        return;
+    }
 
     // JIT compile the C code
     get_time(&start);
