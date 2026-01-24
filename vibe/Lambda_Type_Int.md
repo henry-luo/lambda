@@ -650,6 +650,55 @@ Both now use the same underlying storage (`int64_t*`), but maintain separate typ
 
 ---
 
+## Type Coercion Policy: No Implicit Float→Int
+
+### Design Decision
+
+Lambda **does NOT** auto-coerce `float` to `int`. When a function expects an integer parameter and receives a float, Lambda returns a **type error** rather than silently truncating the value.
+
+```lambda
+// Function expecting int parameters
+let add_i = (a: int, b: int) -> a + b
+add_i(1, 2)      // ✅ OK - both are int
+add_i(1, 3.0)    // ❌ type_error - float passed to int parameter
+```
+
+### Rationale
+
+Implicit float→int conversion is dangerous because it **silently loses information**:
+
+**Problems with auto-coercion:**
+1. **Silent data loss**: `4.9` becomes `4` without warning
+2. **Rounding ambiguity**: Does `4.5` become `4` or `5`? (truncate vs round)
+3. **Overflow risk**: Large floats may not fit in integer range
+4. **Bug masking**: Hides logic errors where float was unintentional
+
+### Industry Alignment
+
+Lambda follows the **modern, type-safe approach** used by most contemporary languages:
+
+| Language | Float→Int Coercion | Behavior |
+|----------|-------------------|----------|
+| **Python** | ❌ No | `TypeError: int() argument must be a string or a number, not 'float'` for strict APIs |
+| **TypeScript** | ❌ No | Compile error: `Type 'number' is not assignable to type 'int'` |
+| **Rust** | ❌ No | `expected i32, found f64` |
+| **Swift** | ❌ No | `Cannot convert value of type 'Double' to expected argument type 'Int'` |
+| **Go** | ❌ No | `cannot use float64 as int` |
+| **Java** | ❌ No | `incompatible types: possible lossy conversion from double to int` |
+| **C** | ✅ Yes | Silent truncation (legacy behavior) |
+| **JavaScript** | ✅ Yes* | No integer type, all numbers are float64 |
+| **PHP** | ✅ Yes | Silent truncation |
+*JavaScript doesn't have a true integer type, so this doesn't apply directly.
+
+### Benefits
+
+1. **Catches bugs early**: Accidentally passing a float is often a logic error
+2. **No surprises**: Code does exactly what it says
+3. **Self-documenting**: Explicit conversions show intent
+4. **Safer refactoring**: Type mismatches surface immediately
+
+---
+
 ## Summary
 
 The int56 approach is the optimal choice because:

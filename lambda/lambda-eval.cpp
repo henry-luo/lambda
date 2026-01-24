@@ -1210,6 +1210,555 @@ Item fn_contains(Item str_item, Item substr_item) {
     return {.item = b2it(false)};
 }
 
+// starts_with(str, prefix) - check if string starts with prefix
+Item fn_starts_with(Item str_item, Item prefix_item) {
+    TypeId str_type = get_type_id(str_item);
+    TypeId prefix_type = get_type_id(prefix_item);
+    
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (prefix_type != LMD_TYPE_STRING && prefix_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_starts_with: arguments must be strings or symbols");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    String* prefix = prefix_item.get_string();
+
+    if (!str || !prefix) {
+        return {.item = b2it(false)};
+    }
+
+    if (prefix->len == 0) {
+        return {.item = b2it(true)};  // empty prefix matches any string
+    }
+
+    if (str->len < prefix->len) {
+        return {.item = b2it(false)};
+    }
+
+    bool result = (memcmp(str->chars, prefix->chars, prefix->len) == 0);
+    return {.item = b2it(result)};
+}
+
+// ends_with(str, suffix) - check if string ends with suffix
+Item fn_ends_with(Item str_item, Item suffix_item) {
+    TypeId str_type = get_type_id(str_item);
+    TypeId suffix_type = get_type_id(suffix_item);
+    
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (suffix_type != LMD_TYPE_STRING && suffix_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_ends_with: arguments must be strings or symbols");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    String* suffix = suffix_item.get_string();
+
+    if (!str || !suffix) {
+        return {.item = b2it(false)};
+    }
+
+    if (suffix->len == 0) {
+        return {.item = b2it(true)};  // empty suffix matches any string
+    }
+
+    if (str->len < suffix->len) {
+        return {.item = b2it(false)};
+    }
+
+    size_t offset = str->len - suffix->len;
+    bool result = (memcmp(str->chars + offset, suffix->chars, suffix->len) == 0);
+    return {.item = b2it(result)};
+}
+
+// index_of(str, sub) - find first occurrence of substring, returns -1 if not found
+int64_t fn_index_of(Item str_item, Item sub_item) {
+    TypeId str_type = get_type_id(str_item);
+    TypeId sub_type = get_type_id(sub_item);
+    
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_index_of: arguments must be strings or symbols");
+        return -1;
+    }
+
+    String* str = str_item.get_string();
+    String* sub = sub_item.get_string();
+
+    if (!str || !sub) {
+        return -1;
+    }
+
+    if (sub->len == 0) {
+        return 0;  // empty substring is at position 0
+    }
+
+    if (str->len < sub->len) {
+        return -1;
+    }
+
+    // byte-based search, then convert byte offset to char offset
+    for (size_t i = 0; i <= str->len - sub->len; i++) {
+        if (memcmp(str->chars + i, sub->chars, sub->len) == 0) {
+            // convert byte offset to character offset
+            int64_t char_index = utf8_char_count_n(str->chars, i);
+            return char_index;
+        }
+    }
+
+    return -1;
+}
+
+// last_index_of(str, sub) - find last occurrence of substring, returns -1 if not found
+int64_t fn_last_index_of(Item str_item, Item sub_item) {
+    TypeId str_type = get_type_id(str_item);
+    TypeId sub_type = get_type_id(sub_item);
+    
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_last_index_of: arguments must be strings or symbols");
+        return -1;
+    }
+
+    String* str = str_item.get_string();
+    String* sub = sub_item.get_string();
+
+    if (!str || !sub) {
+        return -1;
+    }
+
+    if (sub->len == 0) {
+        // empty substring is at the end
+        int64_t char_len = utf8_char_count(str->chars);
+        return char_len;
+    }
+
+    if (str->len < sub->len) {
+        return -1;
+    }
+
+    // search from end to beginning
+    for (size_t i = str->len - sub->len + 1; i > 0; i--) {
+        size_t pos = i - 1;
+        if (memcmp(str->chars + pos, sub->chars, sub->len) == 0) {
+            // convert byte offset to character offset
+            int64_t char_index = utf8_char_count_n(str->chars, pos);
+            return char_index;
+        }
+    }
+
+    return -1;
+}
+
+// Helper: check if character is ASCII whitespace
+static inline bool is_ascii_whitespace(unsigned char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
+}
+
+// trim(str) - remove leading and trailing whitespace
+Item fn_trim(Item str_item) {
+    TypeId str_type = get_type_id(str_item);
+    
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_trim: argument must be a string or symbol");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    if (!str || str->len == 0) {
+        return str_item;
+    }
+
+    // find start (skip leading whitespace)
+    size_t start = 0;
+    while (start < str->len && is_ascii_whitespace((unsigned char)str->chars[start])) {
+        start++;
+    }
+
+    // find end (skip trailing whitespace)
+    size_t end = str->len;
+    while (end > start && is_ascii_whitespace((unsigned char)str->chars[end - 1])) {
+        end--;
+    }
+
+    if (start >= end) {
+        // return empty string/symbol
+        if (str_type == LMD_TYPE_SYMBOL) {
+            return {.item = y2it(heap_create_symbol("", 0))};
+        }
+        String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+        empty->len = 0;
+        empty->chars[0] = '\0';
+        return {.item = s2it(empty)};
+    }
+
+    size_t result_len = end - start;
+    if (str_type == LMD_TYPE_SYMBOL) {
+        return {.item = y2it(heap_create_symbol(str->chars + start, result_len))};
+    }
+    
+    String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
+    result->len = result_len;
+    memcpy(result->chars, str->chars + start, result_len);
+    result->chars[result_len] = '\0';
+    return {.item = s2it(result)};
+}
+
+// trim_start(str) - remove leading whitespace
+Item fn_trim_start(Item str_item) {
+    TypeId str_type = get_type_id(str_item);
+    
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_trim_start: argument must be a string or symbol");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    if (!str || str->len == 0) {
+        return str_item;
+    }
+
+    // find start (skip leading whitespace)
+    size_t start = 0;
+    while (start < str->len && is_ascii_whitespace((unsigned char)str->chars[start])) {
+        start++;
+    }
+
+    if (start == 0) {
+        return str_item;  // no leading whitespace
+    }
+
+    size_t result_len = str->len - start;
+    if (str_type == LMD_TYPE_SYMBOL) {
+        return {.item = y2it(heap_create_symbol(str->chars + start, result_len))};
+    }
+    
+    String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
+    result->len = result_len;
+    memcpy(result->chars, str->chars + start, result_len);
+    result->chars[result_len] = '\0';
+    return {.item = s2it(result)};
+}
+
+// trim_end(str) - remove trailing whitespace
+Item fn_trim_end(Item str_item) {
+    TypeId str_type = get_type_id(str_item);
+    
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_trim_end: argument must be a string or symbol");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    if (!str || str->len == 0) {
+        return str_item;
+    }
+
+    // find end (skip trailing whitespace)
+    size_t end = str->len;
+    while (end > 0 && is_ascii_whitespace((unsigned char)str->chars[end - 1])) {
+        end--;
+    }
+
+    if (end == str->len) {
+        return str_item;  // no trailing whitespace
+    }
+
+    if (end == 0) {
+        // return empty string/symbol
+        if (str_type == LMD_TYPE_SYMBOL) {
+            return {.item = y2it(heap_create_symbol("", 0))};
+        }
+        String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+        empty->len = 0;
+        empty->chars[0] = '\0';
+        return {.item = s2it(empty)};
+    }
+
+    if (str_type == LMD_TYPE_SYMBOL) {
+        return {.item = y2it(heap_create_symbol(str->chars, end))};
+    }
+    
+    String* result = (String *)heap_alloc(sizeof(String) + end + 1, LMD_TYPE_STRING);
+    result->len = end;
+    memcpy(result->chars, str->chars, end);
+    result->chars[end] = '\0';
+    return {.item = s2it(result)};
+}
+
+// split(str, sep) - split string by separator, returns list of strings
+Item fn_split(Item str_item, Item sep_item) {
+    TypeId str_type = get_type_id(str_item);
+    TypeId sep_type = get_type_id(sep_item);
+    
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_split: arguments must be strings or symbols");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    String* sep = sep_item.get_string();
+
+    List* result = list();
+
+    if (!str || str->len == 0) {
+        return {.list = result};  // empty list for empty string
+    }
+
+    if (!sep || sep->len == 0) {
+        // split into individual characters
+        const char* p = str->chars;
+        const char* end = str->chars + str->len;
+        while (p < end) {
+            int char_len = utf8_char_len(*p);
+            if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
+            
+            String* part = (String *)heap_alloc(sizeof(String) + char_len + 1, LMD_TYPE_STRING);
+            part->len = char_len;
+            memcpy(part->chars, p, char_len);
+            part->chars[char_len] = '\0';
+            
+            list_push(result, {.item = s2it(part)});
+            p += char_len;
+        }
+        return {.list = result};
+    }
+
+    // split by separator
+    const char* start = str->chars;
+    const char* end = str->chars + str->len;
+    const char* p = start;
+    
+    while (p <= end - sep->len) {
+        if (memcmp(p, sep->chars, sep->len) == 0) {
+            // found separator
+            size_t part_len = p - start;
+            String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
+            part->len = part_len;
+            memcpy(part->chars, start, part_len);
+            part->chars[part_len] = '\0';
+            
+            list_push(result, {.item = s2it(part)});
+            
+            p += sep->len;
+            start = p;
+        } else {
+            p++;
+        }
+    }
+    
+    // add the last part
+    size_t part_len = end - start;
+    String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
+    part->len = part_len;
+    memcpy(part->chars, start, part_len);
+    part->chars[part_len] = '\0';
+    
+    list_push(result, {.item = s2it(part)});
+
+    return {.list = result};
+}
+
+// str_join(strs, sep) - join list of strings with separator
+Item fn_str_join(Item list_item, Item sep_item) {
+    TypeId list_type = get_type_id(list_item);
+    TypeId sep_type = get_type_id(sep_item);
+    
+    if (list_type != LMD_TYPE_LIST && list_type != LMD_TYPE_ARRAY) {
+        log_debug("fn_str_join: first argument must be a list or array");
+        return ItemError;
+    }
+    
+    if (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_str_join: separator must be a string or symbol");
+        return ItemError;
+    }
+
+    String* sep = sep_item.get_string();
+    size_t sep_len = sep ? sep->len : 0;
+
+    // calculate total length
+    size_t total_len = 0;
+    int64_t count = 0;
+    
+    if (list_type == LMD_TYPE_LIST) {
+        List* lst = list_item.list;
+        count = lst->length;
+        for (int64_t i = 0; i < count; i++) {
+            Item item = lst->items[i];
+            TypeId item_type = get_type_id(item);
+            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+                String* s = item.get_string();
+                if (s) total_len += s->len;
+            }
+        }
+    } else {
+        Array* arr = list_item.array;
+        count = arr->length;
+        for (int64_t i = 0; i < count; i++) {
+            Item item = arr->items[i];
+            TypeId item_type = get_type_id(item);
+            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+                String* s = item.get_string();
+                if (s) total_len += s->len;
+            }
+        }
+    }
+
+    if (count > 1 && sep_len > 0) {
+        total_len += (count - 1) * sep_len;
+    }
+
+    // allocate result
+    String* result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
+    result->len = total_len;
+    
+    // build result
+    char* p = result->chars;
+    
+    if (list_type == LMD_TYPE_LIST) {
+        List* lst = list_item.list;
+        for (int64_t i = 0; i < count; i++) {
+            if (i > 0 && sep_len > 0) {
+                memcpy(p, sep->chars, sep_len);
+                p += sep_len;
+            }
+            Item item = lst->items[i];
+            TypeId item_type = get_type_id(item);
+            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+                String* s = item.get_string();
+                if (s && s->len > 0) {
+                    memcpy(p, s->chars, s->len);
+                    p += s->len;
+                }
+            }
+        }
+    } else {
+        Array* arr = list_item.array;
+        for (int64_t i = 0; i < count; i++) {
+            if (i > 0 && sep_len > 0) {
+                memcpy(p, sep->chars, sep_len);
+                p += sep_len;
+            }
+            Item item = arr->items[i];
+            TypeId item_type = get_type_id(item);
+            if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
+                String* s = item.get_string();
+                if (s && s->len > 0) {
+                    memcpy(p, s->chars, s->len);
+                    p += s->len;
+                }
+            }
+        }
+    }
+    
+    result->chars[total_len] = '\0';
+    return {.item = s2it(result)};
+}
+
+// replace(str, old, new) - replace all occurrences of old with new
+Item fn_replace(Item str_item, Item old_item, Item new_item) {
+    TypeId str_type = get_type_id(str_item);
+    TypeId old_type = get_type_id(old_item);
+    TypeId new_type = get_type_id(new_item);
+    
+    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+        (old_type != LMD_TYPE_STRING && old_type != LMD_TYPE_SYMBOL) ||
+        (new_type != LMD_TYPE_STRING && new_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_replace: all arguments must be strings or symbols");
+        return ItemError;
+    }
+
+    String* str = str_item.get_string();
+    String* old_str = old_item.get_string();
+    String* new_str = new_item.get_string();
+
+    if (!str || str->len == 0) {
+        return str_item;
+    }
+
+    if (!old_str || old_str->len == 0) {
+        return str_item;  // nothing to replace
+    }
+
+    // count occurrences
+    int count = 0;
+    const char* p = str->chars;
+    const char* end = str->chars + str->len;
+    while (p <= end - old_str->len) {
+        if (memcmp(p, old_str->chars, old_str->len) == 0) {
+            count++;
+            p += old_str->len;
+        } else {
+            p++;
+        }
+    }
+
+    if (count == 0) {
+        return str_item;  // no occurrences found
+    }
+
+    // calculate new length
+    size_t new_str_len = new_str ? new_str->len : 0;
+    size_t new_len = str->len + count * (new_str_len - old_str->len);
+
+    // allocate result - preserve type
+    if (str_type == LMD_TYPE_SYMBOL) {
+        char* buf = (char*)pool_alloc(context->pool, new_len + 1);
+        char* dest = buf;
+        p = str->chars;
+        while (p <= end - old_str->len) {
+            if (memcmp(p, old_str->chars, old_str->len) == 0) {
+                if (new_str_len > 0) {
+                    memcpy(dest, new_str->chars, new_str_len);
+                    dest += new_str_len;
+                }
+                p += old_str->len;
+            } else {
+                *dest++ = *p++;
+            }
+        }
+        // copy remaining
+        while (p < end) {
+            *dest++ = *p++;
+        }
+        *dest = '\0';
+        return {.item = y2it(heap_create_symbol(buf, new_len))};
+    }
+
+    String* result = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
+    result->len = new_len;
+    
+    // build result
+    char* dest = result->chars;
+    p = str->chars;
+    while (p <= end - old_str->len) {
+        if (memcmp(p, old_str->chars, old_str->len) == 0) {
+            if (new_str_len > 0) {
+                memcpy(dest, new_str->chars, new_str_len);
+                dest += new_str_len;
+            }
+            p += old_str->len;
+        } else {
+            *dest++ = *p++;
+        }
+    }
+    // copy remaining
+    while (p < end) {
+        *dest++ = *p++;
+    }
+    result->chars[new_len] = '\0';
+    
+    return {.item = s2it(result)};
+}
+
+// normalize with 1 arg (defaults to NFC)
+Item fn_normalize1(Item str_item) {
+    Item nfc_type = {.item = s2it(heap_strcpy((char*)"nfc", 3))};
+    return fn_normalize(str_item, nfc_type);
+}
+
 // Static DateTime instance to avoid dynamic allocation issues
 static DateTime static_dt;
 static bool static_dt_initialized = false;
