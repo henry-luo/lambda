@@ -26,6 +26,8 @@ const LAMBDA_TO_MATHML = {
     'OVERUNDER': 'munderover',  // Under/over operators
     'ACCENT': 'mover',          // Accent marks
     'ARRAY': 'mtable',          // Tables/matrices
+    'ARRAY_ROW': 'mtr',         // Table row
+    'ARRAY_CELL': 'mtd',        // Table cell
 };
 
 // Map MathML elements to semantic types
@@ -49,6 +51,28 @@ const MATHML_SEMANTIC = {
 };
 
 /**
+ * Unwrap trivial wrapper nodes (mrow with single child) to simplify structure.
+ * This helps normalize differences between Lambda and MathML structures.
+ */
+function unwrapTrivialNodes(node) {
+    if (!node) return null;
+
+    // Process children first
+    if (node.children) {
+        node.children = node.children.map(unwrapTrivialNodes).filter(Boolean);
+    }
+
+    // If this is a row/mrow with exactly one child, unwrap it
+    const type = (node.type || '').toLowerCase();
+    if ((type === 'mrow' || type === 'row') &&
+        node.children && node.children.length === 1 && !node.value) {
+        return node.children[0];
+    }
+
+    return node;
+}
+
+/**
  * Convert Lambda AST to semantic structure for comparison
  */
 function lambdaASTToSemantic(node) {
@@ -59,12 +83,48 @@ function lambdaASTToSemantic(node) {
         value: node.value || null,
     };
 
-    // Handle children
+    // Handle DELIMITED specially - convert to mrow with delimiters as children
+    if (node.type === 'DELIMITED') {
+        result.type = 'mrow';
+        result.children = [];
+
+        // Add left delimiter as operator
+        if (node.leftDelim) {
+            result.children.push({
+                type: 'mo',
+                value: node.leftDelim,
+            });
+        }
+
+        // Add body (the array/content)
+        if (node.body) {
+            const bodyResult = lambdaASTToSemantic(node.body);
+            if (bodyResult) {
+                result.children.push(bodyResult);
+            }
+        }
+
+        // Add right delimiter as operator
+        if (node.rightDelim) {
+            result.children.push({
+                type: 'mo',
+                value: node.rightDelim,
+            });
+        }
+
+        return result;
+    }
+
+    // Handle children - flatten body into children for consistent comparison
     if (node.body) {
         if (Array.isArray(node.body)) {
             result.children = node.body.map(lambdaASTToSemantic).filter(Boolean);
         } else {
-            result.body = lambdaASTToSemantic(node.body);
+            // Convert single body to children array for consistent structure
+            const bodyResult = lambdaASTToSemantic(node.body);
+            if (bodyResult) {
+                result.children = [bodyResult];
+            }
         }
     }
 
@@ -74,6 +134,32 @@ function lambdaASTToSemantic(node) {
     if (node.subscript) result.subscript = lambdaASTToSemantic(node.subscript);
 
     return result;
+}
+
+/**
+ * Extract all leaf values from a semantic tree (for content-based comparison)
+ */
+function extractLeafValues(node, values = []) {
+    if (!node) return values;
+
+    if (node.value) {
+        values.push(node.value);
+    }
+
+    if (node.children) {
+        for (const child of node.children) {
+            extractLeafValues(child, values);
+        }
+    }
+    if (node.body) {
+        extractLeafValues(node.body, values);
+    }
+    if (node.numer) extractLeafValues(node.numer, values);
+    if (node.denom) extractLeafValues(node.denom, values);
+    if (node.superscript) extractLeafValues(node.superscript, values);
+    if (node.subscript) extractLeafValues(node.subscript, values);
+
+    return values;
 }
 
 /**
@@ -160,8 +246,9 @@ function compareASTToMathML(lambdaAST, mathmlRef) {
     let matchedElements = 0;
     let totalElements = 0;
 
-    // Convert both to semantic format
-    const lambdaSemantic = lambdaASTToSemantic(lambdaAST);
+    // Convert both to semantic format and normalize by unwrapping trivial nodes
+    let lambdaSemantic = lambdaASTToSemantic(lambdaAST);
+    lambdaSemantic = unwrapTrivialNodes(lambdaSemantic);
 
     // Get MathML from reference
     let mathmlSemantic;
@@ -172,6 +259,7 @@ function compareASTToMathML(lambdaAST, mathmlRef) {
     } else {
         mathmlSemantic = mathmlRef;
     }
+    mathmlSemantic = unwrapTrivialNodes(mathmlSemantic);
 
     // Compare structures
     function compareNodes(lambda, mathml, path = 'root') {
@@ -262,19 +350,27 @@ function areTypesCompatible(lambdaType, mathmlType) {
     // Direct match
     if (lt === mt) return true;
 
-    // Mapped matches
+    // Mapped matches - bidirectional mappings
     const mappings = {
         'mfrac': ['fraction', 'frac'],
-        'mi': ['identifier', 'ord', 'mi'],
-        'mn': ['number', 'ord'],
+        'mi': ['identifier', 'ord', 'mi', 'number', 'mn'],  // Allow mi to match numbers (digits are often typed as identifiers)
+        'mn': ['number', 'ord', 'mn', 'identifier', 'mi'],  // Allow mn to match identifiers
         'mo': ['operator', 'op', 'bin', 'rel', 'punct'],
         'msqrt': ['radical', 'sqrt'],
         'mroot': ['radical', 'root'],
-        'mrow': ['row', 'group', 'mrow'],
+        'mrow': ['row', 'group', 'mrow', 'delimited'],
         'msubsup': ['scripts', 'msubsup'],
         'msub': ['subscript', 'sub'],
         'msup': ['superscript', 'sup'],
         'munderover': ['underover', 'overunder'],
+        'mtable': ['table', 'array', 'mtable'],
+        'mtr': ['table-row', 'array_row', 'mtr', 'tablerow'],
+        'mtd': ['table-cell', 'array_cell', 'mtd', 'tablecell'],
+        // Also check reverse - MathML types
+        'table': ['mtable', 'array', 'table'],
+        'table-row': ['mtr', 'array_row', 'table-row', 'tablerow'],
+        'table-cell': ['mtd', 'array_cell', 'table-cell', 'tablecell'],
+        'identifier': ['mi', 'ord', 'identifier'],
     };
 
     for (const [key, values] of Object.entries(mappings)) {
