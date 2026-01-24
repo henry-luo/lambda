@@ -9,101 +9,110 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 
-// todo: properly define fn param types
+// System function definitions with method call support
+// Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
+// is_method_eligible: true if can be called as obj.method() style
+// first_param_type: expected type of first param for method calls (LMD_TYPE_ANY for any type)
 SysFuncInfo sys_funcs[] = {
-    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false},
-    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false},
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false}, // return ANY, as there can be error
-    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false},
-    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false, false},
-    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false, false},
-    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false, false},
-    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false},
-    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false},
-    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, false},
-    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, false},
-    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false},
-    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false},
-    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false},
-    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false},
-    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false},
-    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false},
-    {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true}, // TYPE_NUMBER;
-    {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true}, // TYPE_NUMBER;
-    {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true}, // TYPE_NUMBER;
-    {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true}, // TYPE_NUMBER;
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
-    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
-    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
-    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
-    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
-    {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true},
-    {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true},
-    {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true},
-    {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true},
-    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false},
-    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true},   // is_overloaded: fn_normalize1
-    {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true},  // is_overloaded: fn_normalize2
-    // string functions
-    {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false},
-    {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false},
-    {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false},
-    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false},
-    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false},
-    {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_STRING, false, false},
-    {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, false},
-    // vector functions
-    {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_CUMPROD, "cumprod", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false},
-    // statistical functions
-    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false},
-    // element-wise math functions
-    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false},
-    // vector manipulation functions
-    {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true},   // is_overloaded: generates fn_sort1
-    {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true},  // is_overloaded: generates fn_sort2
-    {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false},
-    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false},
-    {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true},  // is_overloaded: generates fn_range3
-    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false},
-    // variadic parameter access
-    {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true},   // is_overloaded: generates fn_varg0
-    {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true},   // is_overloaded: generates fn_varg1
-    // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
-    // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},
-    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false},
-    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false},
-    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false},
-    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false},
-    {SYSPROC_OUTPUT2, "output", 2, &TYPE_NULL, true, true},  // is_overloaded: generates pn_output2
-    {SYSPROC_OUTPUT3, "output", 3, &TYPE_NULL, true, true},  // is_overloaded: generates pn_output3
-    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false},
+    // type/conversion functions - all method-eligible
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY},
+    // datetime functions - date/time with 1 arg are method-eligible
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME},
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME},
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY},  // no args
+    // collection functions
+    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY},  // variable args, not method-eligible
+    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // slice(obj, start, end) -> obj.slice(start, end)
+    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY},
+    // min/max - 1-arg is method-eligible, 2-arg is not (no clear "self")
+    {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},
+    {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // min(a,b) - no clear receiver
+    {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},
+    {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // max(a,b) - no clear receiver
+    // aggregation functions - all method-eligible on collections
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    // math functions - method-eligible on numbers
+    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    // I/O functions
+    {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // not method-eligible
+    {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},
+    {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
+    {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY},  // not method-eligible
+    // string functions - method-eligible on strings
+    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
+    {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
+    {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_STRING, false, false, true, LMD_TYPE_ANY},  // arr.str_join(sep)
+    {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
+    // vector/array functions - method-eligible on arrays
+    {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_CUMPROD, "cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY},  // fill(n, val) - n is count, not self
+    {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // a.dot(b)
+    {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    // statistical functions - method-eligible on collections
+    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    // element-wise math functions - method-eligible on numbers/arrays
+    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    // vector manipulation functions - method-eligible on collections
+    {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},
+    {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},  // arr.sort(comparator)
+    {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // a.concat(b)
+    {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // arr.take(n)
+    {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // arr.drop(n)
+    {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // a.zip(b)
+    {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // range(s,e,step) - constructor, not method
+    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // arr.quantile(p)
+    // variadic parameter access - not method-eligible
+    {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},
+    {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},
+    // procedural functions - not method-eligible (side effects)
+    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_OUTPUT2, "output", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY},
+    {SYSPROC_OUTPUT3, "output", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY},
+    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
 };
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
@@ -114,6 +123,54 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
         }
     }
     log_debug("don't have sys func: %.*s, %d", (int)name->length, name->str, arg_count);
+    return NULL;
+}
+
+// Look up a system function for method-style call: obj.method(args)
+// This searches for a sys func where arg_count includes the object (+1)
+// and validates that the function is method-eligible and type-compatible
+SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count, TypeId obj_type_id) {
+    // method_arg_count is the count of arguments in parentheses (not including obj)
+    // sys func arg_count includes the object, so we add 1
+    int total_arg_count = method_arg_count + 1;
+    
+    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
+        SysFuncInfo* info = &sys_funcs[i];
+        if (strview_equal(method_name, info->name) && info->arg_count == total_arg_count) {
+            // Check if this function is method-eligible
+            if (!info->is_method_eligible) {
+                log_debug("method_call sys func '%.*s' not method-eligible", 
+                    (int)method_name->length, method_name->str);
+                return NULL;
+            }
+            
+            // Check type compatibility with first parameter
+            if (info->first_param_type != LMD_TYPE_ANY && obj_type_id != LMD_TYPE_ANY) {
+                if (info->first_param_type != obj_type_id) {
+                    // Additional check for numeric types
+                    bool type_compatible = false;
+                    if (info->first_param_type == LMD_TYPE_NUMBER) {
+                        type_compatible = (obj_type_id == LMD_TYPE_INT || 
+                                          obj_type_id == LMD_TYPE_INT64 ||
+                                          obj_type_id == LMD_TYPE_FLOAT ||
+                                          obj_type_id == LMD_TYPE_DECIMAL);
+                    }
+                    if (!type_compatible) {
+                        log_debug("method_call type mismatch for '%.*s': expected %d, got %d", 
+                            (int)method_name->length, method_name->str, 
+                            info->first_param_type, obj_type_id);
+                        return NULL;
+                    }
+                }
+            }
+            
+            log_debug("method_call found sys func: %.*s, args=%d", 
+                (int)method_name->length, method_name->str, total_arg_count);
+            return info;
+        }
+    }
+    log_debug("method_call no sys func: %.*s, args=%d", 
+        (int)method_name->length, method_name->str, total_arg_count);
     return NULL;
 }
 
@@ -553,14 +610,71 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
 
     // build function name
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
+    TSSymbol fn_symbol = ts_node_symbol(function_node);
+    
+    // Check if this is a method-style call: obj.method(args)
+    // In this case, function_node is a primary_expr containing a member_expr
+    bool is_method_call = false;
+    TSNode member_node = {0};
+    TSNode object_node = {0};
+    TSNode method_name_node = {0};
+    StrView method_name = {0};
+    
+    if (fn_symbol == SYM_PRIMARY_EXPR) {
+        // Look for member_expr inside primary_expr
+        TSNode inner = ts_node_child(function_node, 0);
+        if (!ts_node_is_null(inner) && ts_node_symbol(inner) == SYM_MEMBER_EXPR) {
+            member_node = inner;
+            is_method_call = true;
+        }
+    } else if (fn_symbol == SYM_MEMBER_EXPR) {
+        member_node = function_node;
+        is_method_call = true;
+    }
+    
+    if (is_method_call) {
+        object_node = ts_node_child_by_field_id(member_node, FIELD_OBJECT);
+        method_name_node = ts_node_child_by_field_id(member_node, FIELD_FIELD);
+        method_name = ts_node_source(tp, method_name_node);
+        log_debug("method_call detected: obj.%.*s() with %d args", 
+            (int)method_name.length, method_name.str, arg_count);
+    }
+    
+    // For method calls, first build the object to get its type for validation
+    AstNode* method_object = NULL;
+    TypeId obj_type_id = LMD_TYPE_ANY;
+    if (is_method_call && !ts_node_is_null(object_node)) {
+        method_object = build_expr(tp, object_node);
+        if (method_object && method_object->type) {
+            obj_type_id = method_object->type->type_id;
+        }
+    }
+    
+    // Try to resolve as sys func
     StrView func_name = ts_node_source(tp, function_node);
-    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name, arg_count);
+    SysFuncInfo* sys_func_info = NULL;
+    
+    if (is_method_call) {
+        // Try method-style lookup: obj.method(args) -> method(obj, args)
+        sys_func_info = get_sys_func_for_method(&method_name, arg_count, obj_type_id);
+        if (sys_func_info) {
+            log_debug("method_call resolved to sys func: %s", sys_func_info->name);
+        }
+    }
+    
+    if (!sys_func_info && !is_method_call) {
+        // Traditional function call lookup
+        sys_func_info = get_sys_func_info(&func_name, arg_count);
+    }
+    
     if (sys_func_info) {
         log_debug("build sys call");
         if (sys_func_info->is_proc) {
             if (!tp->current_scope->is_proc) {
+                const char* fn_name = is_method_call ? method_name.str : func_name.str;
+                int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
                 log_error("Error: procedure '%.*s' cannot be called in a function",
-                    (int)func_name.length, func_name.str);
+                    fn_name_len, fn_name);
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
             }
@@ -571,8 +685,19 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         fn_node->type = sys_func_info->return_type;
         ast_node->function = (AstNode*)fn_node;
         ast_node->type = fn_node->type;
+        
+        // For method calls, prepend the object as the first argument
+        if (is_method_call && method_object) {
+            ast_node->argument = method_object;
+            log_debug("method_call prepended object as first arg, type=%d", obj_type_id);
+        }
     }
     else {
+        if (is_method_call) {
+            // Not a sys func method call - could be a user-defined method on the object
+            // For now, fall back to building as a regular member expression call
+            log_debug("method_call not resolved as sys func, building as regular call");
+        }
         ast_node->function = build_expr(tp, function_node);
         if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
             TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
@@ -599,7 +724,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     // build arguments
     cursor = ts_tree_cursor_new(call_node);
     has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNode* prev_argument = NULL;
+    // For method calls with sys func, arguments are appended after the object
+    AstNode* prev_argument = is_method_call && sys_func_info ? method_object : NULL;
     while (has_node) {
         // check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
