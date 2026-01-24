@@ -28,6 +28,15 @@ int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
     return -1;  // Invalid UTF-8 sequence
 }
 
+// Get UTF-8 character length from first byte
+int utf8_char_len(unsigned char first_byte) {
+    if (first_byte < 0x80) return 1;
+    if ((first_byte & 0xE0) == 0xC0) return 2;
+    if ((first_byte & 0xF0) == 0xE0) return 3;
+    if ((first_byte & 0xF8) == 0xF0) return 4;
+    return 1;  // fallback for invalid sequences
+}
+
 // Count the number of UTF-8 characters in a string
 int utf8_char_count(const char* utf8_string) {
     if (!utf8_string) return 0;
@@ -42,6 +51,30 @@ int utf8_char_count(const char* utf8_string) {
             // Invalid UTF-8 sequence, skip this byte
             ptr++;
         } else {
+            ptr += bytes_consumed;
+            char_count++;
+        }
+    }
+    
+    return char_count;
+}
+
+// Count the number of UTF-8 characters in the first n bytes of a string
+int utf8_char_count_n(const char* utf8_string, size_t byte_len) {
+    if (!utf8_string || byte_len == 0) return 0;
+    
+    int char_count = 0;
+    const unsigned char* ptr = (const unsigned char*)utf8_string;
+    const unsigned char* end = ptr + byte_len;
+    uint32_t codepoint;
+    
+    while (ptr < end && *ptr) {
+        int bytes_consumed = utf8_to_codepoint(ptr, &codepoint);
+        if (bytes_consumed <= 0) {
+            // Invalid UTF-8 sequence, skip this byte
+            ptr++;
+        } else {
+            if (ptr + bytes_consumed > end) break;  // would exceed byte_len
             ptr += bytes_consumed;
             char_count++;
         }
