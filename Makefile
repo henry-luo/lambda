@@ -361,7 +361,8 @@ clean-tree-sitter-minimal:
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
 	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
-	    test-pdf test-pdf-export setup-pdf-tests
+	    test-pdf test-pdf-export setup-pdf-tests \
+	    test-fuzzy test-fuzzy-extended test-fuzz
 
 # Help target - shows available commands
 help:
@@ -431,7 +432,9 @@ help:
 	@echo "  test-coverage - Run tests with code coverage analysis"
 	@echo "  test-memory   - Run memory leak detection tests"
 	@echo "  test-benchmark- Run performance benchmark tests"
-	@echo "  test-fuzz     - Run fuzzing tests for robustness"
+	@echo "  test-fuzz     - Run fuzzy tests for robustness (alias for test-fuzzy)"
+	@echo "  test-fuzzy    - Run fuzzy tests (5 minutes, mutation + random generation)"
+	@echo "  test-fuzzy-extended - Run extended fuzzy tests (1 hour)"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
 	@echo "  test-windows  - Run CI tests for Windows executable"
@@ -1058,15 +1061,25 @@ test-benchmark:
 		exit 1; \
 	fi
 
-test-fuzz:
-	@echo "Running fuzzing tests..."
-	@if [ -f "test/test_fuzz.sh" ]; then \
-		chmod +x test/test_fuzz.sh; \
-		./test/test_fuzz.sh; \
-	else \
-		echo "Fuzz test script not found at test/test_fuzz.sh"; \
-		exit 1; \
-	fi
+# Fuzzy Testing Framework
+# Shell-based fuzzer for testing Lambda robustness
+
+# Run fuzzy tests (quick mode: 5 minutes)
+test-fuzzy: build
+	@echo "Running fuzzy tests (quick mode: 5 minutes)..."
+	@chmod +x test/fuzzy/test_fuzzy.sh
+	@./test/fuzzy/test_fuzzy.sh --duration=300
+	@echo "✅ Fuzzy tests completed"
+
+# Run extended fuzzy tests (1 hour)
+test-fuzzy-extended: build
+	@echo "Running extended fuzzy tests (1 hour)..."
+	@chmod +x test/fuzzy/test_fuzzy.sh
+	@./test/fuzzy/test_fuzzy.sh --duration=3600
+	@echo "✅ Extended fuzzy tests completed"
+
+# Legacy alias for backward compatibility
+test-fuzz: test-fuzzy
 
 test-integration:
 	@echo "Running integration tests..."
