@@ -811,7 +811,7 @@ Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
 ## References
 
 - [Lambda_Function_Param.md](Lambda_Function_Param.md) - Current function parameter handling
-- [Lambda_Proc.md](Lambda_Proc.md) - Procedural function support
+- [Lambda_Proc.md](Lambda_Procedural.md) - Procedural function support
 - `lambda/transpile.cpp` - Current transpilation logic
 - `lambda/mir.c` - MIR JIT integration
 - `lambda/lambda-eval.cpp` - Runtime function implementations
