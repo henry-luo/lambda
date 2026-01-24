@@ -1,0 +1,16 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "rightleftharpoons"
+    },
+    {
+      "type": "REL",
+      "codepoint": 59,
+      "command": "leadsto",
+      "value": ";"
+    }
+  ]
+}

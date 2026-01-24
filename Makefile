@@ -842,6 +842,49 @@ test-tex-reference:
 	done
 	@echo "Reference DVI files generated in test/latex/reference/"
 
+# Math Testing targets (multi-layered semantic comparison framework)
+test-math: build
+	@echo "Running LaTeX Math test suite (ALL)..."
+	@echo "=============================================================="
+	@cd test/latex && npm test
+
+test-math-baseline: build
+	@echo "Running LaTeX Math BASELINE tests (DVI must pass 100%)..."
+	@echo "=============================================================="
+	@cd test/latex && npm run test:baseline
+
+test-math-extended: build
+	@echo "Running LaTeX Math EXTENDED tests (semantic comparison)..."
+	@echo "=============================================================="
+	@cd test/latex && npm run test:extended
+
+test-math-verbose: build
+	@echo "Running LaTeX Math tests (verbose mode)..."
+	@echo "=============================================================="
+	@cd test/latex && npm run test:verbose
+
+test-math-group: build
+	@echo "Running LaTeX Math tests for group: $(group)"
+	@echo "=============================================================="
+	@cd test/latex && node test_math_comparison.js --group=$(group)
+
+test-math-single: build
+	@echo "Running single LaTeX Math test: $(test)"
+	@echo "=============================================================="
+	@cd test/latex && node test_math_comparison.js --test=$(test) --verbose
+
+setup-math-tests:
+	@echo "Setting up LaTeX Math test dependencies..."
+	@cd test/latex && npm install
+	@echo "LaTeX Math test setup complete."
+
+generate-math-references:
+	@echo "Generating reference files (MathLive + KaTeX)..."
+	@echo "=============================================================="
+	@cd test/latex && npm run generate:mathlive
+	@cd test/latex && npm run generate:katex
+	@echo "Reference files generated in test/latex/reference/"
+
 # PDF Testing targets
 test-pdf: build
 	@echo "Running Radiant PDF test suite..."

@@ -293,6 +293,9 @@ namespace tex {
 // Dump AST tree to string buffer for debugging
 void math_ast_dump(MathASTNode* node, ::StrBuf* out, int depth = 0);
 
+// Convert AST to JSON format (MathLive-compatible)
+void math_ast_to_json(MathASTNode* node, ::StrBuf* out);
+
 } // namespace tex
 
 #endif // TEX_MATH_AST_HPP

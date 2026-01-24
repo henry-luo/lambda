@@ -1,0 +1,58 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "langle"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "rangle"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "lfloor"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "rfloor"
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "lceil"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "rceil"
+    }
+  ]
+}

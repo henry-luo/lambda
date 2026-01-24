@@ -1,0 +1,72 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 114,
+      "command": "nabla",
+      "value": "r"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 2,
+      "command": "times",
+      "value": "\u0002"
+    },
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ORD",
+        "codepoint": 69,
+        "value": "E"
+      }
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "BIN",
+      "codepoint": 45,
+      "value": "-"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "ACCENT",
+            "body": {
+              "type": "ORD",
+              "codepoint": 66,
+              "value": "B"
+            }
+          }
+        ]
+      },
+      "denom": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 0,
+            "command": "partial"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 116,
+            "value": "t"
+          }
+        ]
+      }
+    }
+  ]
+}

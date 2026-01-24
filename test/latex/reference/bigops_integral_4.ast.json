@@ -1,0 +1,29 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OP",
+      "codepoint": 0,
+      "command": "iiint"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 102,
+      "value": "f"
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 100,
+      "value": "d"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 86,
+      "value": "V"
+    }
+  ]
+}

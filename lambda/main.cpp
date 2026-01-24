@@ -75,6 +75,9 @@ int render_math_to_dvi(const char* math_formula, const char* dvi_file, bool dump
 // Math formula HTML rendering function
 int render_math_to_html(const char* math_formula, const char* html_file, bool standalone);
 
+// Math formula AST JSON rendering function (for test framework)
+int render_math_to_ast_json(const char* math_formula, const char* json_file);
+
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200, float scale = 1.0f);
 
@@ -240,12 +243,12 @@ void run_repl(Runtime *runtime, bool use_mir) {
 
         // Check if statement is complete using Tree-sitter
         StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
-        
+
         if (status == STMT_INCOMPLETE) {
             // Need more input - continue with continuation prompt
             continue;
         }
-        
+
         if (status == STMT_ERROR) {
             // Syntax error - discard the pending input and let user retry
             printf("Syntax error. Input discarded.\n");
@@ -274,7 +277,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
             // transpile using C2MIR
             output_input = run_script(runtime, repl_history->str, script_path, false);
         }
-        
+
         if (output_input) {
             if (output_input->root.type_id() == LMD_TYPE_ERROR) {
                 // Runtime error - rollback the last input
@@ -285,11 +288,11 @@ void run_repl(Runtime *runtime, bool use_mir) {
                 // Success - print only new output (incremental display)
                 StrBuf *full_output = strbuf_new_cap(256);
                 print_root_item(full_output, output_input->root);
-                
+
                 // Print only the portion after last_output
                 if (full_output->length > last_output->length) {
                     // check if prefix matches
-                    if (last_output->length == 0 || 
+                    if (last_output->length == 0 ||
                         strncmp(full_output->str, last_output->str, last_output->length) == 0) {
                         // print only the new part
                         printf("%s", full_output->str + last_output->length);
@@ -301,7 +304,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
                     // output got shorter or same - just print it
                     printf("%s", full_output->str);
                 }
-                
+
                 // save for next incremental display
                 strbuf_reset(last_output);
                 strbuf_append_str(last_output, full_output->str);
@@ -605,7 +608,7 @@ int exec_convert(int argc, char* argv[]) {
             if (is_latex_input) {
                 // Always use unified pipeline (doc model based) for LaTeX to HTML
                 printf("Using unified LaTeX pipeline\n");
-                    
+
                     // Read the source file content
                     char* source_content = read_text_file(input_file);
                     if (!source_content) {
@@ -613,20 +616,20 @@ int exec_convert(int argc, char* argv[]) {
                         pool_destroy(temp_pool);
                         return 1;
                     }
-                    
+
                     // Create arena for document model
                     Pool* doc_pool = pool_create();
                     Arena* doc_arena = arena_create_default(doc_pool);
-                    
+
                     // Create font manager for math typesetting
                     tex::TFMFontManager* fonts = tex::create_font_manager(doc_arena);
-                    
+
                     // Build document model
                     tex::TexDocumentModel* doc = tex::doc_model_from_string(
                         source_content, strlen(source_content), doc_arena, fonts);
-                    
+
                     free(source_content);
-                    
+
                     if (!doc || !doc->root) {
                         printf("Error: Unified pipeline - document model creation failed\n");
                         arena_destroy(doc_arena);
@@ -634,21 +637,21 @@ int exec_convert(int argc, char* argv[]) {
                         pool_destroy(temp_pool);
                         return 1;
                     }
-                    
+
                     // Render to HTML
                     StrBuf* html_buf = strbuf_new_cap(8192);
                     tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::defaults();
                     opts.standalone = full_document;
                     opts.pretty_print = true;
-                    
+
                     bool success = tex::doc_model_to_html(doc, html_buf, opts);
-                    
+
                     if (success && html_buf->length > 0) {
                         full_doc_output = std::string(html_buf->str, html_buf->length);
                     } else {
                         printf("Error: Unified pipeline - HTML rendering failed\n");
                     }
-                    
+
                     strbuf_free(html_buf);
                     arena_destroy(doc_arena);
                     pool_destroy(doc_pool);
@@ -1091,11 +1094,11 @@ int main(int argc, char *argv[]) {
         } else {
             // DVI output mode (original behavior)
             const char* default_dvi = "/tmp/lambda_math.dvi";
-            
+
             // If only dumping and no output file specified, pass NULL
-            const char* dvi_out = (dump_ast || dump_boxes) && !output_file 
+            const char* dvi_out = (dump_ast || dump_boxes) && !output_file
                                   ? NULL : (output_file ? output_file : default_dvi);
-            
+
             // If neither dump option and default output, still write DVI
             if (!dump_ast && !dump_boxes && !output_file) {
                 dvi_out = default_dvi;
@@ -1107,6 +1110,128 @@ int main(int argc, char *argv[]) {
         log_debug("math command completed with result: %d", exit_code);
         log_finish();
         return exit_code;
+    }
+
+    // Handle typeset-math command - comprehensive math typesetting for testing framework
+    log_debug("Checking for typeset-math command");
+    if (argc >= 2 && strcmp(argv[1], "typeset-math") == 0) {
+        log_debug("Entering typeset-math command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Math Typesetter v1.0\n\n");
+            printf("Usage: %s typeset-math \"<formula>\" [options]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  Typesets a LaTeX math formula and outputs AST, HTML, and DVI formats.\n");
+            printf("  This command is designed for the LaTeX math test framework and produces\n");
+            printf("  all three outputs simultaneously for comparison testing.\n");
+            printf("\nOptions:\n");
+            printf("  --output-ast FILE    Output AST as JSON (required for testing)\n");
+            printf("  --output-html FILE   Output HTML snippet (required for testing)\n");
+            printf("  --output-dvi FILE    Output DVI file (required for testing)\n");
+            printf("  -h, --help           Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s typeset-math \"\\\\frac{a}{b}\" \\\\\n", argv[0]);
+            printf("      --output-ast /tmp/test.ast.json \\\\\n");
+            printf("      --output-html /tmp/test.html \\\\\n");
+            printf("      --output-dvi /tmp/test.dvi\n");
+            printf("\nOutput Formats:\n");
+            printf("  AST (JSON):  MathLive-compatible abstract syntax tree\n");
+            printf("  HTML:        Semantic HTML with math structure classes\n");
+            printf("  DVI:         TeX Device Independent format for precise comparison\n");
+            printf("\nNotes:\n");
+            printf("  - Formulas are rendered in display math style\n");
+            printf("  - All three outputs are generated from the same parse\n");
+            printf("  - Check log.txt for detailed [MATH] tracing output\n");
+            log_finish();
+            return 0;
+        }
+
+        // Parse arguments
+        const char* formula = NULL;
+        const char* ast_file = NULL;
+        const char* html_file = NULL;
+        const char* dvi_file = NULL;
+
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--output-ast") == 0) {
+                if (i + 1 < argc) {
+                    ast_file = argv[++i];
+                } else {
+                    printf("Error: --output-ast option requires a file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--output-html") == 0) {
+                if (i + 1 < argc) {
+                    html_file = argv[++i];
+                } else {
+                    printf("Error: --output-html option requires a file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--output-dvi") == 0) {
+                if (i + 1 < argc) {
+                    dvi_file = argv[++i];
+                } else {
+                    printf("Error: --output-dvi option requires a file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (argv[i][0] != '-') {
+                // Positional argument is the formula
+                formula = argv[i];
+            } else {
+                printf("Error: Unknown option '%s'\n", argv[i]);
+                log_finish();
+                return 1;
+            }
+        }
+
+        if (!formula) {
+            printf("Error: No math formula provided\n");
+            printf("Usage: %s typeset-math \"<formula>\" --output-ast FILE --output-html FILE --output-dvi FILE\n", argv[0]);
+            printf("Try '%s typeset-math --help' for more information.\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        int exit_code = 0;
+
+        // Generate all three outputs
+        // 1. AST output
+        if (ast_file) {
+            exit_code = render_math_to_ast_json(formula, ast_file);
+            if (exit_code != 0) {
+                fprintf(stderr, "Error: Failed to generate AST JSON\n");
+                log_finish();
+                return exit_code;
+            }
+        }
+
+        // 2. HTML output
+        if (html_file) {
+            exit_code = render_math_to_html(formula, html_file, false);  // false = snippet, not standalone
+            if (exit_code != 0) {
+                fprintf(stderr, "Error: Failed to generate HTML\n");
+                log_finish();
+                return exit_code;
+            }
+        }
+
+        // 3. DVI output
+        if (dvi_file) {
+            exit_code = render_math_to_dvi(formula, dvi_file, false, false);
+            if (exit_code != 0) {
+                fprintf(stderr, "Error: Failed to generate DVI\n");
+                log_finish();
+                return exit_code;
+            }
+        }
+
+        log_debug("typeset-math command completed successfully");
+        log_finish();
+        return 0;
     }
 
     // Handle render command
@@ -1287,7 +1412,7 @@ int main(int argc, char *argv[]) {
         const char* input_ext = strrchr(html_file, '.');
         bool is_graph_input = false;
         if (input_ext) {
-            if (strcmp(input_ext, ".mmd") == 0 || 
+            if (strcmp(input_ext, ".mmd") == 0 ||
                 strcmp(input_ext, ".d2") == 0 ||
                 strcmp(input_ext, ".dot") == 0 ||
                 strcmp(input_ext, ".gv") == 0) {
@@ -1301,7 +1426,7 @@ int main(int argc, char *argv[]) {
         // Handle graph inputs - convert to SVG first, then render if needed
         if (is_graph_input) {
             log_info("Detected graph input format");
-            
+
             // Read graph file
             char* graph_content = read_text_file(html_file);
             if (!graph_content) {
@@ -1309,7 +1434,7 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Create input using InputManager directly (no URL needed for graph parsing)
             Input* input = InputManager::create_input(nullptr);
             if (!input) {
@@ -1319,7 +1444,7 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
             log_debug("Created input for graph parsing, parsing content...");
-            
+
             // Parse graph content
             if (strcmp(input_ext, ".mmd") == 0) {
                 log_debug("Parsing Mermaid graph");
@@ -1333,13 +1458,13 @@ int main(int argc, char *argv[]) {
             }
             free(graph_content);
             log_debug("Graph parsed, checking result...");
-            
+
             if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to parse graph file '%s'\n", html_file);
                 log_finish();
                 return 1;
             }
-            
+
             // Layout graph using Dagre
             GraphLayout* layout = layout_graph(input->root.element);
             if (!layout) {
@@ -1347,7 +1472,7 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Generate SVG from layout
             Item svg_item = graph_to_svg(input->root.element, layout, input);
             if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
@@ -1356,10 +1481,10 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Update input root to SVG
             input->root = svg_item;
-            
+
             // Determine output format
             const char* output_ext = strrchr(output_file, '.');
             if (output_ext && strcmp(output_ext, ".svg") == 0) {
@@ -1386,7 +1511,7 @@ int main(int argc, char *argv[]) {
                     return 1;
                 }
                 write_text_file(temp_svg, svg_str->chars);
-                
+
                 // Render the SVG using the appropriate renderer
                 int exit_code = 0;
                 if (output_ext && strcmp(output_ext, ".pdf") == 0) {
@@ -1399,14 +1524,14 @@ int main(int argc, char *argv[]) {
                     printf("Error: Unsupported output format for graph rendering: %s\n", output_ext);
                     exit_code = 1;
                 }
-                
+
                 // Clean up temp file
                 unlink(temp_svg);
-                
+
                 if (exit_code == 0) {
                     printf("Graph rendered successfully to '%s'\n", output_file);
                 }
-                
+
                 free_graph_layout(layout);
                 log_finish();
                 return exit_code;
@@ -1598,8 +1723,8 @@ int main(int argc, char *argv[]) {
 
             // Get file extension from Content-Type
             effective_ext = content_type_to_extension(response->content_type);
-            log_info("HTTP Content-Type: %s -> extension: %s", 
-                     response->content_type ? response->content_type : "(none)", 
+            log_info("HTTP Content-Type: %s -> extension: %s",
+                     response->content_type ? response->content_type : "(none)",
                      effective_ext ? effective_ext : "(none)");
 
             // Write to temp file with appropriate extension
@@ -1613,7 +1738,7 @@ int main(int argc, char *argv[]) {
                     // Find where to inject the base tag (after <head> or at start of content)
                     const char* head_tag = strcasestr(response->data, "<head");
                     const char* html_tag = strcasestr(response->data, "<html");
-                    
+
                     if (head_tag) {
                         // Find the end of the <head> tag
                         const char* head_end = strchr(head_tag, '>');
@@ -1666,16 +1791,16 @@ int main(int argc, char *argv[]) {
         // Detect file type by extension
         const char* ext = effective_ext ? effective_ext : strrchr(filename, '.');
         int exit_code;
-        
+
         // Check if this is a graph file that needs conversion
         bool is_graph_file = ext && (strcmp(ext, ".mmd") == 0 ||
                                       strcmp(ext, ".d2") == 0 ||
                                       strcmp(ext, ".dot") == 0 ||
                                       strcmp(ext, ".gv") == 0);
-        
+
         if (is_graph_file) {
             log_info("Detected graph file, converting to SVG for viewing");
-            
+
             // Read graph file
             char* graph_content = read_text_file(filename);
             if (!graph_content) {
@@ -1683,7 +1808,7 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Create input for graph parsing
             Input* input = InputManager::create_input(nullptr);
             if (!input) {
@@ -1692,7 +1817,7 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Parse graph content based on format
             if (strcmp(ext, ".mmd") == 0) {
                 log_debug("Parsing Mermaid graph");
@@ -1705,13 +1830,13 @@ int main(int argc, char *argv[]) {
                 parse_graph_dot(input, graph_content);
             }
             free(graph_content);
-            
+
             if (get_type_id(input->root) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to parse graph file '%s'\n", filename);
                 log_finish();
                 return 1;
             }
-            
+
             // Layout graph using Dagre
             GraphLayout* layout = layout_graph(input->root.element);
             if (!layout) {
@@ -1719,7 +1844,7 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Generate SVG from layout
             Item svg_item = graph_to_svg(input->root.element, layout, input);
             if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
@@ -1728,7 +1853,7 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             // Format SVG and write to temp file
             String* svg_str = format_xml(input->pool, svg_item);
             if (!svg_str) {
@@ -1737,19 +1862,19 @@ int main(int argc, char *argv[]) {
                 log_finish();
                 return 1;
             }
-            
+
             const char* temp_svg = "/tmp/lambda_graph_view.svg";
             write_text_file(temp_svg, svg_str->chars);
             write_text_file("/tmp/lambda_graph_debug.svg", svg_str->chars);  // debug copy
             free_graph_layout(layout);
-            
+
             // View the temp SVG file
             log_info("Opening graph SVG in viewer: %s", temp_svg);
             exit_code = view_doc_in_window_with_events(temp_svg, event_file, latex_flavor);
-            
+
             // Clean up temp file after viewing
             unlink(temp_svg);
-            
+
             log_debug("view command completed with result: %d", exit_code);
             log_finish();
             return exit_code;

@@ -1,0 +1,27 @@
+{
+  "type": "FRAC",
+  "ruleThickness": -1,
+  "numer": {
+    "type": "ORD",
+    "codepoint": 49,
+    "value": "1"
+  },
+  "denom": {
+    "type": "ROW",
+    "body": [
+      {
+        "type": "PHANTOM",
+        "body": {
+          "type": "BIN",
+          "codepoint": 43,
+          "value": "+"
+        }
+      },
+      {
+        "type": "ORD",
+        "codepoint": 50,
+        "value": "2"
+      }
+    ]
+  }
+}

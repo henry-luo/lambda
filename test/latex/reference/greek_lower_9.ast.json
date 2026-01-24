@@ -1,0 +1,33 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 11,
+      "command": "alpha",
+      "value": "\u000b"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 12,
+      "command": "beta",
+      "value": "\f"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ORD",
+      "codepoint": 13,
+      "command": "gamma",
+      "value": "\r"
+    }
+  ]
+}
