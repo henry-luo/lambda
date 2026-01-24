@@ -1,0 +1,39 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "OP",
+        "codepoint": 0,
+        "command": "oint"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "ORD",
+      "codepoint": 70,
+      "value": "F"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 1,
+      "command": "cdot",
+      "value": "\u0001"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 100,
+      "value": "d"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 114,
+      "value": "r"
+    }
+  ]
+}

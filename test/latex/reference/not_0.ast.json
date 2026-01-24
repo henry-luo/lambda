@@ -1,0 +1,166 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 61,
+        "value": "="
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 60,
+        "value": "<"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 20,
+        "command": "le",
+        "value": "\u0014"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 28,
+        "command": "ll",
+        "value": "\u001c"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 30,
+        "command": "prec",
+        "value": "\u001e"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 22,
+        "command": "preceq",
+        "value": "\u0016"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 26,
+        "command": "subset",
+        "value": "\u001a"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 18,
+        "command": "subseteq",
+        "value": "\u0012"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 118,
+        "command": "sqsubseteq",
+        "value": "v"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "BIN",
+        "codepoint": 1,
+        "command": "lhd",
+        "value": "\u0001"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "BIN",
+        "codepoint": 2,
+        "command": "unlhd",
+        "value": "\u0002"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "NOT",
+      "body": {
+        "type": "REL",
+        "codepoint": 16,
+        "command": "asymp",
+        "value": "\u0010"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 1,
+      "command": "Delta",
+      "value": "\u0001"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 1,
+      "command": "Delta",
+      "value": "\u0001"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 112,
+      "value": "p"
+    },
+    {
+      "type": "REL",
+      "codepoint": 21,
+      "command": "geq",
+      "value": "\u0015"
+    },
+    {
+      "type": "FRAC",
+      "ruleThickness": -1,
+      "numer": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "hbar"
+      },
+      "denom": {
+        "type": "ORD",
+        "codepoint": 50,
+        "value": "2"
+      }
+    }
+  ]
+}

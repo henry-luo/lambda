@@ -1,0 +1,141 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{A}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "limits"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 66,
+        "value": "B"
+      }
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{A}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "limits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 66,
+        "value": "B"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{A}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 66,
+        "value": "B"
+      }
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 3
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "mathop{A}"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      }
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "nolimits"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 66,
+        "value": "B"
+      }
+    }
+  ]
+}

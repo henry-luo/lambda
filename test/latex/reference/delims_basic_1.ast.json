@@ -1,0 +1,30 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "OPEN",
+      "codepoint": 91,
+      "value": "["
+    },
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "CLOSE",
+      "codepoint": 93,
+      "value": "]"
+    }
+  ]
+}

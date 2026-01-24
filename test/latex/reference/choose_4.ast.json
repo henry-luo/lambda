@@ -1,0 +1,33 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "foo"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 98,
+      "value": "b"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 99,
+      "value": "c"
+    },
+    {
+      "type": "ACCENT"
+    }
+  ]
+}

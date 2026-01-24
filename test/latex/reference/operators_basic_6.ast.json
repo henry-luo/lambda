@@ -1,0 +1,32 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 97,
+      "value": "a"
+    },
+    {
+      "type": "REL",
+      "codepoint": 50,
+      "command": "in",
+      "value": "2"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 66,
+      "value": "B"
+    },
+    {
+      "type": "REL",
+      "codepoint": 26,
+      "command": "subset",
+      "value": "\u001a"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 67,
+      "value": "C"
+    }
+  ]
+}

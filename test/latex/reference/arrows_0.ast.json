@@ -1,0 +1,21 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "underrightarrow{\\mathrm{word}}"
+    },
+    {
+      "type": "REL",
+      "codepoint": 33,
+      "command": "rightarrow",
+      "value": "!"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "underleftarrow{\\mathrm{word}}"
+    }
+  ]
+}

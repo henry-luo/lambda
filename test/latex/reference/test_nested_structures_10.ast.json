@@ -1,0 +1,36 @@
+{
+  "type": "DELIMITED",
+  "body": {
+    "type": "ARRAY",
+    "body": {
+      "type": "ARRAY_ROW",
+      "body": {
+        "type": "ARRAY_CELL",
+        "body": {
+          "type": "ROW",
+          "body": [
+            {
+              "type": "ARRAY",
+              "body": {
+                "type": "ARRAY_ROW",
+                "body": {
+                  "type": "ARRAY_CELL",
+                  "body": {
+                    "type": "ROW",
+                    "body": [
+                      {
+                        "type": "ORD",
+                        "codepoint": 97,
+                        "value": "a"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 101,
+        "value": "e"
+      },
+      "superscript": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 105,
+            "value": "i"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 25,
+            "command": "pi",
+            "value": "\u0019"
+          }
+        ]
+      }
+    },
+    {
+      "type": "BIN",
+      "codepoint": 43,
+      "value": "+"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 49,
+      "value": "1"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "ORD",
+      "codepoint": 48,
+      "value": "0"
+    }
+  ]
+}

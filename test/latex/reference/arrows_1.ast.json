@@ -1,0 +1,44 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ACCENT",
+      "body": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "ORD",
+            "codepoint": 119,
+            "value": "w"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 111,
+            "value": "o"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 114,
+            "value": "r"
+          },
+          {
+            "type": "ORD",
+            "codepoint": 100,
+            "value": "d"
+          }
+        ]
+      }
+    },
+    {
+      "type": "REL",
+      "codepoint": 32,
+      "command": "leftarrow",
+      "value": " "
+    },
+    {
+      "type": "ORD",
+      "codepoint": 0,
+      "command": "underleftrightarrow{\\mathrm{word}}"
+    }
+  ]
+}

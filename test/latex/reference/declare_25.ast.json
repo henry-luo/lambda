@@ -1,0 +1,28 @@
+{
+  "type": "SCRIPTS",
+  "body": {
+    "type": "ORD",
+    "codepoint": 113,
+    "value": "q"
+  },
+  "subscript": {
+    "type": "ROW",
+    "body": [
+      {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "WildCard"
+      },
+      {
+        "type": "PUNCT",
+        "codepoint": 44,
+        "value": ","
+      },
+      {
+        "type": "ORD",
+        "codepoint": 0,
+        "command": "WildCard"
+      }
+    ]
+  }
+}

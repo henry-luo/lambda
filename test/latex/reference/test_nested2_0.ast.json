@@ -1,0 +1,26 @@
+{
+  "type": "DELIMITED",
+  "body": {
+    "type": "DELIMITED",
+    "body": {
+      "type": "DELIMITED",
+      "body": {
+        "type": "DELIMITED",
+        "body": {
+          "type": "FRAC",
+          "ruleThickness": -1,
+          "numer": {
+            "type": "ORD",
+            "codepoint": 97,
+            "value": "a"
+          },
+          "denom": {
+            "type": "ORD",
+            "codepoint": 98,
+            "value": "b"
+          }
+        }
+      }
+    }
+  }
+}

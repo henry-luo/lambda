@@ -1,0 +1,58 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 27,
+        "command": "sigma",
+        "value": "\u001b"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 11,
+        "command": "alpha",
+        "value": "\u000b"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 28,
+        "command": "tau",
+        "value": "\u001c"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 12,
+        "command": "beta",
+        "value": "\f"
+      }
+    },
+    {
+      "type": "SPACE",
+      "width": 18
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 33,
+        "command": "omega",
+        "value": "!"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 13,
+        "command": "gamma",
+        "value": "\r"
+      }
+    }
+  ]
+}

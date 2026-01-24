@@ -1,0 +1,37 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 82,
+        "value": "R"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 110,
+        "value": "n"
+      }
+    },
+    {
+      "type": "REL",
+      "codepoint": 33,
+      "command": "to",
+      "value": "!"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 67,
+        "value": "C"
+      },
+      "superscript": {
+        "type": "ORD",
+        "codepoint": 109,
+        "value": "m"
+      }
+    }
+  ]
+}

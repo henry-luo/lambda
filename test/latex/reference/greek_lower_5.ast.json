@@ -1,0 +1,17 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 18,
+      "command": "theta",
+      "value": "\u0012"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 35,
+      "command": "vartheta",
+      "value": "#"
+    }
+  ]
+}

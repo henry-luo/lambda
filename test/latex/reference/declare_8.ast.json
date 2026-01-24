@@ -1,0 +1,146 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 34,
+      "command": "varepsilon",
+      "value": "\""
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 34,
+        "command": "varepsilon",
+        "value": "\""
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 49,
+        "value": "1"
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 84,
+        "value": "T"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 34,
+        "command": "varepsilon",
+        "value": "\""
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 84,
+        "value": "T"
+      },
+      "subscript": {
+        "type": "SCRIPTS",
+        "body": {
+          "type": "ORD",
+          "codepoint": 34,
+          "command": "varepsilon",
+          "value": "\""
+        },
+        "subscript": {
+          "type": "ORD",
+          "codepoint": 49,
+          "value": "1"
+        }
+      }
+    },
+    {
+      "type": "PUNCT",
+      "codepoint": 44,
+      "value": ","
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 84,
+        "value": "T"
+      },
+      "subscript": {
+        "type": "ROW",
+        "body": [
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 34,
+              "command": "varepsilon",
+              "value": "\""
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 49,
+              "value": "1"
+            }
+          },
+          {
+            "type": "PUNCT",
+            "codepoint": 44,
+            "value": ","
+          },
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 34,
+              "command": "varepsilon",
+              "value": "\""
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 50,
+              "value": "2"
+            }
+          },
+          {
+            "type": "PUNCT",
+            "codepoint": 44,
+            "value": ","
+          },
+          {
+            "type": "SCRIPTS",
+            "body": {
+              "type": "ORD",
+              "codepoint": 34,
+              "command": "varepsilon",
+              "value": "\""
+            },
+            "subscript": {
+              "type": "ORD",
+              "codepoint": 51,
+              "value": "3"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

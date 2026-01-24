@@ -1,0 +1,52 @@
+{
+  "type": "ROW",
+  "body": [
+    {
+      "type": "ORD",
+      "codepoint": 1,
+      "command": "Delta",
+      "value": "\u0001"
+    },
+    {
+      "type": "ORD",
+      "codepoint": 120,
+      "value": "x"
+    },
+    {
+      "type": "REL",
+      "codepoint": 61,
+      "value": "="
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 50,
+        "value": "2"
+      }
+    },
+    {
+      "type": "BIN",
+      "codepoint": 45,
+      "value": "-"
+    },
+    {
+      "type": "SCRIPTS",
+      "body": {
+        "type": "ORD",
+        "codepoint": 120,
+        "value": "x"
+      },
+      "subscript": {
+        "type": "ORD",
+        "codepoint": 49,
+        "value": "1"
+      }
+    }
+  ]
+}
