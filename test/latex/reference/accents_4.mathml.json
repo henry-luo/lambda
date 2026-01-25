@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\hat{x+y} \\quad \\bar{a+b}",
+  "mathml": "<mrow><mover accent=\"true\"><mrow><mi>x</mi><mo>+</mo><mi>y</mi></mrow><mo>&#x005e;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><mo>&#x00af;</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00af;"
+      }
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "format": "mathml",
+  "latex": "\\det A, \\dim V, \\ker T, \\mathrm{im}\\, T",
+  "mathml": "<mrow><mo>det</mo><mi>A</mi><mo separator=\"true\">,</mo><mo>dim</mo><mi>V</mi><mo separator=\"true\">,</mo><mo>ker</mo><mi>T</mi><mo separator=\"true\">,</mo><mi mathvariant=\"normal\">im</mi><mspace width=\"0.16666666666666666em\"/><mi>T</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "det"
+      },
+      {
+        "tag": "mi",
+        "content": "A"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "dim"
+      },
+      {
+        "tag": "mi",
+        "content": "V"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "ker"
+      },
+      {
+        "tag": "mi",
+        "content": "T"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "im"
+      },
+      {
+        "tag": "mi",
+        "content": "T"
+      }
+    ]
+  }
+}

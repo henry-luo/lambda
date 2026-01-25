@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\hat{x}",
+  "mathml": "<mover accent=\"true\"><mi>x</mi><mo>&#x005e;</mo></mover>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      }
+    ]
+  }
+}

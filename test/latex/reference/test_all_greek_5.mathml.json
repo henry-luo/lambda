@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "e^{i\\pi} + 1 = 0",
+  "mathml": "<mrow><msup><mi>e</mi><mrow><mi>i</mi><mo>&#8290;</mo><mi>&#x03c0;</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x03c0;"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      }
+    ]
+  }
+}

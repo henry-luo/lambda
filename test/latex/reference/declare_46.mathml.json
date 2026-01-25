@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "i",
+  "mathml": "<mi>i</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "i"
+      }
+    ]
+  }
+}

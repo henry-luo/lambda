@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "a^{{1+2} \\over 2} \\over b^{2 \\over 3}",
+  "mathml": "<mfrac><msup><mi>a</mi><mfrac><mrow><mn>1</mn><mo>+</mo><mn>2</mn></mrow><mn>2</mn></mfrac></msup><msup><mi>b</mi><mfrac><mn>2</mn><mn>3</mn></mfrac></msup></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      }
+    ]
+  }
+}

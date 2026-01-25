@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "a \\choose b",
+  "mathml": "<mrow><mo>(</mo><mtable><mtr><mi>a</mi></mtr><mtr><mi>b</mi></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

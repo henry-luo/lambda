@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\longleftarrow \\longrightarrow \\longleftrightarrow \\Longleftarrow \\Longrightarrow \\Longleftrightarrow",
+  "mathml": "<mrow><munderover >←<munder >→</munder></munderover><munderover ><mo>⟸</mo></munderover><mo>⟹</mo><mo>⟺</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "munder",
+        "content": "→"
+      },
+      {
+        "tag": "mo",
+        "content": "⟸"
+      },
+      {
+        "tag": "mo",
+        "content": "⟹"
+      },
+      {
+        "tag": "mo",
+        "content": "⟺"
+      }
+    ]
+  }
+}

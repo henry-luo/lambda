@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "{}^a",
+  "mathml": "<msup><mi>a</mi></msup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "a \\times b \\div c",
+  "mathml": "<mrow><mi>a</mi><mo>&#215;</mo><mi>b</mi><mo>÷</mo><mi>c</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#215;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "÷"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

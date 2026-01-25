@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{2}",
+  "mathml": "<msqrt><mn>2</mn></msqrt>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

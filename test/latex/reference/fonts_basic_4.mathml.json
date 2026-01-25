@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\mathbb{R}",
+  "mathml": "<mi>ℝ</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ℝ"
+      }
+    ]
+  }
+}

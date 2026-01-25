@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "a_{b_c}",
+  "mathml": "<msub><mi>a</mi><msub><mi>b</mi><mi>c</mi></msub></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

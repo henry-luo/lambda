@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\gamma",
+  "mathml": "<mi>γ</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "γ"
+      }
+    ]
+  }
+}

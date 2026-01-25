@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "a + \\foo b \\choose c \\bar + d",
+  "mathml": "<mrow><mo>(</mo><mtable><mtr><mrow><mi>a</mi><mo>+</mo><merror></merror><mi>b</mi></mrow></mtr><mtr><mrow><mi>c</mi><mover accent=\"true\"><mo>+</mo><mo>&#x00af;</mo></mover><mi>d</mi></mrow></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00af;"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

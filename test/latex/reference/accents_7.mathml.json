@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}",
+  "mathml": "<mrow><mover >→</mover><mspace width=\"1em\"/><mover >←</mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mover",
+        "content": "→"
+      },
+      {
+        "tag": "mover",
+        "content": "←"
+      }
+    ]
+  }
+}

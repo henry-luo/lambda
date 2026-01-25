@@ -1,0 +1,66 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}}{\\begin{pmatrix} e & f \\\\ g & h \\end{pmatrix}}",
+  "mathml": "<mfrac><mrow><mo>(</mo><mtable columnalign=\"center center center center center center center center center center \"><mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd></mtr><mtr><mtd><mi>c</mi></mtd><mtd><mi>d</mi></mtd></mtr></mtable><mo>)</mo></mrow><mrow><mo>(</mo><mtable columnalign=\"center center center center center center center center center center \"><mtr><mtd><mi>e</mi></mtd><mtd><mi>f</mi><mo>&#x2061;</mo></mtd></mtr><mtr><mtd><mi>g</mi><mo>&#x2061;</mo></mtd><mtd><mi>h</mi></mtd></mtr></mtable><mo>)</mo></mrow></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "h"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "x_{i,j}",
+  "mathml": "<msub><mi>x</mi><mrow><mi>i</mi><mo separator=\"true\">,</mo><mi>j</mi></mrow></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      }
+    ]
+  }
+}

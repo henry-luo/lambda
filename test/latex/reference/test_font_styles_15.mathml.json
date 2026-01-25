@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\mathbb{R}^n \\to \\mathbb{C}^m",
+  "mathml": "<mrow><msup><mi>ℝ</mi><mi>n</mi></msup><mo>→</mo><msup><mi>ℂ</mi><mi>m</mi></msup></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ℝ"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "→"
+      },
+      {
+        "tag": "mi",
+        "content": "ℂ"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      }
+    ]
+  }
+}

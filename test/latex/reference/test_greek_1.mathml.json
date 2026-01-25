@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\epsilon \\zeta \\eta \\theta",
+  "mathml": "<mrow><mi>ϵ</mi><mo>&#8290;</mo><mi>ζ</mi><mo>&#8290;</mo><mi>η</mi><mo>&#8290;</mo><mi>θ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ϵ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ζ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "η"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "θ"
+      }
+    ]
+  }
+}

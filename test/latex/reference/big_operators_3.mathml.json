@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\iint_D f(x,y) \\, dA",
+  "mathml": "<mrow><msub><mo>∬</mo><mi>D</mi></msub><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mrow><mi>x</mi><mo separator=\"true\">,</mo><mi>y</mi></mrow><mo>)</mo></mrow><mspace width=\"0.16666666666666666em\"/><mi>d</mi><mo>&#8290;</mo><mi>A</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∬"
+      },
+      {
+        "tag": "mi",
+        "content": "D"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "A"
+      }
+    ]
+  }
+}

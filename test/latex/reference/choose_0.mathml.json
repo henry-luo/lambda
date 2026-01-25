@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "a +  b",
+  "mathml": "<mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

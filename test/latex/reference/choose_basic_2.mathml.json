@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\binom{n+1}{k+1}",
+  "mathml": "<mrow><mo>(</mo><mtable><mtr><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow></mtr><mtr><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

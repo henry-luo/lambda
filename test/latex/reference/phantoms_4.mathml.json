@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "a \\! b \\quad a b",
+  "mathml": "<mrow><mi>a</mi><mspace width=\"-0.16666666666666666em\"/><mi>b</mi><mspace width=\"1em\"/><mi>a</mi><mo>&#8290;</mo><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

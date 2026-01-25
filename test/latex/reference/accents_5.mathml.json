@@ -1,0 +1,9 @@
+{
+  "format": "mathml",
+  "latex": "\\overline{a+b} \\quad \\underline{x+y}",
+  "mathml": "<mspace width=\"1em\"/>",
+  "structure": {
+    "type": "root",
+    "children": []
+  }
+}

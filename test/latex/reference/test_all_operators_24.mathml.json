@@ -1,0 +1,46 @@
+{
+  "format": "mathml",
+  "latex": "\\langle a \\rangle \\quad \\lfloor a \\rfloor \\quad \\lceil a \\rceil",
+  "mathml": "<mrow><mo>⟨</mo><mi>a</mi><mo>⟩</mo><mspace width=\"1em\"/><mo>⌊</mo><mi>a</mi><mo>⌋</mo><mspace width=\"1em\"/><mo>⌈</mo><mi>a</mi><mo>⌉</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "⟨"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "⟩"
+      },
+      {
+        "tag": "mo",
+        "content": "⌊"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "⌋"
+      },
+      {
+        "tag": "mo",
+        "content": "⌈"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "⌉"
+      }
+    ]
+  }
+}

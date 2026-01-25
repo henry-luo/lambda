@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\varepsilon_\\WildCard",
+  "mathml": "<msub><mi>ε</mi><merror></merror></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ε"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      }
+    ]
+  }
+}

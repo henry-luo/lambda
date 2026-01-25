@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\infty \\quad \\partial \\quad \\nabla \\quad \\forall \\quad \\exists",
+  "mathml": "<mrow><mi>&#x221e;</mi><mspace width=\"1em\"/><mi>∂</mi><mspace width=\"1em\"/><mi>∇</mi><mspace width=\"1em\"/><mi>&#x2200;</mi><mspace width=\"1em\"/><mi>&#x2203;</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "&#x221e;"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "∇"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x2200;"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x2203;"
+      }
+    ]
+  }
+}

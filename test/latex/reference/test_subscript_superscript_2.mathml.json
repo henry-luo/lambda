@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "x_i^2",
+  "mathml": "<msubsup><mi>x</mi><mi>i</mi><mn>2</mn></msubsup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

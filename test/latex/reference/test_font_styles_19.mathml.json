@@ -1,0 +1,78 @@
+{
+  "format": "mathml",
+  "latex": "\\sin x, \\cos x, \\tan x, \\log x, \\ln x, \\exp x",
+  "mathml": "<mrow><mo>sin</mo><mi>x</mi><mo separator=\"true\">,</mo><mo>cos</mo><mi>x</mi><mo separator=\"true\">,</mo><mo>tan</mo><mi>x</mi><mo separator=\"true\">,</mo><mo>log</mo><mi>x</mi><mo separator=\"true\">,</mo><mo>ln</mo><mi>x</mi><mo separator=\"true\">,</mo><mo>exp</mo><mi>x</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "sin"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "cos"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "tan"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "log"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "ln"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": "exp"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

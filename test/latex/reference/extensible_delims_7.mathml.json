@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\left\\| \\vec{v} \\right\\|",
+  "mathml": "<mrow><mo>\\|</mo><mover accent=\"true\"><mi>v</mi><mo>&#x20d7;</mo></mover><mo>\\|</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "\\|"
+      },
+      {
+        "tag": "mi",
+        "content": "v"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x20d7;"
+      },
+      {
+        "tag": "mo",
+        "content": "\\|"
+      }
+    ]
+  }
+}

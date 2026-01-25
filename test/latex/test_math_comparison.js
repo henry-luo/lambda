@@ -38,6 +38,7 @@ const __dirname = path.dirname(__filename);
 import { compareAST } from './comparators/ast_comparator.js';
 import { compareHTML } from './comparators/html_comparator.js';
 import { compareDVI, validateDVI } from './comparators/dvi_comparator.js';
+import { compareASTToMathML } from './comparators/mathml_comparator.js';
 
 // Configuration
 const CONFIG = {
@@ -434,16 +435,25 @@ async function runExtendedTest(testInfo, options) {
         const testBaseName = path.basename(testInfo.file, '.json');
         const refBaseName = `${testBaseName}_${expr.index}`;
 
-        // Compare AST
+        // Compare AST against MathML reference (authoritative)
         let astResult = null;
         if (options.compare === 'all' || options.compare === 'ast') {
+            const refMathMLPath = path.join(REFERENCE_DIR, `${refBaseName}.mathml.json`);
             const refAstPath = path.join(REFERENCE_DIR, `${refBaseName}.ast.json`);
-            if (fs.existsSync(refAstPath) && lambdaOutput.ast) {
+
+            if (fs.existsSync(refMathMLPath) && lambdaOutput.ast) {
+                // Use MathML reference (authoritative from MathLive)
+                const refMathML = JSON.parse(fs.readFileSync(refMathMLPath, 'utf-8'));
+                astResult = compareASTToMathML(lambdaOutput.ast, refMathML);
+            } else if (fs.existsSync(refAstPath) && lambdaOutput.ast) {
+                // Fallback to Lambda AST reference (for consistency testing)
                 const refAst = JSON.parse(fs.readFileSync(refAstPath, 'utf-8'));
                 astResult = compareAST(lambdaOutput.ast, refAst);
+                // Mark as self-reference with reduced score
+                astResult.selfReference = true;
+                astResult.passRate = Math.min(astResult.passRate, 50); // Cap at 50% for self-reference
             } else if (lambdaOutput.ast) {
-                // If no reference but Lambda produced AST, give partial credit
-                astResult = { passRate: 50, differences: [{ issue: 'No reference AST available' }] };
+                astResult = { passRate: 0, differences: [{ issue: 'No reference AST available' }] };
             } else {
                 astResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce AST' }] };
             }
@@ -500,12 +510,21 @@ async function runExtendedTest(testInfo, options) {
             }
         }
 
-        // DVI comparison (optional for extended tests)
+        // DVI comparison against pdfTeX reference (authoritative)
         let dviResult = null;
         if (options.compare === 'all' || options.compare === 'dvi') {
+            const refPdfTexDviPath = path.join(REFERENCE_DIR, `${refBaseName}.pdftex.dvi`);
             const refDviPath = path.join(REFERENCE_DIR, `${refBaseName}.dvi`);
-            if (lambdaOutput.dvi && fs.existsSync(refDviPath)) {
+
+            if (lambdaOutput.dvi && fs.existsSync(refPdfTexDviPath)) {
+                // Use pdfTeX DVI reference (authoritative)
+                dviResult = compareDVI(lambdaOutput.dvi, refPdfTexDviPath, { tolerance: options.tolerance });
+            } else if (lambdaOutput.dvi && fs.existsSync(refDviPath)) {
+                // Fallback to Lambda DVI reference (for consistency testing)
                 dviResult = compareDVI(lambdaOutput.dvi, refDviPath, { tolerance: options.tolerance });
+                // Mark as self-reference with reduced score
+                dviResult.selfReference = true;
+                dviResult.passRate = Math.min(dviResult.passRate, 50); // Cap at 50% for self-reference
             }
         }
 
