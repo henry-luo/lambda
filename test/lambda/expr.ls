@@ -33,7 +33,8 @@ let d:float = 123
 let nested = {a:678, {b:123, c:456}, d:789}
 nested.a;  nested.b;  nested.c;  nested.d;
 
-<elmt a:12, &{b:34}, c:56>
+let map = {d:78}
+<elmt a:12, {b:34}, c:56, {map}>  // dynamic attrs
 
 "Test range exprs:"
 1 to 0;  // should be []
