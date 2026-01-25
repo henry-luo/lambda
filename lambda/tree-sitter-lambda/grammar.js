@@ -406,7 +406,7 @@ module.exports = grammar({
             seq(choice(linebreak, ';'), $.content),
           )
         ),
-        optional($.content)
+        optional( seq(optional(choice(linebreak, ';')), $.content) )
       ),'>'
     ),
 
