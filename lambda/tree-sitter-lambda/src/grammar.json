@@ -2365,7 +2365,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "_/"
+                  "value": "div"
                 }
               },
               {
@@ -3981,7 +3981,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "_/"
+                  "value": "div"
                 }
               },
               {

@@ -40,7 +40,7 @@ enum ts_symbol_identifiers {
   anon_sym_DASH = 36,
   anon_sym_STAR = 37,
   anon_sym_SLASH = 38,
-  anon_sym__SLASH = 39,
+  anon_sym_div = 39,
   anon_sym_PERCENT = 40,
   anon_sym_CARET = 41,
   anon_sym_EQ_EQ = 42,
