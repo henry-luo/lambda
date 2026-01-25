@@ -1,0 +1,150 @@
+{
+  "format": "mathml",
+  "latex": "f(x) = \\begin{cases}\n\\begin{cases} a & x > 0 \\\\ b & x = 0 \\end{cases} & \\text{if } y > 0 \\\\\n\\begin{cases} c & x > 0 \\\\ d & x = 0 \\end{cases} & \\text{if } y \\leq 0\n\\end{cases}",
+  "mathml": "<mrow><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>x</mi><mo>)</mo></mrow><mo>=</mo><mrow><mo>{</mo><mtable columnalign=\"left left left left left left left left left left \"><mtr><mtd><mrow><mo>{</mo><mtable columnalign=\"left left left left left left left left left left \"><mtr><mtd><mi>a</mi></mtd><mtd><mrow><mi>x</mi><mo>&gt;</mo><mn>0</mn></mrow></mtd></mtr><mtr><mtd><mi>b</mi></mtd><mtd><mrow><mi>x</mi><mo>=</mo><mn>0</mn></mrow></mtd></mtr></mtable></mrow></mtd><mtd><mrow><mtext >if </mtext><mo>&#8290;</mo><mi>y</mi><mo>&gt;</mo><mn>0</mn></mrow></mtd></mtr><mtr><mtd><mrow><mo>{</mo><mtable columnalign=\"left left left left left left left left left left \"><mtr><mtd><mi>c</mi></mtd><mtd><mrow><mi>x</mi><mo>&gt;</mo><mn>0</mn></mrow></mtd></mtr><mtr><mtd><mi>d</mi></mtd><mtd><mrow><mi>x</mi><mo>=</mo><mn>0</mn></mrow></mtd></mtr></mtable></mrow></mtd><mtd><mrow><mtext >if </mtext><mo>&#8290;</mo><mi>y</mi><mo>≤</mo><mn>0</mn></mrow></mtd></mtr></mtable></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mo",
+        "content": "{"
+      },
+      {
+        "tag": "mo",
+        "content": "{"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mtext",
+        "content": "if "
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mo",
+        "content": "{"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mtext",
+        "content": "if "
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "≤"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      }
+    ]
+  }
+}

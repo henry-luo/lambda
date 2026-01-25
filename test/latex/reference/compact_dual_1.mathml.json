@@ -1,0 +1,46 @@
+{
+  "format": "mathml",
+  "latex": "\\derive2{f}+\\derive3{g}",
+  "mathml": "<mrow><merror></merror><mn>2</mn><mi>f</mi><mo>&#x2061;</mo><mo>+</mo><merror></merror><mn>3</mn><mi>g</mi><mo>&#x2061;</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      }
+    ]
+  }
+}

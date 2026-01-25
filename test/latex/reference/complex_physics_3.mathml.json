@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "i\\hbar\\frac{\\partial}{\\partial t}\\Psi = \\hat{H}\\Psi",
+  "mathml": "<mrow><mi>i</mi><mo>&#8290;</mo><mi>ℏ</mi><mfrac><mi>∂</mi><mrow><mi>∂</mi><mo>&#8290;</mo><mi>t</mi></mrow></mfrac><mi>Ψ</mi><mo>=</mo><mover accent=\"true\"><mi>H</mi><mo>&#x005e;</mo></mover><mi>Ψ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "ℏ"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "t"
+      },
+      {
+        "tag": "mi",
+        "content": "Ψ"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mi",
+        "content": "H"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      },
+      {
+        "tag": "mi",
+        "content": "Ψ"
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}}",
+  "mathml": "<msqrt><mrow><mn>1</mn><mo>+</mo><msqrt><mrow><mn>2</mn><mo>+</mo><msqrt><mrow><mn>3</mn><mo>+</mo><msqrt><mrow><mn>4</mn><mo>+</mo><msqrt><mn>5</mn></msqrt></mrow></msqrt></mrow></msqrt></mrow></msqrt></mrow></msqrt>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "4"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "5"
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "<x, y> = 0",
+  "mathml": "<mrow><mo>&lt;</mo><mi>x</mi><mo separator=\"true\">,</mo><mi>y</mi><mo>&gt;</mo><mo>=</mo><mn>0</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "&lt;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "&gt;"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      }
+    ]
+  }
+}

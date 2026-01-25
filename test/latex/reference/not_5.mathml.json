@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\not\\operatorname{R}",
+  "mathml": "<mi>R</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "R"
+      }
+    ]
+  }
+}

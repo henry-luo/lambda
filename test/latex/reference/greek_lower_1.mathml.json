@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\beta",
+  "mathml": "<mi>β</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "β"
+      }
+    ]
+  }
+}

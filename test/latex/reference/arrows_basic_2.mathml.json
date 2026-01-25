@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\leftrightarrow",
+  "mathml": "<mo>↔</mo>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "↔"
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "format": "mathml",
+  "latex": "\\begin{array}{ccc}\n   a & b & c \\\\\n   c &  & d \\\\\n\\\\\n   e & f  \\\\\n   \\end{array}",
+  "mathml": "<mtable columnalign=\"center center center \"><mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd><mtd><mi>c</mi></mtd></mtr><mtr><mtd><mi>c</mi></mtd><mtd></mtd><mtd><mi>d</mi></mtd></mtr><mtr><mtd></mtd><mtd>?</mtd><mtd>?</mtd></mtr><mtr><mtd><mi>e</mi></mtd><mtd><mi>f</mi><mo>&#x2061;</mo></mtd><mtd>?</mtd></mtr></mtable>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mtd",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mtd",
+        "content": null
+      },
+      {
+        "tag": "mtd",
+        "content": "?"
+      },
+      {
+        "tag": "mtd",
+        "content": "?"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mtd",
+        "content": "?"
+      }
+    ]
+  }
+}

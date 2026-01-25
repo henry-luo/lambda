@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\mathrm{d}x \\quad \\mathrm{e}^x \\quad \\mathrm{i}\\theta",
+  "mathml": "<mrow><mi mathvariant=\"normal\">d</mi><mo>&#8290;</mo><mi>x</mi><mspace width=\"1em\"/><msup><mi mathvariant=\"normal\">e</mi><mi>x</mi></msup><mspace width=\"1em\"/><mi mathvariant=\"normal\">i</mi><mo>&#8290;</mo><mi>θ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "θ"
+      }
+    ]
+  }
+}

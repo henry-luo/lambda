@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\mathrm{text}",
+  "mathml": "<mi mathvariant=\"normal\">text</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "text"
+      }
+    ]
+  }
+}

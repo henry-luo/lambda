@@ -1,0 +1,34 @@
+{
+  "format": "mathml",
+  "latex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}",
+  "mathml": "<mrow><mover accent=\"true\"><mi>i</mi><mo>&#x00af;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>v</mi><mo>&#x20d7;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>o</mi><mo>730</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00af;"
+      },
+      {
+        "tag": "mi",
+        "content": "v"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x20d7;"
+      },
+      {
+        "tag": "mi",
+        "content": "o"
+      },
+      {
+        "tag": "mo",
+        "content": "730"
+      }
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "format": "mathml",
+  "latex": "\\weird{a}{j}; \\weird{abc}{j}",
+  "mathml": "<mrow><merror></merror><mi>a</mi><mi>j</mi><mo separator=\"true\">;</mo><merror></merror><mrow><mi>a</mi><mo>&#8290;</mo><mi>b</mi><mo>&#8290;</mo><mi>c</mi></mrow><mi>j</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mo",
+        "content": ";"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\binom{\\binom{n}{k}}{m}",
+  "mathml": "<mrow><mo>(</mo><mtable><mtr><mrow><mo>(</mo><mtable><mtr><mi>n</mi></mtr><mtr><mi>k</mi></mtr></mtable><mo>)</mo></mrow></mtr><mtr><mi>m</mi></mtr></mtable><mo>)</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

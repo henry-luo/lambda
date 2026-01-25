@@ -1,0 +1,130 @@
+{
+  "format": "mathml",
+  "latex": "\\left\\| \\frac{\\partial}{\\partial x} \\left[ \\sum_{n=0}^{\\infty} \\frac{1}{n!} \\left( \\int_a^b f(t) \\, dt \\right)^n \\right] \\right\\|",
+  "mathml": "<mrow><mo>\\|</mo><mrow><mfrac><mi>∂</mi><mrow><mi>∂</mi><mo>&#8290;</mo><mi>x</mi></mrow></mfrac><mrow><mo>[</mo><mrow><msubsup><mo>∑</mo><mrow><mi>n</mi><mo>=</mo><mn>0</mn></mrow><mi>&#x221e;</mi></msubsup><mfrac><mn>1</mn><mrow><mi>n</mi><mo>!</mo></mrow></mfrac><msup><mrow><mo>(</mo><mrow><msubsup><mo>∫</mo><mi>a</mi><mi>b</mi></msubsup><mi>f</mi><mo>&#x2061;</mo><mrow><mo>(</mo><mi>t</mi><mo>)</mo></mrow><mspace width=\"0.16666666666666666em\"/><mi>d</mi><mo>&#8290;</mo><mi>t</mi></mrow><mo>)</mo></mrow><mi>n</mi></msup></mrow><mo>]</mo></mrow></mrow><mo>\\|</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "\\|"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mi",
+        "content": "∂"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "["
+      },
+      {
+        "tag": "mo",
+        "content": "∑"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x221e;"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "!"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mo",
+        "content": "∫"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "t"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "t"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "]"
+      },
+      {
+        "tag": "mo",
+        "content": "\\|"
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\power{x}{2}+\\power{y}{3}",
+  "mathml": "<mrow><merror></merror><mi>x</mi><mn>2</mn><mo>+</mo><merror></merror><mi>y</mi><mn>3</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      }
+    ]
+  }
+}

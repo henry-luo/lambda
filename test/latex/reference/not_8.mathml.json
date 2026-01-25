@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "a/b c \\not",
+  "mathml": "<mrow><mi>a</mi><mo>&#8290;</mo><mi>/</mi><mo>&#8290;</mo><mi>b</mi><mo>&#8290;</mo><mi>c</mi><mo></mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "/"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mo",
+        "content": ""
+      }
+    ]
+  }
+}

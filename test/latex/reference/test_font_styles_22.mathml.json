@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\lim_{n \\to \\infty} a_n, \\limsup a_n, \\liminf a_n",
+  "mathml": "<mrow><munder><mo>lim</mo><mrow><mi>n</mi><mo>→</mo><mi>&#x221e;</mi></mrow></munder><msub><mi>a</mi><mi>n</mi></msub><mo separator=\"true\">,</mo><msub><mi>a</mi><mi>n</mi></msub><mo separator=\"true\">,</mo><msub><mi>a</mi><mi>n</mi></msub></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "lim"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "→"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x221e;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      }
+    ]
+  }
+}

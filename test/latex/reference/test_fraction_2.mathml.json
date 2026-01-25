@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{\\frac{1}{2}}{3}",
+  "mathml": "<mfrac><mfrac><mn>1</mn><mn>2</mn></mfrac><mn>3</mn></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      }
+    ]
+  }
+}

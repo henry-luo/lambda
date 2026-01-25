@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\omega",
+  "mathml": "<mi>ω</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ω"
+      }
+    ]
+  }
+}

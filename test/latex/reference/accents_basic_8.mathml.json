@@ -1,0 +1,9 @@
+{
+  "format": "mathml",
+  "latex": "\\overline{abc}",
+  "mathml": "",
+  "structure": {
+    "type": "root",
+    "children": []
+  }
+}

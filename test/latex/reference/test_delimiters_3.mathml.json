@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\left[\\frac{x}{y}\\right]",
+  "mathml": "<mrow><mo>[</mo><mfrac><mi>x</mi><mi>y</mi></mfrac><mo>]</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "["
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mo",
+        "content": "]"
+      }
+    ]
+  }
+}
