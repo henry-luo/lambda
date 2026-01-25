@@ -400,8 +400,8 @@ module.exports = grammar({
     element: $ => seq('<',
       choice($.symbol, $.identifier), // string not accepted for element name
       choice(
-        seq(choice($.attr, seq('&', $._attr_expr)),
-          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))),
+        seq(choice($.attr, $.map),
+          repeat(seq(',', choice($.attr, $.map))),
           optional(
             seq(choice(linebreak, ';'), $.content),
           )
