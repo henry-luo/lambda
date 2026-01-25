@@ -759,19 +759,7 @@
           "named": true
         },
         {
-          "type": "binary_expr",
-          "named": true
-        },
-        {
           "type": "content",
-          "named": true
-        },
-        {
-          "type": "fn_expr",
-          "named": true
-        },
-        {
-          "type": "for_expr",
           "named": true
         },
         {
@@ -779,19 +767,11 @@
           "named": true
         },
         {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "primary_expr",
+          "type": "map",
           "named": true
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
           "named": true
         }
       ]
