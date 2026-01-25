@@ -35,6 +35,7 @@ nested.a;  nested.b;  nested.c;  nested.d;
 
 let mp2 = {d:78}
 <elmt a:12, {b:34}, c:56, {mp2}>  // dynamic attrs
+<elmt ;{mp2}>  // mp2 now is content
 
 "Test range exprs:"
 1 to 0;  // should be []
