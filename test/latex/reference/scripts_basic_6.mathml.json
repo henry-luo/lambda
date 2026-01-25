@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "a^{b^c}",
+  "mathml": "<msup><mi>a</mi><msup><mi>b</mi><mi>c</mi></msup></msup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

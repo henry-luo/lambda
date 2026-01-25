@@ -1,0 +1,114 @@
+{
+  "format": "mathml",
+  "latex": "\\mathfrak{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+  "mathml": "<mrow><mi>𝔄</mi><mi>𝔅</mi><mi>ℭ</mi><mi>𝔇</mi><mi>𝔈</mi><mi>𝔉</mi><mi>𝔊</mi><mi>ℌ</mi><mi>ℑ</mi><mi>𝔍</mi><mi>𝔎</mi><mi>𝔏</mi><mi>𝔐</mi><mi>𝔑</mi><mi>𝔒</mi><mi>𝔓</mi><mi>𝔔</mi><mi>ℜ</mi><mi>𝔖</mi><mi>𝔗</mi><mi>𝔘</mi><mi>𝔙</mi><mi>𝔚</mi><mi>𝔛</mi><mi>𝔜</mi><mi>ℨ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "𝔄"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔅"
+      },
+      {
+        "tag": "mi",
+        "content": "ℭ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔇"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔈"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔉"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔊"
+      },
+      {
+        "tag": "mi",
+        "content": "ℌ"
+      },
+      {
+        "tag": "mi",
+        "content": "ℑ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔍"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔎"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔏"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔐"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔑"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔒"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔓"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔔"
+      },
+      {
+        "tag": "mi",
+        "content": "ℜ"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔖"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔗"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔘"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔙"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔚"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔛"
+      },
+      {
+        "tag": "mi",
+        "content": "𝔜"
+      },
+      {
+        "tag": "mi",
+        "content": "ℨ"
+      }
+    ]
+  }
+}

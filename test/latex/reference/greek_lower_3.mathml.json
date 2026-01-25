@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\delta",
+  "mathml": "<mi>δ</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "δ"
+      }
+    ]
+  }
+}

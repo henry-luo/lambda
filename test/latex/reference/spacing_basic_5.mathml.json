@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "a\\hphantom{xyz}b",
+  "mathml": "<mrow><mi>a</mi><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

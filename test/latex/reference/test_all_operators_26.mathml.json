@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "\\dot{a} \\quad \\ddot{a} \\quad \\breve{a} \\quad \\bar{a} \\quad \\vec{a}",
+  "mathml": "<mrow><mover accent=\"true\"><mi>a</mi><mo>&#x02d9;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>a</mi><mo>&#x00a8;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>a</mi><mo>&#x02d8;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>a</mi><mo>&#x00af;</mo></mover><mspace width=\"1em\"/><mover accent=\"true\"><mi>a</mi><mo>&#x20d7;</mo></mover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x02d9;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00a8;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x02d8;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00af;"
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x20d7;"
+      }
+    ]
+  }
+}

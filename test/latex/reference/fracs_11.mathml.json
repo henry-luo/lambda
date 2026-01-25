@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "{a^{n+1} \\over b^m} \\over {c^n \\over d^m}",
+  "mathml": "<mfrac><mfrac><msup><mi>a</mi><mrow><mi>n</mi><mo>+</mo><mn>1</mn></mrow></msup><msup><mi>b</mi><mi>m</mi></msup></mfrac><mfrac><msup><mi>c</mi><mi>n</mi></msup><msup><mi>d</mi><mi>m</mi></msup></mfrac></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      }
+    ]
+  }
+}

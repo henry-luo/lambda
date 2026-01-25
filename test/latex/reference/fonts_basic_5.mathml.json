@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\mathfrak{g}",
+  "mathml": "<mi>𝔤</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "𝔤"
+      }
+    ]
+  }
+}

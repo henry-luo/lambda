@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\sum_{k=0}^{\\infty} \\frac{1}{k!}",
+  "mathml": "<mrow><msubsup><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mi>&#x221e;</mi></msubsup><mfrac><mn>1</mn><mrow><mi>k</mi><mo>!</mo></mrow></mfrac></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∑"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x221e;"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mo",
+        "content": "!"
+      }
+    ]
+  }
+}

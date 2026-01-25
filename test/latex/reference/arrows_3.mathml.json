@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "a \\xrightarrow[\\mathrm{under}]{\\mathrm{over}} b  \\xleftarrow[\\mathrm{under}]{\\mathrm{over}} c",
+  "mathml": "<mrow><mi>a</mi><munderover >→<mi mathvariant=\"normal\">under</mi><mi mathvariant=\"normal\">over</mi></munderover><mi>b</mi><munderover >←<mi mathvariant=\"normal\">under</mi><mi mathvariant=\"normal\">over</mi></munderover><mi>c</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "under"
+      },
+      {
+        "tag": "mi",
+        "content": "over"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "under"
+      },
+      {
+        "tag": "mi",
+        "content": "over"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "a\\qquad b",
+  "mathml": "<mrow><mi>a</mi><mspace width=\"2em\"/><mi>b</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

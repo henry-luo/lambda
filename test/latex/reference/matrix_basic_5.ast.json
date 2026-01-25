@@ -2,21 +2,69 @@
   "type": "DELIMITED",
   "body": {
     "type": "ARRAY",
-    "body": {
-      "type": "ARRAY_ROW",
-      "body": {
-        "type": "ARRAY_CELL",
-        "body": {
-          "type": "ROW",
-          "body": [
-            {
-              "type": "ORD",
-              "codepoint": 49,
-              "value": "1"
+    "body": [
+      {
+        "type": "ARRAY_ROW",
+        "body": [
+          {
+            "type": "ARRAY_CELL",
+            "body": {
+              "type": "ROW",
+              "body": [
+                {
+                  "type": "ORD",
+                  "codepoint": 49,
+                  "value": "1"
+                }
+              ]
             }
-          ]
-        }
+          },
+          {
+            "type": "ARRAY_CELL",
+            "body": {
+              "type": "ROW",
+              "body": [
+                {
+                  "type": "ORD",
+                  "codepoint": 48,
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "ARRAY_ROW",
+        "body": [
+          {
+            "type": "ARRAY_CELL",
+            "body": {
+              "type": "ROW",
+              "body": [
+                {
+                  "type": "ORD",
+                  "codepoint": 48,
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          {
+            "type": "ARRAY_CELL",
+            "body": {
+              "type": "ROW",
+              "body": [
+                {
+                  "type": "ORD",
+                  "codepoint": 49,
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        ]
       }
-    }
+    ]
   }
 }

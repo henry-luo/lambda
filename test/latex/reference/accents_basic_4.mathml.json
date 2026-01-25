@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\ddot{a}",
+  "mathml": "<mover accent=\"true\"><mi>a</mi><mo>&#x00a8;</mo></mover>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x00a8;"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\weird{\\WildCard}{\\WildCard}",
+  "mathml": "<mrow><merror></merror><merror></merror><merror></merror></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "merror",
+        "content": null
+      }
+    ]
+  }
+}

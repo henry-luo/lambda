@@ -1,0 +1,46 @@
+{
+  "format": "mathml",
+  "latex": "\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1",
+  "mathml": "<mrow><munder><mo>lim</mo><mrow><mi>x</mi><mo>→</mo><mn>0</mn></mrow></munder><mfrac><mrow><mo>sin</mo><mi>x</mi></mrow><mi>x</mi></mfrac><mo>=</mo><mn>1</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "lim"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "→"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mo",
+        "content": "sin"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      }
+    ]
+  }
+}

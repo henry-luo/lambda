@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\underrightarrow{\\mathrm{word}} \\rightarrow  \\underleftarrow{\\mathrm{word}}",
+  "mathml": "<mrow><munder >→</munder><mo>→</mo><munder >←</munder></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "munder",
+        "content": "→"
+      },
+      {
+        "tag": "mo",
+        "content": "→"
+      },
+      {
+        "tag": "munder",
+        "content": "←"
+      }
+    ]
+  }
+}

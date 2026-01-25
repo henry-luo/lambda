@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt[3]{x}",
+  "mathml": "<mroot><mi>x</mi><mn>3</mn></mroot>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "3"
+      }
+    ]
+  }
+}

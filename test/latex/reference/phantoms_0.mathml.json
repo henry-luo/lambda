@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "a + \\phantom{b} + c",
+  "mathml": "<mrow><mi>a</mi><mo>+</mo><mo>+</mo><mi>c</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

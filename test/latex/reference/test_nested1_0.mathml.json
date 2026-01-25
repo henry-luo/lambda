@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{1}{1 + \\frac{1}{2}}",
+  "mathml": "<mfrac><mn>1</mn><mrow><mn>1</mn><mo>+</mo><mfrac><mn>1</mn><mn>2</mn></mfrac></mrow></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

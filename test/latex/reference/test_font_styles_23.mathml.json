@@ -1,0 +1,62 @@
+{
+  "format": "mathml",
+  "latex": "\\gcd(a, b), \\lcm(a, b)",
+  "mathml": "<mrow><mo>gcd</mo><mrow><mo>(</mo><mrow><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi></mrow><mo>)</mo></mrow><mo separator=\"true\">,</mo><merror></merror><mrow><mo>(</mo><mrow><mi>a</mi><mo separator=\"true\">,</mo><mi>b</mi></mrow><mo>)</mo></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "gcd"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

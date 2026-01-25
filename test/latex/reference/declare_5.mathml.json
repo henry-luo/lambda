@@ -1,0 +1,62 @@
+{
+  "format": "mathml",
+  "latex": "z(a+b), \\widehat{z}(a)",
+  "mathml": "<mrow><mi>z</mi><mo>&#8290;</mo><mrow><mo>(</mo><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow><mo>)</mo></mrow><mo separator=\"true\">,</mo><mover accent=\"true\"><mi>z</mi><mo>undefined</mo></mover><mrow><mo>(</mo><mi>a</mi><mo>)</mo></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "z"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "z"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      }
+    ]
+  }
+}

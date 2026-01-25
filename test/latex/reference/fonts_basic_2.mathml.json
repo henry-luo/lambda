@@ -1,0 +1,14 @@
+{
+  "format": "mathml",
+  "latex": "\\mathit{italic}",
+  "mathml": "<mi mathvariant=\"italic\">italic</mi>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "italic"
+      }
+    ]
+  }
+}

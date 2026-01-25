@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "f\\WildCard[(\\WildCard,\\WildCard)]",
+  "mathml": "<mrow><mi>f</mi><mo>&#x2061;</mo><merror></merror><mrow><mo>[</mo><mrow><mo>(</mo><mrow><merror></merror><mo separator=\"true\">,</mo><merror></merror></mrow><mo>)</mo></mrow><mo>]</mo></mrow></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": "["
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "]"
+      }
+    ]
+  }
+}

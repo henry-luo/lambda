@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\mathop{A}\\limits_B\\limits^C \\qquad\n   \\mathop{A}\\limits^C \\limits_B \\qquad\n   \\mathop{A}\\nolimits_B\\limits^C \\qquad\n   \\mathop{A}\\nolimits^C \\limits_B",
+  "mathml": "<mrow><munderover><mi>B</mi><mi>C</mi></munderover><mspace width=\"2em\"/><munderover><mi>B</mi><mi>C</mi></munderover><mspace width=\"2em\"/><munderover><mi>B</mi><mi>C</mi></munderover><mspace width=\"2em\"/><munderover><mi>B</mi><mi>C</mi></munderover></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      }
+    ]
+  }
+}

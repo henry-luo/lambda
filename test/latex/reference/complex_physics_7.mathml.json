@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "\\Delta x \\Delta p \\geq \\frac{\\hbar}{2}",
+  "mathml": "<mrow><mi>Δ</mi><mo>&#8290;</mo><mi>x</mi><mo>&#8290;</mo><mi>Δ</mi><mo>&#8290;</mo><mi>p</mi><mo>≥</mo><mfrac><mi>ℏ</mi><mn>2</mn></mfrac></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "Δ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Δ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "p"
+      },
+      {
+        "tag": "mo",
+        "content": "≥"
+      },
+      {
+        "tag": "mi",
+        "content": "ℏ"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

@@ -1,19 +1,67 @@
 {
   "type": "ARRAY",
-  "body": {
-    "type": "ARRAY_ROW",
-    "body": {
-      "type": "ARRAY_CELL",
-      "body": {
-        "type": "ROW",
-        "body": [
-          {
-            "type": "ORD",
-            "codepoint": 97,
-            "value": "a"
+  "body": [
+    {
+      "type": "ARRAY_ROW",
+      "body": [
+        {
+          "type": "ARRAY_CELL",
+          "body": {
+            "type": "ROW",
+            "body": [
+              {
+                "type": "ORD",
+                "codepoint": 97,
+                "value": "a"
+              }
+            ]
           }
-        ]
-      }
+        },
+        {
+          "type": "ARRAY_CELL",
+          "body": {
+            "type": "ROW",
+            "body": [
+              {
+                "type": "ORD",
+                "codepoint": 98,
+                "value": "b"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "type": "ARRAY_ROW",
+      "body": [
+        {
+          "type": "ARRAY_CELL",
+          "body": {
+            "type": "ROW",
+            "body": [
+              {
+                "type": "ORD",
+                "codepoint": 99,
+                "value": "c"
+              }
+            ]
+          }
+        },
+        {
+          "type": "ARRAY_CELL",
+          "body": {
+            "type": "ROW",
+            "body": [
+              {
+                "type": "ORD",
+                "codepoint": 100,
+                "value": "d"
+              }
+            ]
+          }
+        }
+      ]
     }
-  }
+  ]
 }

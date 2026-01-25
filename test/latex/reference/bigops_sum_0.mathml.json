@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\sum x",
+  "mathml": "<mrow><mo>∑</mo><mi>x</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∑"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

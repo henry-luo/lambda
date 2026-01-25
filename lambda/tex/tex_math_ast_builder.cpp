@@ -1200,14 +1200,13 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
             left_delim = '{';
             right_delim = '}';
         } else if (strncmp(env_name, "vmatrix", 7) == 0) {
-            // Note: TeX's vmatrix uses extensible vertical bars from cmex10
-            // For small matrices, these may not render as separate glyphs
-            // For now, use no delimiters to match TeX DVI output
-            left_delim = 0;
-            right_delim = 0;
-        } else if (strncmp(env_name, "Vmatrix", 7) == 0) {
-            left_delim = '|';  // Double bar represented as single for now
+            // Single vertical bars |...|
+            left_delim = '|';
             right_delim = '|';
+        } else if (strncmp(env_name, "Vmatrix", 7) == 0) {
+            // Double vertical bars - use Unicode ∥ (U+2225) PARALLEL TO
+            left_delim = 0x2225;
+            right_delim = 0x2225;
         } else if (strncmp(env_name, "cases", 5) == 0) {
             left_delim = '{';
             right_delim = 0;  // cases has left brace only
@@ -1598,6 +1597,56 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
             ::strbuf_append_format(out, "%.2f", node->frac.rule_thickness);
             break;
 
+        case MathNodeType::DELIMITED:
+            // Output left and right delimiters as character values
+            if (node->delimited.left_delim != 0) {
+                ::strbuf_append_str(out, ",\"leftDelim\":");
+                char delim_char[8];
+                int len = 0;
+                uint32_t cp = (uint32_t)node->delimited.left_delim;
+                if (cp < 0x80) {
+                    delim_char[len++] = (char)cp;
+                } else if (cp < 0x800) {
+                    delim_char[len++] = (char)(0xC0 | (cp >> 6));
+                    delim_char[len++] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    delim_char[len++] = (char)(0xE0 | (cp >> 12));
+                    delim_char[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    delim_char[len++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    delim_char[len++] = (char)(0xF0 | (cp >> 18));
+                    delim_char[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    delim_char[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    delim_char[len++] = (char)(0x80 | (cp & 0x3F));
+                }
+                delim_char[len] = '\0';
+                json_escape_string(delim_char, out);
+            }
+            if (node->delimited.right_delim != 0) {
+                ::strbuf_append_str(out, ",\"rightDelim\":");
+                char delim_char[8];
+                int len = 0;
+                uint32_t cp = (uint32_t)node->delimited.right_delim;
+                if (cp < 0x80) {
+                    delim_char[len++] = (char)cp;
+                } else if (cp < 0x800) {
+                    delim_char[len++] = (char)(0xC0 | (cp >> 6));
+                    delim_char[len++] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    delim_char[len++] = (char)(0xE0 | (cp >> 12));
+                    delim_char[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    delim_char[len++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    delim_char[len++] = (char)(0xF0 | (cp >> 18));
+                    delim_char[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    delim_char[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    delim_char[len++] = (char)(0x80 | (cp & 0x3F));
+                }
+                delim_char[len] = '\0';
+                json_escape_string(delim_char, out);
+            }
+            break;
+
         default:
             break;
     }
@@ -1605,8 +1654,10 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
     // Branches
     if (node->body) {
         ::strbuf_append_str(out, ",\"body\":");
-        if (node->type == MathNodeType::ROW) {
-            // Array of children
+        if (node->type == MathNodeType::ROW ||
+            node->type == MathNodeType::ARRAY ||
+            node->type == MathNodeType::ARRAY_ROW) {
+            // Array of children (rows for ARRAY, cells for ARRAY_ROW, elements for ROW)
             ::strbuf_append_str(out, "[");
             bool first = true;
             for (MathASTNode* child = node->body; child; child = child->next_sibling) {

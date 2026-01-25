@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{a+b}",
+  "mathml": "<msqrt><mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow></msqrt>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      }
+    ]
+  }
+}

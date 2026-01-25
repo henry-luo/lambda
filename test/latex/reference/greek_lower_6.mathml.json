@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\phi \\varphi",
+  "mathml": "<mrow><mi>ϕ</mi><mo>&#8290;</mo><mi>φ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "ϕ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "φ"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{1}{\\hphantom{+}2}",
+  "mathml": "<mfrac><mn>1</mn><mn>2</mn></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

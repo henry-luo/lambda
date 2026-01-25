@@ -15,7 +15,9 @@
         "generate:ast": "node generate_mathlive_ast.mjs"
     },
     "dependencies": {
-        "jsdom": "^24.0.0"
+        "jsdom": "^24.0.0",
+        "katex": "^0.16.27",
+        "mathlive": "^0.108.2"
     },
     "devDependencies": {
         "puppeteer": "^24.0.0"
