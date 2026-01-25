@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\boldsymbol{\\alpha}, \\boldsymbol{\\beta}, \\boldsymbol{\\gamma}",
+  "mathml": "<mrow><mi>&#x03b1;</mi><mo separator=\"true\">,</mo><mi>β</mi><mo separator=\"true\">,</mo><mi>γ</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "&#x03b1;"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "β"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "γ"
+      }
+    ]
+  }
+}

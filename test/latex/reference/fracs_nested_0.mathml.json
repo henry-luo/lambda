@@ -1,0 +1,22 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{\\frac{a}{b}}{c}",
+  "mathml": "<mfrac><mfrac><mi>a</mi><mi>b</mi></mfrac><mi>c</mi></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "format": "mathml",
+  "latex": "a(x) + b(x) + 123",
+  "mathml": "<mrow><mi>a</mi><mo>&#8290;</mo><mrow><mo>(</mo><mi>x</mi><mo>)</mo></mrow><mo>+</mo><mi>b</mi><mo>&#8290;</mo><mrow><mo>(</mo><mi>x</mi><mo>)</mo></mrow><mo>+</mo><mn>123</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mo",
+        "content": "("
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ")"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mn",
+        "content": "123"
+      }
+    ]
+  }
+}

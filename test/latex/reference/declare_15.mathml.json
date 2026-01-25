@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "\\hat{\\WildCard}",
+  "mathml": "<mover accent=\"true\"><merror></merror><mo>&#x005e;</mo></mover>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "merror",
+        "content": null
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      }
+    ]
+  }
+}

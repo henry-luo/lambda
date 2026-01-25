@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "x_{i_j}^{k^{l}}",
+  "mathml": "<msubsup><mi>x</mi><msub><mi>i</mi><mi>j</mi></msub><msup><mi>k</mi><mi>l</mi></msup></msubsup>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "i"
+      },
+      {
+        "tag": "mi",
+        "content": "j"
+      },
+      {
+        "tag": "mi",
+        "content": "k"
+      },
+      {
+        "tag": "mi",
+        "content": "l"
+      }
+    ]
+  }
+}

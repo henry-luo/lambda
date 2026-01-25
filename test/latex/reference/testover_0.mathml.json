@@ -1,0 +1,54 @@
+{
+  "format": "mathml",
+  "latex": "a b c \\over d e f",
+  "mathml": "<mfrac><mrow><mi>a</mi><mo>&#8290;</mo><mi>b</mi><mo>&#8290;</mo><mi>c</mi></mrow><mrow><mi>d</mi><mo>&#8290;</mo><mi>e</mi><mo>&#8290;</mo><mi>f</mi><mo>&#x2061;</mo></mrow></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      }
+    ]
+  }
+}

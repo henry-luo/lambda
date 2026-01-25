@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "g",
+  "mathml": "<mi>g</mi><mo>&#x2061;</mo>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      }
+    ]
+  }
+}

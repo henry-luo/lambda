@@ -1,0 +1,30 @@
+{
+  "format": "mathml",
+  "latex": "\\sqrt{x^2 + y^2}",
+  "mathml": "<msqrt><mrow><msup><mi>x</mi><mn>2</mn></msup><mo>+</mo><msup><mi>y</mi><mn>2</mn></msup></mrow></msqrt>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "y"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      }
+    ]
+  }
+}

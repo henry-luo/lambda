@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "x <= 0",
+  "mathml": "<mrow><mi>x</mi><mo>&lt;</mo><mo>=</mo><mn>0</mn></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&lt;"
+      },
+      {
+        "tag": "mo",
+        "content": "="
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      }
+    ]
+  }
+}

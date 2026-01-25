@@ -1,0 +1,18 @@
+{
+  "format": "mathml",
+  "latex": "x_n",
+  "mathml": "<msub><mi>x</mi><mi>n</mi></msub>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      }
+    ]
+  }
+}

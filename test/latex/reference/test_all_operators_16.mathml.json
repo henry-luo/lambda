@@ -1,0 +1,26 @@
+{
+  "format": "mathml",
+  "latex": "\\nearrow \\searrow \\swarrow \\nwarrow",
+  "mathml": "<mrow><mo>↗</mo><mo>↘</mo><mo>↙</mo><mo>↖</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "↗"
+      },
+      {
+        "tag": "mo",
+        "content": "↘"
+      },
+      {
+        "tag": "mo",
+        "content": "↙"
+      },
+      {
+        "tag": "mo",
+        "content": "↖"
+      }
+    ]
+  }
+}

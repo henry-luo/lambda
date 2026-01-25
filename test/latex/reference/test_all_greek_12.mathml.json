@@ -1,0 +1,34 @@
+{
+  "format": "mathml",
+  "latex": "\\sigma_\\alpha \\quad \\tau_\\beta \\quad \\omega_\\gamma",
+  "mathml": "<mrow><msub><mi>σ</mi><mi>&#x03b1;</mi></msub><mspace width=\"1em\"/><msub><mi>τ</mi><mi>β</mi></msub><mspace width=\"1em\"/><msub><mi>ω</mi><mi>γ</mi></msub></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "σ"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x03b1;"
+      },
+      {
+        "tag": "mi",
+        "content": "τ"
+      },
+      {
+        "tag": "mi",
+        "content": "β"
+      },
+      {
+        "tag": "mi",
+        "content": "ω"
+      },
+      {
+        "tag": "mi",
+        "content": "γ"
+      }
+    ]
+  }
+}

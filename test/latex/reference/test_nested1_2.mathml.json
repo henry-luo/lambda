@@ -1,0 +1,50 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{\\sqrt{a + \\frac{b}{c}}}{\\sqrt{f + \\frac{g}{h}}}",
+  "mathml": "<mfrac><msqrt><mrow><mi>a</mi><mo>+</mo><mfrac><mi>b</mi><mi>c</mi></mfrac></mrow></msqrt><msqrt><mrow><mi>f</mi><mo>&#x2061;</mo><mo>+</mo><mfrac><mi>g</mi><mo>&#x2061;</mo><mi>h</mi></mfrac></mrow></msqrt></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "f"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mo",
+        "content": "+"
+      },
+      {
+        "tag": "mi",
+        "content": "g"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x2061;"
+      },
+      {
+        "tag": "mi",
+        "content": "h"
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "format": "mathml",
+  "latex": "\\oint_C F\\cdot dr",
+  "mathml": "<mrow><msub><mo>∮</mo><mi>C</mi></msub><mi>F</mi><mo>⋅</mo><mi>d</mi><mo>&#8290;</mo><mi>r</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∮"
+      },
+      {
+        "tag": "mi",
+        "content": "C"
+      },
+      {
+        "tag": "mi",
+        "content": "F"
+      },
+      {
+        "tag": "mo",
+        "content": "⋅"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "r"
+      }
+    ]
+  }
+}

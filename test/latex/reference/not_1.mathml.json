@@ -1,0 +1,58 @@
+{
+  "format": "mathml",
+  "latex": "\\not\\equiv, \\not>,\\not\\ge,\\not\\gg,\n   \\not\\succ,\\not\\succeq,\n   \\not\\supset,\\not\\supseteq,\\not\\sqsupseteq,\n   \\not\\rhd,\\not\\unrhd,\n   \\not\\approx,",
+  "mathml": "<mrow><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo><mo separator=\"true\">,</mo></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "format": "mathml",
+  "latex": "\\int_0^{\\infty} e^{-x}\\,dx",
+  "mathml": "<mrow><msubsup><mo>∫</mo><mn>0</mn><mi>&#x221e;</mi></msubsup><msup><mi>e</mi><mrow><mo>−</mo><mi>x</mi></mrow></msup><mspace width=\"0.16666666666666666em\"/><mi>d</mi><mo>&#8290;</mo><mi>x</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mo",
+        "content": "∫"
+      },
+      {
+        "tag": "mn",
+        "content": "0"
+      },
+      {
+        "tag": "mi",
+        "content": "&#x221e;"
+      },
+      {
+        "tag": "mi",
+        "content": "e"
+      },
+      {
+        "tag": "mo",
+        "content": "−"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

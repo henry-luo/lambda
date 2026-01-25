@@ -1,0 +1,110 @@
+{
+  "format": "mathml",
+  "latex": "x, x', x_1, x_n, x_{2n-1}, \\hat{x}, \\widehat{x}, \\mathbf{x}",
+  "mathml": "<mrow><mi>x</mi><mo separator=\"true\">,</mo><msup><mi>x</mi><mi>′</mi></msup><mo separator=\"true\">,</mo><msub><mi>x</mi><mn>1</mn></msub><mo separator=\"true\">,</mo><msub><mi>x</mi><mi>n</mi></msub><mo separator=\"true\">,</mo><msub><mi>x</mi><mrow><mn>2</mn><mo>&#8290;</mo><mi>n</mi><mo>−</mo><mn>1</mn></mrow></msub><mo separator=\"true\">,</mo><mover accent=\"true\"><mi>x</mi><mo>&#x005e;</mo></mover><mo separator=\"true\">,</mo><mover accent=\"true\"><mi>x</mi><mo>undefined</mo></mover><mo separator=\"true\">,</mo><mi mathvariant=\"bold\">x</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "′"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mn",
+        "content": "2"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mo",
+        "content": "−"
+      },
+      {
+        "tag": "mn",
+        "content": "1"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "&#x005e;"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      },
+      {
+        "tag": "mo",
+        "content": "undefined"
+      },
+      {
+        "tag": "mo",
+        "content": ","
+      },
+      {
+        "tag": "mi",
+        "content": "x"
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "format": "mathml",
+  "latex": "\\frac{a^n}{b^m} \\over \\frac{c^n}{d^m}",
+  "mathml": "<mfrac><mfrac><msup><mi>a</mi><mi>n</mi></msup><msup><mi>b</mi><mi>m</mi></msup></mfrac><mfrac><msup><mi>c</mi><mi>n</mi></msup><msup><mi>d</mi><mi>m</mi></msup></mfrac></mfrac>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "a"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "b"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      },
+      {
+        "tag": "mi",
+        "content": "c"
+      },
+      {
+        "tag": "mi",
+        "content": "n"
+      },
+      {
+        "tag": "mi",
+        "content": "d"
+      },
+      {
+        "tag": "mi",
+        "content": "m"
+      }
+    ]
+  }
+}

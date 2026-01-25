@@ -1,0 +1,198 @@
+{
+  "format": "mathml",
+  "latex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega",
+  "mathml": "<mrow><mi>A</mi><mo>&#8290;</mo><mi>B</mi><mo>&#8290;</mo><mi>Γ</mi><mo>&#8290;</mo><mi>Δ</mi><mo>&#8290;</mo><mi>E</mi><mo>&#8290;</mo><mi>Z</mi><mo>&#8290;</mo><mi>H</mi><mo>&#8290;</mo><mi>Θ</mi><mo>&#8290;</mo><mi>I</mi><mo>&#8290;</mo><mi>K</mi><mo>&#8290;</mo><mi>Λ</mi><mo>&#8290;</mo><mi>M</mi><mo>&#8290;</mo><mi>N</mi><mo>&#8290;</mo><mi>Ξ</mi><mo>&#8290;</mo><mi>O</mi><mo>&#8290;</mo><mi>Π</mi><mo>&#8290;</mo><mi>P</mi><mo>&#8290;</mo><mi>Σ</mi><mo>&#8290;</mo><mi>T</mi><mo>&#8290;</mo><mi>Υ</mi><mo>&#8290;</mo><mi>Φ</mi><mo>&#8290;</mo><mi>X</mi><mo>&#8290;</mo><mi>Ψ</mi><mo>&#8290;</mo><mi>Ω</mi></mrow>",
+  "structure": {
+    "type": "root",
+    "children": [
+      {
+        "tag": "mi",
+        "content": "A"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "B"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Γ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Δ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "E"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Z"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "H"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Θ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "I"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "K"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Λ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "M"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "N"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Ξ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "O"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Π"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "P"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Σ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "T"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Υ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Φ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "X"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Ψ"
+      },
+      {
+        "tag": "mo",
+        "content": "&#8290;"
+      },
+      {
+        "tag": "mi",
+        "content": "Ω"
+      }
+    ]
+  }
+}
