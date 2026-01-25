@@ -333,50 +333,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
             break;
         }
-        // Check if this is a variable that was declared as Item due to type coercion
-        if (item->node_type == AST_NODE_PRIMARY) {
-            AstPrimaryNode* pri = (AstPrimaryNode*)item;
-            if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
-                AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
-                if (ident_node->entry && ident_node->entry->node && 
-                    ident_node->entry->node->node_type == AST_NODE_ASSIGN) {
-                    AstNamedNode* assign_node = (AstNamedNode*)ident_node->entry->node;
-                    
-                    // Check if this assignment expression needs boxing (same logic as in transpile_assign_expr)
-                    bool expression_needs_boxing = false;
-                    if (assign_node->as && assign_node->as->node_type == AST_NODE_IF_EXPR) {
-                        AstIfNode *if_node = (AstIfNode*)assign_node->as;
-                        Type* then_type = if_node->then ? if_node->then->type : nullptr;
-                        Type* else_type = if_node->otherwise ? if_node->otherwise->type : nullptr;
-                        
-                        if (then_type && else_type) {
-                            bool then_is_null = (then_type->type_id == LMD_TYPE_NULL);
-                            bool else_is_null = (else_type->type_id == LMD_TYPE_NULL);
-                            bool then_is_int = (then_type->type_id == LMD_TYPE_INT);
-                            bool else_is_int = (else_type->type_id == LMD_TYPE_INT);  
-                            bool then_is_string = (then_type->type_id == LMD_TYPE_STRING);
-                            bool else_is_string = (else_type->type_id == LMD_TYPE_STRING);
-                            
-                            Type *expr_type = assign_node->as->type;
-                            if ((then_is_null && (else_is_string || else_is_int)) ||
-                                (else_is_null && (then_is_string || then_is_int)) ||
-                                (then_is_int && else_is_string) ||
-                                (then_is_string && else_is_int) ||
-                                (expr_type && expr_type->type_id == LMD_TYPE_ANY)) {
-                                expression_needs_boxing = true;
-                            }
-                        }
-                    }
-                    
-                    if (expression_needs_boxing) {
-                        // This variable was declared as Item, so just output the variable name without boxing
-                        log_debug("transpile_box_item: int variable declared as Item, no boxing needed");
-                        transpile_expr(tp, item);
-                        break;
-                    }
-                }
-            }
-        }
         
         // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, OPERATOR_IDIV, or OPERATOR_MOD,
         // don't wrap with i2it because these functions already return an Item
@@ -491,62 +447,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_str(tp->code_buf, ")");
         }
         else {
-            // Check if this is actually a null literal that got mistyped as string
-            if (item->node_type == AST_NODE_PRIMARY) {
-                AstPrimaryNode* pri = (AstPrimaryNode*)item;
-                if (!pri->expr && pri->type->is_literal) {
-                    // This is a literal - check if it's actually null
-                    StrView source = ts_node_source(tp, pri->node);
-                    if (source.length == 4 && strncmp(source.str, "null", 4) == 0) {
-                        // This is a null literal mistyped as string - use ITEM_NULL instead
-                        strbuf_append_str(tp->code_buf, "ITEM_NULL");
-                        break;
-                    }
-                }
-                
-                // Check if this is a variable that was declared as Item due to type coercion
-                if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
-                    AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
-                    if (ident_node->entry && ident_node->entry->node && 
-                        ident_node->entry->node->node_type == AST_NODE_ASSIGN) {
-                        AstNamedNode* assign_node = (AstNamedNode*)ident_node->entry->node;
-                        
-                        // Check if this assignment expression needs boxing (same logic as in transpile_assign_expr)
-                        bool expression_needs_boxing = false;
-                        if (assign_node->as && assign_node->as->node_type == AST_NODE_IF_EXPR) {
-                            AstIfNode *if_node = (AstIfNode*)assign_node->as;
-                            Type* then_type = if_node->then ? if_node->then->type : nullptr;
-                            Type* else_type = if_node->otherwise ? if_node->otherwise->type : nullptr;
-                            
-                            if (then_type && else_type) {
-                                bool then_is_null = (then_type->type_id == LMD_TYPE_NULL);
-                                bool else_is_null = (else_type->type_id == LMD_TYPE_NULL);
-                                bool then_is_int = (then_type->type_id == LMD_TYPE_INT);
-                                bool else_is_int = (else_type->type_id == LMD_TYPE_INT);  
-                                bool then_is_string = (then_type->type_id == LMD_TYPE_STRING);
-                                bool else_is_string = (else_type->type_id == LMD_TYPE_STRING);
-                                
-                                Type *expr_type = assign_node->as->type;
-                                if ((then_is_null && (else_is_string || else_is_int)) ||
-                                    (else_is_null && (then_is_string || then_is_int)) ||
-                                    (then_is_int && else_is_string) ||
-                                    (then_is_string && else_is_int) ||
-                                    (expr_type && expr_type->type_id == LMD_TYPE_ANY)) {
-                                    expression_needs_boxing = true;
-                                }
-                            }
-                        }
-                        
-                        if (expression_needs_boxing) {
-                            // This variable was declared as Item, so just output the variable name without boxing
-                            log_debug("transpile_box_item: variable declared as Item, no boxing needed");
-                            transpile_expr(tp, item);
-                            break;
-                        }
-                    }
-                }
-            }
-            
             strbuf_append_format(tp->code_buf, "%c2it(", t);
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
