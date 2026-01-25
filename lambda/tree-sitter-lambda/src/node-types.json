@@ -399,11 +399,11 @@
             "named": false
           },
           {
-            "type": "_/",
+            "type": "and",
             "named": false
           },
           {
-            "type": "and",
+            "type": "div",
             "named": false
           },
           {
@@ -2632,10 +2632,6 @@
     "named": false
   },
   {
-    "type": "_/",
-    "named": false
-  },
-  {
     "type": "and",
     "named": false
   },
@@ -2696,6 +2692,10 @@
     "named": true
   },
   {
+    "type": "div",
+    "named": false
+  },
+  {
     "type": "element",
     "named": false
   },
@@ -2721,11 +2721,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -2853,11 +2853,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

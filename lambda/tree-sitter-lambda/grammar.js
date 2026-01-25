@@ -49,7 +49,7 @@ function binary_expr($, in_attr) {
     ['-', 'binary_plus'],
     ['*', 'binary_times'],
     ['/', 'binary_times'],
-    ['_/', 'binary_times'],
+    ['div', 'binary_times'],
     ['%', 'binary_times'],
     ['^', 'binary_pow', 'right'],
     ['==', 'binary_eq'],

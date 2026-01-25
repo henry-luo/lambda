@@ -304,7 +304,7 @@ obj["field"]
 5 - 3     // Subtraction
 5 * 3     // Multiplication
 10 / 3    // Division
-10 _/ 3   // Integer division
+10 div 3  // Integer division
 17 % 5    // Modulo
 2 ^ 3     // Exponentiation
 
@@ -1227,7 +1227,7 @@ Lambda Script provides a comprehensive set of built-in system functions for type
 | `-` | Subtraction | `5 - 3` | `2` |
 | `*` | Multiplication | `5 * 3` | `15` |
 | `/` | Division | `10 / 3` | `3.333...` |
-| `_/` | Integer division | `10 _/ 3` | `3` |
+| `div` | Integer division | `10 div 3` | `3` |
 | `%` | Modulo | `17 % 5` | `2` |
 | `^` | Exponentiation | `2 ^ 3` | `8` |
 
@@ -1281,7 +1281,7 @@ From highest to lowest precedence:
 1. Primary expressions (`()`, `[]`, `.`)
 2. Unary operators (`-`, `+`, `not`)
 3. Exponentiation (`^`)
-4. Multiplicative (`*`, `/`, `_/`, `%`)
+4. Multiplicative (`*`, `/`, `//`, `%`)
 5. Additive (`+`, `-`)
 6. Relational (`<`, `<=`, `>`, `>=`)
 7. Equality (`==`, `!=`)
