@@ -112,7 +112,7 @@ pub fn square(x) => x * x; // Export function
 
 **Arithmetic:** addition, subtraction, multiplication, division, integer division, modulo, exponentiation
 ```lambda
-+  -  *  /  _/  %  ^
++  -  *  /  div  %  ^
 ```
 
 **Comparison:** equal, not equal, less than, less equal, greater than, greater equal
@@ -278,7 +278,7 @@ else { print("Success:", result) }
 1. `()` `[]` `.` - Primary expressions
 2. `-` `+` `not` - Unary operators
 3. `^` - Exponentiation
-4. `*` `/` `_/` `%` - Multiplicative
+4. `*` `/` `//` `%` - Multiplicative
 5. `+` `-` - Additive
 6. `<` `<=` `>` `>=` - Relational
 7. `==` `!=` - Equality

@@ -117,7 +117,7 @@
     },
     "operators": {
       "name": "keyword.operator.lambda",
-      "match": "\\*\\*|==|!=|<=|>=|[-+*/%_/<>]|="
+      "match": "\\*\\*|==|!=|<=|>=|//|[-+*/%<>]|="
     },
     "punctuation": {
       "patterns": [

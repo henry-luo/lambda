@@ -7,7 +7,7 @@
 5 - 3
 5 * 3
 10 / 3
-10 _/ 3
+10 div 3
 2 ^ 3
 
 "Negative Numbers:"
@@ -15,7 +15,7 @@
 -5 - 3
 -5 * 3
 -10 / 3
--10 _/ 3
+-10 div 3
 
 "Float Operations:"
 5.5 + 2.3
@@ -29,12 +29,12 @@
 3 - 1.2
 4 * 2.5
 8 / 2.0
-10 _/ 3.3
+10 div 3.3
 0.5 + 7
 2.7 - 1
 1.5 * 6
 9.0 / 3
-15.5 _/ 4
+15.5 div 4
 
 "Modulo Operations (%):"
 17 % 5
@@ -115,15 +115,15 @@ let null_val = null
 "Division by Zero:"
 5 / 0
 0 / 0
-5 _/ 0
-0 _/ 0
+5 div 0
+0 div 0
 
 "Boolean Arithmetic (errors):"
 true + false
 true - false
 true * false
 true / false
-true _/ false
+true div false
 true ^ false
 
 "Null Arithmetic (errors):"
@@ -157,14 +157,14 @@ null + "text"
 true * 3.14
 2.5 + false
 null ^ 3
-4 _/ true
+4 div true
 "string" - 10
 15 + "text"
 t'2025-08-15' + true
 false * t'14:30:00'
 null / t'2025-01-01T00:00:00'
 3.14 ^ "power"
-true _/ false
+true div false
 "hello" ^ 2
 
 "Edge Cases:"
