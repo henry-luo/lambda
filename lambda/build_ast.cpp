@@ -495,6 +495,21 @@ void* alloc_const(Transpiler* tp, size_t size) {
     return bytes;
 }
 
+// check if a name is a reserved type keyword
+bool is_type_keyword(StrView name) {
+    static const char* type_keywords[] = {
+        "null", "any", "error", "bool", "int", "int64", "float", "decimal", "number",
+        "date", "time", "datetime", "symbol", "string", "binary",
+        "list", "array", "map", "element", "entity", "object", "type", "function"
+    };
+    for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
+        if (strview_equal(&name, type_keywords[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
     NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
@@ -1611,6 +1626,13 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
+    // check if the variable name is a reserved type keyword
+    if (!is_type_definition && is_type_keyword(name_view)) {
+        int line = ts_node_start_point(name).row + 1;
+        record_type_error(tp, line, "Error: '%.*s' is a reserved type keyword and cannot be used as a variable name",
+            (int)name_view.length, name_view.str);
+    }
+
     TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
     TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
 
@@ -1773,8 +1795,8 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
 }
 
 AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     log_debug("build type annotation");
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     StrView type_name = ts_node_source(tp, type_node);
     if (strview_equal(&type_name, "null")) {
         ast_node->type = (Type*)&LIT_TYPE_NULL;
