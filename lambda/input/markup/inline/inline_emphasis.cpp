@@ -146,11 +146,13 @@ static bool can_close(char marker, const char* text, const char* run_start, cons
  *
  * @param parser The markup parser
  * @param text Pointer to current position (updated on success)
+ * @param text_start Start of the full text (for flanking context), or nullptr
  * @return Item containing emphasis element, or ITEM_UNDEFINED if not matched
  */
-Item parse_emphasis(MarkupParser* parser, const char** text) {
-    const char* full_text = *text; // for flanking checks (we need preceding context)
+Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_start) {
     const char* start = *text;
+    // Use text_start if provided, otherwise use start (less context for flanking)
+    const char* full_text = text_start ? text_start : start;
     char marker = *start;  // * or _
 
     // Must be * or _
