@@ -6,6 +6,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
+#include "markup-format.h"  // For MarkupFormat enum
 
 // InputManager - manages global pool and input lifecycle
 class InputManager {
@@ -68,6 +69,7 @@ Item input_ascii_math(Input* input, const char* ascii_math);
 
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
+Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
 // JSX parsing functions (from input-jsx.cpp)
 Item input_jsx(Input* input, const char* jsx_string);
