@@ -203,9 +203,7 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
         title_start, title_start ? (title_end - title_start) : 0
     );
 
-    if (added) {
-        parser->current_line++;
-    }
+    // Note: caller is responsible for incrementing current_line
 
     return added;
 }

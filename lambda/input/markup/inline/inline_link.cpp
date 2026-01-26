@@ -327,28 +327,41 @@ Item parse_link(MarkupParser* parser, const char** text) {
     const char* title_start = nullptr;
     const char* title_end = nullptr;
     int paren_depth = 1;
+    bool angle_bracket_url = false;
 
     // Skip leading whitespace in URL
     while (*pos == ' ' || *pos == '\t') pos++;
-    url_start = pos;
 
-    // Parse URL and optional title
-    while (*pos && paren_depth > 0) {
-        if (*pos == '\\' && *(pos + 1)) {
-            // Skip escaped character
-            pos += 2;
-            continue;
+    // Check for angle-bracketed URL: <url>
+    if (*pos == '<') {
+        angle_bracket_url = true;
+        pos++; // Skip <
+        url_start = pos;
+
+        // Find closing >
+        while (*pos && *pos != '>' && *pos != '\n') {
+            if (*pos == '\\' && *(pos + 1)) {
+                pos += 2;
+            } else if (*pos == '<') {
+                // Unescaped < not allowed in angle-bracketed URL
+                return Item{.item = ITEM_UNDEFINED};
+            } else {
+                pos++;
+            }
         }
 
-        // Check for title (quoted string)
-        if ((*pos == '"' || *pos == '\'') && !title_start) {
-            url_end = pos - 1;
-            // Trim trailing whitespace from URL
-            while (url_end > url_start && (*url_end == ' ' || *url_end == '\t')) {
-                url_end--;
-            }
-            url_end++; // Point past last URL char
+        if (*pos != '>') {
+            return Item{.item = ITEM_UNDEFINED};
+        }
 
+        url_end = pos;
+        pos++; // Skip >
+
+        // Skip whitespace after URL
+        while (*pos == ' ' || *pos == '\t') pos++;
+
+        // Check for optional title
+        if (*pos == '"' || *pos == '\'') {
             char quote = *pos;
             pos++; // Skip opening quote
             title_start = pos;
@@ -365,20 +378,79 @@ Item parse_link(MarkupParser* parser, const char** text) {
                 title_end = pos;
                 pos++; // Skip closing quote
             }
+        }
+
+        // Skip trailing whitespace and expect )
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos != ')') {
+            return Item{.item = ITEM_UNDEFINED};
+        }
+        pos++; // Skip )
+    } else {
+        url_start = pos;
+
+    // Parse URL and optional title
+    while (*pos && paren_depth > 0) {
+        if (*pos == '\\' && *(pos + 1)) {
+            // Skip escaped character
+            pos += 2;
             continue;
         }
 
         if (*pos == '(') paren_depth++;
         else if (*pos == ')') paren_depth--;
 
+        // For non-angle-bracket URLs, space terminates URL and starts potential title
+        if (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') {
+            if (!url_end) {
+                url_end = pos;
+            }
+            // Skip whitespace
+            while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+            // After whitespace, check if it's a valid continuation
+            if (*pos == ')') {
+                // Just trailing whitespace before closing paren - OK
+                paren_depth--;
+                break;
+            } else if (*pos == '"' || *pos == '\'' || *pos == '(') {
+                // Title starts - parse it
+                char quote = *pos;
+                char close_quote = (quote == '(') ? ')' : quote;
+                pos++; // Skip opening quote
+                title_start = pos;
+
+                // Find closing quote
+                while (*pos && *pos != close_quote) {
+                    if (*pos == '\\' && *(pos + 1)) {
+                        pos += 2;
+                    } else {
+                        pos++;
+                    }
+                }
+                if (*pos == close_quote) {
+                    title_end = pos;
+                    pos++; // Skip closing quote
+                }
+                // Skip whitespace after title
+                while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+                if (*pos != ')') {
+                    return Item{.item = ITEM_UNDEFINED};  // Invalid content after title
+                }
+                pos++;  // Skip final )
+                paren_depth--;
+                break;
+            } else {
+                // Space inside URL without angle brackets - INVALID
+                return Item{.item = ITEM_UNDEFINED};
+            }
+        }
+
         if (paren_depth == 0) {
             if (!url_end) {
                 url_end = pos;
-                // Trim trailing whitespace
-                while (url_end > url_start && (*(url_end-1) == ' ' || *(url_end-1) == '\t')) {
-                    url_end--;
-                }
             }
+            pos++;  // Skip final )
+            break;
         }
         pos++;
     }
@@ -387,6 +459,7 @@ Item parse_link(MarkupParser* parser, const char** text) {
         // Unmatched parenthesis
         return Item{.item = ITEM_UNDEFINED};
     }
+    } // end of non-angle-bracket URL else block
 
     // Create link element
     Element* link = create_element(parser, "a");
