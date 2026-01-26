@@ -147,7 +147,7 @@ This enhancement aims to:
 ### 1.3 Error Code Implementation
 
 ```cpp
-// lambda/lambda_error.h
+// lambda/lambda-error.h
 
 #pragma once
 
@@ -215,7 +215,7 @@ const char* err_code_message(LambdaErrorCode code);
 ### 2.1 Error Structure
 
 ```cpp
-// lambda/lambda_error.h
+// lambda/lambda-error.h
 
 // Source location information
 typedef struct SourceLocation {
@@ -752,7 +752,7 @@ Extend fuzzy testing to verify:
 ## 6. Implementation Plan
 
 ### Phase 1: Foundation (Week 1-2)
-- [ ] Define `LambdaErrorCode` enum in `lambda/lambda_error.h`
+- [ ] Define `LambdaErrorCode` enum in `lambda/lambda-error.h`
 - [ ] Implement `LambdaError` structure and basic API
 - [ ] Add `SourceLocation` tracking in parser
 - [ ] Create error code lookup tables

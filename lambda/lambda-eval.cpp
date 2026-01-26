@@ -1,5 +1,5 @@
 #include "transpiler.hpp"
-#include "lambda_error.h"
+#include "lambda-error.h"
 #include "../lib/log.h"
 #include "utf_string.h"
 

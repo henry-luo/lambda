@@ -1,5 +1,5 @@
 /**
- * @file lambda_error.h
+ * @file lambda-error.h
  * @brief Lambda Structured Error Handling System
  * 
  * Provides a comprehensive error code system with source location tracking
