@@ -268,6 +268,7 @@
                 "lambda/shape_pool.cpp",
                 "lambda/shape_builder.cpp",
                 "lambda/lambda-data.cpp",
+                "lambda/lambda_error.cpp",
                 "lambda/build_ast.cpp",
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",
@@ -2234,6 +2235,19 @@
                             "gtest_main"
                         ],
                         "icon": "\ud83d\udc11"
+                    },
+                    {
+                        "source": "test/test_lambda_errors_gtest.cpp",
+                        "name": "Lambda Error System Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "binary": "test_lambda_errors_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "icon": "\u26a0\ufe0f"
                     },
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",

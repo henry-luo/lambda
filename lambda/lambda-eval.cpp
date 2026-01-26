@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "lambda_error.h"
 #include "../lib/log.h"
 #include "utf_string.h"
 
@@ -26,6 +27,43 @@ extern __thread EvalContext* context;
 #define Realloc realloc
 
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+
+// =============================================================================
+// Runtime Error Helper
+// =============================================================================
+
+/**
+ * Set a runtime error in the current evaluation context.
+ * This captures the error with stack trace if enabled.
+ */
+static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
+    if (!context) return;
+    
+    char message[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    
+    // create error with current source location
+    SourceLocation loc = {0};
+    if (context->current_file) {
+        loc.file = context->current_file;
+    }
+    
+    LambdaError* error = err_create(code, message, &loc);
+    
+    // capture stack trace
+    error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
+    
+    // store in context
+    if (context->last_error) {
+        err_free(context->last_error);
+    }
+    context->last_error = error;
+    
+    log_error("runtime error [%d]: %s", code, message);
+}
 
 Bool is_truthy(Item item) {
     log_debug("is_truthy: item type %d", item._type_id);
@@ -111,7 +149,8 @@ Item fn_join(Item left, Item right) {
     // else if (left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
     // }
     else {
-        log_error("fn_join: unsupported operand types: %d and %d", left_type, right_type);
+        set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
+            type_info[left_type].name, type_info[right_type].name);
         return ItemError;   // type mismatch
     }
 }
@@ -281,11 +320,11 @@ static inline bool is_valid_function(Function* fn) {
 // For closures, env is passed as the first argument
 Item fn_call(Function* fn, List* args) {
     if (!is_valid_function(fn)) {
-        log_error("fn_call: invalid function (null or wrong type)");
+        set_runtime_error(ERR_INVALID_CALL, "fn_call: invalid function (null or wrong type)");
         return ItemError;
     }
     if (!fn->ptr) {
-        log_error("fn_call: null function pointer");
+        set_runtime_error(ERR_INVALID_CALL, "fn_call: null function pointer");
         return ItemError;
     }
     int arg_count = args ? (int)args->length : 0;
@@ -304,7 +343,7 @@ Item fn_call(Function* fn, List* args) {
             case 6: return ((Item(*)(void*,Item,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5]);
             case 7: return ((Item(*)(void*,Item,Item,Item,Item,Item,Item,Item))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6]);
             default:
-                log_error("fn_call: unsupported argument count %d for closure (max 7)", arg_count);
+                set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH, "fn_call: unsupported argument count %d for closure (max 7)", arg_count);
                 return ItemError;
         }
     }
