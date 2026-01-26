@@ -324,6 +324,9 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             if (nested_content.item != ITEM_ERROR && nested_content.item != ITEM_UNDEFINED) {
                 Element* content_div = (Element*)nested_content.item;
                 if (content_div && ((List*)content_div)->length > 0) {
+                    // If item has continued content after blank lines, list is loose
+                    is_loose = true;
+
                     // Move contents from div to list item
                     List* div_list = (List*)content_div;
                     for (long i = 0; i < div_list->length; i++) {
