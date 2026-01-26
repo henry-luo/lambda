@@ -626,13 +626,15 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
 
     // defensive check: if either object or field building failed, return error
     if (!ast_node->object || !ast_node->field) {
-        log_error("Error: Failed to build field expression - object or field is null");
+        record_semantic_error(tp, array_node, ERR_SYNTAX_ERROR, 
+            "Failed to build field expression - invalid object or field");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
     // additional safety: check if object has valid type
     if (!ast_node->object->type) {
-        log_error("Error: Field expression object missing type information");
+        record_semantic_error(tp, array_node, ERR_INTERNAL_ERROR,
+            "Field expression object missing type information");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
@@ -739,7 +741,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             if (!tp->current_scope->is_proc) {
                 const char* fn_name = is_method_call ? method_name.str : func_name.str;
                 int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
-                log_error("Error: procedure '%.*s' cannot be called in a function",
+                record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                    "procedure '%.*s' cannot be called in a function",
                     fn_name_len, fn_name);
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
@@ -768,7 +771,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
             TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
             if (func_type->is_proc && !tp->current_scope->is_proc) {
-                log_error("Error: procedure '%.*s' cannot be called in a function",
+                record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                    "procedure '%.*s' cannot be called in a function",
                     (int)func_name.length, func_name.str);
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
@@ -3009,7 +3013,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         // This is likely a parsing error - index tokens should not appear as standalone expressions
         // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
         // or case like "12.34.56"
-        log_error("Error: Unexpected index token - check for malformed range syntax (use 'to' instead of '..')");
+        record_semantic_error(tp, expr_node, ERR_INVALID_LITERAL,
+            "Unexpected token - possible malformed number or range (use 'to' instead of '..')");
         return NULL;
     default:
         log_debug("unknown syntax node: %s", ts_node_type(expr_node));
