@@ -334,6 +334,15 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
         return result;
     }
 
+    // If this is a generic map type (no shape defined), just check if item is a map
+    // Generic types like TYPE_MAP are just Type structs, not full TypeMap structs
+    // So accessing map_type->shape would be undefined behavior
+    if (!map_type->shape) {
+        // Item is a map and type is generic map - validation passes
+        result->valid = true;
+        return result;
+    }
+
     // Use MapReader for type-safe access
     MapReader map = item_reader.asMap();
     const Map* raw_map = item.map;
@@ -341,6 +350,12 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
     // Validate each field in the map shape
     ShapeEntry* shape_entry = map_type->shape;
     while (shape_entry) {
+        // Check if shape_entry->name is valid before dereferencing
+        if (!shape_entry->name) {
+            log_error("ShapeEntry has NULL name pointer in map validation");
+            shape_entry = shape_entry->next;
+            continue;
+        }
         const char* field_name = shape_entry->name->str;
 
         // Create path segment for map field
@@ -516,6 +531,12 @@ ValidationResult* validate_against_element_type(SchemaValidator* validator, Cons
         // Validate each attribute using ElementReader
         ShapeEntry* shape_entry = map_part->shape;
         while (shape_entry) {
+            // Check if shape_entry->name is valid before dereferencing
+            if (!shape_entry->name) {
+                log_error("ShapeEntry has NULL name pointer in element validation");
+                shape_entry = shape_entry->next;
+                continue;
+            }
             const char* attr_name = shape_entry->name->str;
 
             if (element.has_attr(attr_name)) {
@@ -866,8 +887,30 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_ARRAY:  case LMD_TYPE_LIST:
             result = validate_against_array_type(validator, item, (TypeArray*)type);
             break;
-        case LMD_TYPE_MAP:
-            result = validate_against_map_type(validator, item, (TypeMap*)type);
+        case LMD_TYPE_MAP: {
+            // Check if this is a generic TYPE_MAP (just a Type struct) or a full TypeMap
+            // Generic types are global constants and just check the type_id match
+            TypeMap* map_type = (TypeMap*)type;
+            // Check if we can safely access map_type fields
+            // A real TypeMap allocated from pool will have shape == nullptr or valid pointer
+            // But TYPE_MAP (global) will have garbage in those fields
+            // Simple heuristic: if type == &TYPE_MAP (global), treat as generic
+            extern Type TYPE_MAP;
+            if (type == &TYPE_MAP) {
+                // Generic map type - just check if item is a map
+                result = create_validation_result(validator->get_pool());
+                if (item.type_id() == LMD_TYPE_MAP) {
+                    result->valid = true;
+                } else {
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg),
+                            "Type mismatch: expected map, got type %d", item.type_id());
+                    add_validation_error(result, create_validation_error(
+                        AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->get_current_path(), validator->get_pool()));
+                }
+            } else {
+                result = validate_against_map_type(validator, item, map_type);
+            }
             // check max_errors after complex validation
             if (should_stop_for_max_errors(result, validator->get_options()->max_errors)) {
                 validator->set_current_depth(validator->get_current_depth() - 1);
@@ -875,14 +918,32 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
             }
             validator->set_current_depth(validator->get_current_depth() - 1);
             return result;
-        case LMD_TYPE_ELEMENT:
-            result = validate_against_element_type(validator, item, (TypeElmt*)type);
+        }
+        case LMD_TYPE_ELEMENT: {
+            // Same check for generic element type
+            extern Type TYPE_ELMT;
+            if (type == &TYPE_ELMT) {
+                // Generic element type - just check if item is an element
+                result = create_validation_result(validator->get_pool());
+                if (item.type_id() == LMD_TYPE_ELEMENT) {
+                    result->valid = true;
+                } else {
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg),
+                            "Type mismatch: expected element, got type %d", item.type_id());
+                    add_validation_error(result, create_validation_error(
+                        AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->get_current_path(), validator->get_pool()));
+                }
+            } else {
+                result = validate_against_element_type(validator, item, (TypeElmt*)type);
+            }
             if (should_stop_for_max_errors(result, validator->get_options()->max_errors)) {
                 validator->set_current_depth(validator->get_current_depth() - 1);
                 return result;
             }
             validator->set_current_depth(validator->get_current_depth() - 1);
             return result;
+        }
         case LMD_TYPE_TYPE:
             result = validate_against_base_type(validator, item, (TypeType*)type);
             validator->set_current_depth(validator->get_current_depth() - 1);
