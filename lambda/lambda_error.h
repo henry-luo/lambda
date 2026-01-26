@@ -227,6 +227,8 @@ int err_get_source_line_count(const char* source);
 // Error output
 char* err_format(LambdaError* error);
 char* err_format_with_context(LambdaError* error, int context_lines);
+char* err_format_json(LambdaError* error);
+char* err_format_json_array(LambdaError** errors, int count);
 void err_print(LambdaError* error);
 void err_print_stack_trace(StackFrame* trace);
 

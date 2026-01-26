@@ -343,6 +343,98 @@ TEST_F(SourceContextTest, FormatWithMultipleContextLines) {
 }
 
 //==============================================================================
+// JSON Output Tests
+//==============================================================================
+
+class JSONOutputTest : public ::testing::Test {
+protected:
+    void SetUp() override {}
+    void TearDown() override {}
+};
+
+TEST_F(JSONOutputTest, FormatSingleError) {
+    SourceLocation loc = {
+        .file = "test.ls",
+        .line = 10,
+        .column = 5,
+        .end_line = 10,
+        .end_column = 15,
+        .source = nullptr
+    };
+    
+    LambdaError* error = err_create(ERR_TYPE_MISMATCH, "expected int, found string", &loc);
+    char* json = err_format_json(error);
+    
+    ASSERT_NE(json, nullptr);
+    
+    // check JSON structure
+    EXPECT_NE(strstr(json, "\"code\": 201"), nullptr) << "Should contain error code\n" << json;
+    EXPECT_NE(strstr(json, "\"name\": \"TYPE_MISMATCH\""), nullptr) << "Should contain error name\n" << json;
+    EXPECT_NE(strstr(json, "\"category\": \"Semantic\""), nullptr) << "Should contain category\n" << json;
+    EXPECT_NE(strstr(json, "\"message\": \"expected int, found string\""), nullptr) << "Should contain message\n" << json;
+    EXPECT_NE(strstr(json, "\"file\": \"test.ls\""), nullptr) << "Should contain file\n" << json;
+    EXPECT_NE(strstr(json, "\"line\": 10"), nullptr) << "Should contain line\n" << json;
+    EXPECT_NE(strstr(json, "\"column\": 5"), nullptr) << "Should contain column\n" << json;
+    
+    free(json);
+    err_free(error);
+}
+
+TEST_F(JSONOutputTest, FormatErrorWithHelp) {
+    SourceLocation loc = { .file = "test.ls", .line = 5, .column = 1 };
+    LambdaError* error = err_create(ERR_UNDEFINED_VARIABLE, "variable 'x' not defined", &loc);
+    err_add_help(error, "Did you mean 'y'?");
+    
+    char* json = err_format_json(error);
+    ASSERT_NE(json, nullptr);
+    
+    EXPECT_NE(strstr(json, "\"help\": \"Did you mean 'y'?\""), nullptr)
+        << "Should contain help text\n" << json;
+    
+    free(json);
+    err_free(error);
+}
+
+TEST_F(JSONOutputTest, FormatErrorArray) {
+    SourceLocation loc1 = { .file = "test.ls", .line = 5, .column = 1 };
+    SourceLocation loc2 = { .file = "test.ls", .line = 10, .column = 8 };
+    
+    LambdaError* errors[2];
+    errors[0] = err_create(ERR_SYNTAX_ERROR, "unexpected token", &loc1);
+    errors[1] = err_create(ERR_TYPE_MISMATCH, "type mismatch", &loc2);
+    
+    char* json = err_format_json_array(errors, 2);
+    ASSERT_NE(json, nullptr);
+    
+    // check structure
+    EXPECT_NE(strstr(json, "\"errors\":"), nullptr) << "Should contain errors array\n" << json;
+    EXPECT_NE(strstr(json, "\"errorCount\": 2"), nullptr) << "Should contain count\n" << json;
+    EXPECT_NE(strstr(json, "SYNTAX_ERROR"), nullptr) << "Should contain first error\n" << json;
+    EXPECT_NE(strstr(json, "TYPE_MISMATCH"), nullptr) << "Should contain second error\n" << json;
+    
+    free(json);
+    err_free(errors[0]);
+    err_free(errors[1]);
+}
+
+TEST_F(JSONOutputTest, EscapeSpecialCharacters) {
+    SourceLocation loc = { .file = "path/to/file.ls", .line = 1, .column = 1 };
+    LambdaError* error = err_create(ERR_SYNTAX_ERROR, "unexpected \"quote\" and \\backslash", &loc);
+    
+    char* json = err_format_json(error);
+    ASSERT_NE(json, nullptr);
+    
+    // special chars should be escaped
+    EXPECT_NE(strstr(json, "\\\"quote\\\""), nullptr) 
+        << "Quotes should be escaped\n" << json;
+    EXPECT_NE(strstr(json, "\\\\backslash"), nullptr)
+        << "Backslash should be escaped\n" << json;
+    
+    free(json);
+    err_free(error);
+}
+
+//==============================================================================
 // Stack Trace Tests (basic - full test requires runtime context)
 //==============================================================================
 
