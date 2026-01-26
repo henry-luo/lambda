@@ -543,12 +543,14 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
         if (!field->name) { // nested map
             log_debug("set nested map field of type: %d", field->type->type_id);
             Item itm = {.item = va_arg(args, uint64_t)};
-            if (itm._type_id == LMD_TYPE_RAW_POINTER && *((TypeId*)itm.item) == LMD_TYPE_MAP) {
+            TypeId type_id = get_type_id(itm);
+            if (type_id == LMD_TYPE_MAP) {
                 Map* nested_map = itm.map;
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
-                log_error("expected a map, got data of type %d", itm._type_id );
+                log_error("expected a map, got data of type %d", type_id);
+                *(Map**)field_ptr = nullptr;
             }
         } else {
             log_debug("map set field: %.*s, type: %d, at offset: %d", (int)field->name->length,

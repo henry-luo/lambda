@@ -78,8 +78,9 @@ run_lambda_script() {
         echo -e "${CYAN}Running: ./lambda.exe $script_path${NC}"
     fi
     
-    # Run the Lambda script and capture output
-    if ./lambda.exe "$script_path" > "$output_file" 2>&1; then
+    # Run the Lambda script and capture stdout only (matching gtest behavior)
+    # stderr (including [NOTE] logs) is not captured
+    if ./lambda.exe "$script_path" > "$output_file"; then
         return 0
     else
         return 1
@@ -102,8 +103,8 @@ show_visual_diff() {
         echo -e "${YELLOW}No expected output file found${NC}"
         echo -e "${BLUE}Actual output:${NC}"
         echo "----------------------------------------"
-        # Show filtered output
-        cat "$actual_file" | sed -n '/##### Script.*executed: #####$/,$ p' | tail -n +2 | grep -v "^TRACE:" | grep -v "^DEBUG:" 2>/dev/null || echo "(no output file)"
+        # Show filtered output (stdout only, no [NOTE] lines since stderr is not captured)
+        cat "$actual_file" | grep -v "^TRACE:" | grep -v "^DEBUG:" 2>/dev/null || echo "(no output file)"
         echo "----------------------------------------"
         return
     fi
@@ -114,8 +115,9 @@ show_visual_diff() {
     fi
     
     # Create temporary file with filtered output for comparison
+    # Filter out TRACE: and DEBUG: lines (stdout only, no [NOTE] lines since stderr is not captured)
     local filtered_actual=$(mktemp)
-    cat "$actual_file" | sed -n '/##### Script.*executed: #####$/,$ p' | tail -n +2 | grep -v "^TRACE:" | grep -v "^DEBUG:" > "$filtered_actual"
+    cat "$actual_file" | grep -v "^TRACE:" | grep -v "^DEBUG:" > "$filtered_actual"
     
     # Compare files
     if diff -q "$expected_file" "$filtered_actual" > /dev/null 2>&1; then
@@ -282,8 +284,8 @@ if [[ "$OUTPUT_ONLY" == true ]]; then
     echo ""
     echo -e "${BLUE}Script Output:${NC}"
     echo "----------------------------------------"
-    # Filter out debug/trace lines and keep only the clean output
-    cat "$ACTUAL_FILE" | sed -n '/##### Script.*executed: #####$/,$ p' | tail -n +2 | grep -v "^TRACE:" | grep -v "^DEBUG:"
+    # Filter out debug/trace lines (stdout only, no [NOTE] lines since stderr is not captured)
+    cat "$ACTUAL_FILE" | grep -v "^TRACE:" | grep -v "^DEBUG:"
     echo "----------------------------------------"
 else
     echo ""

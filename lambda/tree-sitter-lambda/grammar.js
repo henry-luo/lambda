@@ -49,7 +49,7 @@ function binary_expr($, in_attr) {
     ['-', 'binary_plus'],
     ['*', 'binary_times'],
     ['/', 'binary_times'],
-    ['_/', 'binary_times'],
+    ['div', 'binary_times'],
     ['%', 'binary_times'],
     ['^', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
@@ -400,13 +400,13 @@ module.exports = grammar({
     element: $ => seq('<',
       choice($.symbol, $.identifier), // string not accepted for element name
       choice(
-        seq(choice($.attr, seq('&', $._attr_expr)),
-          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))),
+        seq(choice($.attr, $.map),
+          repeat(seq(',', choice($.attr, $.map))),
           optional(
             seq(choice(linebreak, ';'), $.content),
           )
         ),
-        optional($.content)
+        optional( seq(optional(choice(linebreak, ';')), $.content) )
       ),'>'
     ),
 
