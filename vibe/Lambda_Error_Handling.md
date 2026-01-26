@@ -399,198 +399,49 @@ bool transpiler_has_errors(Transpiler* tp);
 
 ## 3. Stack Trace Support
 
-### 3.1 Design Principles
+> **📄 Detailed Documentation**: See [Lambda_Stack_Trace.md](Lambda_Stack_Trace.md) for the complete stack trace implementation design, including MIR JIT compatibility research and the proposed shadow stack solution.
 
-- **Enabled by default** - stack traces always captured on error for better debugging
-- **Zero overhead** during normal execution - stack traces captured only on error
-- Uses **native stack walking** instead of explicit instrumentation
-- Maps native addresses back to Lambda source locations via debug info table
+### 3.1 Summary
 
-### 3.2 Approach Comparison
+Stack traces show the call chain leading to an error:
 
-#### ❌ Rejected: Explicit Instrumentation
+```
+error[E302]: index out of bounds
+    |
+ 78 |     let item = arr[10]
+    |                ^^^^^^^ index 10 out of bounds for array of length 5
 
-We considered adding `push_stack_frame()` / `pop_stack_frame()` calls to every generated function:
+Stack trace:
+  0: at level3 (script.ls:78:17)
+  1: at level2 (script.ls:52:9)  
+  2: at level1 (script.ls:35:5)
+  3: at <main> (script.ls:12:1)
+```
+
+### 3.2 Key Decisions
+
+| Aspect | Decision | Rationale |
+|--------|----------|-----------|
+| Native `backtrace()` | ❌ Not viable | Doesn't work reliably with MIR JIT on macOS ARM64 |
+| Full instrumentation | ❌ Rejected | Performance overhead on every function call |
+| Shadow stack for closures | ✅ Recommended | Minimal overhead, tracks closure calls via `fn_call*()` |
+| Optional debug mode | ✅ Planned | Full instrumentation available via CLI flag |
+
+### 3.3 Data Structures
 
 ```cpp
-// REJECTED APPROACH - Do not use
-void emit_function_entry(MirContext* ctx, AstFuncNode* func) {
-    emit_call(ctx, "push_stack_frame", ...);
-}
-void emit_function_exit(MirContext* ctx, AstFuncNode* func) {
-    emit_call(ctx, "pop_stack_frame", ...);
-}
-```
+// Stack frame for stack traces
+typedef struct StackFrame {
+    const char* function_name;  // function name (or "<script>" for top-level)
+    SourceLocation location;    // call site location
+    struct StackFrame* next;    // next frame (toward main)
+} StackFrame;
 
-**Why rejected:**
-- **Performance overhead**: Branch checking on every function entry/exit, even when tracing disabled
-- **Code bloat**: Every function gets extra prologue/epilogue code
-- **Complexity**: Must handle all exit paths (early returns, exceptions)
-- **Maintenance burden**: Every code path must be instrumented correctly
-
-#### ✅ Recommended: Native Stack Walking
-
-Walk the C native stack only when an error occurs, then map addresses to Lambda source.
-
-**Benefits:**
-- **Zero normal overhead**: No cost until error occurs
-- **Simpler codegen**: No instrumentation needed in generated code
-- **Platform-native**: Uses well-tested OS APIs
-- **Complete trace**: Captures entire call chain including runtime functions
-
-### 3.3 Configuration
-
-Stack traces are **enabled by default**. The following options are planned for future implementation:
-
-#### KIV: CLI Flag (Future)
-```bash
-lambda script.ls --no-stack-trace   # disable stack traces
-lambda script.ls --stack-trace=5    # limit to 5 frames
-```
-
-#### KIV: Runtime Control (Future)
-```lambda
-import sys;
-sys.enable_stack_trace(false); // disable for performance-critical code
-```
-
-#### Runtime Configuration
-```cpp
-// In EvalContext
-typedef struct EvalContext {
-    // ... existing fields ...
-    
-    bool enable_stack_trace;    // default: true
-    int max_stack_frames;       // 0 = unlimited (default)
-    ArrayList* debug_info;      // function address → source mapping
-} EvalContext;
-```
-
-### 3.4 Native Stack Walking Implementation
-
-#### 3.4.1 Debug Info Table
-
-Built during JIT compilation to map native addresses to Lambda source:
-
-```cpp
-// Debug information for a compiled function
-typedef struct FuncDebugInfo {
-    void* native_addr_start;        // start of native code
-    void* native_addr_end;          // end of native code
-    const char* lambda_func_name;   // Lambda function name
-    const char* source_file;        // source file path
-    uint32_t source_line;           // line number of function definition
-} FuncDebugInfo;
-
-// Register function debug info after JIT compilation
-void register_func_debug_info(Transpiler* tp, AstFuncNode* func, MIR_item_t mir_func) {
-    FuncDebugInfo* info = pool_calloc(tp->pool, sizeof(FuncDebugInfo));
-    info->native_addr_start = mir_func->addr;
-    // MIR doesn't expose function size directly; estimate or track separately
-    info->native_addr_end = (char*)mir_func->addr + estimated_size;
-    info->lambda_func_name = func->name.str;
-    info->source_file = tp->reference;
-    info->source_line = func->location.line;
-    
-    arraylist_append(tp->debug_info, info);
-}
-
-// Look up debug info for a native address
-FuncDebugInfo* lookup_debug_info(ArrayList* debug_info, void* addr) {
-    for (int i = 0; i < debug_info->length; i++) {
-        FuncDebugInfo* info = (FuncDebugInfo*)debug_info->data[i];
-        if (addr >= info->native_addr_start && addr < info->native_addr_end) {
-            return info;
-        }
-    }
-    return NULL;  // address not in Lambda code (runtime function)
-}
-```
-
-#### 3.4.2 Runtime Error with Stack Trace
-
-```cpp
-// Capture stack trace only when error occurs - zero normal overhead
-Item runtime_error(EvalContext* ctx, LambdaErrorCode code, const char* msg) {
-    LambdaError* err = err_create(code, msg, ctx->current_location);
-    
-    // Walk native stack only on error
-    err->stack_trace = capture_native_stack(ctx);
-    
-    return create_error_item(err);
-}
-```
-
-### 3.5 Stack Trace Formatting
-
-```cpp
-void print_stack_trace(StackFrame* trace, FILE* out) {
-    if (!trace) return;
-    
-    fprintf(out, "Stack trace:\n");
-    int depth = 0;
-    while (trace) {
-        fprintf(out, "  %d: at %s (%s:%u)\n",
-            depth,
-            trace->function_name ? trace->function_name : "<unknown>",
-            trace->location.file ? trace->location.file : "<unknown>",
-            trace->location.line);
-        trace = trace->caller;
-        depth++;
-    }
-}
-```
-
-### 3.6 Platform Implementation
-
-**Use `backtrace()` on both macOS and Linux** for consistency:
-
-| Platform | API | Notes |
-|----------|-----|-------|
-| macOS | `backtrace()` from `<execinfo.h>` | Built-in, works out of the box |
-| Linux | `backtrace()` from `<execinfo.h>` | Works with MIR JIT code (see below) |
-| Windows | `CaptureStackBackTrace()` | From `<windows.h>` |
-
-#### MIR JIT Compatibility on Linux
-
-`backtrace()` works correctly with MIR JIT-compiled code because:
-
-1. **MIR generates standard stack frames**: MIR's code generator produces x86-64/ARM64 code with proper frame pointers (RBP-based frames), which `backtrace()` can walk.
-
-2. **No symbol resolution needed**: We don't rely on `backtrace_symbols()` for function names. Instead, we maintain our own `FuncDebugInfo` table that maps address ranges to Lambda source locations.
-
-3. **Linker flag for AOT code**: For statically compiled runtime functions to appear in traces, link with `-rdynamic` (exports symbols for `dladdr()`). This is only needed if you want runtime C function names; Lambda function names come from our debug table.
-
-**Build configuration:**
-```makefile
-# In Makefile or premake
-LDFLAGS += -rdynamic  # Linux: export symbols for backtrace_symbols()
-```
-
-```cpp
-// Unified implementation for macOS and Linux
-#if defined(__APPLE__) || defined(__linux__)
-#include <execinfo.h>
-
-StackFrame* capture_native_stack(EvalContext* ctx) {
-    void* frames[64];
-    int count = backtrace(frames, 64);
-    
-    // Map native addresses to Lambda source locations using our debug table
-    return map_addresses_to_lambda(ctx->debug_info, frames, count, 
-                                   ctx->max_stack_frames);
-}
-#elif defined(_WIN32)
-#include <windows.h>
-
-StackFrame* capture_native_stack(EvalContext* ctx) {
-    void* frames[64];
-    USHORT count = CaptureStackBackTrace(0, 64, frames, NULL);
-    
-    return map_addresses_to_lambda(ctx->debug_info, frames, count,
-                                   ctx->max_stack_frames);
-}
-#endif
+// In LambdaError
+typedef struct LambdaError {
+    // ... other fields ...
+    StackFrame* stack_trace;    // call stack (captured on error)
+} LambdaError;
 ```
 
 ---

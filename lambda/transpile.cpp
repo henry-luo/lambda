@@ -463,10 +463,11 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);  // raw pointer treated as Item
         strbuf_append_char(tp->code_buf, ')');
         break;
-    case LMD_TYPE_ANY: {
-        transpile_expr(tp, item);  // no boxing needed
+    case LMD_TYPE_ANY:
+    case LMD_TYPE_ERROR:
+        // ANY and ERROR types are already Item at runtime - no boxing needed
+        transpile_expr(tp, item);
         break;
-    }
     default:
         log_debug("unknown box item type: %d", item->type->type_id);
     }
@@ -598,15 +599,42 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             cap = cap->next;
                         }
                         
-                        strbuf_append_str(tp->code_buf, "  to_closure(");
+                        strbuf_append_str(tp->code_buf, "  to_closure_named(");
                         write_fn_name(tp->code_buf, fn_node, (AstImportNode*)ident_node->entry->import);
-                        strbuf_append_format(tp->code_buf, ",%d,_closure_env); })", arity);
+                        strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
+                        // pass function name as string literal for stack traces
+                        // prefer named function, fall back to assignment variable name, then <anonymous>
+                        if (fn_node->name && fn_node->name->chars) {
+                            strbuf_append_char(tp->code_buf, '"');
+                            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+                            strbuf_append_char(tp->code_buf, '"');
+                        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+                            strbuf_append_char(tp->code_buf, '"');
+                            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
+                            strbuf_append_char(tp->code_buf, '"');
+                        } else {
+                            strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
+                        }
+                        strbuf_append_str(tp->code_buf, "); })");
                     } else {
-                        // Regular function without captures
-                        strbuf_append_format(tp->code_buf, "to_fn_n(");
+                        // Regular function without captures - use to_fn_named for stack traces
+                        strbuf_append_format(tp->code_buf, "to_fn_named(");
                         write_fn_name(tp->code_buf, fn_node, 
                             (AstImportNode*)ident_node->entry->import);
-                        strbuf_append_format(tp->code_buf, ",%d)", arity);
+                        strbuf_append_format(tp->code_buf, ",%d,", arity);
+                        // pass function name as string literal for stack traces
+                        if (fn_node->name && fn_node->name->chars) {
+                            strbuf_append_char(tp->code_buf, '"');
+                            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+                            strbuf_append_char(tp->code_buf, '"');
+                        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+                            strbuf_append_char(tp->code_buf, '"');
+                            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
+                            strbuf_append_char(tp->code_buf, '"');
+                        } else {
+                            strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
+                        }
+                        strbuf_append_char(tp->code_buf, ')');
                     }
                 }
                 else {
@@ -1103,7 +1131,15 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     write_var_name(tp->code_buf, asn_node, NULL);
     strbuf_append_char(tp->code_buf, '=');
 
+    // set assignment name context for closure naming
+    String* prev_assign_name = tp->current_assign_name;
+    tp->current_assign_name = asn_node->name;
+    
     transpile_expr(tp, asn_node->as);
+    
+    // restore previous context
+    tp->current_assign_name = prev_assign_name;
+    
     strbuf_append_char(tp->code_buf, ';');
 }
 
@@ -2444,7 +2480,6 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, ";\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");
-        // closures must box their return value
         if (is_closure) {
             transpile_box_item(tp, fn_node->body);
         } else {
@@ -2516,7 +2551,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         // closure: allocate env, populate captured values, call to_closure
         // generate: ({ Env_fXXX* env = heap_calloc(sizeof(Env_fXXX), 0); 
         //              env->var1 = i2it(_var1); env->var2 = s2it(_var2); ...
-        //              to_closure(_fXXX, arity, env); })
+        //              to_closure_named(_fXXX, arity, env, "name"); })
         strbuf_append_str(tp->code_buf, "({ ");
         write_env_name(tp->code_buf, fn_node);
         strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
@@ -2542,14 +2577,41 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
             cap = cap->next;
         }
         
-        strbuf_append_str(tp->code_buf, "  to_closure(");
+        strbuf_append_str(tp->code_buf, "  to_closure_named(");
         write_fn_name(tp->code_buf, fn_node, NULL);
-        strbuf_append_format(tp->code_buf, ",%d,_closure_env); })", arity);
+        strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
+        // pass function name as string literal for stack traces
+        // prefer named function, fall back to assignment variable name, then <anonymous>
+        if (fn_node->name && fn_node->name->chars) {
+            strbuf_append_char(tp->code_buf, '"');
+            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+            strbuf_append_char(tp->code_buf, '"');
+        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+            strbuf_append_char(tp->code_buf, '"');
+            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
+            strbuf_append_char(tp->code_buf, '"');
+        } else {
+            strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
+        }
+        strbuf_append_str(tp->code_buf, "); })");
     } else {
-        // regular function without captures
-        strbuf_append_format(tp->code_buf, "to_fn_n(");
+        // regular function without captures - use to_fn_named for stack traces
+        strbuf_append_format(tp->code_buf, "to_fn_named(");
         write_fn_name(tp->code_buf, fn_node, NULL);
-        strbuf_append_format(tp->code_buf, ",%d)", arity);
+        strbuf_append_format(tp->code_buf, ",%d,", arity);
+        // pass function name as string literal for stack traces
+        if (fn_node->name && fn_node->name->chars) {
+            strbuf_append_char(tp->code_buf, '"');
+            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+            strbuf_append_char(tp->code_buf, '"');
+        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+            strbuf_append_char(tp->code_buf, '"');
+            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
+            strbuf_append_char(tp->code_buf, '"');
+        } else {
+            strbuf_append_str(tp->code_buf, "\"<anonymous>\"");
+        }
+        strbuf_append_char(tp->code_buf, ')');
     }
 }
 
