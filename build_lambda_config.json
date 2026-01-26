@@ -1442,6 +1442,20 @@
                         "icon": "\ud83c\udf10"
                     },
                     {
+                        "source": "markup/test_commonmark_spec_gtest.cpp",
+                        "name": "CommonMark Spec Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_commonmark_spec_gtest.exe",
+                        "icon": "📝"
+                    },
+                    {
                         "source": "test_latex_ts_gtest.cpp",
                         "name": "LaTeX Tree-sitter Parser Tests",
                         "dependencies": [
