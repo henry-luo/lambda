@@ -142,7 +142,7 @@ static char* unescape_string(const char* start, size_t len) {
                     size_t name_len = entity_pos - entity_start;
                     EntityResult result = html_entity_resolve(entity_start, name_len);
 
-                    if (result.type == ENTITY_ASCII_ESCAPE) {
+                    if (result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) {
                         size_t decoded_len = strlen(result.decoded);
                         memcpy(out, result.decoded, decoded_len);
                         out += decoded_len;
