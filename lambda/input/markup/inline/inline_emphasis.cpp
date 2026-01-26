@@ -167,13 +167,11 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
     }
 
     if (open_count == 0) {
-        (*text)++;
         return Item{.item = ITEM_UNDEFINED};
     }
 
     // Check if this can open emphasis
     if (!can_open(marker, full_text, start, content_start)) {
-        (*text)++;
         return Item{.item = ITEM_UNDEFINED};
     }
 
@@ -210,8 +208,7 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
     }
 
     if (!close_start) {
-        // No closing marker found, treat as plain text
-        (*text)++;
+        // No closing marker found, treat as plain text (don't advance pos)
         return Item{.item = ITEM_UNDEFINED};
     }
 
