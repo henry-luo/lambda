@@ -21,6 +21,11 @@ extern Item parse_inline_spans(MarkupParser* parser, const char* text);
  *
  * Creates a <p> element containing parsed inline content.
  * Collects multiple lines if they continue the paragraph.
+ *
+ * CommonMark: Paragraphs preserve soft line breaks (newlines) between lines.
+ * Lines with any indentation can continue a paragraph as long as they
+ * don't match another block type (except indented code - that doesn't
+ * interrupt paragraphs).
  */
 Item parse_paragraph(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
@@ -49,7 +54,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
     bool first_line_has_math = (strstr(first_line, "$") != nullptr);
 
     if (!first_line_has_math) {
-        // Only collect additional lines if the first line doesn't have math
+        // Collect continuation lines
         while (parser->current_line < parser->line_count) {
             const char* current = parser->lines[parser->current_line];
 
@@ -59,9 +64,28 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             }
 
             // Check if next line starts a different block type
+            // NOTE: Indented code blocks do NOT interrupt paragraphs in CommonMark
             BlockType next_type = detect_block_type(parser, current);
-            if (next_type != BlockType::PARAGRAPH) {
-                break;
+
+            // These block types interrupt paragraphs:
+            // - Headers, lists, blockquotes, thematic breaks, fenced code, HTML blocks
+            // Indented code blocks (4+ spaces) do NOT interrupt paragraphs
+            if (next_type == BlockType::HEADER ||
+                next_type == BlockType::LIST_ITEM ||
+                next_type == BlockType::QUOTE ||
+                next_type == BlockType::DIVIDER ||
+                next_type == BlockType::TABLE ||
+                next_type == BlockType::MATH) {
+                // Check if it's a fenced code block (``` or ~~~)
+                const char* pos = current;
+                skip_whitespace(&pos);
+                if (next_type == BlockType::CODE_BLOCK && (*pos == '`' || *pos == '~')) {
+                    break;  // Fenced code interrupts paragraphs
+                }
+                if (next_type != BlockType::CODE_BLOCK) {
+                    break;  // Other block types interrupt paragraphs
+                }
+                // Indented code block - doesn't interrupt, fall through
             }
 
             const char* content = current;
@@ -72,8 +96,8 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                 break;
             }
 
-            // Add space between lines and append content
-            stringbuf_append_char(sb, ' ');
+            // CommonMark: Add newline between lines (soft line break), not space
+            stringbuf_append_char(sb, '\n');
             stringbuf_append_str(sb, content);
             parser->current_line++;
         }
