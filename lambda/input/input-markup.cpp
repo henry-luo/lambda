@@ -3139,9 +3139,19 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 // Skip leading spaces on the next line
                 while (*pos == ' ') pos++;
             } else {
-                // Soft line break - add newline character to buffer
+                // Soft line break - CommonMark §6.8: trim trailing/leading spaces
+                // Trim trailing spaces from buffer before soft line break
+                while (sb->length > 0 && sb->str->chars[sb->length - 1] == ' ') {
+                    sb->length--;
+                    sb->str->chars[sb->length] = '\0';
+                }
+
+                // Add newline character to buffer
                 stringbuf_append_char(sb, *pos);
                 pos++;
+
+                // Skip leading spaces on the next line for soft line break
+                while (*pos == ' ' || *pos == '\t') pos++;
             }
         }
         else {
