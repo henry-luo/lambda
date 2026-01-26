@@ -64,7 +64,7 @@ static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t l
     StringBuf* sb = ctx.output();
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
-        // Percent-encode spaces and other unsafe characters
+        // Percent-encode spaces, special chars, and non-ASCII bytes
         if (c == ' ') {
             stringbuf_append_str(sb, "%20");
         } else if (c == '"') {
@@ -81,6 +81,11 @@ static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t l
             stringbuf_append_str(sb, "%5D");
         } else if (c == '\\') {
             stringbuf_append_str(sb, "%5C");
+        } else if (c > 127) {
+            // Percent-encode non-ASCII bytes (UTF-8 bytes)
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%%%02X", c);
+            stringbuf_append_str(sb, hex);
         } else {
             stringbuf_append_char(sb, c);
         }

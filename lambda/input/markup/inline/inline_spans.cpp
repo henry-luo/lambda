@@ -50,7 +50,8 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
     // For simple text without markup, return as string
     // Check for any potential inline markup characters
-    if (!strpbrk(text, "*_`[!~\\$:^{@'<")) {
+    // Also include newline since we need to check for hard line breaks (2+ spaces before \n)
+    if (!strpbrk(text, "*_`[!~\\$:^{@'<&\n\r")) {
         log_debug("parse_inline_spans: no markup chars, returning as plain string");
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
@@ -66,11 +67,21 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         return Item{.item = s2it(content)};
     }
 
+    // Make a local copy of the text since we use the shared parser->sb which
+    // might be the source of the text pointer (e.g., when called from block_quote)
+    size_t text_len = strlen(text);
+    char* text_copy = (char*)malloc(text_len + 1);
+    if (!text_copy) {
+        String* content = create_string(parser, text);
+        return Item{.item = s2it(content)};
+    }
+    memcpy(text_copy, text, text_len + 1);
+
     // Get string buffer from parser context
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
-    const char* pos = text;
+    const char* pos = text_copy;
     Format format = parser->config.format;
 
     while (*pos) {
@@ -78,7 +89,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (*pos == '*' || *pos == '_') {
             // Try to parse emphasis - don't flush buffer yet in case it fails
             const char* try_pos = pos;
-            Item inline_item = parse_emphasis(parser, &try_pos, text);
+            Item inline_item = parse_emphasis(parser, &try_pos, text_copy);
 
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
                 // Success - flush buffer first, then add emphasis element
@@ -524,8 +535,10 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         Item text_item = {.item = s2it(text_content)};
         list_push((List*)span, text_item);
         increment_element_content_length(span);
+        stringbuf_reset(sb);  // Reset for any subsequent/parent calls
     }
 
+    free(text_copy);  // Free the local copy we made
     return Item{.item = (uint64_t)span};
 }
 
