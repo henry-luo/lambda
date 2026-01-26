@@ -203,7 +203,7 @@ void *import_resolver(const char *name) {
     return NULL;
 }
 
-MIR_context_t jit_init() {
+MIR_context_t jit_init(unsigned int optimize_level) {
     MIR_context_t ctx = MIR_init();
     c2mir_init(ctx);
     MIR_gen_init(ctx); // init the JIT generator
@@ -212,8 +212,8 @@ MIR_context_t jit_init() {
     // Level 2: Adds CSE/GVN and constant propagation (default)
     // Level 3: Adds register renaming and loop invariant code motion
     // Note: MIR inlines CALL instructions for functions under 50 instructions at levels > 0
-    // Using level 0 to preserve call frames for stack traces
-    MIR_gen_set_optimize_level(ctx, 0);
+    log_info("MIR JIT optimization level: %u", optimize_level);
+    MIR_gen_set_optimize_level(ctx, optimize_level);
     return ctx;
 }
 
