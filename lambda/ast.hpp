@@ -342,9 +342,13 @@ struct Script : Input {
     MIR_context_t jit_context;
     main_func_t main_func;      // transpiled main function
     mpd_context_t* decimal_ctx;  // libmpdec context for decimal operations
+    
+    // Debug info for stack traces (function address → source mapping)
+    ArrayList* debug_info;      // list of FuncDebugInfo*
 };
 
 typedef struct Runtime Runtime;
+struct LambdaError;  // forward declaration
 
 typedef struct Transpiler : Script {
     TSParser* parser;
@@ -354,6 +358,7 @@ typedef struct Transpiler : Script {
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count
     int max_errors;            // threshold (default: 10)
+    ArrayList* errors;         // list of LambdaError* (structured errors)
     
     // Closure transpilation context
     AstFuncNode* current_closure;  // non-null when transpiling inside a closure body

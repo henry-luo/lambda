@@ -1,7 +1,9 @@
 #include "transpiler.hpp"
+#include "lambda_error.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/log.h"
+#include "../lib/arraylist.h"
 #include <errno.h>
 #include <algorithm>  // for std::max
 
@@ -203,14 +205,63 @@ bool types_compatible(Type* arg_type, Type* param_type) {
 void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     tp->error_count++;
     
-    // Format and log error message
+    // Format error message
     char error_msg[512];
     va_list args;
     va_start(args, format);
     vsnprintf(error_msg, sizeof(error_msg), format, args);
     va_end(args);
     
+    // Create structured error
+    SourceLocation loc = src_loc(tp->reference, line, 1);
+    loc.source = tp->source;
+    LambdaError* error = err_create(ERR_TYPE_MISMATCH, error_msg, &loc);
+    
+    // Store in error list if available
+    if (tp->errors) {
+        arraylist_append(tp->errors, error);
+    }
+    
+    // Also log for backward compatibility
     log_error("type_error (line %d): %s", line, error_msg);
+    
+    // Check threshold
+    if (tp->error_count >= tp->max_errors) {
+        log_error("error_threshold: max errors (%d) reached", tp->max_errors);
+    }
+}
+
+// Record a semantic error with error code
+void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
+    tp->error_count++;
+    
+    // Get location from TSNode
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+    
+    // Format error message
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    
+    // Create structured error with span
+    SourceLocation loc = src_loc_span(tp->reference, 
+        start.row + 1, start.column + 1,
+        end.row + 1, end.column + 1);
+    loc.source = tp->source;
+    LambdaError* error = err_create(code, error_msg, &loc);
+    
+    // Store in error list if available
+    if (tp->errors) {
+        arraylist_append(tp->errors, error);
+    }
+    
+    // Also log for backward compatibility
+    log_error("error[E%d] at %s:%u:%u: %s", code, 
+        tp->reference ? tp->reference : "<unknown>",
+        start.row + 1, start.column + 1, error_msg);
     
     // Check threshold
     if (tp->error_count >= tp->max_errors) {
