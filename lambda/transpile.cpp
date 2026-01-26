@@ -2553,6 +2553,22 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, "*)_env_ptr;\n");
     }
     
+    // Stack overflow check for potentially recursive functions
+    // All closures and named functions get checks since they may be called recursively
+    bool needs_stack_check = true;  // For now, check all functions
+    if (needs_stack_check) {
+        strbuf_append_str(tp->code_buf, " LAMBDA_STACK_CHECK(\"");
+        // Use function name if available, otherwise use assignment name
+        if (fn_node->name && fn_node->name->chars) {
+            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
+        } else {
+            strbuf_append_str(tp->code_buf, "<anonymous>");
+        }
+        strbuf_append_str(tp->code_buf, "\");\n");
+    }
+    
     // set vargs before function body for variadic functions
     if (fn_type && fn_type->is_variadic) {
         strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
@@ -3115,8 +3131,30 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
 // include lambda-embed.h to get the lambda header file content as a string
 #include "lambda-embed.h"
 
+// Stack overflow check code to be included in transpiled output
+// Uses portable approach compatible with MIR C compiler
+// Note: We call functions instead of accessing variables directly (MIR limitation)
+static const char* stack_check_code = R"(
+// Stack overflow protection declarations
+extern uintptr_t get_stack_limit(void);
+extern void lambda_stack_overflow_error(const char* func_name);
+extern Item get_item_error(void);
+
+// Portable stack check using local variable address
+#define LAMBDA_STACK_CHECK(func_name) \
+    do { \
+        volatile char _stack_marker; \
+        if ((uintptr_t)&_stack_marker < get_stack_limit()) { \
+            lambda_stack_overflow_error(func_name); \
+            return get_item_error(); \
+        } \
+    } while(0)
+)";
+
 void transpile_ast_root(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
+    // Add stack overflow protection code
+    strbuf_append_str(tp->code_buf, stack_check_code);
     // all (nested) function definitions need to be hoisted to global level
     log_debug("define_ast_node ...");
     // defines global runtime context

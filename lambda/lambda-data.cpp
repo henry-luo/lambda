@@ -69,6 +69,11 @@ String EMPTY_STRING = {.len = sizeof("lambda.nil") - 1, .ref_cnt = 0, .chars = "
 // TRUE_EMPTY_STRING is a real empty string for HTML boolean attributes
 String TRUE_EMPTY_STRING = {.len = 0, .ref_cnt = 0, .chars = ""};
 
+// Accessor function for ItemError (for MIR compatibility)
+extern "C" Item get_item_error(void) {
+    return ItemError;
+}
+
 // Note: ConstItem has const members and cannot be assigned after initialization.
 // These are zero-initialized and should be used via reinterpret_cast from appropriate Items.
 alignas(ConstItem) static uint64_t error_result_storage = ITEM_ERROR;
