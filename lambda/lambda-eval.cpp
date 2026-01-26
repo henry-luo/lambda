@@ -66,6 +66,29 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
 }
 
 /**
+ * Public API to set a runtime error from external modules (e.g., lambda-stack.cpp)
+ * Does NOT capture stack trace since it may be called in low-stack situations.
+ */
+extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message) {
+    if (!context) return;
+    
+    SourceLocation loc = {0};
+    if (context->current_file) {
+        loc.file = context->current_file;
+    }
+    
+    LambdaError* error = err_create(code, message, &loc);
+    // Skip stack trace capture - may be called in low-stack conditions
+    
+    if (context->last_error) {
+        err_free(context->last_error);
+    }
+    context->last_error = error;
+    
+    log_error("runtime error [%d]: %s", code, message);
+}
+
+/**
  * fn_error(message) - raise a user error with stack trace
  * This is the Lambda sys func that triggers a runtime error.
  */
