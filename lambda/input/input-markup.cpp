@@ -29,6 +29,15 @@ static void increment_element_content_length(Element* element) {
     }
 }
 
+// Helper function to get element content length
+static int get_elem_content_len(Element* element) {
+    if (element && element->type) {
+        TypeElmt* elmt_type = (TypeElmt*)element->type;
+        return elmt_type->content_length;
+    }
+    return 0;
+}
+
 // Phase 2: Enhanced block element parsers
 static Item parse_header(MarkupParser* parser, const char* line);
 static Item parse_list_item(MarkupParser* parser, const char* line);
@@ -42,11 +51,12 @@ static Item parse_divider(MarkupParser* parser);
 
 // Phase 2: Enhanced inline element parsers
 static Item parse_inline_spans(MarkupParser* parser, const char* text);
-static Item parse_bold_italic(MarkupParser* parser, const char** text);
+static Item parse_bold_italic(MarkupParser* parser, const char* full_text, const char** text);
 static Item parse_code_span(MarkupParser* parser, const char** text);
 static Item parse_link(MarkupParser* parser, const char** text);
 static Item parse_image(MarkupParser* parser, const char** text);
 static Item parse_raw_html_tag(MarkupParser* parser, const char** text);
+static char* process_emphasis_delimiters(MarkupParser* parser, const char* text);
 
 // Phase 4: Advanced inline element parsers
 static Item parse_strikethrough(MarkupParser* parser, const char** text);
@@ -70,6 +80,10 @@ static Item parse_org_block(MarkupParser* parser, const char* line);
 static Item parse_yaml_frontmatter(MarkupParser* parser);
 static Item parse_org_properties(MarkupParser* parser);
 static Item parse_wiki_template(MarkupParser* parser, const char** text);
+
+// Link reference definition parsing
+static bool is_link_definition_start(const char* line);
+static bool try_parse_link_definition(MarkupParser* parser, const char* line);
 
 // MediaWiki-specific forward declarations
 static bool is_wiki_heading(const char* line, int* level);
@@ -193,6 +207,7 @@ MarkupParser::MarkupParser(Input* input, ParseConfig cfg)
     , lines(nullptr)
     , line_count(0)
     , current_line(0)
+    , link_def_count(0)
 {
     // Initialize state
     resetState();
@@ -239,10 +254,206 @@ Item MarkupParser::parseContent(const char* content) {
     }
 
     current_line = 0;
+    link_def_count = 0;  // reset link definitions
     resetState();
 
     // Parse the document
     return parse_document(this);
+}
+
+// Normalize a link label for case-insensitive matching
+// CommonMark: Labels are normalized by lowercase, collapse whitespace, trim
+void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size_t out_size) {
+    if (!label || !out || out_size == 0) return;
+
+    size_t out_pos = 0;
+    bool in_whitespace = true; // start true to skip leading whitespace
+
+    for (size_t i = 0; i < len && out_pos < out_size - 1; i++) {
+        char c = label[i];
+
+        // Skip emphasis markers (they shouldn't affect label matching)
+        if (c == '*' || c == '_') {
+            continue;
+        }
+
+        // Check for whitespace (space, tab, newline)
+        bool is_ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+
+        if (is_ws) {
+            if (!in_whitespace && out_pos < out_size - 1) {
+                // collapse whitespace to single space
+                out[out_pos++] = ' ';
+            }
+            in_whitespace = true;
+        } else {
+            // convert to lowercase
+            if (c >= 'A' && c <= 'Z') {
+                c = c - 'A' + 'a';
+            }
+            out[out_pos++] = c;
+            in_whitespace = false;
+        }
+    }
+
+    // trim trailing space
+    if (out_pos > 0 && out[out_pos - 1] == ' ') {
+        out_pos--;
+    }
+
+    out[out_pos] = '\0';
+}
+
+/**
+ * stripEmphasisTags - Strip <em>, </em>, <strong>, </strong> tags from text
+ *
+ * This is needed when parsing image/link labels after emphasis processing
+ * has already been applied. The raw label is needed for definition lookups.
+ * Returns the length of the stripped string.
+ */
+static size_t stripEmphasisTags(const char* src, size_t src_len, char* out, size_t out_size) {
+    if (!src || !out || out_size == 0) return 0;
+
+    size_t out_pos = 0;
+    const char* p = src;
+    const char* end = src + src_len;
+
+    while (p < end && out_pos < out_size - 1) {
+        if (*p == '<') {
+            // Check for emphasis tags
+            if (strncmp(p, "<em>", 4) == 0) {
+                p += 4;
+                continue;
+            }
+            if (strncmp(p, "</em>", 5) == 0) {
+                p += 5;
+                continue;
+            }
+            if (strncmp(p, "<strong>", 8) == 0) {
+                p += 8;
+                continue;
+            }
+            if (strncmp(p, "</strong>", 9) == 0) {
+                p += 9;
+                continue;
+            }
+        }
+        out[out_pos++] = *p;
+        p++;
+    }
+    out[out_pos] = '\0';
+    return out_pos;
+}
+
+/**
+ * unescapeBackslashes - Process backslash escapes in URL or title strings
+ *
+ * According to CommonMark §2.4, a backslash followed by ASCII punctuation
+ * is an escape sequence. The backslash is removed and the character is kept.
+ * Backslash followed by any other character is kept literally.
+ *
+ * This is used for link destinations and titles.
+ * Returns the length of the unescaped string.
+ */
+static size_t unescapeBackslashes(const char* src, size_t src_len, char* out, size_t out_size) {
+    if (!src || !out || out_size == 0) return 0;
+
+    size_t out_pos = 0;
+    size_t i = 0;
+
+    while (i < src_len && out_pos < out_size - 1) {
+        if (src[i] == '\\' && i + 1 < src_len) {
+            char next = src[i + 1];
+            // CommonMark §2.4: ASCII punctuation can be escaped
+            if (next && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", next)) {
+                // Skip backslash, keep the escaped character
+                out[out_pos++] = next;
+                i += 2;
+                continue;
+            }
+        }
+        // Not an escape sequence - keep character as-is
+        out[out_pos++] = src[i];
+        i++;
+    }
+    out[out_pos] = '\0';
+    return out_pos;
+}
+
+bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
+                                      const char* url, size_t url_len,
+                                      const char* title, size_t title_len) {
+    if (!label || label_len == 0 || !url) {
+        return false;
+    }
+
+    if (link_def_count >= MAX_LINK_DEFINITIONS) {
+        log_debug("markup_parser: link definition limit reached (%d)", MAX_LINK_DEFINITIONS);
+        return false;
+    }
+
+    // normalize the label
+    char normalized[256];
+    normalizeLabel(label, label_len, normalized, sizeof(normalized));
+
+    // Empty label after normalization is invalid
+    if (normalized[0] == '\0') {
+        return false;
+    }
+
+    // check for duplicate (first definition wins per CommonMark)
+    for (int i = 0; i < link_def_count; i++) {
+        if (strcmp(link_defs[i].label, normalized) == 0) {
+            // duplicate, ignore
+            return true; // still return true to indicate it was parsed
+        }
+    }
+
+    // add new definition
+    LinkDefinition& def = link_defs[link_def_count];
+
+    strncpy(def.label, normalized, sizeof(def.label) - 1);
+    def.label[sizeof(def.label) - 1] = '\0';
+
+    // unescape backslash sequences in URL when storing
+    unescapeBackslashes(url, url_len, def.url, sizeof(def.url));
+
+    if (title && title_len > 0) {
+        // unescape backslash sequences in title when storing
+        unescapeBackslashes(title, title_len, def.title, sizeof(def.title));
+        def.has_title = true;
+    } else {
+        def.title[0] = '\0';
+        def.has_title = false;
+    }
+
+    link_def_count++;
+    log_debug("markup_parser: added link definition [%s] -> %s", def.label, def.url);
+    return true;
+}
+
+const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t label_len) const {
+    if (!label || label_len == 0) {
+        return nullptr;
+    }
+
+    // normalize the label for lookup
+    char normalized[256];
+    normalizeLabel(label, label_len, normalized, sizeof(normalized));
+
+    log_debug("markup_parser: getLinkDefinition looking for [%s] (from [%.*s])",
+              normalized, (int)label_len, label);
+
+    for (int i = 0; i < link_def_count; i++) {
+        log_debug("markup_parser: comparing with stored [%s]", link_defs[i].label);
+        if (strcmp(link_defs[i].label, normalized) == 0) {
+            log_debug("markup_parser: found match!");
+            return &link_defs[i];
+        }
+    }
+
+    log_debug("markup_parser: no match found");
+    return nullptr;
 }
 
 } // namespace lambda
@@ -364,6 +575,201 @@ const char* detect_markup_flavor(MarkupFormat format, const char* content) {
     }
 }
 
+// ============================================================================
+// Link Reference Definition Parsing
+// ============================================================================
+
+/**
+ * is_link_definition_start - Quick check if line might start a link definition
+ *
+ * CommonMark: Link definitions start with [label]: at left margin (0-3 spaces)
+ */
+static bool is_link_definition_start(const char* line) {
+    if (!line) return false;
+
+    // Skip up to 3 leading spaces
+    int spaces = 0;
+    const char* p = line;
+    while (*p == ' ' && spaces < 4) { spaces++; p++; }
+    if (spaces >= 4) return false; // indented code
+
+    // Must start with [
+    if (*p != '[') return false;
+
+    // Look for ]: pattern
+    p++;
+    while (*p && *p != ']' && *p != '\n' && *p != '\r') {
+        if (*p == '\\' && *(p+1)) {
+            p += 2;
+        } else {
+            p++;
+        }
+    }
+
+    return (*p == ']' && *(p+1) == ':');
+}
+
+/**
+ * try_parse_link_definition - Try to parse a link reference definition
+ *
+ * CommonMark link reference definitions:
+ * - Must start within 3 spaces of margin
+ * - Label in square brackets, followed by colon
+ * - Optional whitespace (including newline)
+ * - URL (optionally in angle brackets)
+ * - Optional title in quotes or parentheses
+ *
+ * Returns true if a definition was parsed successfully.
+ */
+static bool try_parse_link_definition(MarkupParser* parser, const char* line) {
+    if (!parser || !line) return false;
+
+    const char* p = line;
+
+    // Skip up to 3 leading spaces
+    int spaces = 0;
+    while (*p == ' ' && spaces < 4) { spaces++; p++; }
+    if (spaces >= 4) return false;
+
+    // Must start with [
+    if (*p != '[') return false;
+    p++;
+
+    // Parse label (non-empty, no unescaped ])
+    const char* label_start = p;
+    int bracket_depth = 1;
+
+    while (*p && bracket_depth > 0) {
+        if (*p == '\\' && *(p+1)) {
+            p += 2;
+            continue;
+        }
+        if (*p == '[') bracket_depth++;
+        else if (*p == ']') bracket_depth--;
+        if (bracket_depth > 0) p++;
+    }
+
+    if (bracket_depth != 0 || p == label_start) {
+        return false; // no closing ] or empty label
+    }
+
+    const char* label_end = p;
+    p++; // skip ]
+
+    // Must have :
+    if (*p != ':') return false;
+    p++;
+
+    // Skip optional whitespace (space, tab, up to one newline)
+    while (*p == ' ' || *p == '\t') p++;
+
+    if (*p == '\n' || *p == '\r') {
+        // After newline, need to check if continuation is on next line
+        // For now, require URL on same line for simplicity
+        // The full CommonMark spec allows URL on next line
+        if (*p == '\r' && *(p+1) == '\n') p++;
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+
+        // If we're at another newline or end, the URL is missing
+        if (*p == '\n' || *p == '\r' || *p == '\0') {
+            return false;
+        }
+    }
+
+    // Parse URL
+    const char* url_start = nullptr;
+    const char* url_end = nullptr;
+
+    if (*p == '<') {
+        // URL in angle brackets - only < and > can be escaped
+        p++;
+        url_start = p;
+        while (*p && *p != '\n' && *p != '\r') {
+            if (*p == '\\' && (*(p+1) == '<' || *(p+1) == '>' || *(p+1) == '\\')) {
+                p += 2;
+                continue;
+            }
+            if (*p == '<') return false; // Unescaped < not allowed
+            if (*p == '>') break; // Found closing >
+            p++;
+        }
+        if (*p != '>') return false;
+        url_end = p;
+        p++;
+    } else {
+        // Bare URL (no whitespace, balanced parentheses)
+        url_start = p;
+        int paren_depth = 0;
+
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+            if (*p == '\\' && *(p+1)) {
+                p += 2;
+                continue;
+            }
+            if (*p == '(') paren_depth++;
+            else if (*p == ')') {
+                if (paren_depth == 0) break;
+                paren_depth--;
+            }
+            p++;
+        }
+        url_end = p;
+    }
+
+    // URL can be empty (per CommonMark)
+    // if (url_start == url_end) {
+    //     return false; // empty URL - actually allowed!
+    // }
+
+    // Skip whitespace before optional title
+    while (*p == ' ' || *p == '\t') p++;
+
+    // Optional title on same line
+    const char* title_start = nullptr;
+    const char* title_end = nullptr;
+
+    // Check for title on same line
+    if (*p == '"' || *p == '\'' || *p == '(') {
+        char open_char = *p;
+        char close_char = (*p == '(') ? ')' : *p;
+        p++;
+        title_start = p;
+
+        // Title can span lines, but must be closed
+        while (*p && *p != close_char) {
+            if (*p == '\\' && *(p+1)) {
+                p += 2;
+            } else {
+                p++;
+            }
+        }
+
+        if (*p != close_char) {
+            // Title not closed - not a valid definition
+            return false;
+        }
+        title_end = p;
+        p++;
+    }
+
+    // Rest of line should be whitespace only
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '\0' && *p != '\n' && *p != '\r') {
+        // Extra content after title - not a valid definition
+        return false;
+    }
+
+    // Add the link definition to parser
+    bool added = parser->addLinkDefinition(
+        label_start, label_end - label_start,
+        url_start, url_end - url_start,
+        title_start, title_start ? (title_end - title_start) : 0
+    );
+
+    return added;
+}
+
 // Document parsing - creates proper structure according to Doc Schema
 static Item parse_document(MarkupParser* parser) {
     // Create root document element according to schema
@@ -456,6 +862,15 @@ static Item parse_block_element(MarkupParser* parser) {
     if (is_empty_line(line)) {
         parser->current_line++;
         return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // CommonMark: Try to parse link reference definitions first
+    // They don't produce output but are stored for later reference resolution
+    if (parser->config.format == MARKUP_MARKDOWN && is_link_definition_start(line)) {
+        if (try_parse_link_definition(parser, line)) {
+            parser->current_line++;
+            return (Item){.item = ITEM_UNDEFINED};  // consumed, no output
+        }
     }
 
     // Phase 6: Check for advanced features first
@@ -1947,6 +2362,295 @@ static Item parse_table_row(MarkupParser* parser, const char* line) {
     return (Item){.item = (uint64_t)row};
 }
 
+// Parse inline content that has <em>, </em>, <strong>, </strong> emphasis tags
+// This is used after process_emphasis_delimiters transforms the text
+static Item parse_inline_with_emphasis_tags(MarkupParser* parser, const char* text) {
+    if (!text || !*text) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    log_debug("parse_inline_with_emphasis_tags input: [%s]", text);
+
+    // Quick check: if no emphasis tags, just parse normally without the emphasis path
+    if (!strstr(text, "<em>") && !strstr(text, "<strong>")) {
+        // No emphasis tags - create a span with the text content
+        // Check for other inline markup
+        if (!strpbrk(text, "`[!~\\$:^{@'<\n\r")) {
+            size_t len = strlen(text);
+            while (len > 0 && text[len - 1] == ' ') len--;
+            String* content = parser->builder.createString(text, len);
+            return (Item){.item = s2it(content)};
+        }
+        // Has other inline markup - need to parse it
+        // Create span and parse other inline elements
+        Element* span = create_element(parser, "span");
+        if (!span) {
+            String* content = parser->builder.createString(text, strlen(text));
+            return (Item){.item = s2it(content)};
+        }
+
+        const char* pos = text;
+        StringBuf* sb = parser->sb;
+        stringbuf_reset(sb);
+
+        while (*pos) {
+            if (*pos == '\\' && *(pos+1) && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", *(pos+1))) {
+                // Backslash escape - skip backslash, keep character
+                pos++;
+                stringbuf_append_char(sb, *pos);
+                pos++;
+            } else if (*pos == '`') {
+                if (sb->length > 0) {
+                    String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                    list_push((List*)span, (Item){.item = s2it(txt)});
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+                Item code = parse_code_span(parser, &pos);
+                if (code.item != ITEM_ERROR && code.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, code);
+                    increment_element_content_length(span);
+                }
+            } else if (*pos == '[') {
+                // Handle links
+                if (sb->length > 0) {
+                    String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                    list_push((List*)span, (Item){.item = s2it(txt)});
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+                const char* link_start = pos;
+                Item link = parse_link(parser, &pos);
+                if (link.item != ITEM_ERROR && link.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, link);
+                    increment_element_content_length(span);
+                } else {
+                    stringbuf_append_char(sb, '[');
+                    pos = link_start + 1;
+                }
+            } else if (*pos == '!' && *(pos + 1) == '[') {
+                // Handle images
+                if (sb->length > 0) {
+                    String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                    list_push((List*)span, (Item){.item = s2it(txt)});
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+                const char* img_start = pos;
+                Item img = parse_image(parser, &pos);
+                if (img.item != ITEM_ERROR && img.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, img);
+                    increment_element_content_length(span);
+                } else {
+                    stringbuf_append_char(sb, '!');
+                    pos = img_start + 1;
+                }
+            } else {
+                stringbuf_append_char(sb, *pos);
+                pos++;
+            }
+        }
+
+        if (sb->length > 0) {
+            String* txt = parser->builder.createString(sb->str->chars, sb->length);
+            list_push((List*)span, (Item){.item = s2it(txt)});
+            increment_element_content_length(span);
+            stringbuf_reset(sb);
+        }
+
+        if (get_elem_content_len(span) == 0) {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+        if (get_elem_content_len(span) == 1) {
+            Item first = ((List*)span)->items[0];
+            return first;
+        }
+        return (Item){.item = (uint64_t)span};
+    }
+
+    // Parse text with emphasis tags
+    Element* span = create_element(parser, "span");
+    if (!span) {
+        String* content = parser->builder.createString(text, strlen(text));
+        return (Item){.item = s2it(content)};
+    }
+
+    const char* pos = text;
+    StringBuf* sb = parser->sb;
+    stringbuf_reset(sb);
+
+    // Element stack for nesting
+    #define MAX_EMPHASIS_DEPTH 16
+    Element* elem_stack[MAX_EMPHASIS_DEPTH];
+    int stack_depth = 0;
+    elem_stack[0] = span;
+
+    while (*pos) {
+        // Handle backslash escapes first
+        if (*pos == '\\' && *(pos+1) && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", *(pos+1))) {
+            pos++; // Skip backslash
+            stringbuf_append_char(sb, *pos);
+            pos++;
+            continue;
+        }
+        // Check for emphasis opening tags
+        if (strncmp(pos, "<strong>", 8) == 0) {
+            // Flush text
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            // Push new strong element
+            if (stack_depth < MAX_EMPHASIS_DEPTH - 1) {
+                Element* strong = create_element(parser, "strong");
+                if (strong) {
+                    stack_depth++;
+                    elem_stack[stack_depth] = strong;
+                }
+            }
+            pos += 8;
+        }
+        else if (strncmp(pos, "</strong>", 9) == 0) {
+            // Flush text
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            // Pop and add to parent
+            if (stack_depth > 0) {
+                Element* completed = elem_stack[stack_depth];
+                stack_depth--;
+                list_push((List*)elem_stack[stack_depth], (Item){.item = (uint64_t)completed});
+                increment_element_content_length(elem_stack[stack_depth]);
+            }
+            pos += 9;
+        }
+        else if (strncmp(pos, "<em>", 4) == 0) {
+            // Flush text
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            // Push new em element
+            if (stack_depth < MAX_EMPHASIS_DEPTH - 1) {
+                Element* em = create_element(parser, "em");
+                if (em) {
+                    stack_depth++;
+                    elem_stack[stack_depth] = em;
+                }
+            }
+            pos += 4;
+        }
+        else if (strncmp(pos, "</em>", 5) == 0) {
+            // Flush text
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            // Pop and add to parent
+            if (stack_depth > 0) {
+                Element* completed = elem_stack[stack_depth];
+                stack_depth--;
+                list_push((List*)elem_stack[stack_depth], (Item){.item = (uint64_t)completed});
+                increment_element_content_length(elem_stack[stack_depth]);
+            }
+            pos += 5;
+        }
+        else if (*pos == '`') {
+            // Handle code spans
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            Item code = parse_code_span(parser, &pos);
+            if (code.item != ITEM_ERROR && code.item != ITEM_UNDEFINED) {
+                list_push((List*)elem_stack[stack_depth], code);
+                increment_element_content_length(elem_stack[stack_depth]);
+            }
+        }
+        else if (*pos == '[') {
+            // Handle links
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            const char* link_start = pos;
+            Item link = parse_link(parser, &pos);
+            if (link.item != ITEM_ERROR && link.item != ITEM_UNDEFINED) {
+                list_push((List*)elem_stack[stack_depth], link);
+                increment_element_content_length(elem_stack[stack_depth]);
+            } else {
+                // Not a valid link, just add the '[' character
+                stringbuf_append_char(sb, '[');
+                pos = link_start + 1;
+            }
+        }
+        else if (*pos == '!' && *(pos + 1) == '[') {
+            // Handle images
+            if (sb->length > 0) {
+                String* txt = parser->builder.createString(sb->str->chars, sb->length);
+                list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+                increment_element_content_length(elem_stack[stack_depth]);
+                stringbuf_reset(sb);
+            }
+            const char* img_start = pos;
+            Item img = parse_image(parser, &pos);
+            if (img.item != ITEM_ERROR && img.item != ITEM_UNDEFINED) {
+                list_push((List*)elem_stack[stack_depth], img);
+                increment_element_content_length(elem_stack[stack_depth]);
+            } else {
+                // Not a valid image, just add the '!' character
+                stringbuf_append_char(sb, '!');
+                pos = img_start + 1;
+            }
+        }
+        else {
+            stringbuf_append_char(sb, *pos);
+            pos++;
+        }
+    }
+
+    // Flush remaining text
+    if (sb->length > 0) {
+        String* txt = parser->builder.createString(sb->str->chars, sb->length);
+        list_push((List*)elem_stack[stack_depth], (Item){.item = s2it(txt)});
+        increment_element_content_length(elem_stack[stack_depth]);
+        stringbuf_reset(sb);
+    }
+
+    // Close any unclosed elements
+    while (stack_depth > 0) {
+        Element* completed = elem_stack[stack_depth];
+        stack_depth--;
+        list_push((List*)elem_stack[stack_depth], (Item){.item = (uint64_t)completed});
+        increment_element_content_length(elem_stack[stack_depth]);
+    }
+
+    if (get_elem_content_len(span) == 0) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    if (get_elem_content_len(span) == 1) {
+        Item first = ((List*)span)->items[0];
+        return first;
+    }
+    return (Item){.item = (uint64_t)span};
+}
+
+// Forward declaration
+static Item parse_inline_with_emphasis_tags(MarkupParser* parser, const char* text);
+
 // Phase 2: Enhanced inline content parsing with spans
 static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     if (!text || !*text) {
@@ -1963,6 +2667,16 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         }
         String* content = parser->builder.createString(text, len);
         return (Item){.item = s2it(content)};
+    }
+
+    // If text contains emphasis markers, use the delimiter-based algorithm
+    if (strpbrk(text, "*_")) {
+        char* processed = process_emphasis_delimiters(parser, text);
+        if (processed) {
+            Item result = parse_inline_with_emphasis_tags(parser, processed);
+            free(processed);
+            return result;
+        }
     }
 
     // Create span container for mixed inline content
@@ -1990,7 +2704,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
             // Parse bold/italic
             const char* before_parse = pos;
-            Item inline_item = parse_bold_italic(parser, &pos);
+            Item inline_item = parse_bold_italic(parser, text, &pos);
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, inline_item);
                 increment_element_content_length(span);
@@ -2050,26 +2764,41 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
             // Phase 6: Check for footnote reference [^1] first
             if (*(pos+1) == '^') {
+                const char* old_pos = pos;
                 Item footnote_ref = parse_footnote_reference(parser, &pos);
                 if (footnote_ref.item != ITEM_ERROR && footnote_ref.item != ITEM_UNDEFINED) {
                     list_push((List*)span, footnote_ref);
                     increment_element_content_length(span);
+                } else {
+                    // Failed - add '[' and move on
+                    stringbuf_append_char(sb, '[');
+                    pos = old_pos + 1;
                 }
             }
             // Phase 6: Check for citation [@key]
             else if (*(pos+1) == '@') {
+                const char* old_pos = pos;
                 Item citation = parse_citation(parser, &pos);
                 if (citation.item != ITEM_ERROR && citation.item != ITEM_UNDEFINED) {
                     list_push((List*)span, citation);
                     increment_element_content_length(span);
+                } else {
+                    // Failed - add '[' and move on
+                    stringbuf_append_char(sb, '[');
+                    pos = old_pos + 1;
                 }
             }
             // Regular link parsing
             else {
+                const char* old_pos = pos;
                 Item link_item = parse_link(parser, &pos);
                 if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, link_item);
                     increment_element_content_length(span);
+                } else {
+                    // Failed - add '[' and move on
+                    stringbuf_append_char(sb, '[');
+                    pos = old_pos + 1;
                 }
             }
         }
@@ -2104,10 +2833,15 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 stringbuf_reset(sb);
             }
 
+            const char* img_start = pos;
             Item image_item = parse_image(parser, &pos);
             if (image_item.item != ITEM_ERROR && image_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, image_item);
                 increment_element_content_length(span);
+            } else {
+                // Not a valid image, just add the '!' character
+                stringbuf_append_char(sb, '!');
+                pos = img_start + 1;
             }
         }
         // Phase 4: Enhanced inline parsing
@@ -2405,9 +3139,19 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 // Skip leading spaces on the next line
                 while (*pos == ' ') pos++;
             } else {
-                // Soft line break - add newline character to buffer
+                // Soft line break - CommonMark §6.8: trim trailing/leading spaces
+                // Trim trailing spaces from buffer before soft line break
+                while (sb->length > 0 && sb->str->chars[sb->length - 1] == ' ') {
+                    sb->length--;
+                    sb->str->chars[sb->length] = '\0';
+                }
+
+                // Add newline character to buffer
                 stringbuf_append_char(sb, *pos);
                 pos++;
+
+                // Skip leading spaces on the next line for soft line break
+                while (*pos == ' ' || *pos == '\t') pos++;
             }
         }
         else {
@@ -2523,12 +3267,79 @@ static Item parse_inline_content(MarkupParser* parser, const char* text) {
 }
 
 // CommonMark flanking delimiter helpers
-static inline bool is_cm_whitespace(char c) {
+
+// Helper to find the start of a UTF-8 character (skip backward over continuation bytes)
+static inline const char* utf8_char_start(const char* p, const char* start) {
+    if (!p || p <= start) return p;
+    // UTF-8 continuation bytes are 10xxxxxx (0x80-0xBF)
+    while (p > start && ((unsigned char)*p >= 0x80 && (unsigned char)*p <= 0xBF)) {
+        p--;
+    }
+    return p;
+}
+
+// Check for Unicode whitespace (including NBSP U+00A0)
+static inline bool is_cm_whitespace(const char* p) {
+    if (!p) return true;
+    unsigned char c = (unsigned char)*p;
+    // ASCII whitespace
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v' || c == '\0') return true;
+    // UTF-8: U+00A0 Non-breaking space = 0xC2 0xA0
+    if (c == 0xC2 && (unsigned char)*(p+1) == 0xA0) return true;
+    // Other Unicode whitespace could be added here
+    return false;
+}
+
+// Helper to check single char for backward compatibility
+static inline bool is_cm_whitespace_char(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v' || c == '\0';
 }
 
-static inline bool is_cm_punctuation(char c) {
+// Check if character is CommonMark punctuation
+// This includes ASCII punctuation and Unicode Punctuation (P) and Symbol (S) categories
+static inline bool is_cm_punctuation_at(const char* p) {
+    if (!p) return false;
+    unsigned char c = (unsigned char)*p;
+
     // ASCII punctuation characters
+    if ((c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+        (c >= '[' && c <= '`') || (c >= '{' && c <= '~')) {
+        return true;
+    }
+
+    // UTF-8 multibyte punctuation/symbols
+    if (c >= 0xC2 && c <= 0xDF) {
+        // 2-byte UTF-8 (U+0080 to U+07FF)
+        unsigned char c2 = (unsigned char)*(p+1);
+        if (c == 0xC2) {
+            // U+00A0-U+00BF range includes some punctuation
+            // U+00A1-U+00BF contains various punctuation and symbols
+            if (c2 >= 0xA1 && c2 <= 0xBF) return true;
+        }
+        // Other 2-byte ranges could be added
+    } else if (c >= 0xE0 && c <= 0xEF) {
+        // 3-byte UTF-8 (U+0800 to U+FFFF)
+        unsigned char c2 = (unsigned char)*(p+1);
+        unsigned char c3 = (unsigned char)*(p+2);
+        // U+20AC (Euro) = E2 82 AC
+        if (c == 0xE2 && c2 == 0x82 && c3 == 0xAC) return true;
+        // U+2000-U+206F General Punctuation
+        if (c == 0xE2 && c2 >= 0x80 && c2 <= 0x81) return true;
+        // U+2100-U+214F Letterlike Symbols
+        if (c == 0xE2 && c2 == 0x84) return true;
+        // Other 3-byte punctuation/symbols
+    } else if (c >= 0xF0) {
+        // 4-byte UTF-8 (U+10000+) - includes various symbols
+        // U+1E2FF is in 4-byte range - check for symbol categories
+        return true; // Treat unknown high-range as punctuation for safety
+    }
+
+    return false;
+}
+
+// For backwards compatibility with single char calls
+static inline bool is_cm_punctuation(char c) {
+    // ASCII punctuation characters only
     return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
            (c >= '[' && c <= '`') || (c >= '{' && c <= '~');
 }
@@ -2541,17 +3352,21 @@ static inline bool is_cm_punctuation(char c) {
  * (2b) followed by punctuation AND preceded by whitespace or punctuation
  */
 static bool is_left_flanking(const char* full_text, const char* delim_start, int delim_len) {
-    char before = (delim_start > full_text) ? *(delim_start - 1) : ' ';
-    char after = *(delim_start + delim_len);
+    // Get pointer to start of previous UTF-8 character
+    const char* before_ptr = nullptr;
+    if (delim_start > full_text) {
+        before_ptr = utf8_char_start(delim_start - 1, full_text);
+    }
+    const char* after_ptr = delim_start + delim_len;
 
     // (1) not followed by whitespace
-    if (is_cm_whitespace(after)) return false;
+    if (is_cm_whitespace(after_ptr)) return false;
 
     // (2a) not followed by punctuation
-    if (!is_cm_punctuation(after)) return true;
+    if (!is_cm_punctuation_at(after_ptr)) return true;
 
     // (2b) followed by punctuation, check if preceded by whitespace or punctuation
-    return is_cm_whitespace(before) || is_cm_punctuation(before);
+    return !before_ptr || is_cm_whitespace(before_ptr) || is_cm_punctuation_at(before_ptr);
 }
 
 /**
@@ -2562,17 +3377,21 @@ static bool is_left_flanking(const char* full_text, const char* delim_start, int
  * (2b) preceded by punctuation AND followed by whitespace or punctuation
  */
 static bool is_right_flanking(const char* full_text, const char* delim_start, int delim_len) {
-    char before = (delim_start > full_text) ? *(delim_start - 1) : ' ';
-    char after = *(delim_start + delim_len);
+    // Get pointer to start of previous UTF-8 character
+    const char* before_ptr = nullptr;
+    if (delim_start > full_text) {
+        before_ptr = utf8_char_start(delim_start - 1, full_text);
+    }
+    const char* after_ptr = delim_start + delim_len;
 
-    // (1) not preceded by whitespace
-    if (is_cm_whitespace(before)) return false;
+    // (1) not preceded by whitespace - if at start, consider it whitespace
+    if (!before_ptr || is_cm_whitespace(before_ptr)) return false;
 
     // (2a) not preceded by punctuation
-    if (!is_cm_punctuation(before)) return true;
+    if (!is_cm_punctuation_at(before_ptr)) return true;
 
     // (2b) preceded by punctuation, check if followed by whitespace or punctuation
-    return is_cm_whitespace(after) || is_cm_punctuation(after);
+    return is_cm_whitespace(after_ptr) || is_cm_punctuation_at(after_ptr);
 }
 
 /**
@@ -2590,8 +3409,12 @@ static bool can_open_emphasis(const char* full_text, const char* delim_start, in
     bool right = is_right_flanking(full_text, delim_start, delim_len);
     if (!right) return true;
 
-    char before = (delim_start > full_text) ? *(delim_start - 1) : ' ';
-    return is_cm_punctuation(before);
+    // Get pointer to start of previous UTF-8 character
+    const char* before = nullptr;
+    if (delim_start > full_text) {
+        before = utf8_char_start(delim_start - 1, full_text);
+    }
+    return before && is_cm_punctuation_at(before);
 }
 
 /**
@@ -2609,15 +3432,244 @@ static bool can_close_emphasis(const char* full_text, const char* delim_start, i
     bool left = is_left_flanking(full_text, delim_start, delim_len);
     if (!left) return true;
 
-    char after = *(delim_start + delim_len);
-    return is_cm_punctuation(after);
+    const char* after = delim_start + delim_len;
+    return is_cm_punctuation_at(after);
+}
+
+// Structure for delimiter stack entry
+struct DelimiterRun {
+    int position;        // position in text
+    int orig_count;      // original number of markers
+    int count;           // remaining markers
+    char marker;         // '*' or '_'
+    bool can_open;
+    bool can_close;
+    bool active;         // still available for matching
+};
+
+// Structure for a match between opener and closer
+struct EmphMatch {
+    int opener_idx;
+    int closer_idx;
+    int consume;  // 1 or 2
+};
+
+#define MAX_DELIMITERS 256
+#define MAX_MATCHES 256
+
+// Process emphasis using CommonMark-style delimiter stack algorithm
+// Returns a newly allocated string with emphasis markers replaced by tags
+// Caller must free the returned string
+static char* process_emphasis_delimiters(MarkupParser* parser, const char* text) {
+    if (!text || !*text) return strdup("");
+
+    size_t text_len = strlen(text);
+    DelimiterRun delims[MAX_DELIMITERS];
+    int num_delims = 0;
+
+    EmphMatch matches[MAX_MATCHES];
+    int num_matches = 0;
+
+    // First pass: collect all delimiter runs
+    const char* pos = text;
+    while (*pos && num_delims < MAX_DELIMITERS) {
+        // Skip over backslash-escaped characters
+        if (*pos == '\\' && *(pos+1) && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", *(pos+1))) {
+            pos += 2; // Skip escape sequence
+            continue;
+        }
+        if (*pos == '*' || *pos == '_') {
+            char marker = *pos;
+            int start_pos = pos - text;
+            int count = 0;
+            while (*pos == marker) {
+                count++;
+                pos++;
+            }
+
+            const char* delim_start = text + start_pos;
+            bool can_open = can_open_emphasis(text, delim_start, count, marker);
+            bool can_close = can_close_emphasis(text, delim_start, count, marker);
+
+            if (can_open || can_close) {
+                delims[num_delims].position = start_pos;
+                delims[num_delims].orig_count = count;
+                delims[num_delims].count = count;
+                delims[num_delims].marker = marker;
+                delims[num_delims].can_open = can_open;
+                delims[num_delims].can_close = can_close;
+                delims[num_delims].active = true;
+                num_delims++;
+            }
+        } else {
+            pos++;
+        }
+    }
+
+    if (num_delims == 0) return strdup(text);
+
+    // Second pass: process closers from left to right
+    // For each closer, find matching opener looking backward
+    for (int closer_idx = 0; closer_idx < num_delims; closer_idx++) {
+        if (!delims[closer_idx].can_close || !delims[closer_idx].active)
+            continue;
+        if (delims[closer_idx].count == 0) continue;
+
+        // Look backward for a matching opener
+        for (int opener_idx = closer_idx - 1; opener_idx >= 0; opener_idx--) {
+            if (!delims[opener_idx].can_open || !delims[opener_idx].active)
+                continue;
+            if (delims[opener_idx].marker != delims[closer_idx].marker)
+                continue;
+            if (delims[opener_idx].count == 0) continue;
+
+            // Check rule of 3
+            bool opener_can_close = delims[opener_idx].can_close;
+            bool closer_can_open = delims[closer_idx].can_open;
+            int open_count = delims[opener_idx].count;
+            int close_count = delims[closer_idx].count;
+
+            if ((opener_can_close || closer_can_open) && ((open_count + close_count) % 3 == 0)) {
+                if ((open_count % 3 != 0) || (close_count % 3 != 0)) {
+                    continue;  // rule of 3 violation, try next opener
+                }
+            }
+
+            // Found a match! Determine how many markers to consume
+            int consume = (open_count >= 2 && close_count >= 2) ? 2 : 1;
+
+            // Record this match
+            if (num_matches < MAX_MATCHES) {
+                matches[num_matches].opener_idx = opener_idx;
+                matches[num_matches].closer_idx = closer_idx;
+                matches[num_matches].consume = consume;
+                num_matches++;
+            }
+
+            // Reduce counts
+            delims[opener_idx].count -= consume;
+            delims[closer_idx].count -= consume;
+
+            // If either is exhausted, mark as inactive
+            if (delims[opener_idx].count == 0) delims[opener_idx].active = false;
+            if (delims[closer_idx].count == 0) delims[closer_idx].active = false;
+
+            // If closer still has markers, continue looking for more matches
+            if (delims[closer_idx].count > 0 && delims[closer_idx].can_close) {
+                closer_idx--;  // re-process this closer
+            }
+            break;  // found match, stop looking backward
+        }
+    }
+
+    if (num_matches == 0) return strdup(text);
+
+    // Third pass: build result string with tags
+    // We need to insert opening tags at opener positions and closing tags at closer positions
+    // The tricky part: matches form a stack structure
+
+    // For each position in original text, track what tags to insert
+    // Use arrays: open_tags[pos] = list of opening tag lengths to insert AFTER pos
+    //             close_tags[pos] = list of closing tag lengths to insert BEFORE pos
+
+    // Actually, simpler: for each match, record the opener/closer positions and consume counts
+    // Then walk through text and at each delimiter position, output appropriate tags
+
+    // For proper nesting, matches closer to the text should be innermost
+    // Matches are already ordered: earlier closers are processed first, matching with nearest opener
+    // So match[0] is innermost, match[n-1] is outermost when closers overlap
+
+    // But for output we need to nest properly:
+    // For "***foo** bar*":
+    //   match 0: opener 0 (pos 0), closer 1 (pos 6), consume 2 → <strong>...</strong>
+    //   match 1: opener 0 (pos 0), closer 2 (pos 12), consume 1 → <em>...</em>
+    //
+    // Output should be: <em><strong>foo</strong> bar</em>
+    // At pos 0: output <em> then <strong>
+    // At pos 6: output </strong>
+    // At pos 12: output </em>
+
+    // Create position-to-action mapping
+    // For each delimiter, track how many open/close tags of each type
+
+    struct TagAction {
+        int em_open;       // number of <em> to open
+        int em_close;      // number of </em> to close
+        int strong_open;   // number of <strong> to open
+        int strong_close;  // number of </strong> to close
+        int skip;          // number of delimiter chars to skip
+    };
+
+    TagAction* actions = (TagAction*)calloc(num_delims, sizeof(TagAction));
+    if (!actions) return strdup(text);
+
+    for (int m = 0; m < num_matches; m++) {
+        int oi = matches[m].opener_idx;
+        int ci = matches[m].closer_idx;
+        int consume = matches[m].consume;
+
+        if (consume == 2) {
+            actions[oi].strong_open++;
+            actions[ci].strong_close++;
+        } else {
+            actions[oi].em_open++;
+            actions[ci].em_close++;
+        }
+        actions[oi].skip += consume;
+        actions[ci].skip += consume;
+    }
+
+    // Build output
+    StrBuf* sb = strbuf_new_cap(text_len * 3);
+    if (!sb) { free(actions); return strdup(text); }
+
+    int text_pos = 0;
+    int delim_idx = 0;
+
+    while (text_pos < (int)text_len) {
+        // Check if we're at a delimiter
+        if (delim_idx < num_delims && delims[delim_idx].position == text_pos) {
+            // Output opening tags (in order: outermost first = em before strong)
+            // Actually for proper nesting at opener, we want outermost first
+            // But we counted independently, so we just emit in a consistent order
+            for (int i = 0; i < actions[delim_idx].em_open; i++) {
+                strbuf_append_str(sb, "<em>");
+            }
+            for (int i = 0; i < actions[delim_idx].strong_open; i++) {
+                strbuf_append_str(sb, "<strong>");
+            }
+
+            // Output unmatched markers
+            int unmatched = delims[delim_idx].orig_count - actions[delim_idx].skip;
+            for (int i = 0; i < unmatched; i++) {
+                strbuf_append_char(sb, delims[delim_idx].marker);
+            }
+
+            // Output closing tags (in order: innermost first = strong before em)
+            for (int i = 0; i < actions[delim_idx].strong_close; i++) {
+                strbuf_append_str(sb, "</strong>");
+            }
+            for (int i = 0; i < actions[delim_idx].em_close; i++) {
+                strbuf_append_str(sb, "</em>");
+            }
+
+            text_pos += delims[delim_idx].orig_count;
+            delim_idx++;
+        } else {
+            strbuf_append_char(sb, text[text_pos]);
+            text_pos++;
+        }
+    }
+
+    char* result = strdup(sb->str);
+    strbuf_free(sb);
+    free(actions);
+    return result;
 }
 
 // Parse bold and italic text (**bold**, *italic*, __bold__, _italic_)
-static Item parse_bold_italic(MarkupParser* parser, const char** text) {
-    // We need context from parse_inline_spans to properly check flanking
-    // This function is called when we see * or _
-
+// Uses proper CommonMark flanking rules with full_text context
+static Item parse_bold_italic(MarkupParser* parser, const char* full_text, const char** text) {
     const char* pos = *text;
     char marker = *pos;
     int count = 0;
@@ -2633,20 +3685,12 @@ static Item parse_bold_italic(MarkupParser* parser, const char** text) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    // Check if this delimiter can open emphasis
-    // We need the full text context - for now use a simple heuristic
-    // based on character after the delimiter run
-    char after = *pos;
-
-    // Simple left-flanking check: not followed by whitespace
-    if (is_cm_whitespace(after)) {
-        // Not left-flanking, can't open - treat as literal
-        (*text)++;
+    // Check if this delimiter can open emphasis using proper flanking rules
+    if (!can_open_emphasis(full_text, *text, count, marker)) {
+        // Can't open - skip all markers and let caller treat them as literal
+        *text = pos;
         return (Item){.item = ITEM_UNDEFINED};
     }
-
-    // For punctuation after delimiter, need to check before too
-    // But we don't have full text context here, so be lenient
 
     // Find closing markers that can close emphasis
     const char* content_start = pos;
@@ -2662,26 +3706,24 @@ static Item parse_bold_italic(MarkupParser* parser, const char** text) {
                 pos++;
             }
 
-            // Check if this can close emphasis
-            // Simple right-flanking check: not preceded by whitespace
-            char before_close = (marker_start > content_start) ? *(marker_start - 1) : ' ';
-            char after_close = *pos;
+            // Check if this can close emphasis using proper flanking rules
+            if (can_close_emphasis(full_text, marker_start, marker_count, marker)) {
+                // Apply rule of 3: if opener or closer can both open and close,
+                // and sum is divisible by 3, both must be divisible by 3
+                bool opener_can_close = can_close_emphasis(full_text, *text, count, marker);
+                bool closer_can_open = can_open_emphasis(full_text, marker_start, marker_count, marker);
 
-            bool can_close = !is_cm_whitespace(before_close);
-
-            // For underscore, additional rule: can't be intraword
-            if (marker == '_' && can_close) {
-                // If preceded by alphanumeric and followed by alphanumeric, can't close
-                if (!is_cm_whitespace(before_close) && !is_cm_punctuation(before_close) &&
-                    !is_cm_whitespace(after_close) && !is_cm_punctuation(after_close) && after_close != '\0') {
-                    can_close = false;
+                bool rule_of_3_ok = true;
+                if ((opener_can_close || closer_can_open) && ((count + marker_count) % 3 == 0)) {
+                    rule_of_3_ok = (count % 3 == 0) && (marker_count % 3 == 0);
                 }
-            }
 
-            if (can_close && marker_count >= count) {
-                end = marker_start;
-                end_count = marker_count;
-                break;
+                // Remove the marker_count >= count requirement to allow partial matching
+                if (rule_of_3_ok) {
+                    end = marker_start;
+                    end_count = marker_count;
+                    break;
+                }
             }
         } else {
             pos++;
@@ -2689,77 +3731,189 @@ static Item parse_bold_italic(MarkupParser* parser, const char** text) {
     }
 
     if (!end) {
-        // No closing marker found, treat as plain text
+        // No closing marker found, treat opener as plain text
         (*text)++;
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    // Determine how many markers to consume
-    // We match the minimum of opening and closing count
+    // Match the minimum of opening and closing count
     int match_count = (count < end_count) ? count : end_count;
 
-    // Create appropriate element based on match_count
+    // Decide how many to consume: prefer 2 (strong) if available, else 1 (em)
+    int consume_count = (match_count >= 2) ? 2 : 1;
+    int open_remaining = count - consume_count;
+    int close_remaining = end_count - consume_count;
+
+    // Create appropriate element based on consume_count
     Element* elem;
-    if (match_count >= 3) {
-        // Create strong with em inside for ***
-        elem = create_element(parser, "strong");
-        Element* em_elem = create_element(parser, "em");
-
-        if (!elem || !em_elem) {
-            *text = end + match_count;
-            return (Item){.item = ITEM_ERROR};
-        }
-
-        // Extract content between markers
-        size_t content_len = end - content_start;
-        char* content = (char*)malloc(content_len + 1);
-        if (content) {
-            strncpy(content, content_start, content_len);
-            content[content_len] = '\0';
-
-            Item inner_content = parse_inline_spans(parser, content);
-            if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
-                list_push((List*)em_elem, inner_content);
-                increment_element_content_length(em_elem);
-            }
-            free(content);
-        }
-
-        list_push((List*)elem, (Item){.item = (uint64_t)em_elem});
-        increment_element_content_length(elem);
-
-        *text = end + match_count;
-        return (Item){.item = (uint64_t)elem};
-    }
-    else if (match_count == 2) {
+    if (consume_count == 2) {
         elem = create_element(parser, "strong");
     } else {
         elem = create_element(parser, "em");
     }
 
     if (!elem) {
-        *text = end + match_count;
+        *text = end + consume_count;
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Extract content between markers
-    size_t content_len = end - content_start;
+    // Content between matched markers (no remaining openers/closers in base)
+    const char* inner_start = *text + count;  // after all opening markers
+    size_t base_len = end - inner_start;
+
+    // Only add remaining closers to content - they'll match with something inside
+    // Remaining openers are handled differently below
+    size_t content_len = base_len + close_remaining;
+
     char* content = (char*)malloc(content_len + 1);
     if (content) {
-        strncpy(content, content_start, content_len);
+        memcpy(content, inner_start, base_len);
+        for (int i = 0; i < close_remaining; i++) {
+            content[base_len + i] = marker;
+        }
         content[content_len] = '\0';
 
-        // Recursively parse inline content
+        // Recursively parse inner content
         Item inner_content = parse_inline_spans(parser, content);
         if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
             list_push((List*)elem, inner_content);
             increment_element_content_length(elem);
         }
-
         free(content);
+        stringbuf_reset(parser->sb);
     }
 
-    *text = end + match_count;  // Move past closing markers
+    // Now handle remaining openers - they need to find a closer AFTER our closer
+    if (open_remaining > 0) {
+        // Search for a closer after the current closer
+        const char* after_closer = end + consume_count;
+        const char* outer_closer = NULL;
+        int outer_closer_count = 0;
+
+        const char* scan = after_closer;
+        while (*scan) {
+            if (*scan == marker) {
+                const char* cstart = scan;
+                int ccount = 0;
+                while (*scan == marker) {
+                    ccount++;
+                    scan++;
+                }
+                if (can_close_emphasis(full_text, cstart, ccount, marker)) {
+                    // Check rule of 3 for remaining opener vs this closer
+                    bool opener_can_close = can_close_emphasis(full_text, *text, open_remaining, marker);
+                    bool closer_can_open = can_open_emphasis(full_text, cstart, ccount, marker);
+                    bool rule_ok = true;
+                    if ((opener_can_close || closer_can_open) && ((open_remaining + ccount) % 3 == 0)) {
+                        rule_ok = (open_remaining % 3 == 0) && (ccount % 3 == 0);
+                    }
+                    if (rule_ok) {
+                        outer_closer = cstart;
+                        outer_closer_count = ccount;
+                        break;
+                    }
+                }
+            } else {
+                scan++;
+            }
+        }
+
+        if (outer_closer) {
+            // Found a closer for remaining openers - wrap elem in outer emphasis
+            int outer_match = (open_remaining < outer_closer_count) ? open_remaining : outer_closer_count;
+            int outer_consume = (outer_match >= 2) ? 2 : 1;
+
+            Element* outer_elem;
+            if (outer_consume == 2) {
+                outer_elem = create_element(parser, "strong");
+            } else {
+                outer_elem = create_element(parser, "em");
+            }
+
+            if (outer_elem) {
+                // Build content for outer: inner elem + text between + remaining outer closers
+                int final_open_remaining = open_remaining - outer_consume;
+                int final_close_remaining = outer_closer_count - outer_consume;
+
+                Element* outer_span = create_element(parser, "span");
+                if (outer_span) {
+                    // Add inner elem
+                    list_push((List*)outer_span, (Item){.item = (uint64_t)elem});
+                    increment_element_content_length(outer_span);
+
+                    // Add text between our closer and outer closer
+                    size_t between_len = outer_closer - after_closer;
+
+                    if (between_len > 0 || final_close_remaining > 0) {
+                        size_t wrap_len = between_len + final_close_remaining;
+                        char* wrap_content = (char*)malloc(wrap_len + 1);
+                        if (wrap_content) {
+                            memcpy(wrap_content, after_closer, between_len);
+                            for (int i = 0; i < final_close_remaining; i++) {
+                                wrap_content[between_len + i] = marker;
+                            }
+                            wrap_content[wrap_len] = '\0';
+
+                            Item wrap_inner = parse_inline_spans(parser, wrap_content);
+                            if (wrap_inner.item != ITEM_ERROR && wrap_inner.item != ITEM_UNDEFINED) {
+                                list_push((List*)outer_span, wrap_inner);
+                                increment_element_content_length(outer_span);
+                            }
+                            free(wrap_content);
+                            stringbuf_reset(parser->sb);
+                        }
+                    }
+
+                    list_push((List*)outer_elem, (Item){.item = (uint64_t)outer_span});
+                    increment_element_content_length(outer_elem);
+                }
+
+                *text = outer_closer + outer_consume;
+
+                // Handle any remaining outer openers
+                if (final_open_remaining > 0) {
+                    Element* wrapper = create_element(parser, "span");
+                    if (wrapper) {
+                        char* remain = (char*)malloc(final_open_remaining + 1);
+                        if (remain) {
+                            for (int i = 0; i < final_open_remaining; i++) remain[i] = marker;
+                            remain[final_open_remaining] = '\0';
+                            String* remain_str = parser->builder.createString(remain, final_open_remaining);
+                            list_push((List*)wrapper, (Item){.item = s2it(remain_str)});
+                            increment_element_content_length(wrapper);
+                            free(remain);
+                        }
+                        list_push((List*)wrapper, (Item){.item = (uint64_t)outer_elem});
+                        increment_element_content_length(wrapper);
+                        return (Item){.item = (uint64_t)wrapper};
+                    }
+                }
+
+                return (Item){.item = (uint64_t)outer_elem};
+            }
+        } else {
+            // No outer closer found - remaining openers become literal
+            Element* wrapper = create_element(parser, "span");
+            if (wrapper) {
+                char* remain = (char*)malloc(open_remaining + 1);
+                if (remain) {
+                    for (int i = 0; i < open_remaining; i++) remain[i] = marker;
+                    remain[open_remaining] = '\0';
+                    String* remain_str = parser->builder.createString(remain, open_remaining);
+                    list_push((List*)wrapper, (Item){.item = s2it(remain_str)});
+                    increment_element_content_length(wrapper);
+                    free(remain);
+                }
+                list_push((List*)wrapper, (Item){.item = (uint64_t)elem});
+                increment_element_content_length(wrapper);
+
+                *text = end + consume_count;
+                return (Item){.item = (uint64_t)wrapper};
+            }
+        }
+    }
+
+    *text = end + consume_count;  // Move past consumed closing markers
     return (Item){.item = (uint64_t)elem};
 }
 
@@ -3173,12 +4327,11 @@ static Item parse_raw_html_tag(MarkupParser* parser, const char** text) {
     return (Item){.item = ITEM_UNDEFINED};
 }
 
-// Parse links ([text](url))
+// Parse links - supports inline [text](url) and reference [text][ref], [text][], [text]
 static Item parse_link(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (*pos != '[') {
-        (*text)++;
-        return (Item){.item = ITEM_UNDEFINED};
+        return (Item){.item = ITEM_UNDEFINED};  // Don't advance on non-match
     }
 
     pos++; // Skip [
@@ -3202,221 +4355,514 @@ static Item parse_link(MarkupParser* parser, const char** text) {
             pos++;
         }
     }
+
+    if (!text_end) {
+        return (Item){.item = ITEM_UNDEFINED};  // No closing ]
+    }
     if (bracket_depth == 0) pos++; // move past ]
 
-    if (!text_end || *pos != '(') {
-        (*text)++;
-        return (Item){.item = ITEM_UNDEFINED};
-    }
+    size_t link_text_len = text_end - text_start;
 
-    pos++; // Skip (
+    // Check what follows the first ]
+    if (*pos == '(') {
+        // Inline link: [text](url "title")
+        pos++; // Skip (
 
-    // Skip leading whitespace in destination
-    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+        // Skip leading whitespace in destination
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
 
-    // Parse URL - check for angle bracket form
-    const char* url_start = pos;
-    const char* url_end = NULL;
-    bool angle_bracket = (*pos == '<');
+        // Parse URL - check for angle bracket form
+        const char* url_start = pos;
+        const char* url_end = NULL;
+        bool angle_bracket = (*pos == '<');
 
-    if (angle_bracket) {
-        pos++; // Skip <
-        url_start = pos;
-        while (*pos && *pos != '>' && *pos != '\n' && *pos != '\r') {
-            pos++;
+        if (angle_bracket) {
+            pos++; // Skip <
+            url_start = pos;
+            // In angle bracket URLs, < and > can be backslash-escaped
+            // Line endings are never allowed
+            while (*pos && *pos != '\n' && *pos != '\r') {
+                if (*pos == '\\' && (*(pos+1) == '<' || *(pos+1) == '>' || *(pos+1) == '\\')) {
+                    pos += 2; // Skip escaped character
+                    continue;
+                }
+                if (*pos == '<') {
+                    // Unescaped < is not allowed in angle bracket URL
+                    return (Item){.item = ITEM_UNDEFINED};
+                }
+                if (*pos == '>') {
+                    break; // Found closing >
+                }
+                pos++;
+            }
+            if (*pos != '>') {
+                return (Item){.item = ITEM_UNDEFINED};
+            }
+            url_end = pos;
+            pos++; // Skip >
+        } else {
+            // No angle brackets - find end of URL
+            // URL ends at whitespace or ) with balanced parentheses
+            int paren_count = 0;
+            while (*pos) {
+                if (*pos == '\\' && *(pos+1)) {
+                    pos += 2;
+                    continue;
+                }
+                if (*pos == '(') {
+                    paren_count++;
+                    pos++;
+                } else if (*pos == ')') {
+                    if (paren_count == 0) break;
+                    paren_count--;
+                    pos++;
+                } else if (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') {
+                    break;
+                } else {
+                    pos++;
+                }
+            }
+            url_end = pos;
         }
-        if (*pos != '>') {
-            (*text)++;
+
+        // Skip whitespace between URL and title
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+
+        // Parse optional title
+        const char* title_start = NULL;
+        const char* title_end = NULL;
+
+        if (*pos == '"' || *pos == '\'' || *pos == '(') {
+            char open_char = *pos;
+            char close_char = (*pos == '(') ? ')' : *pos;
+            pos++; // Skip opening quote
+            title_start = pos;
+
+            while (*pos && *pos != close_char) {
+                if (*pos == '\\' && *(pos+1)) {
+                    pos += 2;
+                    continue;
+                }
+                pos++;
+            }
+            if (*pos == close_char) {
+                title_end = pos;
+                pos++; // Skip closing quote
+            }
+        }
+
+        // Skip trailing whitespace
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+
+        // Must end with )
+        if (*pos != ')') {
             return (Item){.item = ITEM_UNDEFINED};
         }
-        url_end = pos;
-        pos++; // Skip >
-    } else {
-        // No angle brackets - find end of URL
-        // URL ends at whitespace or ) with balanced parentheses
-        int paren_count = 0;
-        while (*pos) {
+        pos++; // Skip )
+
+        Element* link = create_element(parser, "a");
+        if (!link) {
+            *text = pos;
+            return (Item){.item = ITEM_ERROR};
+        }
+
+        // Add URL attribute (even if empty)
+        size_t url_len = url_end - url_start;
+        if (url_len > 0) {
+            // allocate enough space for unescaped URL (size can only shrink)
+            char* url = (char*)malloc(url_len + 1);
+            if (url) {
+                // unescape backslash sequences in URL
+                unescapeBackslashes(url_start, url_len, url, url_len + 1);
+                add_attribute_to_element(parser, link, "href", url);
+                free(url);
+            }
+        } else {
+            add_attribute_to_element(parser, link, "href", "");
+        }
+
+        // Add title if present
+        if (title_start && title_end && title_end > title_start) {
+            size_t title_len = title_end - title_start;
+            char* title = (char*)malloc(title_len + 1);
+            if (title) {
+                // unescape backslash sequences in title
+                unescapeBackslashes(title_start, title_len, title, title_len + 1);
+                add_attribute_to_element(parser, link, "title", title);
+                free(title);
+            }
+        }
+
+        // Add link text content
+        if (link_text_len > 0) {
+            char* link_text = (char*)malloc(link_text_len + 1);
+            if (link_text) {
+                strncpy(link_text, text_start, link_text_len);
+                link_text[link_text_len] = '\0';
+
+                Item inner_content = parse_inline_spans(parser, link_text);
+                if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)link, inner_content);
+                    increment_element_content_length(link);
+                }
+                free(link_text);
+            }
+        }
+
+        *text = pos;
+        return (Item){.item = (uint64_t)link};
+
+    } else if (*pos == '[') {
+        // Reference link: [text][ref] or [text][]
+        pos++; // Skip [
+
+        const char* ref_start = pos;
+
+        // Find closing ]
+        while (*pos && *pos != ']' && *pos != '\n') {
             if (*pos == '\\' && *(pos+1)) {
                 pos += 2;
-                continue;
-            }
-            if (*pos == '(') {
-                paren_count++;
-                pos++;
-            } else if (*pos == ')') {
-                if (paren_count == 0) break;
-                paren_count--;
-                pos++;
-            } else if (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') {
-                break;
             } else {
                 pos++;
             }
         }
-        url_end = pos;
-    }
 
-    // Skip whitespace between URL and title
-    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
-
-    // Parse optional title
-    const char* title_start = NULL;
-    const char* title_end = NULL;
-    char title_delim = 0;
-
-    if (*pos == '"' || *pos == '\'' || *pos == '(') {
-        title_delim = *pos;
-        if (title_delim == '(') title_delim = ')';
-        pos++; // Skip opening quote
-        title_start = pos;
-
-        while (*pos && *pos != title_delim) {
-            if (*pos == '\\' && *(pos+1)) {
-                pos += 2;
-                continue;
-            }
-            pos++;
+        if (*pos != ']') {
+            return (Item){.item = ITEM_UNDEFINED};
         }
-        if (*pos == title_delim) {
-            title_end = pos;
-            pos++; // Skip closing quote
+
+        const char* ref_end = pos;
+        pos++; // Skip ]
+
+        // If ref is empty [], use link text as ref
+        const char* label_start;
+        size_t label_len;
+        if (ref_end == ref_start) {
+            // Collapsed reference link [text][]
+            label_start = text_start;
+            label_len = link_text_len;
+        } else {
+            // Full reference link [text][ref]
+            label_start = ref_start;
+            label_len = ref_end - ref_start;
         }
-    }
 
-    // Skip trailing whitespace
-    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+        // Strip emphasis tags before lookup
+        char stripped_label[512];
+        size_t stripped_len = stripEmphasisTags(label_start, label_len, stripped_label, sizeof(stripped_label));
 
-    // Must end with )
-    if (*pos != ')') {
-        (*text)++;
-        return (Item){.item = ITEM_UNDEFINED};
-    }
-    pos++; // Skip )
-
-    Element* link = create_element(parser, "a");
-    if (!link) {
-        *text = pos;
-        return (Item){.item = ITEM_ERROR};
-    }
-
-    // Add URL attribute (even if empty)
-    size_t url_len = url_end - url_start;
-    if (url_len > 0) {
-        char* url = (char*)malloc(url_len + 1);
-        if (url) {
-            strncpy(url, url_start, url_len);
-            url[url_len] = '\0';
-            add_attribute_to_element(parser, link, "href", url);
-            free(url);
+        // Look up the reference
+        const LinkDefinition* def = parser->getLinkDefinition(stripped_label, stripped_len);
+        if (!def) {
+            return (Item){.item = ITEM_UNDEFINED};  // No matching definition
         }
-    } else {
-        // Empty URL - still set href attribute to empty string
-        add_attribute_to_element(parser, link, "href", "");
-    }
 
-    // Add title if present
-    if (title_start && title_end && title_end > title_start) {
-        size_t title_len = title_end - title_start;
-        char* title = (char*)malloc(title_len + 1);
-        if (title) {
-            strncpy(title, title_start, title_len);
-            title[title_len] = '\0';
-            add_attribute_to_element(parser, link, "title", title);
-            free(title);
+        // Create link from definition
+        Element* link = create_element(parser, "a");
+        if (!link) {
+            return (Item){.item = ITEM_ERROR};
         }
-    }
 
-    // Add link text content
-    size_t text_len = text_end - text_start;
-    char* link_text = (char*)malloc(text_len + 1);
-    if (link_text) {
-        strncpy(link_text, text_start, text_len);
-        link_text[text_len] = '\0';
+        add_attribute_to_element(parser, link, "href", def->url);
+        if (def->has_title && def->title[0]) {
+            add_attribute_to_element(parser, link, "title", def->title);
+        }
 
-        // Parse inline content recursively
-        Item inner_content = parse_inline_spans(parser, link_text);
-        if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
-            list_push((List*)link, inner_content);
+        // Add link text content - use stripped text
+        char stripped_text[512];
+        size_t stripped_text_len = stripEmphasisTags(text_start, link_text_len, stripped_text, sizeof(stripped_text));
+        if (stripped_text_len > 0) {
+            String* text_content = parser->builder.createString(stripped_text, stripped_text_len);
+            list_push((List*)link, (Item){.item = s2it(text_content)});
             increment_element_content_length(link);
         }
 
-        free(link_text);
-    }
+        *text = pos;
+        return (Item){.item = (uint64_t)link};
 
-    *text = pos;
-    return (Item){.item = (uint64_t)link};
+    } else {
+        // Shortcut reference link: [text] (no second bracket)
+        // Label is same as link text
+
+        // Strip emphasis tags before lookup
+        char stripped_label[512];
+        size_t stripped_len = stripEmphasisTags(text_start, link_text_len, stripped_label, sizeof(stripped_label));
+
+        const LinkDefinition* def = parser->getLinkDefinition(stripped_label, stripped_len);
+        if (!def) {
+            return (Item){.item = ITEM_UNDEFINED};  // No matching definition
+        }
+
+        // Create link from definition
+        Element* link = create_element(parser, "a");
+        if (!link) {
+            return (Item){.item = ITEM_ERROR};
+        }
+
+        add_attribute_to_element(parser, link, "href", def->url);
+        if (def->has_title && def->title[0]) {
+            add_attribute_to_element(parser, link, "title", def->title);
+        }
+
+        // Add link text content - use stripped label
+        if (stripped_len > 0) {
+            String* text_content = parser->builder.createString(stripped_label, stripped_len);
+            list_push((List*)link, (Item){.item = s2it(text_content)});
+            increment_element_content_length(link);
+        }
+
+        *text = pos;
+        return (Item){.item = (uint64_t)link};
+    }
 }
 
-// Parse images (![alt](src))
+// Parse images (![alt](src)) or reference images ![alt][ref]
 static Item parse_image(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (*pos != '!' || *(pos+1) != '[') {
-        (*text)++;
-        return (Item){.item = ITEM_UNDEFINED};
+        return (Item){.item = ITEM_UNDEFINED};  // Don't advance on non-match
     }
 
     pos += 2; // Skip ![
 
-    // Find closing ]
+    // Find closing ] - handle nested brackets
     const char* alt_start = pos;
     const char* alt_end = NULL;
+    int bracket_depth = 1;
 
-    while (*pos && *pos != ']') {
-        pos++;
+    while (*pos && bracket_depth > 0) {
+        if (*pos == '\\' && *(pos+1)) {
+            pos += 2;
+            continue;
+        }
+        if (*pos == '[') bracket_depth++;
+        else if (*pos == ']') bracket_depth--;
+
+        if (bracket_depth == 0) {
+            alt_end = pos;
+        } else {
+            pos++;
+        }
     }
 
-    if (*pos != ']' || *(pos+1) != '(') {
-        (*text)++;
+    if (!alt_end) {
         return (Item){.item = ITEM_UNDEFINED};
     }
+    if (bracket_depth == 0) pos++; // move past ]
 
-    alt_end = pos;
-    pos += 2; // Skip ](
-
-    // Find closing )
-    const char* src_start = pos;
-    const char* src_end = NULL;
-
-    while (*pos && *pos != ')') {
-        pos++;
-    }
-
-    if (*pos != ')') {
-        (*text)++;
-        return (Item){.item = ITEM_UNDEFINED};
-    }
-
-    src_end = pos;
-    pos++; // Skip )
-
-    Element* img = create_element(parser, "img");
-    if (!img) {
-        *text = pos;
-        return (Item){.item = ITEM_ERROR};
-    }
-
-    // Add src attribute
-    size_t src_len = src_end - src_start;
-    char* src = (char*)malloc(src_len + 1);
-    if (src) {
-        strncpy(src, src_start, src_len);
-        src[src_len] = '\0';
-        add_attribute_to_element(parser, img, "src", src);
-        free(src);
-    }
-
-    // Add alt attribute
     size_t alt_len = alt_end - alt_start;
-    char* alt = (char*)malloc(alt_len + 1);
-    if (alt) {
-        strncpy(alt, alt_start, alt_len);
-        alt[alt_len] = '\0';
-        add_attribute_to_element(parser, img, "alt", alt);
-        free(alt);
-    }
 
-    *text = pos;
-    return (Item){.item = (uint64_t)img};
+    // Check what follows the ]
+    if (*pos == '(') {
+        // Inline image: ![alt](src "title")
+        pos++; // Skip (
+
+        // Skip leading whitespace
+        while (*pos == ' ' || *pos == '\t') pos++;
+
+        // Parse URL
+        const char* src_start = pos;
+        const char* src_end = NULL;
+
+        if (*pos == '<') {
+            pos++;
+            src_start = pos;
+            // In angle bracket URLs, < and > can be backslash-escaped
+            while (*pos && *pos != '\n' && *pos != '\r') {
+                if (*pos == '\\' && (*(pos+1) == '<' || *(pos+1) == '>' || *(pos+1) == '\\')) {
+                    pos += 2;
+                    continue;
+                }
+                if (*pos == '<') {
+                    return (Item){.item = ITEM_UNDEFINED};
+                }
+                if (*pos == '>') {
+                    break;
+                }
+                pos++;
+            }
+            if (*pos != '>') {
+                return (Item){.item = ITEM_UNDEFINED};
+            }
+            src_end = pos;
+            pos++;
+        } else {
+            int paren_count = 0;
+            while (*pos) {
+                if (*pos == '\\' && *(pos+1)) {
+                    pos += 2;
+                    continue;
+                }
+                if (*pos == '(') { paren_count++; pos++; }
+                else if (*pos == ')') {
+                    if (paren_count == 0) break;
+                    paren_count--; pos++;
+                } else if (*pos == ' ' || *pos == '\t') {
+                    break;
+                } else {
+                    pos++;
+                }
+            }
+            src_end = pos;
+        }
+
+        // Skip whitespace
+        while (*pos == ' ' || *pos == '\t') pos++;
+
+        // Optional title
+        const char* title_start = NULL;
+        const char* title_end = NULL;
+        if (*pos == '"' || *pos == '\'' || *pos == '(') {
+            char close_char = (*pos == '(') ? ')' : *pos;
+            pos++;
+            title_start = pos;
+            while (*pos && *pos != close_char) {
+                if (*pos == '\\' && *(pos+1)) pos += 2;
+                else pos++;
+            }
+            if (*pos == close_char) {
+                title_end = pos;
+                pos++;
+            }
+        }
+
+        // Skip whitespace and expect )
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos != ')') {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+        pos++;
+
+        Element* img = create_element(parser, "img");
+        if (!img) {
+            return (Item){.item = ITEM_ERROR};
+        }
+
+        // Add src attribute
+        size_t src_len = src_end - src_start;
+        if (src_len > 0) {
+            char* src = (char*)malloc(src_len + 1);
+            if (src) {
+                // unescape backslash sequences in src
+                unescapeBackslashes(src_start, src_len, src, src_len + 1);
+                add_attribute_to_element(parser, img, "src", src);
+                free(src);
+            }
+        } else {
+            add_attribute_to_element(parser, img, "src", "");
+        }
+
+        // Add alt attribute
+        if (alt_len > 0) {
+            char* alt = (char*)malloc(alt_len + 1);
+            if (alt) {
+                strncpy(alt, alt_start, alt_len);
+                alt[alt_len] = '\0';
+                add_attribute_to_element(parser, img, "alt", alt);
+                free(alt);
+            }
+        }
+
+        // Add title if present
+        if (title_start && title_end && title_end > title_start) {
+            size_t title_len = title_end - title_start;
+            char* title = (char*)malloc(title_len + 1);
+            if (title) {
+                // unescape backslash sequences in title
+                unescapeBackslashes(title_start, title_len, title, title_len + 1);
+                add_attribute_to_element(parser, img, "title", title);
+                free(title);
+            }
+        }
+
+        *text = pos;
+        return (Item){.item = (uint64_t)img};
+
+    } else if (*pos == '[') {
+        // Reference image: ![alt][ref] or ![alt][]
+        pos++;
+
+        const char* ref_start = pos;
+        while (*pos && *pos != ']' && *pos != '\n') {
+            if (*pos == '\\' && *(pos+1)) pos += 2;
+            else pos++;
+        }
+
+        if (*pos != ']') {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+
+        const char* ref_end = pos;
+        pos++;
+
+        // If ref is empty, use alt as ref
+        const char* label_start;
+        size_t label_len;
+        if (ref_end == ref_start) {
+            label_start = alt_start;
+            label_len = alt_len;
+        } else {
+            label_start = ref_start;
+            label_len = ref_end - ref_start;
+        }
+
+        // Strip any emphasis tags from the label before looking up
+        // (emphasis may have been pre-processed in the text)
+        char stripped_label[512];
+        size_t stripped_len = stripEmphasisTags(label_start, label_len, stripped_label, sizeof(stripped_label));
+
+        const LinkDefinition* def = parser->getLinkDefinition(stripped_label, stripped_len);
+        if (!def) {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+
+        Element* img = create_element(parser, "img");
+        if (!img) {
+            return (Item){.item = ITEM_ERROR};
+        }
+
+        add_attribute_to_element(parser, img, "src", def->url);
+        if (alt_len > 0) {
+            // Also strip emphasis tags from alt for clean alt text
+            char stripped_alt[512];
+            size_t stripped_alt_len = stripEmphasisTags(alt_start, alt_len, stripped_alt, sizeof(stripped_alt));
+            add_attribute_to_element(parser, img, "alt", stripped_alt);
+        }
+        if (def->has_title && def->title[0]) {
+            add_attribute_to_element(parser, img, "title", def->title);
+        }
+
+        *text = pos;
+        return (Item){.item = (uint64_t)img};
+
+    } else {
+        // Shortcut reference image: ![alt]
+        // Strip emphasis tags before lookup
+        char stripped_label[512];
+        size_t stripped_len = stripEmphasisTags(alt_start, alt_len, stripped_label, sizeof(stripped_label));
+
+        const LinkDefinition* def = parser->getLinkDefinition(stripped_label, stripped_len);
+        if (!def) {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+
+        Element* img = create_element(parser, "img");
+        if (!img) {
+            return (Item){.item = ITEM_ERROR};
+        }
+
+        add_attribute_to_element(parser, img, "src", def->url);
+        if (alt_len > 0) {
+            // Use stripped label as alt text (emphasis tags removed)
+            add_attribute_to_element(parser, img, "alt", stripped_label);
+        }
+        if (def->has_title && def->title[0]) {
+            add_attribute_to_element(parser, img, "title", def->title);
+        }
+
+        *text = pos;
+        return (Item){.item = (uint64_t)img};
+    }
 }
 
 // Input integration - main entry point from input system
