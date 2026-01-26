@@ -347,6 +347,108 @@ std::string generate_statement(std::mt19937& rng, int depth) {
     }
 }
 
+// Generate deeply nested heterogeneous structures
+std::string generate_nested_structure(std::mt19937& rng, int depth) {
+    if (depth > 8) {
+        // Base case: simple literal
+        int type = std::uniform_int_distribution<>(0, 3)(rng);
+        if (type == 0) return random_int(rng);
+        if (type == 1) return random_string(rng);
+        if (type == 2) return "true";
+        return "null";
+    }
+    
+    int type = std::uniform_int_distribution<>(0, 3)(rng);
+    
+    if (type == 0) {
+        // Nested array
+        int count = std::uniform_int_distribution<>(1, 3)(rng);
+        std::string result = "[";
+        for (int i = 0; i < count; i++) {
+            if (i > 0) result += ", ";
+            result += generate_nested_structure(rng, depth + 1);
+        }
+        result += "]";
+        return result;
+    } else if (type == 1) {
+        // Nested map
+        int count = std::uniform_int_distribution<>(1, 3)(rng);
+        std::string result = "{";
+        for (int i = 0; i < count; i++) {
+            if (i > 0) result += ", ";
+            result += random_identifier(rng) + ": " + generate_nested_structure(rng, depth + 1);
+        }
+        result += "}";
+        return result;
+    } else if (type == 2) {
+        // Mixed: map with array values
+        return "{data: [" + generate_nested_structure(rng, depth + 1) + 
+               "], meta: {nested: " + generate_nested_structure(rng, depth + 1) + "}}";
+    } else {
+        // Array of maps
+        return "[{key: " + generate_nested_structure(rng, depth + 1) + "}]";
+    }
+}
+
+// Generate nested function call patterns
+std::string generate_nested_call(std::mt19937& rng, int depth) {
+    if (depth > 8) {
+        return random_identifier(rng) + "(" + random_int(rng) + ")";
+    }
+    
+    int type = std::uniform_int_distribution<>(0, 3)(rng);
+    
+    if (type == 0) {
+        // Simple nested call
+        return random_identifier(rng) + "(" + generate_nested_call(rng, depth + 1) + ")";
+    } else if (type == 1) {
+        // Multiple arguments with nested calls
+        int arg_count = std::uniform_int_distribution<>(1, 3)(rng);
+        std::string result = random_identifier(rng) + "(";
+        for (int i = 0; i < arg_count; i++) {
+            if (i > 0) result += ", ";
+            if (std::uniform_int_distribution<>(0, 1)(rng)) {
+                result += generate_nested_call(rng, depth + 1);
+            } else {
+                result += random_int(rng);
+            }
+        }
+        result += ")";
+        return result;
+    } else if (type == 2) {
+        // Higher-order: function call returning function called again
+        return "(" + random_identifier(rng) + "(" + random_int(rng) + "))(" + random_int(rng) + ")";
+    } else {
+        // Nested call with operations
+        return random_identifier(rng) + "(" + generate_nested_call(rng, depth + 1) + " + " + random_int(rng) + ")";
+    }
+}
+
+// Generate complex closure patterns
+std::string generate_closure_pattern(std::mt19937& rng, int depth) {
+    if (depth > 4) {
+        return "(x) => x + " + random_int(rng);
+    }
+    
+    int type = std::uniform_int_distribution<>(0, 3)(rng);
+    
+    if (type == 0) {
+        // Simple closure capturing variable
+        std::string var = random_identifier(rng);
+        return "fn make_" + var + "(n) { fn inner(x) => x + n; inner }";
+    } else if (type == 1) {
+        // Multi-level closure
+        return "fn outer(a) { fn middle(b) { fn inner(c) => a + b + c; inner }; middle }";
+    } else if (type == 2) {
+        // Closure returning map of closures
+        return "fn make_ops(base) { {add: (x) => x + base, mul: (x) => x * base} }";
+    } else {
+        // Array of closures
+        return "[" + generate_closure_pattern(rng, depth + 1) + ", " + 
+               generate_closure_pattern(rng, depth + 1) + "]";
+    }
+}
+
 std::string generate_valid_program(std::mt19937& rng, int statement_count) {
     std::string result;
     
@@ -355,4 +457,17 @@ std::string generate_valid_program(std::mt19937& rng, int statement_count) {
     }
     
     return result;
+}
+
+// Generate program with specific pattern focus
+std::string generate_focused_program(std::mt19937& rng, const std::string& focus) {
+    if (focus == "nested_structures") {
+        return "let nested = " + generate_nested_structure(rng, 0) + ";\nnested";
+    } else if (focus == "nested_calls") {
+        return "fn f(x) => x + 1;\nfn g(x) => x * 2;\n" + generate_nested_call(rng, 0);
+    } else if (focus == "closures") {
+        return generate_closure_pattern(rng, 0) + "\n";
+    } else {
+        return generate_valid_program(rng, 5);
+    }
 }
