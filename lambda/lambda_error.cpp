@@ -617,6 +617,132 @@ void err_print_stack_trace(StackFrame* trace) {
 }
 
 // ============================================================================
+// JSON Error Output
+// ============================================================================
+
+// helper to escape JSON string
+static void json_escape_string(char* dest, size_t dest_size, const char* src) {
+    if (!src) { dest[0] = '\0'; return; }
+    
+    size_t di = 0;
+    while (*src && di < dest_size - 2) {
+        char c = *src++;
+        switch (c) {
+            case '"':  if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = '"'; } break;
+            case '\\': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = '\\'; } break;
+            case '\n': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = 'n'; } break;
+            case '\r': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = 'r'; } break;
+            case '\t': if (di < dest_size - 3) { dest[di++] = '\\'; dest[di++] = 't'; } break;
+            default:   dest[di++] = c; break;
+        }
+    }
+    dest[di] = '\0';
+}
+
+char* err_format_json(LambdaError* error) {
+    if (!error) return err_strdup("null");
+    
+    char buffer[4096];
+    int pos = 0;
+    
+    // escape message and help for JSON
+    char escaped_msg[1024] = {0};
+    char escaped_help[512] = {0};
+    char escaped_file[256] = {0};
+    
+    if (error->message) json_escape_string(escaped_msg, sizeof(escaped_msg), error->message);
+    if (error->help) json_escape_string(escaped_help, sizeof(escaped_help), error->help);
+    if (error->location.file) json_escape_string(escaped_file, sizeof(escaped_file), error->location.file);
+    
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "{\n");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  \"code\": %d,\n", error->code);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  \"name\": \"%s\",\n", err_code_name(error->code));
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  \"category\": \"%s\",\n", err_category_name(error->code));
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  \"severity\": \"error\",\n");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  \"message\": \"%s\",\n", escaped_msg);
+    
+    // location object
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  \"location\": {\n");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    \"file\": \"%s\",\n", 
+        error->location.file ? escaped_file : "");
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    \"line\": %u,\n", error->location.line);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    \"column\": %u,\n", error->location.column);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    \"endLine\": %u,\n", 
+        error->location.end_line > 0 ? error->location.end_line : error->location.line);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    \"endColumn\": %u\n", 
+        error->location.end_column > 0 ? error->location.end_column : error->location.column);
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  }");
+    
+    // optional help
+    if (error->help) {
+        pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",\n  \"help\": \"%s\"", escaped_help);
+    }
+    
+    // stack trace (if present)
+    if (error->stack_trace) {
+        pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",\n  \"stackTrace\": [\n");
+        StackFrame* frame = error->stack_trace;
+        bool first = true;
+        while (frame && (size_t)pos < sizeof(buffer) - 200) {
+            if (!first) pos += snprintf(buffer + pos, sizeof(buffer) - pos, ",\n");
+            first = false;
+            
+            char escaped_fn[256] = {0};
+            char escaped_frame_file[256] = {0};
+            if (frame->function_name) json_escape_string(escaped_fn, sizeof(escaped_fn), frame->function_name);
+            if (frame->location.file) json_escape_string(escaped_frame_file, sizeof(escaped_frame_file), frame->location.file);
+            
+            pos += snprintf(buffer + pos, sizeof(buffer) - pos, 
+                "    {\"function\": \"%s\", \"file\": \"%s\", \"line\": %u}",
+                escaped_fn, escaped_frame_file, frame->location.line);
+            frame = frame->next;
+        }
+        pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n  ]");
+    }
+    
+    pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n}");
+    
+    return err_strdup(buffer);
+}
+
+char* err_format_json_array(LambdaError** errors, int count) {
+    if (!errors || count == 0) return err_strdup("{\"errors\": [], \"errorCount\": 0}");
+    
+    // estimate buffer size needed
+    size_t buf_size = 256 + count * 2048;
+    char* buffer = (char*)malloc(buf_size);
+    if (!buffer) return err_strdup("{\"errors\": [], \"errorCount\": 0, \"error\": \"out of memory\"}");
+    
+    int pos = 0;
+    pos += snprintf(buffer + pos, buf_size - pos, "{\n  \"errors\": [\n");
+    
+    for (int i = 0; i < count && (size_t)pos < buf_size - 100; i++) {
+        char* err_json = err_format_json(errors[i]);
+        if (i > 0) pos += snprintf(buffer + pos, buf_size - pos, ",\n");
+        
+        // indent each line of the error JSON
+        const char* line = err_json;
+        while (*line && (size_t)pos < buf_size - 100) {
+            pos += snprintf(buffer + pos, buf_size - pos, "    ");
+            while (*line && *line != '\n' && (size_t)pos < buf_size - 10) {
+                buffer[pos++] = *line++;
+            }
+            if (*line == '\n') {
+                buffer[pos++] = '\n';
+                line++;
+            }
+        }
+        free(err_json);
+    }
+    
+    pos += snprintf(buffer + pos, buf_size - pos, "\n  ],\n");
+    pos += snprintf(buffer + pos, buf_size - pos, "  \"errorCount\": %d\n", count);
+    pos += snprintf(buffer + pos, buf_size - pos, "}");
+    
+    return buffer;
+}
+
+// ============================================================================
 // Error Cleanup
 // ============================================================================
 
