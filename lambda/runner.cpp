@@ -306,7 +306,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     
     // Build debug info table for stack traces (after MIR_link has assigned addresses)
-    tp->debug_info = (ArrayList*)build_debug_info_table(tp->jit_context);
+    // Pass func_name_map so MIR internal names are mapped to Lambda user-friendly names
+    tp->debug_info = (ArrayList*)build_debug_info_table(tp->jit_context, tp->func_name_map);
     
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
