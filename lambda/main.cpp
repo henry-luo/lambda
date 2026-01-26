@@ -21,7 +21,7 @@
 #include "tex/tex_document_model.hpp"
 
 // Error handling with stack traces
-#include "lambda_error.h"
+#include "lambda-error.h"
 
 // Graph layout includes
 #include "../radiant/layout_graph.hpp"
@@ -2160,6 +2160,7 @@ int main(int argc, char *argv[]) {
     bool help_only = false;
     char* script_file = NULL;
     int max_errors = 0;  // 0 means use default (10)
+    int optimize_level = -1;  // -1 means use default (2)
 
     // Parse arguments
     int ret_code = 0;
@@ -2183,6 +2184,27 @@ int main(int argc, char *argv[]) {
                 ret_code = 1;
             }
         }
+        else if (strncmp(argv[i], "--optimize=", 11) == 0) {
+            // Parse --optimize=N format
+            optimize_level = atoi(argv[i] + 11);
+            if (optimize_level < 0 || optimize_level > 3) {
+                printf("Error: --optimize level must be 0-3 (got %d)\n", optimize_level);
+                help_only = true;
+                ret_code = 1;
+            }
+        }
+        else if (strcmp(argv[i], "-O0") == 0) {
+            optimize_level = 0;
+        }
+        else if (strcmp(argv[i], "-O1") == 0) {
+            optimize_level = 1;
+        }
+        else if (strcmp(argv[i], "-O2") == 0) {
+            optimize_level = 2;
+        }
+        else if (strcmp(argv[i], "-O3") == 0) {
+            optimize_level = 3;
+        }
         else if (argv[i][0] != '-') {
             // This is a script file
             script_file = argv[i];
@@ -2194,6 +2216,11 @@ int main(int argc, char *argv[]) {
             help_only = true;
             ret_code = 1;
         }
+    }
+
+    // Apply optimize_level setting to runtime
+    if (optimize_level >= 0) {
+        runtime.optimize_level = (unsigned int)optimize_level;
     }
 
     // Apply max_errors setting to runtime

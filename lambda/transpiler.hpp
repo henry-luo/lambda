@@ -49,6 +49,7 @@ struct Runtime {
     TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
+    unsigned int optimize_level;  // MIR JIT optimization level (0-2, default: 2)
 };
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
@@ -73,7 +74,7 @@ void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
 
 extern"C" {
-MIR_context_t jit_init();
+MIR_context_t jit_init(unsigned int optimize_level);
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);

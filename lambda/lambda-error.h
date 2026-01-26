@@ -1,5 +1,5 @@
 /**
- * @file lambda_error.h
+ * @file lambda-error.h
  * @brief Lambda Structured Error Handling System
  * 
  * Provides a comprehensive error code system with source location tracking
@@ -167,6 +167,7 @@ typedef struct SourceLocation {
 typedef struct StackFrame {
     const char* function_name;  // function name (or "<script>" for top-level)
     SourceLocation location;    // call site location
+    bool is_native;             // true if this is a C/native function
     struct StackFrame* next;    // next frame (toward main)
 } StackFrame;
 
@@ -185,16 +186,30 @@ typedef struct LambdaError {
 } LambdaError;
 
 // ============================================================================
-// Debug Info for Stack Trace Mapping
+// Debug Info for Stack Trace Mapping (Native Stack Walking)
 // ============================================================================
 
+// Debug information for a compiled function
 typedef struct FuncDebugInfo {
     void* native_addr_start;        // start of native code
-    void* native_addr_end;          // end of native code  
+    void* native_addr_end;          // end of native code (computed via address ordering)
     const char* lambda_func_name;   // Lambda function name
     const char* source_file;        // source file path
     uint32_t source_line;           // line number of function definition
 } FuncDebugInfo;
+
+// Build debug info table from MIR-compiled functions (call after MIR_link)
+// Collects function addresses, sorts by address, and computes boundaries
+// If func_name_map is provided, maps MIR internal names to Lambda user-friendly names
+// Returns opaque pointer to internal list (sorted by address)
+void* build_debug_info_table(void* mir_ctx, void* func_name_map);
+
+// Look up debug info for a native address using binary search
+// Returns NULL if address is not in any Lambda function (runtime/system code)
+FuncDebugInfo* lookup_debug_info(void* debug_info_list, void* addr);
+
+// Free debug info table (call during cleanup)
+void free_debug_info_table(void* debug_info_list);
 
 // ============================================================================
 // Error API

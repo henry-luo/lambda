@@ -1,5 +1,5 @@
 #include "transpiler.hpp"
-#include "lambda_error.h"
+#include "lambda-error.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/log.h"
@@ -2857,19 +2857,185 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 }
 
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
-    log_debug("build content");
+    log_debug("build content, is_global=%d", is_global);
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
     TypeList* type = (TypeList*)alloc_type(tp->pool, LMD_TYPE_LIST, sizeof(TypeList));
     ast_node->list_type = type;
     ast_node->type = &TYPE_ANY;  // content() returns Item, not List
 
-    // build body content
+    // Two-pass compilation for top-level functions (only when is_global is true)
+    if (is_global) {
+        log_debug("pass 1: scanning for top-level function declarations");
+        // Pass 1: Scan and register all top-level function names with placeholder nodes
+        TSNode child = ts_node_named_child(list_node, 0);
+        while (!ts_node_is_null(child)) {
+            TSSymbol symbol = ts_node_symbol(child);
+            if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+                // Create minimal placeholder function node
+                bool is_proc = false;
+                TSNode kind = ts_node_child_by_field_id(child, FIELD_KIND);
+                if (!ts_node_is_null(kind)) {
+                    StrView kind_str = ts_node_source(tp, kind);
+                    is_proc = strview_equal(&kind_str, "pn");
+                }
+
+                AstFuncNode* fn_node = (AstFuncNode*)alloc_ast_node(tp,
+                    is_proc ? AST_NODE_PROC : AST_NODE_FUNC, child, sizeof(AstFuncNode));
+                fn_node->type = alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+                TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                fn_type->is_anonymous = false;
+                fn_type->is_proc = is_proc;
+                fn_type->returned = &TYPE_ANY;  // Safe default for forward references
+                
+                // Initialize required fields to prevent crashes
+                fn_node->param = NULL;
+                fn_node->body = NULL;
+                fn_node->vars = NULL;
+                fn_node->captures = NULL;
+
+                // Get function name and register it early
+                TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView name = ts_node_source(tp, fn_name_node);
+                fn_node->name = name_pool_create_strview(tp->name_pool, name);
+                
+                log_debug("pass 1: registering function placeholder '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
+                push_name(tp, (AstNamedNode*)fn_node, NULL);
+            }
+            child = ts_node_next_named_sibling(child);
+        }
+    }
+
+    // Pass 2: build all content (functions and other expressions)
+    log_debug("pass 2: building content bodies");
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
-        AstNode* item = symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM ?
-            build_func(tp, child, true, is_global) : build_expr(tp, child);
+        AstNode* item = NULL;
+        
+        if (symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM) {
+            if (is_global) {
+                // For global functions, look up the pre-registered placeholder
+                TSNode fn_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView name = ts_node_source(tp, fn_name_node);
+                NameEntry* entry = lookup_name(tp, name);
+                
+                if (entry && entry->node && 
+                    (entry->node->node_type == AST_NODE_FUNC || entry->node->node_type == AST_NODE_PROC)) {
+                    AstFuncNode* fn_node = (AstFuncNode*)entry->node;
+                    log_debug("pass 2: completing function '%.*s'", (int)fn_node->name->len, fn_node->name->chars);
+                    
+                    // Now build the complete function body
+                    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                    
+                    // 'pub' flag
+                    TSNode pub = ts_node_child_by_field_id(child, FIELD_PUB);
+                    fn_type->is_public = !ts_node_is_null(pub);
+                    
+                    // Build parameters
+                    fn_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+                    fn_node->vars->parent = tp->current_scope;
+                    fn_node->vars->is_proc = fn_type->is_proc;
+                    tp->current_scope = fn_node->vars;
+                    
+                    TSTreeCursor cursor = ts_tree_cursor_new(child);
+                    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+                    AstNamedNode* prev_param = NULL;
+                    int param_count = 0;
+                    int required_count = 0;
+                    bool seen_optional = false;
+                    bool has_declared_return_type = false;
+                    
+                    while (has_node) {
+                        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+                        if (field_id == FIELD_DECLARE) {
+                            TSNode param_child = ts_tree_cursor_current_node(&cursor);
+                            AstNamedNode* param = build_param_expr(tp, param_child, false);
+                            
+                            if (param == NULL) {
+                                fn_type->is_variadic = true;
+                                log_debug("function is variadic");
+                                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                                continue;
+                            }
+                            
+                            TypeParam* param_type = (TypeParam*)param->type;
+                            log_debug("got param: %.*s, optional=%d", (int)param->name->len, param->name->chars, param_type->is_optional);
+                            
+                            if (param_type->is_optional) {
+                                seen_optional = true;
+                            } else {
+                                if (seen_optional) {
+                                    log_error("required parameter '%.*s' cannot follow optional parameter", (int)param->name->len);
+                                }
+                                required_count++;
+                            }
+                            
+                            if (prev_param == NULL) {
+                                fn_node->param = param;
+                                fn_type->param = param_type;
+                            } else {
+                                prev_param->next = (AstNode*)param;
+                                ((TypeParam*)prev_param->type)->next = param_type;
+                            }
+                            prev_param = param;
+                            param_count++;
+                        }
+                        else if (field_id == FIELD_TYPE) {
+                            TSNode type_child = ts_tree_cursor_current_node(&cursor);
+                            AstNode* type_expr = build_expr(tp, type_child);
+                            if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+                                fn_type->returned = ((TypeType*)type_expr->type)->type;
+                                has_declared_return_type = true;
+                            } else {
+                                StrView type_str = ts_node_source(tp, type_child);
+                                log_error("Error: invalid return type '%.*s' - not a valid type",
+                                    (int)type_str.length, type_str.str);
+                                tp->error_count++;
+                                fn_type->returned = &TYPE_ANY;
+                            }
+                        }
+                        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                    }
+                    ts_tree_cursor_delete(&cursor);
+                    
+                    fn_type->param_count = param_count;
+                    fn_type->required_param_count = required_count;
+                    
+                    // Build function body
+                    TSNode fn_body_node = ts_node_child_by_field_id(child, FIELD_BODY);
+                    fn_node->body = build_expr(tp, fn_body_node);
+                    
+                    // If no return type was declared, keep it as &TYPE_ANY (Item)
+                    // This ensures forward-referenced functions work correctly
+                    if (!has_declared_return_type) {
+                        fn_type->returned = &TYPE_ANY;  // Safe for all forward refs
+                    }
+                    
+                    // Restore parent scope
+                    tp->current_scope = fn_node->vars->parent;
+                    
+                    // Analyze captures
+                    NameScope* global_scope = find_global_scope(fn_node->vars->parent);
+                    analyze_captures(tp, fn_node, global_scope);
+                    
+                    item = (AstNode*)fn_node;
+                    log_debug("pass 2: completed function '%.*s' with body=%p", 
+                        (int)fn_node->name->len, fn_node->name->chars, fn_node->body);
+                } else {
+                    log_error("Error: failed to find pre-registered function for '%.*s'", 
+                        (int)name.length, name.str);
+                    // Fallback: build normally
+                    item = build_func(tp, child, true, is_global);
+                }
+            } else {
+                // For non-global functions, use original single-pass behavior
+                item = build_func(tp, child, true, is_global);
+            }
+        } else {
+            item = build_expr(tp, child);
+        }
+        
         if (item) {
             if (!prev_item) {
                 ast_node->item = item;
@@ -2883,6 +3049,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
         // else comment or error
         child = ts_node_next_named_sibling(child);
     }
+    
     log_debug("end building content item: %p, %ld", ast_node->item, type->length);
     if (flattern && type->length == 1) { return ast_node->item; }
     return ast_node;

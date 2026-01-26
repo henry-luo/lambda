@@ -345,6 +345,10 @@ struct Script : Input {
     
     // Debug info for stack traces (function address → source mapping)
     ArrayList* debug_info;      // list of FuncDebugInfo*
+    
+    // Function name mapping: MIR internal name → Lambda human-readable name
+    // Used by build_debug_info_table() to get user-friendly names
+    struct hashmap* func_name_map;  // maps char* (MIR name) → char* (Lambda name)
 };
 
 typedef struct Runtime Runtime;
@@ -362,6 +366,9 @@ typedef struct Transpiler : Script {
     
     // Closure transpilation context
     AstFuncNode* current_closure;  // non-null when transpiling inside a closure body
+    
+    // Assignment name context (for naming anonymous closures)
+    String* current_assign_name;  // name of variable being assigned (e.g., "level1" for let level1 = fn...)
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type
