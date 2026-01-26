@@ -369,6 +369,10 @@ typedef struct Transpiler : Script {
     
     // Assignment name context (for naming anonymous closures)
     String* current_assign_name;  // name of variable being assigned (e.g., "level1" for let level1 = fn...)
+    
+    // Tail Call Optimization context
+    AstFuncNode* tco_func;     // non-null when transpiling body of a TCO-enabled function
+    bool in_tail_position;     // true when current expression is in tail position
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

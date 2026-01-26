@@ -9,6 +9,11 @@
 #include "lambda.h"
 #include "lambda-error.h"
 
+// Stack overflow protection functions
+extern uintptr_t get_stack_limit(void);
+extern void lambda_stack_overflow_error(const char* func_name);
+extern Item get_item_error(void);
+
 typedef struct jit_item {
     const char *code;
     size_t code_size;
@@ -29,6 +34,10 @@ typedef struct {
 func_obj_t func_list[] = {
     // C library functions
     {"memset", (fn_ptr) memset},
+    // Stack overflow protection
+    {"get_stack_limit", (fn_ptr) get_stack_limit},
+    {"lambda_stack_overflow_error", (fn_ptr) lambda_stack_overflow_error},
+    {"get_item_error", (fn_ptr) get_item_error},
     // {"printf", (fn_ptr) printf}, // printf does not work
     {"array", (fn_ptr) array},
     {"array_int", (fn_ptr) array_int},
