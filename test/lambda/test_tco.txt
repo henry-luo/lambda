@@ -2,6 +2,11 @@
   factorial_10: 3628800,
   sum_1000: 500500,
   fib_30: 832040,
+  gcd_48_18: 6,
+  sum_non_tail_100: 5050,
+  factorial_non_tail_10: 3628800,
+  count_evens_100: 50,
   deep_count: 0,
-  deep_sum: 705082704
+  deep_sum: 705082704,
+  deep_gcd: 1
 }
