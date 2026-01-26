@@ -12,6 +12,7 @@
 #include "format_adapter.hpp"
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
+#include "../html_entities.h"
 #include "lib/log.h"
 #include <cstring>
 #include <cstdlib>
@@ -309,24 +310,111 @@ static bool is_escapable_char(char c) {
 }
 
 /**
- * unescape_to_buffer - Process backslash escapes in a string into a buffer
+ * unescape_to_buffer - Process backslash escapes and entity references in a string into a buffer
  *
- * Copies the input string to the output buffer, processing backslash escapes.
- * For example, \* becomes * and \[ becomes [.
+ * Copies the input string to the output buffer, processing backslash escapes
+ * and HTML entity references (both named and numeric).
  */
 static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_t dst_size) {
     if (!src || !dst || dst_size == 0) return;
 
     size_t out_pos = 0;
+    const char* pos = src;
     const char* end = src + src_len;
 
-    while (src < end && out_pos < dst_size - 1) {
-        if (*src == '\\' && src + 1 < end && is_escapable_char(*(src + 1))) {
+    while (pos < end && out_pos < dst_size - 1) {
+        if (*pos == '\\' && pos + 1 < end && is_escapable_char(*(pos + 1))) {
             // skip the backslash, copy the escaped character
-            src++;
-            dst[out_pos++] = *src++;
+            pos++;
+            dst[out_pos++] = *pos++;
+        } else if (*pos == '&') {
+            // Try to parse entity reference
+            const char* entity_start = pos + 1;
+            const char* entity_pos = entity_start;
+
+            if (entity_pos < end && *entity_pos == '#') {
+                // Numeric entity
+                entity_pos++;
+                uint32_t codepoint = 0;
+                bool valid = false;
+
+                if (entity_pos < end && (*entity_pos == 'x' || *entity_pos == 'X')) {
+                    // Hex
+                    entity_pos++;
+                    const char* num_start = entity_pos;
+                    while (entity_pos < end &&
+                           ((*entity_pos >= '0' && *entity_pos <= '9') ||
+                            (*entity_pos >= 'a' && *entity_pos <= 'f') ||
+                            (*entity_pos >= 'A' && *entity_pos <= 'F'))) {
+                        codepoint *= 16;
+                        if (*entity_pos >= '0' && *entity_pos <= '9')
+                            codepoint += *entity_pos - '0';
+                        else if (*entity_pos >= 'a' && *entity_pos <= 'f')
+                            codepoint += *entity_pos - 'a' + 10;
+                        else
+                            codepoint += *entity_pos - 'A' + 10;
+                        entity_pos++;
+                        if (codepoint > 0x10FFFF) break;
+                    }
+                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
+                        valid = true;
+                    }
+                } else {
+                    // Decimal
+                    const char* num_start = entity_pos;
+                    while (entity_pos < end && *entity_pos >= '0' && *entity_pos <= '9') {
+                        codepoint = codepoint * 10 + (*entity_pos - '0');
+                        entity_pos++;
+                        if (codepoint > 0x10FFFF) break;
+                    }
+                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
+                        valid = true;
+                    }
+                }
+
+                if (valid && out_pos + 4 < dst_size) {
+                    if (codepoint == 0) codepoint = 0xFFFD;
+                    int utf8_len = unicode_to_utf8(codepoint, dst + out_pos);
+                    if (utf8_len > 0) {
+                        out_pos += utf8_len;
+                        pos = entity_pos + 1;
+                        continue;
+                    }
+                }
+            } else {
+                // Named entity
+                while (entity_pos < end &&
+                       ((*entity_pos >= 'a' && *entity_pos <= 'z') ||
+                        (*entity_pos >= 'A' && *entity_pos <= 'Z') ||
+                        (*entity_pos >= '0' && *entity_pos <= '9'))) {
+                    entity_pos++;
+                }
+
+                if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
+                    size_t name_len = entity_pos - entity_start;
+                    EntityResult result = html_entity_resolve(entity_start, name_len);
+
+                    if ((result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) && out_pos + strlen(result.decoded) < dst_size) {
+                        size_t decoded_len = strlen(result.decoded);
+                        memcpy(dst + out_pos, result.decoded, decoded_len);
+                        out_pos += decoded_len;
+                        pos = entity_pos + 1;
+                        continue;
+                    } else if ((result.type == ENTITY_UNICODE_SPACE || result.type == ENTITY_NAMED) && out_pos + 4 < dst_size) {
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, dst + out_pos);
+                        if (utf8_len > 0) {
+                            out_pos += utf8_len;
+                            pos = entity_pos + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Not a valid entity, copy & literally
+            dst[out_pos++] = *pos++;
         } else {
-            dst[out_pos++] = *src++;
+            dst[out_pos++] = *pos++;
         }
     }
 

@@ -30,6 +30,7 @@ typedef enum {
     ENTITY_NOT_FOUND = 0,       // Unknown entity
     ENTITY_ASCII_ESCAPE,         // lt, gt, amp, quot, apos - decode inline
     ENTITY_UNICODE_SPACE,        // nbsp, ensp, emsp, thinsp, hairsp - decode inline as Unicode
+    ENTITY_UNICODE_MULTI,        // Multi-codepoint sequences - decoded as UTF-8 string
     ENTITY_NAMED                 // Other named entities - return as Symbol
 } EntityType;
 
@@ -39,7 +40,7 @@ typedef enum {
 typedef struct {
     EntityType type;
     union {
-        const char* decoded;     // For ASCII escapes: the decoded UTF-8 string
+        const char* decoded;     // For ASCII escapes and multi-codepoint: the decoded UTF-8 string
         struct {
             const char* name;    // For named entities: the entity name
             uint32_t codepoint;  // Unicode codepoint for rendering
