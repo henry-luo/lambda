@@ -16,9 +16,36 @@ namespace lambda {
 namespace markup {
 
 /**
+ * is_escapable_punctuation - Check if character is escapable in CommonMark
+ */
+static inline bool is_escapable_punctuation(char c) {
+    return c && strchr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", c) != nullptr;
+}
+
+/**
+ * process_backslash_escapes - Process backslash escapes in a string
+ * Returns new length after processing
+ */
+static size_t process_backslash_escapes(char* str, size_t len) {
+    size_t read = 0, write = 0;
+    while (read < len) {
+        if (str[read] == '\\' && read + 1 < len && is_escapable_punctuation(str[read + 1])) {
+            // Skip backslash, keep the escaped character
+            read++;
+            str[write++] = str[read++];
+        } else {
+            str[write++] = str[read++];
+        }
+    }
+    str[write] = '\0';
+    return write;
+}
+
+/**
  * is_code_fence - Check if a line is a code fence opener/closer
  *
  * Checks for ``` or ~~~ with at least 3 characters.
+ * For backtick fences, the info string cannot contain backticks (CommonMark spec).
  */
 bool is_code_fence(const char* line) {
     if (!line) return false;
@@ -33,7 +60,17 @@ bool is_code_fence(const char* line) {
             count++;
             pos++;
         }
-        return count >= 3;
+        if (count >= 3) {
+            // CommonMark: backtick fences cannot have backticks in the info string
+            while (*pos && *pos != '\r' && *pos != '\n') {
+                if (*pos == '`') {
+                    return false;  // Backtick in info string - not a valid fence
+                }
+                pos++;
+            }
+            return true;
+        }
+        return false;
     }
 
     // Check for tilde fences (~~~)
@@ -94,6 +131,7 @@ static void extract_language(const char* line, char* lang, size_t lang_size) {
 
 /**
  * is_indented_code_line - Check if a line has 4+ space indentation
+ * Returns false for blank lines (lines with only whitespace)
  */
 static bool is_indented_code_line(const char* line, const char** content_start) {
     if (!line) return false;
@@ -108,6 +146,11 @@ static bool is_indented_code_line(const char* line, const char** content_start) 
             spaces++;
         }
         p++;
+    }
+
+    // Blank line (only whitespace) is not an indented code line
+    if (*p == '\0' || *p == '\r' || *p == '\n') {
+        return false;
     }
 
     if (spaces >= 4) {
@@ -179,9 +222,25 @@ static Item parse_indented_code_block(MarkupParser* parser, const char* line) {
             }
 
             if (more_code) {
-                // Include blank line in code
+                // Include blank line in code, preserving indentation beyond 4 spaces
                 if (sb->length > 0) {
                     stringbuf_append_char(sb, '\n');
+                    // Calculate content after removing up to 4 spaces
+                    const char* p = current;
+                    int spaces = 0;
+                    while ((*p == ' ' || *p == '\t') && spaces < 4) {
+                        if (*p == '\t') {
+                            spaces = ((spaces / 4) + 1) * 4;
+                        } else {
+                            spaces++;
+                        }
+                        p++;
+                    }
+                    // Append remaining whitespace (if any)
+                    while (*p == ' ' || *p == '\t') {
+                        stringbuf_append_char(sb, *p);
+                        p++;
+                    }
                 }
                 parser->current_line++;
             } else {
@@ -255,16 +314,22 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
                                   ? fence_info.info_length : sizeof(lang) - 1;
                 memcpy(lang, fence_info.info_string, copy_len);
                 lang[copy_len] = '\0';
+                // Process backslash escapes in info string
+                process_backslash_escapes(lang, copy_len);
             }
         } else {
             // Default fence detection
             get_fence_info(line, &fence_char, &fence_len);
             extract_language(line, lang, sizeof(lang));
+            // Process backslash escapes
+            process_backslash_escapes(lang, strlen(lang));
         }
     } else {
         // Default fence detection
         get_fence_info(line, &fence_char, &fence_len);
         extract_language(line, lang, sizeof(lang));
+        // Process backslash escapes
+        process_backslash_escapes(lang, strlen(lang));
     }
 
     // Add language attribute if present
