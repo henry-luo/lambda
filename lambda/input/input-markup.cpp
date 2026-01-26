@@ -46,6 +46,7 @@ static Item parse_bold_italic(MarkupParser* parser, const char** text);
 static Item parse_code_span(MarkupParser* parser, const char** text);
 static Item parse_link(MarkupParser* parser, const char** text);
 static Item parse_image(MarkupParser* parser, const char** text);
+static Item parse_raw_html_tag(MarkupParser* parser, const char** text);
 
 // Phase 4: Advanced inline element parsers
 static Item parse_strikethrough(MarkupParser* parser, const char** text);
@@ -150,6 +151,9 @@ static bool is_list_item(const char* line);
 static bool is_code_fence(const char* line);
 static bool is_blockquote(const char* line);
 static bool is_table_row(const char* line);
+static int is_html_block_start(const char* line);  // Returns HTML block type 1-7, or 0 if not
+static Item parse_html_block(MarkupParser* parser, const char* line);
+static bool is_html_block_end(const char* line, int html_block_type);
 
 // Common utility functions
 #define is_whitespace_char input_is_whitespace_char
@@ -570,6 +574,8 @@ static Item parse_block_element(MarkupParser* parser) {
                 }
             }
             return parse_rst_comment(parser);
+        case BLOCK_HTML:
+            return parse_html_block(parser, line);
         case BLOCK_PARAGRAPH:
         default:
             return parse_paragraph(parser, line);
@@ -632,14 +638,28 @@ static Item parse_header(MarkupParser* parser, const char* line) {
                 end--;
             }
 
-            // Strip trailing # markers (CommonMark: closing # optional)
-            while (end >= 0 && header_text_buf[end] == '#') {
-                end--;
+            // Strip trailing # markers only if preceded by a space OR if all content is #
+            // First check if trailing characters are #
+            int hash_start = end;
+            while (hash_start >= 0 && header_text_buf[hash_start] == '#') {
+                hash_start--;
             }
 
-            // Strip any spaces before the closing #
-            while (end >= 0 && (header_text_buf[end] == ' ' || header_text_buf[end] == '\t')) {
-                end--;
+            // Strip trailing # if:
+            // 1. There's a space before them (hash_start >= 0 && is space), OR
+            // 2. ALL content is hashes (hash_start < 0)
+            if ((hash_start >= 0 && hash_start < end && header_text_buf[hash_start] == ' ') ||
+                (hash_start < 0 && end >= 0)) {
+                if (hash_start >= 0) {
+                    end = hash_start;
+                    // Strip any spaces before the closing #
+                    while (end >= 0 && (header_text_buf[end] == ' ' || header_text_buf[end] == '\t')) {
+                        end--;
+                    }
+                } else {
+                    // All content was hashes - empty header
+                    end = -1;
+                }
             }
 
             header_text_buf[end + 1] = '\0';
@@ -676,6 +696,31 @@ static Item parse_header(MarkupParser* parser, const char* line) {
         // The underline will be skipped by incrementing current_line twice
         text = line;
         skip_whitespace(&text);
+    } else if ((parser->config.format == MARKUP_MARKDOWN) &&
+               *text != '#') {
+        // CommonMark setext heading: text line followed by === or ---
+        // Trim leading/trailing whitespace from content line
+        const char* start = text;
+        // Skip up to 3 leading spaces
+        int leading = 0;
+        while (*start == ' ' && leading < 3) {
+            start++;
+            leading++;
+        }
+        // Skip trailing whitespace and tabs
+        size_t content_len = strlen(start);
+        if (content_len > 0) {
+            header_text_buf = (char*)malloc(content_len + 1);
+            strcpy(header_text_buf, start);
+            int end = content_len - 1;
+            while (end >= 0 && (header_text_buf[end] == ' ' || header_text_buf[end] == '\t')) {
+                end--;
+            }
+            header_text_buf[end + 1] = '\0';
+            text = header_text_buf;
+        } else {
+            text = "";
+        }
     } else {
         // Fallback: use the entire line
         skip_whitespace(&text);
@@ -711,6 +756,40 @@ static Item parse_header(MarkupParser* parser, const char* line) {
                   ch == '^' || ch == '+' || ch == '*')) {
             // Skip the underline
             parser->current_line++;
+        }
+    }
+
+    // For CommonMark setext headings, also skip the underline
+    if ((parser->config.format == MARKUP_MARKDOWN) &&
+        parser->current_line < parser->line_count) {
+        const char* next_line = parser->lines[parser->current_line];
+        const char* next_pos = next_line;
+        // Skip up to 3 spaces
+        int spaces = 0;
+        while (*next_pos == ' ' && spaces < 3) {
+            next_pos++;
+            spaces++;
+        }
+
+        // Check if next line is a setext underline (= or -)
+        char ch = *next_pos;
+        if (ch == '=' || ch == '-') {
+            // Verify it's all the same character
+            char underline_char = ch;
+            int count = 0;
+            while (*next_pos == underline_char) {
+                next_pos++;
+                count++;
+            }
+            // Skip trailing whitespace
+            while (*next_pos == ' ' || *next_pos == '\t') {
+                next_pos++;
+            }
+            // Valid underline ends with newline or end of string
+            if (count >= 1 && (*next_pos == '\0' || *next_pos == '\n' || *next_pos == '\r')) {
+                // Skip the underline
+                parser->current_line++;
+            }
         }
     }
 
@@ -761,7 +840,8 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
                 break;
             }
 
-            stringbuf_append_char(sb, ' '); // Add space between lines
+            // CommonMark soft line break: use newline, not space
+            stringbuf_append_char(sb, '\n');
             stringbuf_append_str(sb, content);
             parser->current_line++;
         }
@@ -1026,24 +1106,45 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
     // Mark as block-level code
     add_attribute_to_element(parser, code, "type", "block");
 
-    // Extract language from fence line (```python, ~~~javascript, etc.)
-    const char* fence = line;
-    skip_whitespace(&fence);
-    char lang[32] = {0};
-    bool has_language = false;
+    // Extract fence character, length, and indentation from opening fence
+    const char* start = line;
+    int fence_indent = 0;
+    while (*start == ' ' && fence_indent < 3) {
+        start++;
+        fence_indent++;
+    }
 
-    if (*fence == '`' || *fence == '~') {
-        fence += 3; // Skip fence chars
-        skip_whitespace(&fence);
-        if (*fence && !isspace(*fence)) {
-            // Extract language
-            int i = 0;
-            while (*fence && !isspace(*fence) && i < 31) {
-                lang[i++] = *fence++;
-            }
-            lang[i] = '\0';
-            has_language = true;
+    char fence_char = *start;
+    int fence_len = 0;
+    const char* fence = start;
+    while (*fence == fence_char) {
+        fence_len++;
+        fence++;
+    }
 
+    // Extract info string (language) after fence
+    char lang[64] = {0};
+    const char* info_start = fence;
+    // Skip leading spaces
+    while (*info_start == ' ' || *info_start == '\t') info_start++;
+
+    if (*info_start && *info_start != '\n' && *info_start != '\r') {
+        // For backtick fences, info string cannot contain backticks
+        if (fence_char == '`' && strchr(info_start, '`')) {
+            // Invalid - treat as paragraph
+            return parse_paragraph(parser, line);
+        }
+
+        // Extract first word as language (up to first space)
+        int i = 0;
+        while (info_start[i] && info_start[i] != ' ' && info_start[i] != '\t' &&
+               info_start[i] != '\n' && info_start[i] != '\r' && i < 63) {
+            lang[i] = info_start[i];
+            i++;
+        }
+        lang[i] = '\0';
+
+        if (lang[0]) {
             // Check if this is an ASCII math block
             if (strcmp(lang, "asciimath") == 0 || strcmp(lang, "ascii-math") == 0) {
                 // Convert code block to math block
@@ -1065,10 +1166,19 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
                 while (parser->current_line < parser->line_count) {
                     const char* current = parser->lines[parser->current_line];
 
-                    // Check for closing fence
-                    if (is_code_fence(current)) {
-                        parser->current_line++; // Skip closing fence
-                        break;
+                    // Check for closing fence (same char, same or longer length)
+                    const char* check = current;
+                    int check_indent = 0;
+                    while (*check == ' ' && check_indent < 3) { check++; check_indent++; }
+                    if (*check == fence_char) {
+                        int close_len = 0;
+                        while (*check == fence_char) { close_len++; check++; }
+                        // Must be followed only by spaces/tabs/end
+                        while (*check == ' ' || *check == '\t') check++;
+                        if ((*check == '\0' || *check == '\n' || *check == '\r') && close_len >= fence_len) {
+                            parser->current_line++; // Skip closing fence
+                            break;
+                        }
                     }
 
                     // Add line to math content
@@ -1098,6 +1208,7 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
             }
 
             add_attribute_to_element(parser, code, "language", lang);
+            add_attribute_to_element(parser, code, "info", lang);  // Also set info attribute
         }
     }
 
@@ -1110,14 +1221,31 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
-        // Check for closing fence
-        if (is_code_fence(current)) {
-            parser->current_line++; // Skip closing fence
-            break;
+        // Check for closing fence (same char, same or longer length)
+        const char* check = current;
+        int check_indent = 0;
+        while (*check == ' ' && check_indent < 3) { check++; check_indent++; }
+        if (*check == fence_char) {
+            int close_len = 0;
+            while (*check == fence_char) { close_len++; check++; }
+            // Must be followed only by spaces/tabs/end
+            while (*check == ' ' || *check == '\t') check++;
+            if ((*check == '\0' || *check == '\n' || *check == '\r') && close_len >= fence_len) {
+                parser->current_line++; // Skip closing fence
+                break;
+            }
+        }
+
+        // Remove up to fence_indent spaces from content line
+        const char* content = current;
+        int spaces_removed = 0;
+        while (*content == ' ' && spaces_removed < fence_indent) {
+            content++;
+            spaces_removed++;
         }
 
         // Add line to code content (with newline after each line)
-        stringbuf_append_str(sb, current);
+        stringbuf_append_str(sb, content);
         stringbuf_append_char(sb, '\n');
         parser->current_line++;
     }
@@ -1825,9 +1953,15 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    // For simple text without markup, return as string
-    if (!strpbrk(text, "*_`[!~\\$:^{@'")) {
-        String* content = create_string(parser, text);
+    // For simple text without markup, return as string (with trailing spaces trimmed)
+    // Include \n and \r to catch hard line breaks (2+ spaces before newline)
+    if (!strpbrk(text, "*_`[!~\\$:^{@'<\n\r")) {
+        // Trim trailing spaces from end of text
+        size_t len = strlen(text);
+        while (len > 0 && text[len - 1] == ' ') {
+            len--;
+        }
+        String* content = parser->builder.createString(text, len);
         return (Item){.item = s2it(content)};
     }
 
@@ -2158,7 +2292,8 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 list_push((List*)span, math_item);
                 increment_element_content_length(span);
             } else if (pos == old_pos) {
-                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                // Parse failed and didn't advance - add $ to buffer literally
+                stringbuf_append_char(sb, *pos);
                 pos++;
             }
         }
@@ -2202,6 +2337,79 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 pos++;
             }
         }
+        else if (*pos == '<') {
+            // Flush text first
+            if (sb->length > 0) {
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                stringbuf_reset(sb);
+            }
+
+            // Try to parse as raw HTML tag
+            const char* old_pos = pos;
+            Item html_item = parse_raw_html_tag(parser, &pos);
+            if (html_item.item != ITEM_ERROR && html_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, html_item);
+                increment_element_content_length(span);
+            } else {
+                // Not a valid HTML tag - add < literally
+                stringbuf_append_char(sb, '<');
+                pos = old_pos + 1;
+            }
+        }
+        else if (*pos == '\n' || *pos == '\r') {
+            // Check for hard line break (2+ spaces before newline)
+            // Look back in the string buffer for trailing spaces
+            int trailing_spaces = 0;
+            if (sb->length > 0) {
+                const char* buf = sb->str->chars;
+                int i = sb->length - 1;
+                while (i >= 0 && buf[i] == ' ') {
+                    trailing_spaces++;
+                    i--;
+                }
+            }
+
+            if (trailing_spaces >= 2) {
+                // Hard line break - trim trailing spaces from buffer
+                sb->length -= trailing_spaces;
+                sb->str->chars[sb->length] = '\0';
+
+                // Flush accumulated text
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                // Create <br> element for hard line break
+                Element* br = create_element(parser, "br");
+                if (br) {
+                    list_push((List*)span, (Item){.item = (uint64_t)br});
+                    increment_element_content_length(span);
+                }
+
+                // Skip the newline
+                if (*pos == '\r' && pos[1] == '\n') {
+                    pos += 2;
+                } else if (*pos == '\n' && pos[1] == '\r') {
+                    pos += 2;
+                } else {
+                    pos++;
+                }
+
+                // Skip leading spaces on the next line
+                while (*pos == ' ') pos++;
+            } else {
+                // Soft line break - add newline character to buffer
+                stringbuf_append_char(sb, *pos);
+                pos++;
+            }
+        }
         else {
             // Regular character, add to text buffer
             stringbuf_append_char(sb, *pos);
@@ -2209,12 +2417,20 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         }
     }
 
-    // Flush any remaining text
+    // Flush any remaining text (trim trailing whitespace for CommonMark)
     if (sb->length > 0) {
-        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-        Item text_item = {.item = s2it(text_content)};
-        list_push((List*)span, text_item);
-        increment_element_content_length(span);
+        // Trim trailing spaces from end of paragraph
+        while (sb->length > 0 && sb->str->chars[sb->length - 1] == ' ') {
+            sb->length--;
+        }
+        sb->str->chars[sb->length] = '\0';
+
+        if (sb->length > 0) {
+            String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+            Item text_item = {.item = s2it(text_content)};
+            list_push((List*)span, text_item);
+            increment_element_content_length(span);
+        }
     }
 
     return (Item){.item = (uint64_t)span};
@@ -2478,16 +2694,51 @@ static Item parse_bold_italic(MarkupParser* parser, const char** text) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    // Create appropriate element
+    // Determine how many markers to consume
+    // We match the minimum of opening and closing count
+    int match_count = (count < end_count) ? count : end_count;
+
+    // Create appropriate element based on match_count
     Element* elem;
-    if (count >= 2) {
+    if (match_count >= 3) {
+        // Create strong with em inside for ***
+        elem = create_element(parser, "strong");
+        Element* em_elem = create_element(parser, "em");
+
+        if (!elem || !em_elem) {
+            *text = end + match_count;
+            return (Item){.item = ITEM_ERROR};
+        }
+
+        // Extract content between markers
+        size_t content_len = end - content_start;
+        char* content = (char*)malloc(content_len + 1);
+        if (content) {
+            strncpy(content, content_start, content_len);
+            content[content_len] = '\0';
+
+            Item inner_content = parse_inline_spans(parser, content);
+            if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
+                list_push((List*)em_elem, inner_content);
+                increment_element_content_length(em_elem);
+            }
+            free(content);
+        }
+
+        list_push((List*)elem, (Item){.item = (uint64_t)em_elem});
+        increment_element_content_length(elem);
+
+        *text = end + match_count;
+        return (Item){.item = (uint64_t)elem};
+    }
+    else if (match_count == 2) {
         elem = create_element(parser, "strong");
     } else {
         elem = create_element(parser, "em");
     }
 
     if (!elem) {
-        *text = end + end_count;
+        *text = end + match_count;
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -2508,7 +2759,7 @@ static Item parse_bold_italic(MarkupParser* parser, const char** text) {
         free(content);
     }
 
-    *text = end + count;  // Move past closing markers
+    *text = end + match_count;  // Move past closing markers
     return (Item){.item = (uint64_t)elem};
 }
 
@@ -2606,6 +2857,320 @@ static Item parse_code_span(MarkupParser* parser, const char** text) {
 
     *text = end + backticks;
     return (Item){.item = (uint64_t)code};
+}
+
+// Helper: check if character is valid for start of tag name (ASCII letter)
+static inline bool is_tag_name_start(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+// Helper: check if character is valid in tag name (letter, digit, hyphen)
+static inline bool is_tag_name_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '-';
+}
+
+// Helper: check if character is valid for start of attribute name
+static inline bool is_attr_name_start(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':';
+}
+
+// Helper: check if character is valid in attribute name
+static inline bool is_attr_name_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '.' || c == ':' || c == '-';
+}
+
+// Parse raw HTML tag - returns raw-html element containing the tag text
+static Item parse_raw_html_tag(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    const char* pos = start;
+
+    if (*pos != '<') {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    pos++;
+
+    // Check for autolink (URI scheme or email) before HTML
+    // Autolink URI: <scheme:...> where scheme is [a-zA-Z][a-zA-Z0-9+.-]{0,31}
+    {
+        const char* scheme_start = pos;
+        if ((*pos >= 'a' && *pos <= 'z') || (*pos >= 'A' && *pos <= 'Z')) {
+            pos++;
+            int scheme_len = 1;
+            while (scheme_len < 32 && ((*pos >= 'a' && *pos <= 'z') ||
+                   (*pos >= 'A' && *pos <= 'Z') || (*pos >= '0' && *pos <= '9') ||
+                   *pos == '+' || *pos == '.' || *pos == '-')) {
+                pos++;
+                scheme_len++;
+            }
+            if (*pos == ':') {
+                // Found valid scheme, now find > ensuring no whitespace or <
+                pos++;
+                const char* uri_start = scheme_start;
+                while (*pos && *pos != '>' && *pos != '<' && *pos != ' ' &&
+                       *pos != '\t' && *pos != '\n' && *pos != '\r') {
+                    pos++;
+                }
+                if (*pos == '>') {
+                    // Valid autolink URI
+                    size_t uri_len = pos - uri_start;
+                    pos++; // Skip >
+                    char uri_buf[1024];
+                    if (uri_len < sizeof(uri_buf)) {
+                        memcpy(uri_buf, uri_start, uri_len);
+                        uri_buf[uri_len] = '\0';
+                        Element* link = create_element(parser, "a");
+                        if (link) {
+                            add_attribute_to_element(parser, link, "href", uri_buf);
+                            // Text content is the URI
+                            String* text_str = parser->builder.createString(uri_start, uri_len);
+                            list_push((List*)link, (Item){.item = s2it(text_str)});
+                            increment_element_content_length(link);
+                            *text = pos;
+                            return (Item){.item = (uint64_t)link};
+                        }
+                    }
+                }
+            }
+        }
+        pos = start + 1; // Reset for other checks
+    }
+
+    // Check for email autolink: <addr@domain>
+    {
+        const char* email_start = pos;
+        // Basic email validation - at least one char, @, then domain
+        bool has_at = false;
+        bool valid_email = true;
+        const char* at_pos = NULL;
+        while (*pos && *pos != '>' && *pos != '<' && *pos != ' ' &&
+               *pos != '\t' && *pos != '\n' && *pos != '\r') {
+            if (*pos == '@') {
+                if (has_at) {
+                    valid_email = false;
+                    break;
+                }
+                if (pos == email_start) {
+                    valid_email = false;
+                    break;
+                }
+                has_at = true;
+                at_pos = pos;
+            }
+            pos++;
+        }
+        if (*pos == '>' && has_at && valid_email && at_pos &&
+            pos > at_pos + 1) {  // Must have domain after @
+            size_t email_len = pos - email_start;
+            pos++; // Skip >
+
+            // Build mailto: href
+            char mailto_buf[512];
+            if (email_len < sizeof(mailto_buf) - 8) {
+                memcpy(mailto_buf, "mailto:", 7);
+                memcpy(mailto_buf + 7, email_start, email_len);
+                mailto_buf[7 + email_len] = '\0';
+
+                Element* link = create_element(parser, "a");
+                if (link) {
+                    add_attribute_to_element(parser, link, "href", mailto_buf);
+                    String* email_str = parser->builder.createString(email_start, email_len);
+                    list_push((List*)link, (Item){.item = s2it(email_str)});
+                    increment_element_content_length(link);
+                    *text = pos;
+                    return (Item){.item = (uint64_t)link};
+                }
+            }
+        }
+        pos = start + 1; // Reset for HTML checks
+    }
+
+    // HTML Comment: <!-- ... -->
+    if (pos[0] == '!' && pos[1] == '-' && pos[2] == '-') {
+        pos += 3;
+        // Find -->
+        while (*pos && !(pos[0] == '-' && pos[1] == '-' && pos[2] == '>')) {
+            pos++;
+        }
+        if (pos[0] == '-' && pos[1] == '-' && pos[2] == '>') {
+            pos += 3;
+            size_t len = pos - start;
+            String* html_str = parser->builder.createString(start, len);
+            Element* elem = create_element(parser, "raw-html");
+            if (elem && html_str) {
+                list_push((List*)elem, (Item){.item = s2it(html_str)});
+                increment_element_content_length(elem);
+                *text = pos;
+                return (Item){.item = (uint64_t)elem};
+            }
+        }
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // Processing instruction: <? ... ?>
+    if (*pos == '?') {
+        pos++;
+        while (*pos && !(pos[0] == '?' && pos[1] == '>')) {
+            pos++;
+        }
+        if (pos[0] == '?' && pos[1] == '>') {
+            pos += 2;
+            size_t len = pos - start;
+            String* html_str = parser->builder.createString(start, len);
+            Element* elem = create_element(parser, "raw-html");
+            if (elem && html_str) {
+                list_push((List*)elem, (Item){.item = s2it(html_str)});
+                increment_element_content_length(elem);
+                *text = pos;
+                return (Item){.item = (uint64_t)elem};
+            }
+        }
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // CDATA: <![CDATA[ ... ]]>
+    if (pos[0] == '!' && pos[1] == '[' && strncmp(pos, "![CDATA[", 8) == 0) {
+        pos += 8;
+        while (*pos && !(pos[0] == ']' && pos[1] == ']' && pos[2] == '>')) {
+            pos++;
+        }
+        if (pos[0] == ']' && pos[1] == ']' && pos[2] == '>') {
+            pos += 3;
+            size_t len = pos - start;
+            String* html_str = parser->builder.createString(start, len);
+            Element* elem = create_element(parser, "raw-html");
+            if (elem && html_str) {
+                list_push((List*)elem, (Item){.item = s2it(html_str)});
+                increment_element_content_length(elem);
+                *text = pos;
+                return (Item){.item = (uint64_t)elem};
+            }
+        }
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // Declaration: <! followed by letter, ends with >
+    if (*pos == '!' && is_tag_name_start(pos[1])) {
+        pos += 2;
+        while (*pos && *pos != '>') {
+            pos++;
+        }
+        if (*pos == '>') {
+            pos++;
+            size_t len = pos - start;
+            String* html_str = parser->builder.createString(start, len);
+            Element* elem = create_element(parser, "raw-html");
+            if (elem && html_str) {
+                list_push((List*)elem, (Item){.item = s2it(html_str)});
+                increment_element_content_length(elem);
+                *text = pos;
+                return (Item){.item = (uint64_t)elem};
+            }
+        }
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // Close tag: </tagname>
+    if (*pos == '/') {
+        pos++;
+        if (!is_tag_name_start(*pos)) {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+        while (is_tag_name_char(*pos)) pos++;
+        // Skip whitespace
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+        if (*pos != '>') {
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+        pos++;
+        size_t len = pos - start;
+        String* html_str = parser->builder.createString(start, len);
+        Element* elem = create_element(parser, "raw-html");
+        if (elem && html_str) {
+            list_push((List*)elem, (Item){.item = s2it(html_str)});
+            increment_element_content_length(elem);
+            *text = pos;
+            return (Item){.item = (uint64_t)elem};
+        }
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // Open tag: <tagname ...>
+    if (!is_tag_name_start(*pos)) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+
+    // Parse tag name
+    while (is_tag_name_char(*pos)) pos++;
+
+    // Parse attributes (simplified)
+    while (*pos) {
+        // Skip whitespace
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+
+        // End of tag?
+        if (*pos == '>') {
+            pos++;
+            break;
+        }
+        if (*pos == '/' && pos[1] == '>') {
+            pos += 2;
+            break;
+        }
+
+        // Attribute name
+        if (!is_attr_name_start(*pos)) {
+            // Invalid attribute start
+            return (Item){.item = ITEM_UNDEFINED};
+        }
+        while (is_attr_name_char(*pos)) pos++;
+
+        // Skip whitespace
+        while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+
+        // Optional = followed by value
+        if (*pos == '=') {
+            pos++;
+            // Skip whitespace
+            while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+
+            // Attribute value
+            if (*pos == '"') {
+                pos++;
+                while (*pos && *pos != '"') pos++;
+                if (*pos == '"') pos++;
+                else return (Item){.item = ITEM_UNDEFINED};
+            } else if (*pos == '\'') {
+                pos++;
+                while (*pos && *pos != '\'') pos++;
+                if (*pos == '\'') pos++;
+                else return (Item){.item = ITEM_UNDEFINED};
+            } else {
+                // Unquoted value - ends at whitespace or >
+                while (*pos && *pos != ' ' && *pos != '\t' && *pos != '\n' &&
+                       *pos != '\r' && *pos != '>' && *pos != '"' && *pos != '\'' &&
+                       *pos != '=' && *pos != '<' && *pos != '`') {
+                    pos++;
+                }
+            }
+        }
+    }
+
+    // If we reached here, we have a valid tag
+    if (pos > start + 1) {  // At least <x>
+        size_t len = pos - start;
+        String* html_str = parser->builder.createString(start, len);
+        Element* elem = create_element(parser, "raw-html");
+        if (elem && html_str) {
+            list_push((List*)elem, (Item){.item = s2it(html_str)});
+            increment_element_content_length(elem);
+            *text = pos;
+            return (Item){.item = (uint64_t)elem};
+        }
+    }
+
+    return (Item){.item = ITEM_UNDEFINED};
 }
 
 // Parse links ([text](url))
@@ -3183,6 +3748,11 @@ static BlockType detect_block_type(MarkupParser* parser, const char* line) {
         return BLOCK_MATH;
     }
 
+    // CommonMark HTML block detection (types 1-7)
+    if (is_html_block_start(line) > 0) {
+        return BLOCK_HTML;
+    }
+
     return BLOCK_PARAGRAPH;
 }
 
@@ -3203,6 +3773,72 @@ static int get_header_level(MarkupParser* parser, const char* line) {
     // Must be followed by space or end of line
     if (level > 0 && (*pos == ' ' || *pos == '\t' || *pos == '\0')) {
         return level;
+    }
+
+    // CommonMark setext headings: text followed by === (h1) or --- (h2)
+    if (parser->config.format == MARKUP_MARKDOWN) {
+        // Check indentation - no more than 3 spaces
+        int spaces = 0;
+        const char* p = line;
+        while (*p == ' ') {
+            spaces++;
+            p++;
+        }
+        // 4+ spaces means it can't start a setext heading
+        if (spaces >= 4) return 0;
+
+        // Line must have non-empty content
+        if (*p == '\0' || *p == '\n' || *p == '\r') return 0;
+
+        // Setext heading cannot start with > (that's a blockquote)
+        // or be a list item marker or thematic break pattern
+        if (*p == '>') return 0;
+        if (*p == '-' || *p == '*' || *p == '+') {
+            // Check if this looks like a list item or thematic break, not text
+            const char* check = p;
+            while (*check == *p || *check == ' ') check++;
+            if (*check == '\0' || *check == '\n' || *check == '\r') {
+                // Looks like a thematic break (--- or ***)
+                return 0;
+            }
+            // Check for list item (- text)
+            if (p[1] == ' ' || p[1] == '\t') {
+                return 0;  // List item, not setext content
+            }
+        }
+
+        // Check if next line is a setext underline
+        if (parser->current_line + 1 < parser->line_count) {
+            const char* next_line = parser->lines[parser->current_line + 1];
+            const char* next_pos = next_line;
+
+            // Skip up to 3 spaces
+            int next_spaces = 0;
+            while (*next_pos == ' ' && next_spaces < 3) {
+                next_spaces++;
+                next_pos++;
+            }
+            // 4+ spaces means not an underline
+            if (*next_pos == ' ') return 0;
+
+            // Check for = or - underline
+            char underline_char = *next_pos;
+            if (underline_char == '=' || underline_char == '-') {
+                int underline_count = 0;
+                while (*next_pos == underline_char) {
+                    underline_count++;
+                    next_pos++;
+                }
+                // Skip trailing spaces and tabs
+                while (*next_pos == ' ' || *next_pos == '\t') {
+                    next_pos++;
+                }
+                // Must end with newline or end of string (at least 1 underline char)
+                if (underline_count >= 1 && (*next_pos == '\0' || *next_pos == '\n' || *next_pos == '\r')) {
+                    return (underline_char == '=') ? 1 : 2;
+                }
+            }
+        }
     }
 
     // Handle RST-style underlined headers (only for RST format)
@@ -3361,6 +3997,271 @@ static bool is_table_row(const char* line) {
     }
 
     return false;
+}
+
+// Case-insensitive prefix match helper
+static bool ci_starts_with(const char* str, const char* prefix) {
+    while (*prefix) {
+        if (tolower((unsigned char)*str) != tolower((unsigned char)*prefix)) {
+            return false;
+        }
+        str++;
+        prefix++;
+    }
+    return true;
+}
+
+// Check if character follows valid HTML block tag (space, tab, >, />, or end of line)
+static bool is_tag_end_char(char c) {
+    return c == ' ' || c == '\t' || c == '>' || c == '\0' || c == '\n' || c == '\r';
+}
+
+// Check if line starts an HTML block - returns type 1-7, or 0 if not
+static int is_html_block_start(const char* line) {
+    if (!line) return 0;
+
+    const char* pos = line;
+    // Skip up to 3 spaces of indentation
+    int spaces = 0;
+    while (*pos == ' ' && spaces < 3) {
+        pos++;
+        spaces++;
+    }
+    if (*pos == ' ') return 0;  // 4+ spaces is not HTML block
+
+    if (*pos != '<') return 0;
+    pos++;
+
+    // Type 1: <pre, <script, <style, <textarea
+    if (ci_starts_with(pos, "pre") && (is_tag_end_char(pos[3]) || pos[3] == '/')) return 1;
+    if (ci_starts_with(pos, "script") && (is_tag_end_char(pos[6]) || pos[6] == '/')) return 1;
+    if (ci_starts_with(pos, "style") && (is_tag_end_char(pos[5]) || pos[5] == '/')) return 1;
+    if (ci_starts_with(pos, "textarea") && (is_tag_end_char(pos[8]) || pos[8] == '/')) return 1;
+
+    // Type 2: <!--
+    if (pos[0] == '!' && pos[1] == '-' && pos[2] == '-') return 2;
+
+    // Type 3: <?
+    if (pos[0] == '?') return 3;
+
+    // Type 4: <! followed by uppercase letter
+    if (pos[0] == '!' && pos[1] >= 'A' && pos[1] <= 'Z') return 4;
+
+    // Type 5: <![CDATA[
+    if (ci_starts_with(pos, "![CDATA[")) return 5;
+
+    // Type 6: Block-level HTML elements (open or close tag)
+    bool is_close = false;
+    if (*pos == '/') {
+        is_close = true;
+        pos++;
+    }
+
+    // List of block-level elements for type 6
+    static const char* block_tags[] = {
+        "address", "article", "aside", "base", "basefont", "blockquote", "body",
+        "caption", "center", "col", "colgroup", "dd", "details", "dialog",
+        "dir", "div", "dl", "dt", "fieldset", "figcaption", "figure",
+        "footer", "form", "frame", "frameset",
+        "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr",
+        "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
+        "nav", "noframes", "ol", "optgroup", "option", "p", "param",
+        "search", "section", "summary", "table", "tbody", "td",
+        "tfoot", "th", "thead", "title", "tr", "track", "ul", NULL
+    };
+
+    for (int i = 0; block_tags[i]; i++) {
+        size_t len = strlen(block_tags[i]);
+        if (ci_starts_with(pos, block_tags[i])) {
+            char next = pos[len];
+            if (is_tag_end_char(next) || next == '/') {
+                return 6;
+            }
+        }
+    }
+
+    // Type 7: Complete open or close tag on single line (any tag except script/pre/style/textarea)
+    // This is more complex - need to verify complete tag syntax
+    // For now, detect simple complete tags like <div>, </span>, <hr/>, etc.
+    if (!is_close) {
+        // Check for open tag: <tagname ...> or <tagname .../>
+        const char* tag_start = pos;
+        // Tag name must start with ASCII letter
+        if (!((*pos >= 'a' && *pos <= 'z') || (*pos >= 'A' && *pos <= 'Z'))) {
+            return 0;
+        }
+        // Skip tag name (letters, digits, hyphen)
+        while ((*pos >= 'a' && *pos <= 'z') || (*pos >= 'A' && *pos <= 'Z') ||
+               (*pos >= '0' && *pos <= '9') || *pos == '-') {
+            pos++;
+        }
+
+        // After tag name, must have whitespace, >, or />
+        // If there's something else (like : for http:), it's not a valid tag
+        if (*pos != ' ' && *pos != '\t' && *pos != '\n' && *pos != '\r' &&
+            *pos != '>' && !(*pos == '/' && pos[1] == '>')) {
+            return 0;
+        }
+
+        // Exclude type 1 tags from type 7
+        size_t tag_len = pos - tag_start;
+        char tag_name[32];
+        if (tag_len < sizeof(tag_name)) {
+            memcpy(tag_name, tag_start, tag_len);
+            tag_name[tag_len] = '\0';
+            if (strcasecmp(tag_name, "pre") == 0 || strcasecmp(tag_name, "script") == 0 ||
+                strcasecmp(tag_name, "style") == 0 || strcasecmp(tag_name, "textarea") == 0) {
+                return 0;  // These are type 1, not type 7
+            }
+        }
+
+        // Skip attributes (simplified: anything until > or />)
+        while (*pos && *pos != '>' && !(*pos == '/' && pos[1] == '>')) {
+            pos++;
+        }
+        if (*pos == '/' && pos[1] == '>') {
+            pos += 2;
+        } else if (*pos == '>') {
+            pos++;
+        } else {
+            return 0;  // Incomplete tag
+        }
+        // After tag, must be only whitespace until end of line
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos == '\0' || *pos == '\n' || *pos == '\r') {
+            return 7;
+        }
+    } else {
+        // Close tag: </tagname>
+        const char* tag_start = pos;
+        if (!((*pos >= 'a' && *pos <= 'z') || (*pos >= 'A' && *pos <= 'Z'))) {
+            return 0;
+        }
+        while ((*pos >= 'a' && *pos <= 'z') || (*pos >= 'A' && *pos <= 'Z') ||
+               (*pos >= '0' && *pos <= '9') || *pos == '-') {
+            pos++;
+        }
+        // Skip whitespace before >
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos != '>') return 0;
+        pos++;
+        // After tag, must be only whitespace until end of line
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos == '\0' || *pos == '\n' || *pos == '\r') {
+            return 7;
+        }
+    }
+
+    return 0;
+}
+
+// Case-insensitive substring search
+static const char* ci_strstr(const char* haystack, const char* needle) {
+    if (!*needle) return haystack;
+    for (; *haystack; haystack++) {
+        const char* h = haystack;
+        const char* n = needle;
+        while (*h && *n && tolower((unsigned char)*h) == tolower((unsigned char)*n)) {
+            h++;
+            n++;
+        }
+        if (!*n) return haystack;
+    }
+    return NULL;
+}
+
+// Check if line ends an HTML block of given type
+static bool is_html_block_end(const char* line, int html_block_type) {
+    if (!line) return false;
+
+    switch (html_block_type) {
+        case 1:
+            // End on </pre>, </script>, </style>, </textarea>
+            return ci_strstr(line, "</pre>") || ci_strstr(line, "</script>") ||
+                   ci_strstr(line, "</style>") || ci_strstr(line, "</textarea>");
+        case 2:
+            // End on -->
+            return strstr(line, "-->") != NULL;
+        case 3:
+            // End on ?>
+            return strstr(line, "?>") != NULL;
+        case 4:
+            // End on >
+            return strchr(line, '>') != NULL;
+        case 5:
+            // End on ]]>
+            return strstr(line, "]]>") != NULL;
+        case 6:
+        case 7:
+            // End on blank line (checked in parse_html_block)
+            return false;
+        default:
+            return false;
+    }
+}
+
+// Parse HTML block - raw HTML passthrough
+static Item parse_html_block(MarkupParser* parser, const char* line) {
+    int html_type = is_html_block_start(line);
+    if (html_type == 0) {
+        return parse_paragraph(parser, line);
+    }
+
+    // Create html-block element to hold raw content
+    Element* html_elem = create_element(parser, "html-block");
+    if (!html_elem) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // Collect all lines until end condition
+    StringBuf* sb = stringbuf_new(parser->input()->pool);
+
+    bool first_line = true;
+
+    while (parser->current_line < parser->line_count) {
+        const char* current = parser->lines[parser->current_line];
+
+        // For types 6 and 7, end on blank line
+        if ((html_type == 6 || html_type == 7) && !first_line) {
+            if (is_empty_line(current)) {
+                break;
+            }
+        }
+
+        // Add line to content
+        if (!first_line) {
+            stringbuf_append_char(sb, '\n');
+        }
+        stringbuf_append_str(sb, current);
+
+        // Check for type-specific end condition
+        if (html_type >= 1 && html_type <= 5) {
+            if (is_html_block_end(current, html_type)) {
+                parser->current_line++;
+                break;
+            }
+        }
+
+        parser->current_line++;
+        first_line = false;
+    }
+
+    // Store the raw HTML content
+    if (sb->length > 0) {
+        String* content_str = stringbuf_to_string(sb);
+        if (content_str) {
+            list_push((List*)html_elem, (Item){.item = s2it(content_str)});
+            increment_element_content_length(html_elem);
+        }
+    }
+
+    // Add type attribute for debugging
+    char type_str[8];
+    snprintf(type_str, sizeof(type_str), "%d", html_type);
+    add_attribute_to_element(parser, html_elem, "type", type_str);
+
+    return (Item){.item = (uint64_t)html_elem};
 }
 
 // Phase 4: Advanced inline element parsers
