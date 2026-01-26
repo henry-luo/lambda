@@ -10,6 +10,9 @@
 namespace lambda {
 namespace markup {
 
+// Forward declaration for HTML block detection (from block_html.cpp)
+extern bool is_html_block_start(const char* line);
+
 /**
  * is_blockquote_line - Check if a line starts a blockquote
  */
@@ -141,6 +144,16 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         CodeFenceInfo fence_info = adapter->detectCodeFence(line);
         if (fence_info.valid) {
             return BlockType::CODE_BLOCK;
+        }
+
+        // HTML block detection (Markdown only)
+        log_debug("block_detection: checking HTML block, format=%d, MARKDOWN=%d",
+                  (int)parser->config.format, (int)Format::MARKDOWN);
+        if (parser->config.format == Format::MARKDOWN) {
+            if (is_html_block_start(line)) {
+                log_debug("block_detection: detected HTML block at line %d: '%s'", parser->current_line, line);
+                return BlockType::RAW_HTML;
+            }
         }
 
         // Blockquote detection

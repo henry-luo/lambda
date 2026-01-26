@@ -149,6 +149,18 @@ Item parse_footnote_reference(MarkupParser* parser, const char** text);
  */
 Item parse_citation(MarkupParser* parser, const char** text);
 
+/**
+ * parse_raw_html - Parse inline raw HTML tags
+ *
+ * Handles HTML tags, comments, processing instructions, CDATA, and declarations.
+ * Tags pass through without markdown processing.
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing raw-html element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_raw_html(MarkupParser* parser, const char** text);
+
 // ============================================================================
 // Format-Specific Inline Parsers
 // ============================================================================

@@ -19,6 +19,7 @@ extern Item parse_blockquote(MarkupParser* parser, const char* line);
 extern Item parse_table_row(MarkupParser* parser, const char* line);
 extern Item parse_math_block(MarkupParser* parser, const char* line);
 extern Item parse_divider(MarkupParser* parser);
+extern Item parse_html_block(MarkupParser* parser, const char* line);
 
 // Forward declarations for link reference parsing
 extern bool try_parse_link_definition(MarkupParser* parser, const char* line);
@@ -76,6 +77,9 @@ Item parse_block_element(MarkupParser* parser) {
         case BlockType::DIVIDER:
             return parse_divider(parser);
 
+        case BlockType::RAW_HTML:
+            return parse_html_block(parser, line);
+
         case BlockType::PARAGRAPH:
         default:
             return parse_paragraph(parser, line);
@@ -87,6 +91,7 @@ Item parse_block_element(MarkupParser* parser) {
  *
  * Creates root doc element with meta and body sections,
  * then parses all block elements into the body.
+ * If HTML content was encountered, includes the HTML DOM.
  */
 Item parse_document(MarkupParser* parser) {
     if (!parser) {
@@ -130,6 +135,29 @@ Item parse_document(MarkupParser* parser) {
     // Add body to document
     list_push((List*)doc, Item{.item = (uint64_t)body});
     increment_element_content_length(doc);
+
+    // If any HTML content was parsed, add the HTML DOM to the document
+    // The HTML DOM contains all HTML fragments accumulated during parsing
+    Element* html_body = parser->getHtmlBody();
+    if (html_body && html_body->length > 0) {
+        // Create an html-dom wrapper element containing the parsed HTML structure
+        Element* html_dom = create_element(parser, "html-dom");
+        if (html_dom) {
+            // Copy all children from the HTML5 body to our html-dom element
+            for (size_t i = 0; i < html_body->length; i++) {
+                list_push((List*)html_dom, html_body->items[i]);
+            }
+            // Set content length
+            TypeElmt* html_dom_type = (TypeElmt*)html_dom->type;
+            html_dom_type->content_length = html_body->length;
+
+            // Add html-dom to the document
+            list_push((List*)doc, Item{.item = (uint64_t)html_dom});
+            increment_element_content_length(doc);
+
+            log_debug("parse_document: added html-dom with %zu children", html_body->length);
+        }
+    }
 
     return Item{.item = (uint64_t)doc};
 }
