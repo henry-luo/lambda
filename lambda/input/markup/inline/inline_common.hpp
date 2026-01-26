@@ -150,6 +150,17 @@ Item parse_footnote_reference(MarkupParser* parser, const char** text);
 Item parse_citation(MarkupParser* parser, const char** text);
 
 /**
+ * parse_entity_reference - Parse HTML entity and numeric character references
+ *
+ * Handles: &amp; &lt; &gt; &#35; &#x23; &copy; etc.
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing decoded string, or ITEM_UNDEFINED if not matched
+ */
+Item parse_entity_reference(MarkupParser* parser, const char** text);
+
+/**
  * parse_raw_html - Parse inline raw HTML tags
  *
  * Handles HTML tags, comments, processing instructions, CDATA, and declarations.
