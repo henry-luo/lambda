@@ -3008,6 +3008,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_INDEX:
         // This is likely a parsing error - index tokens should not appear as standalone expressions
         // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
+        // or case like "12.34.56"
         log_error("Error: Unexpected index token - check for malformed range syntax (use 'to' instead of '..')");
         return NULL;
     default:
