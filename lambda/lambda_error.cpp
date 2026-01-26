@@ -261,6 +261,67 @@ SourceLocation src_loc_span(const char* file, uint32_t line, uint32_t col,
 }
 
 // ============================================================================
+// Source Context Extraction
+// ============================================================================
+
+// count lines in source string
+int err_get_source_line_count(const char* source) {
+    if (!source) return 0;
+    
+    int count = 1;  // at least one line
+    while (*source) {
+        if (*source == '\n') count++;
+        source++;
+    }
+    return count;
+}
+
+// extract a single line from source (caller must free result)
+char* err_get_source_line(const char* source, uint32_t line_number) {
+    if (!source || line_number == 0) return NULL;
+    
+    uint32_t current_line = 1;
+    const char* line_start = source;
+    
+    // find the start of the requested line
+    while (*source && current_line < line_number) {
+        if (*source == '\n') {
+            current_line++;
+            line_start = source + 1;
+        }
+        source++;
+    }
+    
+    if (current_line != line_number) return NULL;  // line not found
+    
+    // find the end of the line
+    const char* line_end = line_start;
+    while (*line_end && *line_end != '\n') {
+        line_end++;
+    }
+    
+    // copy the line
+    size_t len = line_end - line_start;
+    char* result = (char*)malloc(len + 1);
+    if (result) {
+        memcpy(result, line_start, len);
+        result[len] = '\0';
+    }
+    return result;
+}
+
+// extract source context around the error location
+void err_extract_context(LambdaError* error, const char* source, int context_lines) {
+    if (!error || !source) return;
+    
+    // store source reference for later formatting
+    error->location.source = source;
+    
+    // context_lines parameter is stored for formatting (unused for now, formatting uses it directly)
+    (void)context_lines;
+}
+
+// ============================================================================
 // Stack Trace Capture
 // ============================================================================
 
@@ -443,52 +504,58 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
         error->message ? error->message : err_code_message(error->code));
     
     // source context (if available)
-    if (error->location.source && error->location.line > 0 && context_lines > 0) {
+    if (error->location.source && error->location.line > 0) {
         const char* src = error->location.source;
         uint32_t target_line = error->location.line;
+        uint32_t start_line = (target_line > (uint32_t)context_lines) ? (target_line - context_lines) : 1;
+        uint32_t end_line = target_line + context_lines;
         
-        // find the target line
-        uint32_t current_line = 1;
-        const char* line_start = src;
-        const char* line_end = NULL;
+        // calculate max line number width for alignment
+        int line_width = 1;
+        uint32_t temp = end_line;
+        while (temp >= 10) { temp /= 10; line_width++; }
         
-        while (*src && current_line <= target_line) {
-            if (current_line == target_line) {
-                line_start = src;
-            }
-            while (*src && *src != '\n') src++;
-            if (current_line == target_line) {
-                line_end = src;
-                break;
-            }
-            if (*src == '\n') {
-                src++;
-                current_line++;
-            }
-        }
+        // empty gutter line
+        pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%*s |\n", line_width, "");
         
-        if (line_end && line_end > line_start) {
-            // print line number gutter
-            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    |\n");
-            pos += snprintf(buffer + pos, sizeof(buffer) - pos, " %3u| ", target_line);
+        // extract and print each context line
+        for (uint32_t line_num = start_line; line_num <= end_line && (size_t)pos < sizeof(buffer) - 256; line_num++) {
+            char* line_text = err_get_source_line(src, line_num);
+            if (!line_text) break;  // past end of source
             
-            // print source line
-            int line_len = (int)(line_end - line_start);
-            if (line_len > 0 && (size_t)(pos + line_len) < sizeof(buffer) - 1) {
-                memcpy(buffer + pos, line_start, line_len);
-                pos += line_len;
-            }
-            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n");
-            
-            // print caret indicator
-            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "    | ");
-            if (error->location.column > 0) {
-                for (uint32_t i = 1; i < error->location.column && (size_t)pos < sizeof(buffer) - 1; i++) {
+            // print line number and content
+            if (line_num == target_line) {
+                pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%*u | %s\n", 
+                    line_width, line_num, line_text);
+                
+                // print caret indicator for the error column/span
+                pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%*s | ", line_width, "");
+                
+                uint32_t col = error->location.column > 0 ? error->location.column : 1;
+                uint32_t end_col = error->location.end_column > 0 ? error->location.end_column : col;
+                if (end_col < col) end_col = col;
+                
+                // span length (at least 1)
+                uint32_t span_len = end_col - col + 1;
+                if (span_len > 20) span_len = 20;  // limit caret length
+                if (span_len < 1) span_len = 1;
+                
+                // spaces before carets
+                for (uint32_t i = 1; i < col && (size_t)pos < sizeof(buffer) - 32; i++) {
                     buffer[pos++] = ' ';
                 }
-                pos += snprintf(buffer + pos, sizeof(buffer) - pos, "^^^");
+                
+                // carets
+                for (uint32_t i = 0; i < span_len && (size_t)pos < sizeof(buffer) - 16; i++) {
+                    buffer[pos++] = '^';
+                }
+                buffer[pos++] = '\n';
+            } else {
+                pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%*u | %s\n", 
+                    line_width, line_num, line_text);
             }
-            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "\n");
+            
+            free(line_text);
         }
     }
     
