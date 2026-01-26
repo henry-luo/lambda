@@ -2274,6 +2274,18 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 }
 
 void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
+    // defensive check: if object or field is null, emit error and skip
+    if (!field_node->object || !field_node->field) {
+        log_error("transpile_member_expr: null object or field");
+        strbuf_append_str(tp->code_buf, "ItemError /* null member expr */");
+        return;
+    }
+    if (!field_node->object->type) {
+        log_error("transpile_member_expr: object missing type");
+        strbuf_append_str(tp->code_buf, "ItemError /* missing type */");
+        return;
+    }
+    
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
         strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
