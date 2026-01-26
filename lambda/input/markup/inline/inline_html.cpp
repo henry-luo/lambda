@@ -257,6 +257,167 @@ static const char* try_parse_html_tag(const char* start) {
 }
 
 // ============================================================================
+// Autolink Parser
+// ============================================================================
+
+/**
+ * is_uri_scheme_char - Check if character is valid in URI scheme
+ * Per CommonMark: [A-Za-z][A-Za-z0-9+.-]{0,31}
+ */
+static inline bool is_uri_scheme_char(char c) {
+    return isalnum((unsigned char)c) || c == '+' || c == '.' || c == '-';
+}
+
+/**
+ * try_parse_autolink_uri - Try to parse URI autolink <scheme:...>
+ *
+ * CommonMark spec: A URI autolink consists of <, an absolute URI, and >.
+ * An absolute URI is a scheme followed by : followed by zero or more characters
+ * other than ASCII control characters, space, <, and >.
+ * Scheme: [A-Za-z][A-Za-z0-9+.-]{0,31}
+ */
+static const char* try_parse_autolink_uri(const char* start, const char** url_start, const char** url_end) {
+    if (*start != '<') return nullptr;
+
+    const char* p = start + 1;
+
+    // Must start with ASCII letter
+    if (!is_ascii_letter(*p)) return nullptr;
+    p++;
+
+    // Read scheme: [A-Za-z0-9+.-]{0,31}
+    int scheme_len = 1;
+    while (is_uri_scheme_char(*p) && scheme_len < 32) {
+        scheme_len++;
+        p++;
+    }
+
+    // Must have : after scheme
+    if (*p != ':') return nullptr;
+    p++;
+
+    *url_start = start + 1;
+
+    // Read URI content until > or invalid char
+    while (*p && *p != '>' && *p != ' ' && *p != '<' && (unsigned char)*p >= 32) {
+        p++;
+    }
+
+    if (*p != '>') return nullptr;
+
+    *url_end = p;
+    return p + 1; // past >
+}
+
+/**
+ * try_parse_autolink_email - Try to parse email autolink <email@domain>
+ *
+ * Per CommonMark: an email address matching a complex regex pattern.
+ * Simplified: local-part @ domain
+ */
+static const char* try_parse_autolink_email(const char* start, const char** email_start, const char** email_end) {
+    if (*start != '<') return nullptr;
+
+    const char* p = start + 1;
+    *email_start = p;
+
+    // Local part: [a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+
+    bool has_local = false;
+    while (*p && (isalnum((unsigned char)*p) ||
+           *p == '.' || *p == '!' || *p == '#' || *p == '$' || *p == '%' ||
+           *p == '&' || *p == '\'' || *p == '*' || *p == '+' || *p == '/' ||
+           *p == '=' || *p == '?' || *p == '^' || *p == '_' || *p == '`' ||
+           *p == '{' || *p == '|' || *p == '}' || *p == '~' || *p == '-')) {
+        has_local = true;
+        p++;
+    }
+
+    if (!has_local || *p != '@') return nullptr;
+    p++; // skip @
+
+    // Domain: [a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*
+    bool has_domain = false;
+    while (*p && *p != '>') {
+        if (isalnum((unsigned char)*p) || *p == '-' || *p == '.') {
+            has_domain = true;
+            p++;
+        } else {
+            return nullptr; // invalid char
+        }
+    }
+
+    if (!has_domain || *p != '>') return nullptr;
+
+    *email_end = p;
+    return p + 1; // past >
+}
+
+/**
+ * parse_autolink - Parse autolinks <URL> or <email>
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing link element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_autolink(MarkupParser* parser, const char** text) {
+    if (!parser || !text || !*text || **text != '<') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* start = *text;
+    const char* end = nullptr;
+    const char* url_start = nullptr;
+    const char* url_end = nullptr;
+    bool is_email = false;
+
+    // Try URI autolink first
+    end = try_parse_autolink_uri(start, &url_start, &url_end);
+
+    // Try email autolink if URI failed
+    if (!end) {
+        end = try_parse_autolink_email(start, &url_start, &url_end);
+        is_email = (end != nullptr);
+    }
+
+    if (!end) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Create link element
+    Element* link = create_element(parser, "a");
+    if (!link) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Extract URL/email text
+    size_t url_len = url_end - url_start;
+    char* url_buf = (char*)arena_alloc(parser->input()->arena, url_len + 1);
+    memcpy(url_buf, url_start, url_len);
+    url_buf[url_len] = '\0';
+
+    // Add href attribute (mailto: for email)
+    String* href_key = parser->builder.createString("href");
+    String* href_val;
+    if (is_email) {
+        char* mailto = (char*)arena_alloc(parser->input()->arena, url_len + 8);
+        strcpy(mailto, "mailto:");
+        strcat(mailto, url_buf);
+        href_val = parser->builder.createString(mailto);
+    } else {
+        href_val = parser->builder.createString(url_buf);
+    }
+    parser->builder.putToElement(link, href_key, Item{.item = s2it(href_val)});
+
+    // Add link text (same as URL/email, no mailto)
+    String* link_text = parser->builder.createString(url_buf);
+    list_push((List*)link, Item{.item = s2it(link_text)});
+    increment_element_content_length(link);
+
+    *text = end;
+    return Item{.item = (uint64_t)link};
+}
+
+// ============================================================================
 // Main Parser Function
 // ============================================================================
 
