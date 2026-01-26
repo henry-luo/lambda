@@ -249,7 +249,7 @@ It collects all MIR function addresses and computes their boundaries using addre
 
 #### 4.2.2 Frame Pointer Walker
 
-New code to add to `lambda_error.cpp`:
+New code to add to `lambda-error.cpp`:
 
 ```c
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -386,7 +386,7 @@ This is complementary, not required. The FP chain should capture most cases.
 
 ### ✅ Phase 2: Frame Pointer Walker (COMPLETE)
 
-**File:** `lambda/lambda_error.cpp`
+**File:** `lambda/lambda-error.cpp`
 
 **Implementation:**
 ```c
@@ -419,7 +419,7 @@ static inline void* get_frame_pointer(void) {
 **Key Innovation:** Combined MIR JIT stack walking with C function resolution using `dladdr()`.
 
 ```c
-// In lambda_error.cpp - resolving C functions
+// In lambda-error.cpp - resolving C functions
 #if defined(__APPLE__) || defined(__linux__)
 extern "C" {
     typedef struct {
@@ -552,8 +552,8 @@ The implementation correctly shows the full call chain from Lambda user code thr
 
 | File | Changes |
 |------|---------|
-| `lambda/lambda_error.cpp` | FP walking, `dladdr()` integration, stack frame building |
-| `lambda/lambda_error.h` | Added `is_native` field to `StackFrame` struct |
+| `lambda/lambda-error.cpp` | FP walking, `dladdr()` integration, stack frame building |
+| `lambda/lambda-error.h` | Added `is_native` field to `StackFrame` struct |
 | `lambda/mir.c` | `build_debug_info_table()` with `func_name_map` lookup |
 | `lambda/ast.hpp` | Added `func_name_map` to `Script` struct |
 | `lambda/transpile.cpp` | `register_func_name()`, `register_func_name_with_context()` |

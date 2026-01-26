@@ -1,5 +1,5 @@
 /**
- * @file lambda_error.cpp
+ * @file lambda-error.cpp
  * @brief Lambda Structured Error Handling Implementation
  */
 
@@ -33,7 +33,7 @@ extern "C" {
 #include <windows.h>
 #endif
 
-#include "lambda_error.h"
+#include "lambda-error.h"
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"
 #include "../lib/arraylist.h"
