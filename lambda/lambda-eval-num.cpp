@@ -769,6 +769,19 @@ Item fn_idiv(Item item_a, Item item_b) {
 }
 
 Item fn_pow(Item item_a, Item item_b) {
+    // Defensive check: verify items are valid before accessing
+    // Check if the item union pointer fields are valid (not small integers that indicate corruption)
+    uint64_t ptr_a = item_a.item;
+    uint64_t ptr_b = item_b.item;
+    if (ptr_a != 0 && ptr_a < 0x1000) {
+        log_error("fn_pow: item_a has invalid/corrupt pointer value: 0x%llx", (unsigned long long)ptr_a);
+        return ItemError;
+    }
+    if (ptr_b != 0 && ptr_b < 0x1000) {
+        log_error("fn_pow: item_b has invalid/corrupt pointer value: 0x%llx", (unsigned long long)ptr_b);
+        return ItemError;
+    }
+    
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_pow called with types: %d and %d", type_a, type_b);
     

@@ -1,9 +1,11 @@
 #include "transpiler.hpp"
+#include "safety_analyzer.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 
 extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
+void transpile_expr_tco(Transpiler* tp, AstNode *expr_node, bool in_tail_position);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
@@ -1912,12 +1914,91 @@ AstNamedNode* get_param_at_index(AstFuncNode* fn_node, int index) {
     return param;
 }
 
+/**
+ * Transpile a tail-recursive call as a goto statement.
+ * Transforms: factorial(n-1, acc*n) into:
+ *   { int _t0 = _n - 1; int _t1 = _acc * _n; _n = _t0; _acc = _t1; goto _tco_start; }
+ * 
+ * Note: We use temporary variables to handle cases like f(b, a) where args are swapped.
+ */
+void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tco_func) {
+    log_debug("transpile_tail_call: converting recursive call to goto");
+    
+    // Generate: ({ temp assignments; param = temp; ...; goto _tco_start; ITEM_NULL; })
+    // The ITEM_NULL at end is never reached but satisfies the expression type
+    strbuf_append_str(tp->code_buf, "({ ");
+    
+    // Count params and args
+    int param_count = 0;
+    AstNamedNode* param = tco_func->param;
+    while (param) { param_count++; param = (AstNamedNode*)param->next; }
+    
+    // First pass: assign arguments to temporary variables
+    // This handles cases like factorial(b, a) where we swap values
+    AstNode* arg = call_node->argument;
+    param = tco_func->param;
+    int arg_idx = 0;
+    
+    while (arg && param) {
+        // Generate: TypeX _tN = <arg>;
+        Type* param_type = param->type;
+        write_type(tp->code_buf, param_type);
+        strbuf_append_format(tp->code_buf, " _tco_tmp%d = ", arg_idx);
+        transpile_expr(tp, arg);
+        strbuf_append_str(tp->code_buf, "; ");
+        
+        arg = arg->next;
+        param = (AstNamedNode*)param->next;
+        arg_idx++;
+    }
+    
+    // Second pass: assign temporaries to parameters
+    param = tco_func->param;
+    for (int i = 0; i < arg_idx; i++) {
+        if (!param) break;
+        strbuf_append_str(tp->code_buf, "_");
+        strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
+        strbuf_append_format(tp->code_buf, " = _tco_tmp%d; ", i);
+        param = (AstNamedNode*)param->next;
+    }
+    
+    // Jump back to function start
+    strbuf_append_str(tp->code_buf, "goto _tco_start; ");
+    
+    // The expression type - never reached but keeps C happy
+    Type* ret_type = ((TypeFunc*)tco_func->type)->returned;
+    if (!ret_type) ret_type = &TYPE_ANY;
+    if (ret_type->type_id == LMD_TYPE_INT) {
+        strbuf_append_str(tp->code_buf, "0; })");
+    } else if (ret_type->type_id == LMD_TYPE_FLOAT) {
+        strbuf_append_str(tp->code_buf, "0.0; })");
+    } else if (ret_type->type_id == LMD_TYPE_BOOL) {
+        strbuf_append_str(tp->code_buf, "false; })");
+    } else {
+        strbuf_append_str(tp->code_buf, "ITEM_NULL; })");
+    }
+}
+
+/**
+ * Check if a call expression is a tail-recursive call to the TCO function.
+ */
+bool is_tco_tail_call(Transpiler* tp, AstCallNode* call_node) {
+    if (!tp->tco_func || !tp->in_tail_position) return false;
+    return is_recursive_call(call_node, tp->tco_func);
+}
+
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     log_debug("transpile call expr");
     // Defensive validation: ensure all required pointers and components are valid
     if (!call_node || !call_node->function || !call_node->function->type) {
         log_error("Error: invalid call_node");
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        return;
+    }
+    
+    // TCO: Check if this is a tail-recursive call that should be transformed to goto
+    if (is_tco_tail_call(tp, call_node)) {
+        transpile_tail_call(tp, call_node, tp->tco_func);
         return;
     }
 
@@ -2553,6 +2634,33 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, "*)_env_ptr;\n");
     }
     
+    // Check if this function should use Tail Call Optimization
+    // A function can only use TCO if ALL recursive calls are in tail position
+    // (otherwise, transforming just the tail calls would break the function)
+    bool use_tco = should_use_tco(fn_node) && is_tco_function_safe(fn_node);
+    
+    // Stack overflow check for potentially recursive functions
+    // TCO functions don't need stack checks since they won't grow the stack
+    bool needs_stack_check = !use_tco;
+    
+    if (needs_stack_check) {
+        strbuf_append_str(tp->code_buf, " LAMBDA_STACK_CHECK(\"");
+        // Use function name if available, otherwise use assignment name
+        if (fn_node->name && fn_node->name->chars) {
+            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
+        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
+        } else {
+            strbuf_append_str(tp->code_buf, "<anonymous>");
+        }
+        strbuf_append_str(tp->code_buf, "\");\n");
+    }
+    
+    // TCO: Add loop label at start of function body for goto target
+    if (use_tco) {
+        strbuf_append_str(tp->code_buf, " _tco_start:;\n");
+    }
+    
     // set vargs before function body for variadic functions
     if (fn_type && fn_type->is_variadic) {
         strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
@@ -2562,6 +2670,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstFuncNode* prev_closure = tp->current_closure;
     if (is_closure) {
         tp->current_closure = fn_node;
+    }
+    
+    // TCO context setup
+    AstFuncNode* prev_tco_func = tp->tco_func;
+    bool prev_in_tail = tp->in_tail_position;
+    if (use_tco) {
+        tp->tco_func = fn_node;
+        tp->in_tail_position = true;  // Function body is in tail position
     }
     
     // for procedures, use procedural content transpilation
@@ -2592,6 +2708,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         }
         strbuf_append_str(tp->code_buf, ";\n}\n");
     }
+    
+    // Restore TCO context
+    tp->tco_func = prev_tco_func;
+    tp->in_tail_position = prev_in_tail;
     
     // restore previous closure context
     tp->current_closure = prev_closure;
@@ -3115,8 +3235,30 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
 // include lambda-embed.h to get the lambda header file content as a string
 #include "lambda-embed.h"
 
+// Stack overflow check code to be included in transpiled output
+// Uses portable approach compatible with MIR C compiler
+// Note: We call functions instead of accessing variables directly (MIR limitation)
+static const char* stack_check_code = R"(
+// Stack overflow protection declarations
+extern uintptr_t get_stack_limit(void);
+extern void lambda_stack_overflow_error(const char* func_name);
+extern Item get_item_error(void);
+
+// Portable stack check using local variable address
+#define LAMBDA_STACK_CHECK(func_name) \
+    do { \
+        volatile char _stack_marker; \
+        if ((uintptr_t)&_stack_marker < get_stack_limit()) { \
+            lambda_stack_overflow_error(func_name); \
+            return get_item_error(); \
+        } \
+    } while(0)
+)";
+
 void transpile_ast_root(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
+    // Add stack overflow protection code
+    strbuf_append_str(tp->code_buf, stack_check_code);
     // all (nested) function definitions need to be hoisted to global level
     log_debug("define_ast_node ...");
     // defines global runtime context
