@@ -189,6 +189,7 @@ void print_help() {
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
     printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
     printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
+    printf("  lambda --optimize=N [script.ls]     - Set MIR JIT optimization level (0-2, default: 2)\n");
     printf("  lambda run [--mir] <script.ls>      - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
@@ -201,6 +202,7 @@ void print_help() {
     printf("  --mir                        - Use MIR JIT compilation instead of interpreter\n");
     printf("  --transpile-only             - Transpile to C code without execution\n");
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
+    printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
     printf("\nScript Commands:\n");
     printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
     printf("                               - This automatically runs the main function if defined\n");
