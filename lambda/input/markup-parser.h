@@ -51,6 +51,17 @@ typedef enum {
     INLINE_WIKI_TEMPLATE
 } InlineType;
 
+// Maximum number of link reference definitions per document
+#define MAX_LINK_DEFINITIONS 256
+
+// Link reference definition structure
+typedef struct {
+    char label[256];     // normalized label (lowercase, whitespace collapsed)
+    char url[1024];      // destination URL
+    char title[512];     // optional title
+    bool has_title;
+} LinkDefinition;
+
 namespace lambda {
 
 // MarkupParser extends InputContext for unified parsing
@@ -61,6 +72,10 @@ public:
     char** lines;
     int line_count;
     int current_line;
+
+    // Link reference definitions storage
+    LinkDefinition link_defs[MAX_LINK_DEFINITIONS];
+    int link_def_count;
 
     // Format-specific state
     struct {
@@ -95,6 +110,13 @@ public:
 
     // Main parsing function
     Item parseContent(const char* content);
+
+    // Link reference definition management
+    bool addLinkDefinition(const char* label, size_t label_len,
+                           const char* url, size_t url_len,
+                           const char* title, size_t title_len);
+    const LinkDefinition* getLinkDefinition(const char* label, size_t label_len) const;
+    static void normalizeLabel(const char* label, size_t len, char* out, size_t out_size);
 
     // Non-copyable
     MarkupParser(const MarkupParser&) = delete;
