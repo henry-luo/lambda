@@ -3,32 +3,204 @@
  *
  * This header provides common types and function declarations
  * used by inline-level parsers (emphasis, code, link, image, etc.).
+ *
+ * Phase 3 of Markup Parser Refactoring:
+ * Extracted from input-markup.cpp to enable format-agnostic inline parsing.
  */
 #ifndef INLINE_COMMON_HPP
 #define INLINE_COMMON_HPP
 
 #include "../markup_parser.hpp"
+#include "../format_adapter.hpp"
+#include <cstdlib>
 
 namespace lambda {
 namespace markup {
 
 // ============================================================================
-// Inline Parser Interface
+// Forward Declarations (defined in markup_parser.hpp)
+// ============================================================================
+
+// parse_inline_spans is declared in markup_parser.hpp
+
+// ============================================================================
+// Inline Parser Functions
 // ============================================================================
 
 /**
- * Inline parsers follow this pattern:
+ * parse_emphasis - Parse bold/italic text
  *
- * 1. Receive MarkupParser* and pointer to current position in text
- * 2. Use adapter to detect inline element at position
- * 3. If detected, create element using builder
- * 4. Parse nested content if applicable
- * 5. Advance *text pointer past the parsed element
- * 6. Return Item containing the created element
+ * Handles Markdown-style: **bold**, *italic*, __bold__, _italic_
+ * Uses adapter for format-specific delimiters.
  *
- * Returns ITEM_NULL if no inline element was detected
- * Returns ITEM_ERROR on fatal errors
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing emphasis element, or ITEM_UNDEFINED if not matched
  */
+Item parse_emphasis(MarkupParser* parser, const char** text);
+
+/**
+ * parse_code_span - Parse inline code spans
+ *
+ * Handles: `code`, ``code with `backticks` ``
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing code element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_code_span(MarkupParser* parser, const char** text);
+
+/**
+ * parse_link - Parse links
+ *
+ * Handles: [text](url), [text](url "title"), [text][ref]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing link element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_link(MarkupParser* parser, const char** text);
+
+/**
+ * parse_image - Parse images
+ *
+ * Handles: ![alt](src), ![alt](src "title")
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing image element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_image(MarkupParser* parser, const char** text);
+
+/**
+ * parse_inline_math - Parse inline math expressions
+ *
+ * Handles: $expression$
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing math element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_inline_math(MarkupParser* parser, const char** text);
+
+/**
+ * parse_strikethrough - Parse strikethrough text
+ *
+ * Handles: ~~text~~
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing strikethrough element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_strikethrough(MarkupParser* parser, const char** text);
+
+/**
+ * parse_superscript - Parse superscript
+ *
+ * Handles: ^text^
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing sup element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_superscript(MarkupParser* parser, const char** text);
+
+/**
+ * parse_subscript - Parse subscript
+ *
+ * Handles: ~text~
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing sub element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_subscript(MarkupParser* parser, const char** text);
+
+/**
+ * parse_emoji_shortcode - Parse emoji shortcodes
+ *
+ * Handles: :smile:, :heart:, etc.
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing emoji Symbol, or ITEM_UNDEFINED if not matched
+ */
+Item parse_emoji_shortcode(MarkupParser* parser, const char** text);
+
+/**
+ * parse_footnote_reference - Parse footnote references
+ *
+ * Handles: [^1], [^ref]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing footnote-ref element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_footnote_reference(MarkupParser* parser, const char** text);
+
+/**
+ * parse_citation - Parse citations
+ *
+ * Handles: [@key], [@key, p. 123]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing citation element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_citation(MarkupParser* parser, const char** text);
+
+// ============================================================================
+// Format-Specific Inline Parsers
+// ============================================================================
+
+/**
+ * parse_wiki_link - Parse MediaWiki-style links
+ *
+ * Handles: [[Page]], [[Page|display]], [[File:image.png]]
+ */
+Item parse_wiki_link(MarkupParser* parser, const char** text);
+
+/**
+ * parse_wiki_external_link - Parse MediaWiki external links
+ *
+ * Handles: [http://example.com text]
+ */
+Item parse_wiki_external_link(MarkupParser* parser, const char** text);
+
+/**
+ * parse_wiki_bold_italic - Parse MediaWiki-style emphasis
+ *
+ * Handles: ''italic'', '''bold''', '''''bolditalic'''''
+ */
+Item parse_wiki_bold_italic(MarkupParser* parser, const char** text);
+
+/**
+ * parse_wiki_template - Parse MediaWiki templates
+ *
+ * Handles: {{template}}, {{template|arg}}
+ */
+Item parse_wiki_template(MarkupParser* parser, const char** text);
+
+/**
+ * parse_asciidoc_inline - Parse AsciiDoc inline elements
+ *
+ * Handles AsciiDoc-specific inline syntax
+ */
+Item parse_asciidoc_inline(MarkupParser* parser, const char* text);
+
+/**
+ * parse_rst_double_backtick_literal - Parse RST literal text
+ *
+ * Handles: ``literal``
+ */
+Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text);
+
+/**
+ * parse_rst_trailing_underscore_reference - Parse RST references
+ *
+ * Handles: text_
+ */
+Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text);
 
 // ============================================================================
 // Helper Functions
@@ -38,15 +210,43 @@ namespace markup {
  * Create an inline element with given tag name
  */
 inline Element* create_inline_element(MarkupParser* parser, const char* tag) {
-    return parser->builder_.element(tag).final().element;
+    return parser->builder.element(tag).final().element;
 }
 
 /**
- * Create a text string item
+ * Add text content to an inline element
  */
-inline Item create_text(MarkupParser* parser, const char* text, size_t len) {
-    String* str = parser->builder_.createString(text, len);
-    return Item{.item = s2it(str)};
+inline void add_text_to_element(MarkupParser* parser, Element* elem, const char* text, size_t len) {
+    String* str = parser->builder.createString(text, len);
+    if (str) {
+        Item item = {.item = s2it(str)};
+        list_push((List*)elem, item);
+        TypeElmt* elmt_type = (TypeElmt*)elem->type;
+        elmt_type->content_length++;
+    }
+}
+
+/**
+ * Add child item to an inline element
+ */
+inline void add_child_to_element(Element* elem, Item child) {
+    if (child.item != ITEM_UNDEFINED && child.item != ITEM_ERROR) {
+        list_push((List*)elem, child);
+        TypeElmt* elmt_type = (TypeElmt*)elem->type;
+        elmt_type->content_length++;
+    }
+}
+
+/**
+ * Add attribute to an inline element
+ */
+inline void add_inline_attribute(MarkupParser* parser, Element* elem,
+                                 const char* key, const char* val) {
+    String* k = parser->builder.createString(key);
+    String* v = parser->builder.createString(val);
+    if (k && v) {
+        parser->builder.putToElement(elem, k, Item{.item = s2it(v)});
+    }
 }
 
 /**
@@ -74,14 +274,39 @@ const char* find_closing(const char* start, const char* delimiter);
 const char* find_inline_end(const char* start, const char* open, const char* close);
 
 /**
- * Extract text between positions, handling escapes
+ * Count consecutive occurrences of a character
  */
-std::string extract_text(const char* start, const char* end, bool unescape = true);
+inline int count_consecutive(const char* pos, char c) {
+    int count = 0;
+    while (*pos == c) {
+        count++;
+        pos++;
+    }
+    return count;
+}
 
 /**
- * URL-decode a string (for links)
+ * Find matching closing delimiter with same count
  */
-std::string url_decode(const char* start, const char* end);
+inline const char* find_matching_delimiter(const char* start, char marker, int count) {
+    const char* pos = start;
+    while (*pos) {
+        if (*pos == marker) {
+            int found = 0;
+            const char* match_start = pos;
+            while (*pos == marker) {
+                found++;
+                pos++;
+            }
+            if (found >= count) {
+                return match_start;
+            }
+        } else {
+            pos++;
+        }
+    }
+    return nullptr;
+}
 
 } // namespace markup
 } // namespace lambda
