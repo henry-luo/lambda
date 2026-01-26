@@ -311,6 +311,13 @@ static inline bool is_valid_function(Function* fn) {
         return false;
     }
     
+    // Reject small values that can't be valid heap pointers
+    // Typical heap addresses are well above 4KB (first page is reserved)
+    // On most systems, valid heap addresses are > 0x10000
+    if (val < 0x10000) {
+        return false;
+    }
+    
     // Now safe to dereference - check that type_id matches Function
     TypeId type_id = *(TypeId*)fn;
     return type_id == LMD_TYPE_FUNC;
@@ -369,40 +376,52 @@ Item fn_call(Function* fn, List* args) {
 // For closures, env is passed as the first argument
 Item fn_call0(Function* fn) {
     if (!is_valid_function(fn)) {
-        log_error("fn_call0: invalid function (null or wrong type)");
+        set_runtime_error(ERR_INVALID_CALL, "fn_call0: cannot call non-function value");
         return ItemError;
     }
-    if (!fn->ptr) return ItemError;
+    if (!fn->ptr) {
+        set_runtime_error(ERR_INVALID_CALL, "fn_call0: null function pointer");
+        return ItemError;
+    }
     if (fn->closure_env) return ((Item(*)(void*))fn->ptr)(fn->closure_env);
     return ((Item(*)())fn->ptr)();
 }
 
 Item fn_call1(Function* fn, Item a) {
     if (!is_valid_function(fn)) {
-        log_error("Error: attempting to call non-function value");
+        set_runtime_error(ERR_INVALID_CALL, "fn_call1: cannot call non-function value");
         return ItemError;
     }
-    if (!fn->ptr) return ItemError;
+    if (!fn->ptr) {
+        set_runtime_error(ERR_INVALID_CALL, "fn_call1: null function pointer");
+        return ItemError;
+    }
     if (fn->closure_env) return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
     return ((Item(*)(Item))fn->ptr)(a);
 }
 
 Item fn_call2(Function* fn, Item a, Item b) {
     if (!is_valid_function(fn)) {
-        log_error("Error: attempting to call non-function value");
+        set_runtime_error(ERR_INVALID_CALL, "fn_call2: cannot call non-function value");
         return ItemError;
     }
-    if (!fn->ptr) return ItemError;
+    if (!fn->ptr) {
+        set_runtime_error(ERR_INVALID_CALL, "fn_call2: null function pointer");
+        return ItemError;
+    }
     if (fn->closure_env) return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
     return ((Item(*)(Item,Item))fn->ptr)(a, b);
 }
 
 Item fn_call3(Function* fn, Item a, Item b, Item c) {
     if (!is_valid_function(fn)) {
-        log_error("Error: attempting to call non-function value");
+        set_runtime_error(ERR_INVALID_CALL, "fn_call3: cannot call non-function value");
         return ItemError;
     }
-    if (!fn->ptr) return ItemError;
+    if (!fn->ptr) {
+        set_runtime_error(ERR_INVALID_CALL, "fn_call3: null function pointer");
+        return ItemError;
+    }
     if (fn->closure_env) return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
     return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
 }

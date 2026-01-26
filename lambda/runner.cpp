@@ -59,6 +59,22 @@ void print_heap_entries();
 __thread EvalContext* context = NULL;
 extern __thread Context* input_context;
 
+// Persistent last error (survives beyond runner lifetime)
+// This is needed because context points to runner's stack-allocated EvalContext
+__thread LambdaError* persistent_last_error = NULL;
+
+// Accessor for persistent error from other modules
+LambdaError* get_persistent_last_error() {
+    return persistent_last_error;
+}
+
+void clear_persistent_last_error() {
+    if (persistent_last_error) {
+        err_free(persistent_last_error);
+        persistent_last_error = NULL;
+    }
+}
+
 void find_errors(TSNode node) {
     const char *node_type = ts_node_type(node);
     TSPoint start_point = ts_node_start_point(node);
@@ -379,6 +395,12 @@ void runner_setup_context(Runner* runner) {
     mpd_defaultcontext(runner->context.decimal_ctx);
     // init AST validator
     runner->context.validator = schema_validator_create(runner->context.pool);
+    
+    // Initialize error handling and stack trace support
+    runner->context.debug_info = NULL;  // MIR doesn't expose function sizes, rely on backtrace_symbols
+    runner->context.current_file = runner->script->reference;  // source file for error reporting
+    runner->context.last_error = NULL;
+    
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
@@ -424,6 +446,12 @@ void runner_cleanup(Runner* runner) {
         schema_validator_destroy(runner->context.validator);
         runner->context.validator = NULL;
     }
+    // free last runtime error
+    if (runner->context.last_error) {
+        log_debug("freeing last error");
+        err_free(runner->context.last_error);
+        runner->context.last_error = NULL;
+    }
     log_debug("runner cleanup end");
 }
 
@@ -457,6 +485,14 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     log_debug("exec main func");
     Item result = context->result = runner->script->main_func(context);
     log_debug("after main func, result type_id=%d", get_type_id(result));
+
+    // Preserve runtime error before runner goes out of scope
+    // context points to runner's stack-allocated EvalContext, so we need to copy the error
+    if (context && context->last_error) {
+        clear_persistent_last_error();  // free any previous error
+        persistent_last_error = context->last_error;
+        context->last_error = NULL;  // transfer ownership
+    }
 
     // Create output Input with its own pool (independent from Script's pool)
     // This allows safe cleanup of the execution context and heap

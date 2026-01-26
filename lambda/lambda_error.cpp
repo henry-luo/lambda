@@ -488,12 +488,19 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
     char buffer[8192];
     int pos = 0;
     
-    // location prefix
+    // location prefix - validate file pointer before use
     if (error->location.file && error->location.line > 0) {
-        pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s:%u:%u: ", 
-            error->location.file,
-            error->location.line,
-            error->location.column > 0 ? error->location.column : 1);
+        // sanity check: file pointer should be in a reasonable memory range
+        // and first few characters should be printable ASCII or common UTF-8
+        const char* file = error->location.file;
+        uintptr_t file_addr = (uintptr_t)file;
+        bool file_valid = (file_addr > 0x10000) && (file[0] >= 0x20 || file[0] == '\0');
+        if (file_valid) {
+            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "%s:%u:%u: ", 
+                error->location.file,
+                error->location.line,
+                error->location.column > 0 ? error->location.column : 1);
+        }
     }
     
     // error type and code
