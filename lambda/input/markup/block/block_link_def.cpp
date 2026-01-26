@@ -210,5 +210,14 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
     return added;
 }
 
+/**
+ * try_parse_link_definition - Alias for parse_link_definition
+ *
+ * Kept for API compatibility with the old parser.
+ */
+bool try_parse_link_definition(MarkupParser* parser, const char* line) {
+    return parse_link_definition(parser, line);
+}
+
 } // namespace markup
 } // namespace lambda

@@ -149,21 +149,11 @@ Item MarkupParser::parseContent(const char* content) {
     // Reset state
     resetState();
 
-    // Parse document
-    // NOTE: parse_document is implemented in the old input-markup.cpp for now
-    // In Phase 2, it will be moved to block/block_document.cpp
+    // Parse document using modular block parsers
     log_debug("markup_parser: parsing %d lines with format '%s'",
               line_count, adapter_->name());
 
-    // For Phase 1, we just return the basic structure
-    // The actual parsing is still done by the old code
-    Element* doc = builder.element("doc").final().element;
-    if (!doc) {
-        log_error("markup_parser: failed to create document element");
-        return Item{.item = ITEM_ERROR};
-    }
-
-    return Item{.item = (uint64_t)doc};
+    return parse_document(this);
 }
 
 // ============================================================================
@@ -358,3 +348,39 @@ const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t 
 
 } // namespace markup
 } // namespace lambda
+// ============================================================================
+// Bridge Functions - Connect new modular parser to old API
+// ============================================================================
+
+using namespace lambda;
+using namespace lambda::markup;
+
+/**
+ * input_markup_modular - Entry point for modular markup parser
+ *
+ * This function provides a bridge from the input system to the new
+ * modular parser architecture.
+ */
+extern "C" Item input_markup_modular(Input* input, const char* content) {
+    if (!input || !content) {
+        log_error("input_markup_modular: null input or content");
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Create parser config
+    ParseConfig cfg;
+    cfg.format = Format::AUTO_DETECT;
+    cfg.strict_mode = false;
+    cfg.collect_metadata = true;
+    cfg.resolve_refs = true;
+
+    // Create and run parser
+    MarkupParser parser(input, cfg);
+    Item result = parser.parseContent(content);
+
+    if (result.item == ITEM_ERROR) {
+        log_error("input_markup_modular: parsing failed");
+    }
+
+    return result;
+}
