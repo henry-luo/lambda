@@ -65,11 +65,11 @@ static bool is_escapable_char(char c) {
 static char* unescape_string(const char* start, size_t len) {
     char* result = (char*)malloc(len * 4 + 1); // Worst case: all entities expand
     if (!result) return nullptr;
-    
+
     char* out = result;
     const char* pos = start;
     const char* end = start + len;
-    
+
     while (pos < end) {
         if (*pos == '\\' && pos + 1 < end && is_escapable_char(*(pos + 1))) {
             // Backslash escape - skip backslash, copy escaped char
@@ -79,18 +79,18 @@ static char* unescape_string(const char* start, size_t len) {
             // Try to parse entity reference
             const char* entity_start = pos + 1;
             const char* entity_pos = entity_start;
-            
+
             if (*entity_pos == '#') {
                 // Numeric entity
                 entity_pos++;
                 uint32_t codepoint = 0;
                 bool valid = false;
-                
+
                 if (*entity_pos == 'x' || *entity_pos == 'X') {
                     // Hex
                     entity_pos++;
                     const char* num_start = entity_pos;
-                    while (entity_pos < end && 
+                    while (entity_pos < end &&
                            ((*entity_pos >= '0' && *entity_pos <= '9') ||
                             (*entity_pos >= 'a' && *entity_pos <= 'f') ||
                             (*entity_pos >= 'A' && *entity_pos <= 'F'))) {
@@ -119,7 +119,7 @@ static char* unescape_string(const char* start, size_t len) {
                         valid = true;
                     }
                 }
-                
+
                 if (valid) {
                     if (codepoint == 0) codepoint = 0xFFFD;
                     int utf8_len = unicode_to_utf8(codepoint, out);
@@ -131,17 +131,17 @@ static char* unescape_string(const char* start, size_t len) {
                 }
             } else {
                 // Named entity
-                while (entity_pos < end && 
+                while (entity_pos < end &&
                        ((*entity_pos >= 'a' && *entity_pos <= 'z') ||
                         (*entity_pos >= 'A' && *entity_pos <= 'Z') ||
                         (*entity_pos >= '0' && *entity_pos <= '9'))) {
                     entity_pos++;
                 }
-                
+
                 if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
                     size_t name_len = entity_pos - entity_start;
                     EntityResult result = html_entity_resolve(entity_start, name_len);
-                    
+
                     if (result.type == ENTITY_ASCII_ESCAPE) {
                         size_t decoded_len = strlen(result.decoded);
                         memcpy(out, result.decoded, decoded_len);
@@ -158,14 +158,14 @@ static char* unescape_string(const char* start, size_t len) {
                     }
                 }
             }
-            
+
             // Not a valid entity, copy & literally
             *out++ = *pos++;
         } else {
             *out++ = *pos++;
         }
     }
-    
+
     *out = '\0';
     return result;
 }
