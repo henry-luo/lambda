@@ -92,24 +92,47 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     while (*pos) {
         // Check for emphasis markers (* or _)
         if (*pos == '*' || *pos == '_') {
-            // Try to parse emphasis - don't flush buffer yet in case it fails
+            // Save current buffer before trying emphasis parsing
+            // This is critical because parse_emphasis may call parse_inline_spans
+            // recursively, which resets the shared buffer
+            char* saved_buffer = nullptr;
+            size_t saved_length = sb->length;
+            if (saved_length > 0) {
+                saved_buffer = (char*)malloc(saved_length + 1);
+                if (saved_buffer) {
+                    memcpy(saved_buffer, sb->str->chars, saved_length);
+                    saved_buffer[saved_length] = '\0';
+                }
+            }
+
+            // Try to parse emphasis
             const char* try_pos = pos;
             Item inline_item = parse_emphasis(parser, &try_pos, text_copy);
 
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
-                // Success - flush buffer first, then add emphasis element
-                if (sb->length > 0) {
-                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                // Success - flush saved buffer first, then add emphasis element
+                if (saved_buffer && saved_length > 0) {
+                    String* text_content = parser->builder.createString(saved_buffer, saved_length);
                     Item text_item = {.item = s2it(text_content)};
                     list_push((List*)span, text_item);
                     increment_element_content_length(span);
-                    stringbuf_reset(sb);
                 }
                 list_push((List*)span, inline_item);
                 increment_element_content_length(span);
                 pos = try_pos;  // Advance past the emphasis
+                stringbuf_reset(sb);  // Reset buffer for subsequent text
+                if (saved_buffer) free(saved_buffer);
             } else {
-                // Emphasis parsing failed - treat entire marker run as plain text
+                // Emphasis parsing failed - restore saved buffer and treat marker as text
+                // Restore the buffer contents that may have been clobbered
+                stringbuf_reset(sb);
+                if (saved_buffer && saved_length > 0) {
+                    for (size_t i = 0; i < saved_length; i++) {
+                        stringbuf_append_char(sb, saved_buffer[i]);
+                    }
+                }
+                if (saved_buffer) free(saved_buffer);
+                // Treat entire marker run as plain text
                 // This prevents second marker from being tried as opener
                 char marker = *pos;
                 while (*pos == marker) {

@@ -270,6 +270,151 @@ static Item parse_reference_link(MarkupParser* parser, const char** text,
 }
 
 /**
+ * try_parse_inline_link_syntax - Try to parse (url "title") syntax
+ *
+ * Returns true if successful and sets url/title output parameters.
+ * Returns false if syntax invalid (caller should try reference link).
+ */
+static bool try_parse_inline_link_syntax(const char* start, const char** out_end,
+                                          const char** url_start_out, const char** url_end_out,
+                                          const char** title_start_out, const char** title_end_out) {
+    const char* pos = start;
+
+    // Must start with (
+    if (*pos != '(') return false;
+    pos++; // Skip (
+
+    const char* url_start = pos;
+    const char* url_end = nullptr;
+    const char* title_start = nullptr;
+    const char* title_end = nullptr;
+    int paren_depth = 1;
+
+    // Skip leading whitespace in URL
+    while (*pos == ' ' || *pos == '\t') pos++;
+
+    // Check for angle-bracketed URL: <url>
+    if (*pos == '<') {
+        pos++; // Skip <
+        url_start = pos;
+
+        // Find closing >
+        while (*pos && *pos != '>' && *pos != '\n') {
+            if (*pos == '\\' && *(pos + 1)) {
+                pos += 2;
+            } else if (*pos == '<') {
+                // Unescaped < not allowed
+                return false;
+            } else {
+                pos++;
+            }
+        }
+
+        if (*pos != '>') return false;
+        url_end = pos;
+        pos++; // Skip >
+
+        // Skip whitespace after URL
+        while (*pos == ' ' || *pos == '\t') pos++;
+
+        // Check for optional title
+        if (*pos == '"' || *pos == '\'') {
+            char quote = *pos;
+            pos++; // Skip opening quote
+            title_start = pos;
+
+            // Find closing quote
+            while (*pos && *pos != quote) {
+                if (*pos == '\\' && *(pos + 1)) {
+                    pos += 2;
+                } else {
+                    pos++;
+                }
+            }
+            if (*pos == quote) {
+                title_end = pos;
+                pos++; // Skip closing quote
+            }
+        }
+
+        // Skip trailing whitespace and expect )
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos != ')') return false;
+        pos++; // Skip )
+    } else {
+        url_start = pos;
+
+        // Parse URL and optional title
+        while (*pos && paren_depth > 0) {
+            if (*pos == '\\' && *(pos + 1)) {
+                pos += 2;
+                continue;
+            }
+
+            if (*pos == '(') paren_depth++;
+            else if (*pos == ')') paren_depth--;
+
+            // For non-angle-bracket URLs, space terminates URL and starts potential title
+            if (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') {
+                if (!url_end) url_end = pos;
+                // Skip whitespace
+                while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+                // After whitespace, check if it's a valid continuation
+                if (*pos == ')') {
+                    paren_depth--;
+                    break;
+                } else if (*pos == '"' || *pos == '\'' || *pos == '(') {
+                    // Title starts
+                    char quote = *pos;
+                    char close_quote = (quote == '(') ? ')' : quote;
+                    pos++; // Skip opening quote
+                    title_start = pos;
+
+                    // Find closing quote
+                    while (*pos && *pos != close_quote) {
+                        if (*pos == '\\' && *(pos + 1)) {
+                            pos += 2;
+                        } else {
+                            pos++;
+                        }
+                    }
+                    if (*pos == close_quote) {
+                        title_end = pos;
+                        pos++; // Skip closing quote
+                    }
+                    // Skip whitespace after title
+                    while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
+                    if (*pos != ')') return false;
+                    pos++;  // Skip final )
+                    paren_depth--;
+                    break;
+                } else {
+                    // Space inside URL without angle brackets - invalid
+                    return false;
+                }
+            }
+
+            if (paren_depth == 0) {
+                if (!url_end) url_end = pos;
+                pos++;  // Skip final )
+                break;
+            }
+            pos++;
+        }
+
+        if (paren_depth > 0) return false;
+    }
+
+    // Success - set output parameters
+    *out_end = pos;
+    *url_start_out = url_start;
+    *url_end_out = url_end;
+    *title_start_out = title_start;
+    *title_end_out = title_end;
+    return true;
+}
+
+/**
  * parse_link - Parse inline links
  *
  * Handles: [text](url), [text](url "title"), [text][ref], [text][], [text]
@@ -314,201 +459,72 @@ Item parse_link(MarkupParser* parser, const char** text) {
     }
 
     // Check for (url) after ] for inline link
-    if (*pos != '(') {
-        // Try reference-style link: [text][ref], [text][], or [text]
-        return parse_reference_link(parser, text, text_start, text_end);
-    }
+    if (*pos == '(') {
+        // Try inline link syntax
+        const char* url_start = nullptr;
+        const char* url_end = nullptr;
+        const char* title_start = nullptr;
+        const char* title_end = nullptr;
+        const char* new_pos = nullptr;
 
-    pos++; // Skip (
-
-    // Find closing )
-    const char* url_start = pos;
-    const char* url_end = nullptr;
-    const char* title_start = nullptr;
-    const char* title_end = nullptr;
-    int paren_depth = 1;
-    bool angle_bracket_url = false;
-
-    // Skip leading whitespace in URL
-    while (*pos == ' ' || *pos == '\t') pos++;
-
-    // Check for angle-bracketed URL: <url>
-    if (*pos == '<') {
-        angle_bracket_url = true;
-        pos++; // Skip <
-        url_start = pos;
-
-        // Find closing >
-        while (*pos && *pos != '>' && *pos != '\n') {
-            if (*pos == '\\' && *(pos + 1)) {
-                pos += 2;
-            } else if (*pos == '<') {
-                // Unescaped < not allowed in angle-bracketed URL
-                return Item{.item = ITEM_UNDEFINED};
-            } else {
-                pos++;
+        if (try_parse_inline_link_syntax(pos, &new_pos, &url_start, &url_end, &title_start, &title_end)) {
+            // Inline link syntax succeeded - create link element
+            Element* link = create_element(parser, "a");
+            if (!link) {
+                *text = new_pos;
+                return Item{.item = ITEM_ERROR};
             }
-        }
 
-        if (*pos != '>') {
-            return Item{.item = ITEM_UNDEFINED};
-        }
+            // Add href attribute (unescape backslash escapes and entities)
+            if (url_end && url_end > url_start) {
+                size_t url_len = url_end - url_start;
+                char* url = unescape_string(url_start, url_len);
+                if (url) {
+                    add_attribute_to_element(parser, link, "href", url);
+                    free(url);
+                }
+            } else {
+                // Empty URL
+                add_attribute_to_element(parser, link, "href", "");
+            }
 
-        url_end = pos;
-        pos++; // Skip >
-
-        // Skip whitespace after URL
-        while (*pos == ' ' || *pos == '\t') pos++;
-
-        // Check for optional title
-        if (*pos == '"' || *pos == '\'') {
-            char quote = *pos;
-            pos++; // Skip opening quote
-            title_start = pos;
-
-            // Find closing quote
-            while (*pos && *pos != quote) {
-                if (*pos == '\\' && *(pos + 1)) {
-                    pos += 2;
-                } else {
-                    pos++;
+            // Add title attribute if present (unescape backslash escapes and entities)
+            if (title_start && title_end && title_end > title_start) {
+                size_t title_len = title_end - title_start;
+                char* title = unescape_string(title_start, title_len);
+                if (title) {
+                    add_attribute_to_element(parser, link, "title", title);
+                    free(title);
                 }
             }
-            if (*pos == quote) {
-                title_end = pos;
-                pos++; // Skip closing quote
-            }
-        }
 
-        // Skip trailing whitespace and expect )
-        while (*pos == ' ' || *pos == '\t') pos++;
-        if (*pos != ')') {
-            return Item{.item = ITEM_UNDEFINED};
-        }
-        pos++; // Skip )
-    } else {
-        url_start = pos;
+            // Parse link text content (can contain inline elements)
+            if (text_end > text_start) {
+                size_t text_len = text_end - text_start;
+                char* link_text = (char*)malloc(text_len + 1);
+                if (link_text) {
+                    strncpy(link_text, text_start, text_len);
+                    link_text[text_len] = '\0';
 
-    // Parse URL and optional title
-    while (*pos && paren_depth > 0) {
-        if (*pos == '\\' && *(pos + 1)) {
-            // Skip escaped character
-            pos += 2;
-            continue;
-        }
-
-        if (*pos == '(') paren_depth++;
-        else if (*pos == ')') paren_depth--;
-
-        // For non-angle-bracket URLs, space terminates URL and starts potential title
-        if (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') {
-            if (!url_end) {
-                url_end = pos;
-            }
-            // Skip whitespace
-            while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
-            // After whitespace, check if it's a valid continuation
-            if (*pos == ')') {
-                // Just trailing whitespace before closing paren - OK
-                paren_depth--;
-                break;
-            } else if (*pos == '"' || *pos == '\'' || *pos == '(') {
-                // Title starts - parse it
-                char quote = *pos;
-                char close_quote = (quote == '(') ? ')' : quote;
-                pos++; // Skip opening quote
-                title_start = pos;
-
-                // Find closing quote
-                while (*pos && *pos != close_quote) {
-                    if (*pos == '\\' && *(pos + 1)) {
-                        pos += 2;
-                    } else {
-                        pos++;
+                    // Recursively parse inline content
+                    Item inner_content = parse_inline_spans(parser, link_text);
+                    if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
+                        list_push((List*)link, inner_content);
+                        increment_element_content_length(link);
                     }
+
+                    free(link_text);
                 }
-                if (*pos == close_quote) {
-                    title_end = pos;
-                    pos++; // Skip closing quote
-                }
-                // Skip whitespace after title
-                while (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') pos++;
-                if (*pos != ')') {
-                    return Item{.item = ITEM_UNDEFINED};  // Invalid content after title
-                }
-                pos++;  // Skip final )
-                paren_depth--;
-                break;
-            } else {
-                // Space inside URL without angle brackets - INVALID
-                return Item{.item = ITEM_UNDEFINED};
-            }
-        }
-
-        if (paren_depth == 0) {
-            if (!url_end) {
-                url_end = pos;
-            }
-            pos++;  // Skip final )
-            break;
-        }
-        pos++;
-    }
-
-    if (paren_depth > 0) {
-        // Unmatched parenthesis
-        return Item{.item = ITEM_UNDEFINED};
-    }
-    } // end of non-angle-bracket URL else block
-
-    // Create link element
-    Element* link = create_element(parser, "a");
-    if (!link) {
-        *text = pos;
-        return Item{.item = ITEM_ERROR};
-    }
-
-    // Add href attribute (unescape backslash escapes and entities)
-    if (url_end > url_start) {
-        size_t url_len = url_end - url_start;
-        char* url = unescape_string(url_start, url_len);
-        if (url) {
-            add_attribute_to_element(parser, link, "href", url);
-            free(url);
-        }
-    }
-
-    // Add title attribute if present (unescape backslash escapes and entities)
-    if (title_start && title_end && title_end > title_start) {
-        size_t title_len = title_end - title_start;
-        char* title = unescape_string(title_start, title_len);
-        if (title) {
-            add_attribute_to_element(parser, link, "title", title);
-            free(title);
-        }
-    }
-
-    // Parse link text content (can contain inline elements)
-    if (text_end > text_start) {
-        size_t text_len = text_end - text_start;
-        char* link_text = (char*)malloc(text_len + 1);
-        if (link_text) {
-            strncpy(link_text, text_start, text_len);
-            link_text[text_len] = '\0';
-
-            // Recursively parse inline content
-            Item inner_content = parse_inline_spans(parser, link_text);
-            if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
-                list_push((List*)link, inner_content);
-                increment_element_content_length(link);
             }
 
-            free(link_text);
+            *text = new_pos;
+            return Item{.item = (uint64_t)link};
         }
+        // Inline link syntax failed - fall through to try reference link
     }
 
-    *text = pos;
-    return Item{.item = (uint64_t)link};
+    // Try reference-style link: [text][ref], [text][], or [text]
+    return parse_reference_link(parser, text, text_start, text_end);
 }
 
 } // namespace markup
