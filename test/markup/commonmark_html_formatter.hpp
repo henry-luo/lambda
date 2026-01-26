@@ -65,7 +65,10 @@ static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t l
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
         // Percent-encode spaces, special chars, and non-ASCII bytes
-        if (c == ' ') {
+        // Also HTML-escape & since it appears in an HTML attribute
+        if (c == '&') {
+            stringbuf_append_str(sb, "&amp;");
+        } else if (c == ' ') {
             stringbuf_append_str(sb, "%20");
         } else if (c == '"') {
             stringbuf_append_str(sb, "%22");
