@@ -24,7 +24,11 @@ enum class MutationType {
     FLIP_OPERATOR,
     DEEP_NESTING,
     EMPTY_CONSTRUCTS,
-    BOUNDARY_VALUES
+    BOUNDARY_VALUES,
+    TYPE_CONFUSION,
+    CLOSURE_PATTERN,
+    CONTEXT_SENSITIVE,
+    INVARIANT_VIOLATION
 };
 
 static const std::vector<std::string> KEYWORDS = {
@@ -377,6 +381,187 @@ static std::string mutate_boundary_values(const std::string& input, std::mt19937
     return result;
 }
 
+// Type confusion mutations - replace literals with incompatible types
+static std::string mutate_type_confusion(const std::string& input, std::mt19937& rng) {
+    std::string result = input;
+    
+    // Define replacements for type confusion
+    std::vector<std::pair<std::string, std::vector<std::string>>> replacements = {
+        {"true", {"false", "null", "1", "\"true\"", "[]", "{}"}},
+        {"false", {"true", "null", "0", "\"false\"", "[]", "{}"}},
+        {"null", {"0", "false", "\"\"", "[]", "{}"}},
+        {"[]", {"{}", "null", "\"\"", "0"}},
+        {"{}", {"[]", "null", "\"\"", "0"}},
+        {"\"\"", {"null", "0", "false", "[]"}}
+    };
+    
+    for (const auto& pair : replacements) {
+        size_t pos = result.find(pair.first);
+        if (pos != std::string::npos) {
+            const auto& options = pair.second;
+            const std::string& replacement = options[
+                std::uniform_int_distribution<>(0, (int)options.size() - 1)(rng)
+            ];
+            result.replace(pos, pair.first.size(), replacement);
+            return result;
+        }
+    }
+    
+    return result;
+}
+
+// Mutate closure patterns - target function definitions
+static std::string mutate_closure_pattern(const std::string& input, std::mt19937& rng) {
+    std::string result = input;
+    
+    // Find "fn " pattern
+    size_t fn_pos = result.find("fn ");
+    if (fn_pos == std::string::npos) return result;
+    
+    int mutation = std::uniform_int_distribution<>(0, 5)(rng);
+    
+    if (mutation == 0) {
+        // Duplicate nested fn inside function body
+        size_t open_brace = result.find("{", fn_pos);
+        if (open_brace != std::string::npos) {
+            result.insert(open_brace + 1, " fn inner() => 42; ");
+        }
+    } else if (mutation == 1) {
+        // Add extra parameter
+        size_t open_paren = result.find("(", fn_pos);
+        size_t close_paren = result.find(")", open_paren);
+        if (open_paren != std::string::npos && close_paren != std::string::npos) {
+            result.insert(close_paren, ", extra");
+        }
+    } else if (mutation == 2) {
+        // Remove function name
+        size_t space = result.find(" ", fn_pos + 3);
+        if (space != std::string::npos) {
+            size_t paren = result.find("(", space);
+            if (paren != std::string::npos && paren - space < 20) {
+                result.erase(space + 1, paren - space - 1);
+            }
+        }
+    } else if (mutation == 3) {
+        // Change => to invalid syntax
+        size_t arrow = result.find("=>", fn_pos);
+        if (arrow != std::string::npos) {
+            result.replace(arrow, 2, "==");
+        }
+    } else if (mutation == 4) {
+        // Add recursive call without base case
+        size_t arrow = result.find("=>", fn_pos);
+        if (arrow != std::string::npos) {
+            result.insert(arrow + 2, " recurse() + ");
+        }
+    } else {
+        // Wrap closure in expression context
+        result.insert(fn_pos, "1 + ");
+    }
+    
+    return result;
+}
+
+// Context-sensitive mutations - violate scoping rules
+static std::string mutate_context_sensitive(const std::string& input, std::mt19937& rng) {
+    std::string result = input;
+    
+    int mutation = std::uniform_int_distribution<>(0, 4)(rng);
+    
+    if (mutation == 0) {
+        // Use undefined variable
+        result.insert(0, "undefined_var + ");
+    } else if (mutation == 1) {
+        // Duplicate let declaration
+        size_t let_pos = result.find("let ");
+        if (let_pos != std::string::npos) {
+            size_t newline = result.find("\n", let_pos);
+            if (newline != std::string::npos) {
+                std::string decl = result.substr(let_pos, newline - let_pos);
+                result.insert(newline + 1, decl + "\n");
+            }
+        }
+    } else if (mutation == 2) {
+        // Use variable before declaration
+        size_t let_pos = result.find("let ");
+        if (let_pos != std::string::npos) {
+            size_t eq = result.find("=", let_pos);
+            if (eq != std::string::npos) {
+                std::string var_name = result.substr(let_pos + 4, eq - let_pos - 5);
+                result.insert(0, var_name + "\n");
+            }
+        }
+    } else if (mutation == 3) {
+        // Reference local variable outside its scope
+        size_t open_brace = result.find("{");
+        size_t close_brace = result.find("}");
+        if (open_brace != std::string::npos && close_brace != std::string::npos) {
+            result.insert(close_brace + 1, "\nlocal_var");
+        }
+    } else {
+        // Assign to immutable let binding
+        size_t let_pos = result.find("let ");
+        if (let_pos != std::string::npos) {
+            size_t newline = result.find("\n", let_pos);
+            if (newline != std::string::npos) {
+                size_t eq = result.find("=", let_pos);
+                if (eq != std::string::npos) {
+                    std::string var_name = result.substr(let_pos + 4, eq - let_pos - 5);
+                    result.insert(newline + 1, var_name + " = 999\n");
+                }
+            }
+        }
+    }
+    
+    return result;
+}
+
+// Invariant violation - generate inputs that violate semantic rules
+static std::string mutate_invariant_violation(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> violations = {
+        // Array invariants
+        "let arr = [1, 2]; arr[-arr.length]",
+        "let arr = []; arr[0/0]",
+        "let arr = [1, 2]; arr[inf]",
+        "let arr = [1, 2]; arr[null]",
+        
+        // Map invariants
+        "let m = {}; m[null]",
+        "let m = {}; m[{}]",
+        "let m = {}; m[[]]",
+        
+        // Function invariants
+        "let f = (x) => x; f()",
+        "let f = () => 1; f(1, 2, 3)",
+        "let f = (x, y) => x + y; f(1)",
+        
+        // Type invariants
+        "true + false",
+        "\"hello\" / \"world\"",
+        "[1, 2] * [3, 4]",
+        "null * null",
+        "true ^ false",
+        
+        // Division by zero
+        "5 / 0",
+        "10 % 0",
+        
+        // Recursive without base
+        "fn loop(n) => loop(n); loop(1)",
+        
+        // String operations on non-strings
+        "123.length",
+        "true.split()",
+        "null.trim()"
+    };
+    
+    const std::string& violation = violations[
+        std::uniform_int_distribution<>(0, (int)violations.size() - 1)(rng)
+    ];
+    
+    return input + "\n" + violation;
+}
+
 std::string mutate_program(const std::string& input, std::mt19937& rng) {
     // Apply 1-3 random mutations
     int num_mutations = std::uniform_int_distribution<>(1, 3)(rng);
@@ -384,7 +569,7 @@ std::string mutate_program(const std::string& input, std::mt19937& rng) {
     
     for (int i = 0; i < num_mutations; i++) {
         MutationType type = static_cast<MutationType>(
-            std::uniform_int_distribution<>(0, 14)(rng)
+            std::uniform_int_distribution<>(0, 18)(rng)
         );
         
         switch (type) {
@@ -432,6 +617,18 @@ std::string mutate_program(const std::string& input, std::mt19937& rng) {
                 break;
             case MutationType::BOUNDARY_VALUES:
                 result = mutate_boundary_values(result, rng);
+                break;
+            case MutationType::TYPE_CONFUSION:
+                result = mutate_type_confusion(result, rng);
+                break;
+            case MutationType::CLOSURE_PATTERN:
+                result = mutate_closure_pattern(result, rng);
+                break;
+            case MutationType::CONTEXT_SENSITIVE:
+                result = mutate_context_sensitive(result, rng);
+                break;
+            case MutationType::INVARIANT_VIOLATION:
+                result = mutate_invariant_violation(result, rng);
                 break;
         }
     }

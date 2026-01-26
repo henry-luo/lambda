@@ -8,10 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LAMBDA_EXE="$PROJECT_ROOT/lambda.exe"
 CORPUS_DIR="$SCRIPT_DIR/corpus"
+LAMBDA_TEST_DIR="$PROJECT_ROOT/test/lambda"
 CRASH_DIR="$SCRIPT_DIR/crashes"
 TIMEOUT_SEC=5
 DURATION_SEC=300
 VERBOSE=0
+USE_LAMBDA_TESTS=1
 
 # Colors for output
 RED='\033[0;31m'
@@ -34,9 +36,13 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=1
             shift
             ;;
+        --no-lambda-tests)
+            USE_LAMBDA_TESTS=0
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--duration=SECONDS] [--timeout=SECONDS] [--verbose]"
+            echo "Usage: $0 [--duration=SECONDS] [--timeout=SECONDS] [--verbose] [--no-lambda-tests]"
             exit 1
             ;;
     esac
@@ -133,10 +139,10 @@ generate_random_code() {
     echo "$code"
 }
 
-# Mutate a program
+# Mutate a program with various strategies
 mutate_program() {
     local input="$1"
-    local mutation=$((RANDOM % 10))
+    local mutation=$((RANDOM % 20))
     
     case $mutation in
         0) # Delete random character
@@ -171,7 +177,58 @@ mutate_program() {
         8) # Empty constructs
             echo "[] {} () <>"
             ;;
-        9) # Pass through
+        9) # Delete random line
+            echo "$input" | sed "$((RANDOM % $(echo "$input" | wc -l) + 1))d"
+            ;;
+        10) # Swap two random lines
+            local lines=$(echo "$input" | wc -l)
+            if [ "$lines" -gt 1 ]; then
+                local line1=$((RANDOM % lines + 1))
+                local line2=$((RANDOM % lines + 1))
+                echo "$input" | sed "${line1}h;${line1}d;${line2}G"
+            else
+                echo "$input"
+            fi
+            ;;
+        11) # Delete random function definition
+            echo "$input" | sed '/^fn /d'
+            ;;
+        12) # Delete random let statement
+            echo "$input" | sed '/^let /d'
+            ;;
+        13) # Corrupt function call (remove closing paren)
+            echo "$input" | sed 's/)$//'
+            ;;
+        14) # Duplicate random function definition
+            local fn_line=$(echo "$input" | grep -n '^fn ' | head -1 | cut -d: -f1)
+            if [ -n "$fn_line" ]; then
+                echo "$input" | sed "${fn_line}p"
+            else
+                echo "$input"
+            fi
+            ;;
+        15) # Comment out random line
+            local lines=$(echo "$input" | wc -l)
+            if [ "$lines" -gt 0 ]; then
+                local line=$((RANDOM % lines + 1))
+                echo "$input" | sed "${line}s/^/\/\/ /"
+            else
+                echo "$input"
+            fi
+            ;;
+        16) # Replace operator
+            local ops=('+' '-' '*' '/' '%' '^' '==' '!=' '<' '>' 'and' 'or')
+            local old_op="${ops[$((RANDOM % ${#ops[@]}))]}"
+            local new_op="${ops[$((RANDOM % ${#ops[@]}))]}"
+            echo "$input" | sed "s/${old_op}/${new_op}/g" 2>/dev/null || echo "$input"
+            ;;
+        17) # Remove function body
+            echo "$input" | sed 's/=> .*/=>/'
+            ;;
+        18) # Add type error
+            echo "$input" | sed 's/\([0-9]\+\)/"\1"/g'
+            ;;
+        19) # Pass through (no mutation)
             echo "$input"
             ;;
     esac
@@ -183,6 +240,11 @@ echo "=========================================="
 echo "Duration: ${DURATION_SEC}s"
 echo "Timeout per test: ${TIMEOUT_SEC}s"
 echo "Corpus: $CORPUS_DIR"
+if [ "$USE_LAMBDA_TESTS" -eq 1 ]; then
+    echo "Lambda tests: $LAMBDA_TEST_DIR (enabled)"
+else
+    echo "Lambda tests: disabled"
+fi
 echo "Crashes saved to: $CRASH_DIR"
 echo ""
 
@@ -202,27 +264,52 @@ if [ -d "$CORPUS_DIR" ]; then
 fi
 echo ""
 
-# Phase 2: Mutation testing
+# Phase 2: Mutation testing (with real Lambda test scripts)
 echo "Phase 2: Mutation testing..."
 TEMP_FILE=$(mktemp /tmp/fuzzy_XXXXXX.ls)
 trap "rm -f $TEMP_FILE" EXIT
 
-# Get seed programs
+# Get seed programs from corpus
 SEED_PROGRAMS=()
+SEED_FILES=()
 if [ -d "$CORPUS_DIR/valid" ]; then
     for f in "$CORPUS_DIR/valid"/*.ls; do
         if [ -f "$f" ]; then
             SEED_PROGRAMS+=("$(cat "$f")")
+            SEED_FILES+=("$f")
         fi
     done
+fi
+
+# Add Lambda test scripts as seeds
+if [ "$USE_LAMBDA_TESTS" -eq 1 ] && [ -d "$LAMBDA_TEST_DIR" ]; then
+    echo "  Loading Lambda test scripts as fuzzing seeds..."
+    LAMBDA_SEEDS_COUNT=0
+    for f in "$LAMBDA_TEST_DIR"/*.ls; do
+        if [ -f "$f" ]; then
+            # Skip very large test files (>50KB) to keep mutations fast
+            size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+            if [ "$size" -lt 51200 ]; then
+                SEED_PROGRAMS+=("$(cat "$f")")
+                SEED_FILES+=("$f")
+                LAMBDA_SEEDS_COUNT=$((LAMBDA_SEEDS_COUNT + 1))
+            fi
+        fi
+    done
+    log_verbose "  Loaded $LAMBDA_SEEDS_COUNT Lambda test scripts"
 fi
 
 # Add some basic seeds if none found
 if [ ${#SEED_PROGRAMS[@]} -eq 0 ]; then
     SEED_PROGRAMS+=("1 + 2")
+    SEED_FILES+=("basic_seed")
     SEED_PROGRAMS+=("let x = 5; x * 2")
+    SEED_FILES+=("basic_seed")
     SEED_PROGRAMS+=("fn f(x) => x + 1")
+    SEED_FILES+=("basic_seed")
 fi
+
+echo "  Using ${#SEED_PROGRAMS[@]} seed programs for mutation"
 
 # Allocate 70% of time to mutation, 30% to random generation
 MUTATION_END_TIME=$((START_TIME + DURATION_SEC * 70 / 100))
