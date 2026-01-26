@@ -17,6 +17,9 @@
 #include "../../mark_builder.hpp"
 #include <string>
 
+// Forward declaration for HTML5 parser
+struct Html5Parser;
+
 namespace lambda {
 namespace markup {
 
@@ -140,6 +143,11 @@ public:
     LinkDefinition link_defs_[MAX_LINK_DEFINITIONS];
     int link_def_count_;
 
+    // HTML5 fragment parser for accumulating HTML content
+    // When markdown contains HTML blocks/inline, all HTML is parsed into
+    // a single DOM tree using this parser. nullptr if no HTML encountered.
+    Html5Parser* html5_parser_;
+
     // ========================================================================
     // Construction / Destruction
     // ========================================================================
@@ -157,6 +165,29 @@ public:
     // Non-copyable
     MarkupParser(const MarkupParser&) = delete;
     MarkupParser& operator=(const MarkupParser&) = delete;
+
+    // ========================================================================
+    // HTML5 Fragment Parser Interface
+    // ========================================================================
+
+    /**
+     * Get or create the HTML5 fragment parser
+     * Lazily creates the parser on first HTML content encounter
+     */
+    Html5Parser* getOrCreateHtml5Parser();
+
+    /**
+     * Parse HTML content into the shared HTML5 DOM
+     * @param html The HTML content to parse
+     * @return true on success
+     */
+    bool parseHtmlFragment(const char* html);
+
+    /**
+     * Get the parsed HTML body element (if any HTML was parsed)
+     * @return The body element containing all parsed HTML, or nullptr
+     */
+    Element* getHtmlBody();
 
     // ========================================================================
     // Parsing Interface
