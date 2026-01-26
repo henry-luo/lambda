@@ -1,9 +1,11 @@
 /**
  * @file safety_analyzer.hpp
  * @brief Static analysis to classify functions as safe or unsafe for stack overflow
+ *        and detect tail-recursive functions for optimization
  * 
  * Safe functions: Cannot cause unbounded recursion
  * Unsafe functions: May cause unbounded recursion, need stack checks
+ * Tail-recursive: Direct recursive call in tail position - can use TCO
  * 
  * Current implementation: Conservative approach - all user functions get checks
  */
@@ -18,6 +20,9 @@
 
 // Forward declare AstNode to avoid pulling in all AST headers
 struct AstNode;
+struct AstFuncNode;
+struct AstCallNode;
+struct String;
 
 enum class FunctionSafety {
     UNKNOWN,    // Not yet analyzed
@@ -34,6 +39,43 @@ struct FunctionCallInfo {
     bool is_tail_recursive = false;  // Can be optimized with TCO
     AstNode* node = nullptr;
 };
+
+/**
+ * Tail Call Optimization (TCO) Analysis
+ * 
+ * Detects if a function is tail-recursive and can be optimized.
+ * A function is tail-recursive if:
+ * 1. It calls itself recursively
+ * 2. The recursive call is in tail position (last operation before return)
+ * 
+ * Tail positions include:
+ * - Direct function body (fn x => f(x))
+ * - Both branches of if-expression in tail position
+ * - Last expression in let-expression in tail position
+ */
+
+/**
+ * Check if an expression contains a tail call to the given function.
+ * @param expr Expression to analyze
+ * @param func_node Function to check for recursive calls to
+ * @return true if expr contains a tail call to func_node
+ */
+bool has_tail_call(AstNode* expr, AstFuncNode* func_node);
+
+/**
+ * Check if a call expression is a direct recursive call to the given function.
+ * @param call_node Call expression to check
+ * @param func_node Function to check for recursion to
+ * @return true if call_node is a direct call to func_node
+ */
+bool is_recursive_call(AstCallNode* call_node, AstFuncNode* func_node);
+
+/**
+ * Check if a function is tail-recursive and should use TCO.
+ * @param func_node Function to analyze
+ * @return true if function should use tail call optimization
+ */
+bool should_use_tco(AstFuncNode* func_node);
 
 class SafetyAnalyzer {
 public:
