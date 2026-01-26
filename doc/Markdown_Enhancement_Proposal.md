@@ -49,7 +49,7 @@ From examining specific test failures, the following core issues were identified
 1. Add escape character map:
 ```cpp
 // markup_common.hpp
-static const char ESCAPABLE_CHARS[] = 
+static const char ESCAPABLE_CHARS[] =
     "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
 inline bool is_escapable(char c) {
@@ -62,22 +62,22 @@ inline bool is_escapable(char c) {
 // inline_special.cpp
 Item parse_backslash_escape(MarkupParser* parser, const char* text, int* consumed) {
     if (*text != '\\') return ITEM_UNDEFINED;
-    
+
     char next = text[1];
     if (next == '\0') return ITEM_UNDEFINED;
-    
+
     // Hard line break: backslash at end of line
     if (next == '\n') {
         *consumed = 2;
         return parser->builder()->createElement("br");
     }
-    
+
     // Escapable punctuation
     if (is_escapable(next)) {
         *consumed = 2;
         return parser->builder()->createString(&next, 1);
     }
-    
+
     return ITEM_UNDEFINED;  // Not an escape, treat as literal
 }
 ```
@@ -118,22 +118,22 @@ Item parse_fenced_code_block(MarkupParser* parser, const char* line) {
     if (!parser->adapter->detect_code_fence(line, &fence)) {
         return ITEM_UNDEFINED;
     }
-    
+
     // Parse info string (language + optional attributes)
     const char* info_start = line + fence.fence_length;
     while (*info_start == ' ') info_start++;
-    
+
     // Info string ends at newline or backtick (CommonMark rule)
     const char* info_end = info_start;
     while (*info_end && *info_end != '\n' && *info_end != '`') {
         info_end++;
     }
-    
+
     // Trim trailing whitespace from info string
     while (info_end > info_start && isspace(info_end[-1])) {
         info_end--;
     }
-    
+
     // ... create code element with info attribute
 }
 ```
@@ -143,12 +143,12 @@ Item parse_fenced_code_block(MarkupParser* parser, const char* line) {
 // Code block content is literal - no inline processing
 while (parser->advance_line()) {
     const char* code_line = parser->current_line;
-    
+
     // Check for closing fence
     if (is_closing_fence(code_line, fence)) {
         break;
     }
-    
+
     // Append raw content (no escape processing)
     content.append(code_line);
     content.append("\n");
@@ -170,43 +170,43 @@ while (parser->advance_line()) {
 Item parse_atx_header(MarkupParser* parser, const char* line) {
     int level = 0;
     const char* p = line;
-    
+
     // Count leading #
     while (*p == '#' && level < 6) { level++; p++; }
-    
+
     // Must be followed by space or end of line
     if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\0') {
         return ITEM_UNDEFINED;  // Not a valid header
     }
-    
+
     // Skip whitespace after #
     while (*p == ' ' || *p == '\t') p++;
-    
+
     // Find content end (before trailing # sequence)
     const char* content_start = p;
     const char* content_end = p + strlen(p);
-    
+
     // Trim trailing whitespace
     while (content_end > content_start && isspace(content_end[-1])) {
         content_end--;
     }
-    
+
     // Strip trailing # sequence (optionally preceded by spaces)
     const char* hash_scan = content_end;
     while (hash_scan > content_start && hash_scan[-1] == '#') {
         hash_scan--;
     }
     // If we found trailing #, check if preceded by space
-    if (hash_scan < content_end && 
+    if (hash_scan < content_end &&
         (hash_scan == content_start || hash_scan[-1] == ' ' || hash_scan[-1] == '\t')) {
         content_end = hash_scan;
         // Trim spaces before the trailing #
-        while (content_end > content_start && 
+        while (content_end > content_start &&
                (content_end[-1] == ' ' || content_end[-1] == '\t')) {
             content_end--;
         }
     }
-    
+
     // Create header element with trimmed content
     // ...
 }
@@ -214,21 +214,21 @@ Item parse_atx_header(MarkupParser* parser, const char* line) {
 
 2. Implement Setext header detection:
 ```cpp
-// block_header.cpp  
+// block_header.cpp
 Item parse_setext_header(MarkupParser* parser, const char* text_line, const char* underline) {
     // Underline must be all = or all - (at least 1 char)
     char marker = underline[0];
     if (marker != '=' && marker != '-') return ITEM_UNDEFINED;
-    
+
     const char* p = underline;
     while (*p == marker) p++;
-    
+
     // Only whitespace allowed after markers
     while (*p == ' ' || *p == '\t') p++;
     if (*p != '\n' && *p != '\0') return ITEM_UNDEFINED;
-    
+
     int level = (marker == '=') ? 1 : 2;
-    
+
     // Create h1 or h2 with text_line content
     // ...
 }
@@ -257,11 +257,11 @@ struct LinkDefinition {
 class MarkupParser : public InputContext {
     // ...
     std::unordered_map<std::string, LinkDefinition> link_definitions_;
-    
+
 public:
     void add_link_definition(const char* label, const char* url, const char* title);
     const LinkDefinition* get_link_definition(const char* label);
-    
+
     // Label normalization: lowercase, collapse whitespace
     static std::string normalize_label(const char* label);
 };
@@ -284,15 +284,15 @@ if (line[0] == '[') {
 // inline_link.cpp
 Item parse_reference_link(MarkupParser* parser, const char* text, int* consumed) {
     // [link text][label] or [link text][] or [link text]
-    
+
     // Parse [link text]
     const char* p = text + 1;
     const char* link_text_end = find_matching_bracket(p);
     if (!link_text_end) return ITEM_UNDEFINED;
-    
+
     std::string link_text(p, link_text_end - p);
     p = link_text_end + 1;
-    
+
     std::string label;
     if (*p == '[') {
         // [text][label] form
@@ -304,11 +304,11 @@ Item parse_reference_link(MarkupParser* parser, const char* text, int* consumed)
         // [text] form - label is same as text
         label = link_text;
     }
-    
+
     // Look up reference
     const LinkDefinition* def = parser->get_link_definition(label.c_str());
     if (!def) return ITEM_UNDEFINED;  // No matching definition
-    
+
     *consumed = p - text;
     return create_link_element(parser, def->url, def->title, link_text);
 }
@@ -340,29 +340,29 @@ struct DelimiterRun {
 void classify_delimiter_run(const char* text, int pos, DelimiterRun* run) {
     char c = text[pos];
     run->character = c;
-    
+
     // Count consecutive delimiters
     int len = 0;
     while (text[pos + len] == c) len++;
     run->length = len;
-    
+
     // Get characters before and after the run
     char before = (pos > 0) ? text[pos - 1] : ' ';
     char after = text[pos + len];
     if (after == '\0') after = ' ';
-    
-    bool left_flanking = !isspace(after) && 
+
+    bool left_flanking = !isspace(after) &&
         (!ispunct(after) || isspace(before) || ispunct(before));
-    bool right_flanking = !isspace(before) && 
+    bool right_flanking = !isspace(before) &&
         (!ispunct(before) || isspace(after) || ispunct(after));
-    
+
     if (c == '*') {
         run->can_open = left_flanking;
         run->can_close = right_flanking;
     } else {  // '_'
-        run->can_open = left_flanking && 
+        run->can_open = left_flanking &&
             (!right_flanking || ispunct(before));
-        run->can_close = right_flanking && 
+        run->can_close = right_flanking &&
             (!left_flanking || ispunct(after));
     }
 }
@@ -371,11 +371,11 @@ void classify_delimiter_run(const char* text, int pos, DelimiterRun* run) {
 Item process_emphasis(MarkupParser* parser, const char* text) {
     std::vector<DelimiterRun> stack;
     std::vector<Item> output;
-    
+
     // First pass: identify all delimiter runs
     // Second pass: match openers with closers
     // Third pass: build AST with proper nesting
-    
+
     // ... implementation following CommonMark algorithm
 }
 ```
@@ -397,12 +397,12 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
     if (*line != '>') return ITEM_UNDEFINED;
     line++;
     if (*line == ' ') line++;  // Optional space after >
-    
+
     auto quote = parser->builder()->createElement("blockquote");
-    
+
     while (parser->current_line) {
         const char* curr = parser->current_line;
-        
+
         if (*curr == '>') {
             // Continuation with > prefix
             curr++;
@@ -419,10 +419,10 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             // Not a blockquote line - done
             break;
         }
-        
+
         parser->advance_line();
     }
-    
+
     return quote;
 }
 ```
@@ -455,7 +455,7 @@ enum HtmlBlockType {
 
 HtmlBlockType detect_html_block(const char* line) {
     if (*line != '<') return HTML_BLOCK_NONE;
-    
+
     // Type 1: script, pre, style, textarea
     if (strncasecmp(line, "<script", 7) == 0 ||
         strncasecmp(line, "<pre", 4) == 0 ||
@@ -463,33 +463,33 @@ HtmlBlockType detect_html_block(const char* line) {
         strncasecmp(line, "<textarea", 9) == 0) {
         return HTML_BLOCK_1;
     }
-    
+
     // Type 2: HTML comment
     if (strncmp(line, "<!--", 4) == 0) {
         return HTML_BLOCK_2;
     }
-    
+
     // ... other types
 }
 
 Item parse_html_block(MarkupParser* parser, const char* line) {
     HtmlBlockType type = detect_html_block(line);
     if (type == HTML_BLOCK_NONE) return ITEM_UNDEFINED;
-    
+
     auto html_elem = parser->builder()->createElement("html_block");
     StrBuf content;
     strbuf_init(&content);
-    
+
     // Accumulate raw HTML until end condition
     do {
         strbuf_append(&content, parser->current_line);
         strbuf_append(&content, "\n");
-        
+
         if (html_block_ends(type, parser->current_line)) {
             break;
         }
     } while (parser->advance_line());
-    
+
     // Store as raw content, no parsing
     parser->builder()->appendText(html_elem, content.str);
     return html_elem;

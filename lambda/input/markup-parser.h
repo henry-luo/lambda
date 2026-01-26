@@ -26,6 +26,7 @@ typedef enum {
     BLOCK_MATH,
     BLOCK_DIVIDER,
     BLOCK_COMMENT,
+    BLOCK_HTML,  // CommonMark HTML block (raw HTML passthrough)
     // Phase 6: Advanced block types
     BLOCK_FOOTNOTE_DEF,
     BLOCK_RST_DIRECTIVE,

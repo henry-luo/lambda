@@ -341,6 +341,33 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
              strcmp(tag, "body") == 0 || strcmp(tag, "span") == 0) {
         format_cm_children(ctx, elem);
     }
+    // HTML block - raw passthrough without escaping
+    else if (strcmp(tag, "html-block") == 0) {
+        for (int i = 0; i < elem.childCount(); i++) {
+            ItemReader child = elem.childAt(i);
+            if (child.isString()) {
+                String* str = child.asString();
+                if (str && str->chars) {
+                    // Output raw HTML without escaping
+                    format_cm_raw_text(ctx, str->chars, str->len);
+                }
+            }
+        }
+        stringbuf_append_char(sb, '\n');
+    }
+    // Inline raw HTML - passthrough without escaping
+    else if (strcmp(tag, "raw-html") == 0) {
+        for (int i = 0; i < elem.childCount(); i++) {
+            ItemReader child = elem.childAt(i);
+            if (child.isString()) {
+                String* str = child.asString();
+                if (str && str->chars) {
+                    // Output raw HTML without escaping
+                    format_cm_raw_text(ctx, str->chars, str->len);
+                }
+            }
+        }
+    }
     // Unknown elements - try to format as generic
     else {
         // Check if it looks like an HTML element
