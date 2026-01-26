@@ -1,5 +1,5 @@
 #include "transpiler.hpp"
-#include "lambda_error.h"
+#include "lambda-error.h"
 #include "../lib/log.h"
 #include "utf_string.h"
 
@@ -34,7 +34,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 
 /**
  * Set a runtime error in the current evaluation context.
- * This captures the error with stack trace if enabled.
+ * Captures a stack trace using native frame pointer walking.
  */
 static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     if (!context) return;
@@ -53,7 +53,7 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     
     LambdaError* error = err_create(code, message, &loc);
     
-    // capture stack trace
+    // capture native stack trace via FP walking
     error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
     
     // store in context
@@ -63,6 +63,22 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     context->last_error = error;
     
     log_error("runtime error [%d]: %s", code, message);
+}
+
+/**
+ * fn_error(message) - raise a user error with stack trace
+ * This is the Lambda sys func that triggers a runtime error.
+ */
+Item fn_error(Item message) {
+    const char* msg = "Error";
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* str = it2s(message);
+        if (str && str->chars) {
+            msg = str->chars;
+        }
+    }
+    set_runtime_error(ERR_USER_ERROR, "%s", msg);
+    return ItemError;
 }
 
 Bool is_truthy(Item item) {
@@ -279,6 +295,20 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = NULL;
+    fn->name = NULL;
+    return fn;
+}
+
+// Create function with arity and name for stack traces
+Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
+    log_debug("create fn %p with arity %d, name %s", ptr, arity, name ? name : "(null)");
+    Function *fn = (Function*)calloc(1, sizeof(Function));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->ref_cnt = 1;
+    fn->arity = (uint8_t)arity;
+    fn->ptr = ptr;
+    fn->closure_env = NULL;
+    fn->name = name;  // should be interned string, no need to copy
     return fn;
 }
 
@@ -292,6 +322,21 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
     fn->arity = (uint8_t)arity;
     fn->ptr = ptr;
     fn->closure_env = env;
+    fn->name = NULL;
+    return fn;
+}
+
+// Create a closure with captured environment and name for stack traces
+Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
+    log_debug("create closure %p with arity %d, env %p, name %s", ptr, arity, env, name ? name : "(null)");
+    Function* fn = (Function*)calloc(1, sizeof(Function));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->ref_cnt = 1;
+    fn->fn_type = NULL;
+    fn->arity = (uint8_t)arity;
+    fn->ptr = ptr;
+    fn->closure_env = env;
+    fn->name = name;  // should be interned string, no need to copy
     return fn;
 }
 
@@ -325,6 +370,7 @@ static inline bool is_valid_function(Function* fn) {
 
 // Dynamic function dispatch for first-class functions
 // For closures, env is passed as the first argument
+// Stack traces are captured via native stack walking (no push/pop needed)
 Item fn_call(Function* fn, List* args) {
     if (!is_valid_function(fn)) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call: invalid function (null or wrong type)");
@@ -383,8 +429,11 @@ Item fn_call0(Function* fn) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: null function pointer");
         return ItemError;
     }
-    if (fn->closure_env) return ((Item(*)(void*))fn->ptr)(fn->closure_env);
-    return ((Item(*)())fn->ptr)();
+    if (fn->closure_env) {
+        return ((Item(*)(void*))fn->ptr)(fn->closure_env);
+    } else {
+        return ((Item(*)())fn->ptr)();
+    }
 }
 
 Item fn_call1(Function* fn, Item a) {
@@ -396,8 +445,11 @@ Item fn_call1(Function* fn, Item a) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call1: null function pointer");
         return ItemError;
     }
-    if (fn->closure_env) return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
-    return ((Item(*)(Item))fn->ptr)(a);
+    if (fn->closure_env) {
+        return ((Item(*)(void*,Item))fn->ptr)(fn->closure_env, a);
+    } else {
+        return ((Item(*)(Item))fn->ptr)(a);
+    }
 }
 
 Item fn_call2(Function* fn, Item a, Item b) {
@@ -409,8 +461,11 @@ Item fn_call2(Function* fn, Item a, Item b) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call2: null function pointer");
         return ItemError;
     }
-    if (fn->closure_env) return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
-    return ((Item(*)(Item,Item))fn->ptr)(a, b);
+    if (fn->closure_env) {
+        return ((Item(*)(void*,Item,Item))fn->ptr)(fn->closure_env, a, b);
+    } else {
+        return ((Item(*)(Item,Item))fn->ptr)(a, b);
+    }
 }
 
 Item fn_call3(Function* fn, Item a, Item b, Item c) {
@@ -422,8 +477,11 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call3: null function pointer");
         return ItemError;
     }
-    if (fn->closure_env) return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
-    return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
+    if (fn->closure_env) {
+        return ((Item(*)(void*,Item,Item,Item))fn->ptr)(fn->closure_env, a, b, c);
+    } else {
+        return ((Item(*)(Item,Item,Item))fn->ptr)(a, b, c);
+    }
 }
 
 Bool fn_is(Item a, Item b) {

@@ -440,15 +440,16 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         return output;
     }
 
-    // Initialize MIR context
-    MIR_context_t ctx = jit_init();
+    // Initialize MIR context with optimization level from runtime
+    unsigned int opt_level = runtime ? runtime->optimize_level : 2;
+    MIR_context_t ctx = jit_init(opt_level);
 
     // Transpile to MIR
     transpile_mir_ast(ctx, (AstScript*)runner.script->ast_root);
 
     // Generate machine code and link
     MIR_gen_init(ctx);
-    MIR_gen_set_optimize_level(ctx, 2);
+    // Note: optimize_level is already set in jit_init
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
     // Find the main function and store it in the Script

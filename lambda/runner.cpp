@@ -1,7 +1,7 @@
 #include <time.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
-#include "lambda_error.h"
+#include "lambda-error.h"
 
 #if _WIN32
 #include <windows.h>
@@ -291,7 +291,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // JIT compile the C code
     get_time(&start);
-    tp->jit_context = jit_init();
+    tp->jit_context = jit_init(tp->runtime->optimize_level);
     // compile user code to MIR
     log_debug("compiling to MIR...");
     write_text_file("_transpiled.c", tp->code_buf->str);
@@ -304,11 +304,16 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // generate native code and return the function
     tp->main_func = (main_func_t)jit_gen_func(tp->jit_context, "main");
     get_time(&end);
+    
+    // Build debug info table for stack traces (after MIR_link has assigned addresses)
+    // Pass func_name_map so MIR internal names are mapped to Lambda user-friendly names
+    tp->debug_info = (ArrayList*)build_debug_info_table(tp->jit_context, tp->func_name_map);
+    
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
 
     log_info("JIT compiled %s", script_path);
-    log_debug("jit_context: %p, main_func: %p", tp->jit_context, tp->main_func);
+    log_debug("jit_context: %p, main_func: %p, debug_info: %p", tp->jit_context, tp->main_func, tp->debug_info);
     // copy value back to script
     memcpy(script, tp, sizeof(Script));
     script->main_func = tp->main_func;
@@ -397,7 +402,8 @@ void runner_setup_context(Runner* runner) {
     runner->context.validator = schema_validator_create(runner->context.pool);
     
     // Initialize error handling and stack trace support
-    runner->context.debug_info = NULL;  // MIR doesn't expose function sizes, rely on backtrace_symbols
+    // Use debug_info from script (built after MIR compilation for address → function mapping)
+    runner->context.debug_info = runner->script->debug_info;
     runner->context.current_file = runner->script->reference;  // source file for error reporting
     runner->context.last_error = NULL;
     
@@ -576,6 +582,7 @@ void runtime_init(Runtime* runtime) {
     runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
     runtime->max_errors = 10;  // default error threshold
+    runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
 }
 
 void runtime_cleanup(Runtime* runtime) {
