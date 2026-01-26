@@ -263,6 +263,10 @@ MarkupFormat detect_markup_format(const char* content, const char* filename) {
                 return MARKUP_ORG;
             } else if (strcasecmp(ext, "adoc") == 0 || strcasecmp(ext, "asciidoc") == 0 || strcasecmp(ext, "asc") == 0) {
                 return MARKUP_ASCIIDOC;
+            } else if (strcasecmp(ext, "man") == 0 ||
+                       (ext[0] >= '1' && ext[0] <= '9' && (ext[1] == '\0' || ext[1] == 'm' || ext[1] == 'p'))) {
+                // Man pages: .man, .1-.9, .1m, .3p, etc.
+                return MARKUP_MAN;
             }
         }
     }
@@ -270,6 +274,17 @@ MarkupFormat detect_markup_format(const char* content, const char* filename) {
     // Content-based detection
     const char* line = content;
     size_t len = strlen(content);
+
+    // Check for Man page patterns (troff macros)
+    // Man pages start with dot-commands like .TH, .SH, .PP, .B, .I
+    if ((content[0] == '.' && (strncmp(content, ".TH ", 4) == 0 ||
+                                strncmp(content, ".SH ", 4) == 0 ||
+                                strncmp(content, ".\\\"", 3) == 0)) ||
+        strstr(content, "\n.SH ") || strstr(content, "\n.PP") ||
+        strstr(content, "\n.TH ") || strstr(content, "\n.B ") ||
+        strstr(content, "\n.I ") || strstr(content, "\n.TP")) {
+        return MARKUP_MAN;
+    }
 
     // Check for AsciiDoc patterns
     if (strstr(content, "= ") == content || strstr(content, "== ") || strstr(content, "=== ") ||
@@ -331,9 +346,14 @@ const char* detect_markup_flavor(MarkupFormat format, const char* content) {
             }
             return "standard";
 
+        case MARKUP_MAN:
+            return "groff";
+
         case MARKUP_RST:
         case MARKUP_TEXTILE:
         case MARKUP_ORG:
+        case MARKUP_ASCIIDOC:
+        case MARKUP_AUTO_DETECT:
         default:
             return "standard";
     }

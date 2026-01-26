@@ -4,17 +4,7 @@
 #include "input.hpp"
 #include "input-context.hpp"
 #include "../lambda-data.hpp"
-
-// Markup format enumeration
-typedef enum {
-    MARKUP_MARKDOWN,
-    MARKUP_RST,
-    MARKUP_TEXTILE,
-    MARKUP_WIKI,
-    MARKUP_ORG,
-    MARKUP_ASCIIDOC,
-    MARKUP_AUTO_DETECT
-} MarkupFormat;
+#include "markup-format.h"  // MarkupFormat enum defined here
 
 // Parser configuration
 typedef struct {
