@@ -93,6 +93,12 @@ public:
 
         // Setext-style headers: underline with === or ---
         if (!info.valid && next_line && *p && *p != '\r' && *p != '\n') {
+            // The "header text" line must not be a thematic break itself
+            // (e.g., "***" followed by "---" should be hr + hr, not a setext heading)
+            if (detectThematicBreak(line)) {
+                return info; // This line is a thematic break, not header text
+            }
+
             // Check the underline (next_line)
             const char* ul = next_line;
             int ul_spaces = 0;

@@ -341,6 +341,12 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
              strcmp(tag, "body") == 0 || strcmp(tag, "span") == 0) {
         format_cm_children(ctx, elem);
     }
+    // html-dom element contains the parsed HTML5 DOM - skip it entirely
+    // (the raw HTML content is already output via html-block/raw-html elements)
+    else if (strcmp(tag, "html-dom") == 0) {
+        // Skip the HTML DOM element entirely - it's for downstream processing only
+        return;
+    }
     // HTML block - raw passthrough without escaping
     else if (strcmp(tag, "html-block") == 0) {
         for (int i = 0; i < elem.childCount(); i++) {

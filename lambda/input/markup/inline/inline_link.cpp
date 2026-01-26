@@ -12,6 +12,7 @@
  * Extracted from input-markup.cpp parse_link() (lines 2142-2224)
  */
 #include "inline_common.hpp"
+#include "../../html_entities.h"
 #include <cstdlib>
 #include <cstring>
 
@@ -42,6 +43,131 @@ static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
     if (k && v) {
         parser->builder.putToElement(elem, k, Item{.item = s2it(v)});
     }
+}
+
+// CommonMark escapable punctuation characters
+static bool is_escapable_char(char c) {
+    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
+           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
+           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
+           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
+           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
+           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
+           c == '}' || c == '~';
+}
+
+/**
+ * unescape_string - Process backslash escapes and entity references in a string
+ *
+ * Returns newly allocated string with escapes processed.
+ * Caller must free the result.
+ */
+static char* unescape_string(const char* start, size_t len) {
+    char* result = (char*)malloc(len * 4 + 1); // Worst case: all entities expand
+    if (!result) return nullptr;
+
+    char* out = result;
+    const char* pos = start;
+    const char* end = start + len;
+
+    while (pos < end) {
+        if (*pos == '\\' && pos + 1 < end && is_escapable_char(*(pos + 1))) {
+            // Backslash escape - skip backslash, copy escaped char
+            pos++;
+            *out++ = *pos++;
+        } else if (*pos == '&') {
+            // Try to parse entity reference
+            const char* entity_start = pos + 1;
+            const char* entity_pos = entity_start;
+
+            if (*entity_pos == '#') {
+                // Numeric entity
+                entity_pos++;
+                uint32_t codepoint = 0;
+                bool valid = false;
+
+                if (*entity_pos == 'x' || *entity_pos == 'X') {
+                    // Hex
+                    entity_pos++;
+                    const char* num_start = entity_pos;
+                    while (entity_pos < end &&
+                           ((*entity_pos >= '0' && *entity_pos <= '9') ||
+                            (*entity_pos >= 'a' && *entity_pos <= 'f') ||
+                            (*entity_pos >= 'A' && *entity_pos <= 'F'))) {
+                        codepoint *= 16;
+                        if (*entity_pos >= '0' && *entity_pos <= '9')
+                            codepoint += *entity_pos - '0';
+                        else if (*entity_pos >= 'a' && *entity_pos <= 'f')
+                            codepoint += *entity_pos - 'a' + 10;
+                        else
+                            codepoint += *entity_pos - 'A' + 10;
+                        entity_pos++;
+                        if (codepoint > 0x10FFFF) break;
+                    }
+                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
+                        valid = true;
+                    }
+                } else {
+                    // Decimal
+                    const char* num_start = entity_pos;
+                    while (entity_pos < end && *entity_pos >= '0' && *entity_pos <= '9') {
+                        codepoint = codepoint * 10 + (*entity_pos - '0');
+                        entity_pos++;
+                        if (codepoint > 0x10FFFF) break;
+                    }
+                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
+                        valid = true;
+                    }
+                }
+
+                if (valid) {
+                    if (codepoint == 0) codepoint = 0xFFFD;
+                    int utf8_len = unicode_to_utf8(codepoint, out);
+                    if (utf8_len > 0) {
+                        out += utf8_len;
+                        pos = entity_pos + 1;
+                        continue;
+                    }
+                }
+            } else {
+                // Named entity
+                while (entity_pos < end &&
+                       ((*entity_pos >= 'a' && *entity_pos <= 'z') ||
+                        (*entity_pos >= 'A' && *entity_pos <= 'Z') ||
+                        (*entity_pos >= '0' && *entity_pos <= '9'))) {
+                    entity_pos++;
+                }
+
+                if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
+                    size_t name_len = entity_pos - entity_start;
+                    EntityResult result = html_entity_resolve(entity_start, name_len);
+
+                    if (result.type == ENTITY_ASCII_ESCAPE) {
+                        size_t decoded_len = strlen(result.decoded);
+                        memcpy(out, result.decoded, decoded_len);
+                        out += decoded_len;
+                        pos = entity_pos + 1;
+                        continue;
+                    } else if (result.type == ENTITY_UNICODE_SPACE || result.type == ENTITY_NAMED) {
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, out);
+                        if (utf8_len > 0) {
+                            out += utf8_len;
+                            pos = entity_pos + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Not a valid entity, copy & literally
+            *out++ = *pos++;
+        } else {
+            *out++ = *pos++;
+        }
+    }
+
+    *out = '\0';
+    return result;
 }
 
 /**
@@ -269,25 +395,21 @@ Item parse_link(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_ERROR};
     }
 
-    // Add href attribute
+    // Add href attribute (unescape backslash escapes and entities)
     if (url_end > url_start) {
         size_t url_len = url_end - url_start;
-        char* url = (char*)malloc(url_len + 1);
+        char* url = unescape_string(url_start, url_len);
         if (url) {
-            strncpy(url, url_start, url_len);
-            url[url_len] = '\0';
             add_attribute_to_element(parser, link, "href", url);
             free(url);
         }
     }
 
-    // Add title attribute if present
+    // Add title attribute if present (unescape backslash escapes and entities)
     if (title_start && title_end && title_end > title_start) {
         size_t title_len = title_end - title_start;
-        char* title = (char*)malloc(title_len + 1);
+        char* title = unescape_string(title_start, title_len);
         if (title) {
-            strncpy(title, title_start, title_len);
-            title[title_len] = '\0';
             add_attribute_to_element(parser, link, "title", title);
             free(title);
         }

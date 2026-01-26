@@ -10,6 +10,9 @@
 namespace lambda {
 namespace markup {
 
+// Forward declaration for HTML block detection (from block_html.cpp)
+extern bool is_html_block_start(const char* line);
+
 /**
  * is_blockquote_line - Check if a line starts a blockquote
  */
@@ -114,6 +117,12 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
 
     // Use adapter for format-specific detection first
     if (adapter) {
+        // Thematic break detection - MUST come before list detection
+        // because "-" can start both a list and a thematic break
+        if (adapter->detectThematicBreak(line)) {
+            return BlockType::DIVIDER;
+        }
+
         // Header detection
         const char* next_line = nullptr;
         if (parser->current_line + 1 < parser->line_count) {
@@ -137,6 +146,16 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             return BlockType::CODE_BLOCK;
         }
 
+        // HTML block detection (Markdown only)
+        log_debug("block_detection: checking HTML block, format=%d, MARKDOWN=%d",
+                  (int)parser->config.format, (int)Format::MARKDOWN);
+        if (parser->config.format == Format::MARKDOWN) {
+            if (is_html_block_start(line)) {
+                log_debug("block_detection: detected HTML block at line %d: '%s'", parser->current_line, line);
+                return BlockType::RAW_HTML;
+            }
+        }
+
         // Blockquote detection
         BlockquoteInfo quote_info = adapter->detectBlockquote(line);
         if (quote_info.valid) {
@@ -150,11 +169,6 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         }
         if (adapter->detectTable(line, table_next)) {
             return BlockType::TABLE;
-        }
-
-        // Thematic break detection
-        if (adapter->detectThematicBreak(line)) {
-            return BlockType::DIVIDER;
         }
 
         // Indented code block detection (only if not in list context)

@@ -259,6 +259,133 @@ Element* html5_parse(Input* input, const char* html) {
     return parser->document;
 }
 
+// ============================================================================
+// FRAGMENT PARSING
+// For parsing HTML fragments in body context (used by markdown parser)
+// ============================================================================
+
+/**
+ * html5_fragment_parser_create - Create a parser for fragment parsing
+ *
+ * Creates an HTML5 parser set up for parsing fragments in body context.
+ * The parser starts in IN_BODY mode with a synthetic <body> element on the stack.
+ *
+ * @param pool Memory pool
+ * @param arena Memory arena
+ * @param input Input context
+ * @return Initialized parser, or nullptr on error
+ */
+Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input) {
+    Html5Parser* parser = html5_parser_create(pool, arena, input);
+    if (!parser) return nullptr;
+
+    MarkBuilder builder(input);
+
+    // create a minimal document structure for fragment parsing
+    // #document -> html -> body
+    parser->document = builder.element("#document").final().element;
+    parser->html_element = builder.element("html").final().element;
+    Element* body = builder.element("body").final().element;
+
+    // Add html to document
+    array_append(parser->document, Item{.element = parser->html_element}, pool, arena);
+
+    // Add body to html
+    array_append(parser->html_element, Item{.element = body}, pool, arena);
+
+    // Push html and body onto the open elements stack
+    html5_push_element(parser, parser->html_element);
+    html5_push_element(parser, body);
+
+    // Start in body mode (fragments are parsed as body content)
+    parser->mode = HTML5_MODE_IN_BODY;
+
+    log_debug("html5_fragment: created fragment parser");
+
+    return parser;
+}
+
+/**
+ * html5_fragment_parse - Parse an HTML fragment into an existing parser context
+ *
+ * Parses the given HTML string and adds content to the current insertion point.
+ * This is used for incremental parsing of HTML fragments in markdown.
+ *
+ * @param parser The fragment parser (created with html5_fragment_parser_create)
+ * @param html The HTML fragment to parse
+ * @return true on success, false on error
+ */
+bool html5_fragment_parse(Html5Parser* parser, const char* html) {
+    if (!parser || !html) return false;
+
+    size_t html_len = strlen(html);
+    if (html_len == 0) return true;
+
+    // Store the current position (we may be continuing from previous parse)
+    size_t old_pos = parser->pos;
+    size_t old_length = parser->length;
+    const char* old_html = parser->html;
+
+    // Set up new input
+    parser->html = html;
+    parser->pos = 0;
+    parser->length = html_len;
+    parser->tokenizer_state = HTML5_TOK_DATA;
+
+    log_debug("html5_fragment: parsing %zu bytes of HTML", html_len);
+
+    // Tokenize and process
+    while (true) {
+        Html5Token* token = html5_tokenize_next(parser);
+
+        // Don't process EOF through tree builder for fragments
+        // (we want to keep the parser state for more fragments)
+        if (token->type == HTML5_TOKEN_EOF) {
+            break;
+        }
+
+        html5_process_token(parser, token);
+    }
+
+    // Flush any pending text
+    html5_flush_pending_text(parser);
+
+    // Restore for potential continuation
+    // (Note: for fragments we typically create fresh each time,
+    // but support continuation if needed)
+    parser->html = old_html;
+    parser->pos = old_pos;
+    parser->length = old_length;
+
+    return true;
+}
+
+/**
+ * html5_fragment_get_body - Get the body element from a fragment parser
+ *
+ * Returns the body element containing all parsed fragment content.
+ *
+ * @param parser The fragment parser
+ * @return The body element, or nullptr if not available
+ */
+Element* html5_fragment_get_body(Html5Parser* parser) {
+    if (!parser || !parser->html_element) return nullptr;
+
+    // Body is the second child of html (after head if present, or first if no head)
+    for (size_t i = 0; i < parser->html_element->length; i++) {
+        TypeId type = get_type_id(parser->html_element->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            Element* child = parser->html_element->items[i].element;
+            const char* tag = ((TypeElmt*)child->type)->name.str;
+            if (strcmp(tag, "body") == 0) {
+                return child;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
 // forward declarations
 static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token);

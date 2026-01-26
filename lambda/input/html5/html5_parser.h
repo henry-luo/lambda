@@ -231,6 +231,14 @@ void html5_parser_destroy(Html5Parser* parser);
 // Main parsing function
 Element* html5_parse(Input* input, const char* html);
 
+// Fragment parsing (for markdown HTML blocks/inline)
+// Creates a parser in body mode for parsing HTML fragments
+Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input);
+// Parse an HTML fragment into an existing fragment parser context
+bool html5_fragment_parse(Html5Parser* parser, const char* html);
+// Get the body element containing parsed fragment content
+Element* html5_fragment_get_body(Html5Parser* parser);
+
 // Stack operations (defined in html5_tree_builder.cpp)
 Element* html5_current_node(Html5Parser* parser);
 void html5_push_element(Html5Parser* parser, Element* elem);

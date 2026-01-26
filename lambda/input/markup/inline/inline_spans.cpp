@@ -50,7 +50,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
     // For simple text without markup, return as string
     // Check for any potential inline markup characters
-    if (!strpbrk(text, "*_`[!~\\$:^{@'")) {
+    if (!strpbrk(text, "*_`[!~\\$:^{@'<")) {
         log_debug("parse_inline_spans: no markup chars, returning as plain string");
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
@@ -76,20 +76,26 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     while (*pos) {
         // Check for emphasis markers (* or _)
         if (*pos == '*' || *pos == '_') {
-            // Flush accumulated text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
+            // Try to parse emphasis - don't flush buffer yet in case it fails
+            const char* try_pos = pos;
+            Item inline_item = parse_emphasis(parser, &try_pos);
 
-            // Parse bold/italic
-            Item inline_item = parse_emphasis(parser, &pos);
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
+                // Success - flush buffer first, then add emphasis element
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
                 list_push((List*)span, inline_item);
                 increment_element_content_length(span);
+                pos = try_pos;  // Advance past the emphasis
+            } else {
+                // Emphasis parsing failed - treat marker as plain text
+                stringbuf_append_char(sb, *pos);
+                pos++;
             }
             continue;
         }
@@ -110,6 +116,30 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 list_push((List*)span, code_item);
                 increment_element_content_length(span);
             }
+            continue;
+        }
+
+        // Check for raw HTML (<) - Markdown only
+        if (*pos == '<' && format == Format::MARKDOWN) {
+            // Flush text first
+            if (sb->length > 0) {
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                stringbuf_reset(sb);
+            }
+
+            Item html_item = parse_raw_html(parser, &pos);
+            if (html_item.item != ITEM_ERROR && html_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, html_item);
+                increment_element_content_length(span);
+                continue;
+            }
+
+            // Not valid HTML, add < to buffer
+            stringbuf_append_char(sb, *pos);
+            pos++;
             continue;
         }
 
@@ -392,6 +422,30 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
             // Not an escape sequence: treat backslash as literal
             log_debug("escape: not escapable, keeping backslash");
+            stringbuf_append_char(sb, *pos);
+            pos++;
+            continue;
+        }
+
+        // Check for entity reference (&)
+        if (*pos == '&') {
+            // Flush text first
+            if (sb->length > 0) {
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                stringbuf_reset(sb);
+            }
+
+            Item entity_item = parse_entity_reference(parser, &pos);
+            if (entity_item.item != ITEM_ERROR && entity_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, entity_item);
+                increment_element_content_length(span);
+                continue;
+            }
+
+            // Not a valid entity, add & to buffer
             stringbuf_append_char(sb, *pos);
             pos++;
             continue;
