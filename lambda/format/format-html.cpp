@@ -294,6 +294,27 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         return;
     }
 
+    // special handling for raw HTML blocks from markdown parser
+    // Element name "html" with type="raw" attribute - output content verbatim
+    if (tag_len == 4 && memcmp(tag_name, "html", 4) == 0) {
+        ItemReader type_attr = elem.get_attr("type");
+        if (type_attr.isString()) {
+            String* type_str = type_attr.asString();
+            if (type_str && type_str->len == 3 && memcmp(type_str->chars, "raw", 3) == 0) {
+                // Output raw HTML content directly, no escaping
+                ItemReader first_child = elem.childAt(0);
+                if (first_child.isString()) {
+                    String* str = first_child.asString();
+                    if (str && str->chars) {
+                        stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
+                    }
+                }
+                stringbuf_append_char(ctx.output(), '\n');
+                return;
+            }
+        }
+    }
+
     // format as proper HTML element
     stringbuf_append_char(ctx.output(), '<');
     stringbuf_append_str(ctx.output(), tag_name);

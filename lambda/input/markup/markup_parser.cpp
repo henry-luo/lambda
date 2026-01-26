@@ -10,6 +10,7 @@
  */
 #include "markup_parser.hpp"
 #include "format_adapter.hpp"
+#include "../html5/html5_parser.h"
 #include "lib/log.h"
 #include <cstring>
 #include <cstdlib>
@@ -29,6 +30,7 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
     , line_count(0)
     , current_line(0)
     , link_def_count_(0)
+    , html5_parser_(nullptr)
 {
     // Get format adapter
     if (config.format == Format::AUTO_DETECT) {
@@ -43,11 +45,42 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
 
 MarkupParser::~MarkupParser() {
     freeLines();
+    // html5_parser_ is pool-managed, no explicit cleanup needed
 }
 
 void MarkupParser::resetState() {
     state.reset();
     current_line = 0;
+    html5_parser_ = nullptr;
+}
+
+// ============================================================================
+// HTML5 Fragment Parser Interface
+// ============================================================================
+
+Html5Parser* MarkupParser::getOrCreateHtml5Parser() {
+    if (!html5_parser_) {
+        Input* inp = input();
+        html5_parser_ = html5_fragment_parser_create(inp->pool, inp->arena, inp);
+        if (html5_parser_) {
+            log_debug("markup_parser: created HTML5 fragment parser");
+        }
+    }
+    return html5_parser_;
+}
+
+bool MarkupParser::parseHtmlFragment(const char* html) {
+    Html5Parser* parser = getOrCreateHtml5Parser();
+    if (!parser) {
+        log_error("markup_parser: failed to get HTML5 parser");
+        return false;
+    }
+    return html5_fragment_parse(parser, html);
+}
+
+Element* MarkupParser::getHtmlBody() {
+    if (!html5_parser_) return nullptr;
+    return html5_fragment_get_body(html5_parser_);
 }
 
 // ============================================================================
@@ -133,6 +166,8 @@ Item MarkupParser::parseContent(const char* content) {
             filename = (const char*)input()->path;
         }
         adapter_ = FormatRegistry::detectAdapter(content, filename);
+        // Update config with detected format so block parsers can check it
+        config.format = adapter_->format();
         log_debug("markup_parser: auto-detected format '%s'", adapter_->name());
     }
 
