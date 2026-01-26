@@ -200,6 +200,7 @@ struct Function {
     void* fn_type;        // fn type definition (TypeFunc*)
     fn_ptr ptr;           // native function pointer
     void* closure_env;    // closure environment (NULL if no captures)
+    const char* name;     // function name for stack traces (may be NULL)
 };
 
 // Dynamic function invocation for first-class functions
@@ -212,7 +213,9 @@ Item fn_call3(Function* fn, Item a, Item b, Item c);
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);
 Function* to_fn_n(fn_ptr ptr, int arity);
+Function* to_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_closure(fn_ptr ptr, int arity, void* env);
+Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 
 // Memory allocation for closure environments
 void* heap_calloc(size_t size, TypeId type_id);
@@ -442,6 +445,7 @@ typedef struct Context {
     Item fn_input2(Item url, Item options);
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
+    Item fn_error(Item message);  // raise a user-defined error
     Item fn_fetch(Item url, Item options);
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
