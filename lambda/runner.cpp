@@ -291,7 +291,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // JIT compile the C code
     get_time(&start);
-    tp->jit_context = jit_init();
+    tp->jit_context = jit_init(tp->runtime->optimize_level);
     // compile user code to MIR
     log_debug("compiling to MIR...");
     write_text_file("_transpiled.c", tp->code_buf->str);
@@ -582,6 +582,7 @@ void runtime_init(Runtime* runtime) {
     runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
     runtime->max_errors = 10;  // default error threshold
+    runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
 }
 
 void runtime_cleanup(Runtime* runtime) {
