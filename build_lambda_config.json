@@ -11,6 +11,10 @@
         "lambda/input",
         "lambda/input/css",
         "lambda/input/html5",
+        "lambda/input/markup",
+        "lambda/input/markup/block",
+        "lambda/input/markup/inline",
+        "lambda/input/markup/format",
         "lambda/format",
         "lambda/validator",
         "lambda/tex",
@@ -1398,6 +1402,20 @@
                         ],
                         "binary": "test_markup_roundtrip_gtest.exe",
                         "icon": "\ud83d\udcdd"
+                    },
+                    {
+                        "source": "test_markup_modular_gtest.cpp",
+                        "name": "Markup Modular Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_markup_modular_gtest.exe",
+                        "icon": "\ud83e\udde9"
                     },
                     {
                         "source": "test_entity_emoji_gtest.cpp",

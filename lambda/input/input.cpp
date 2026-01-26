@@ -615,7 +615,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
         }
         else if (strcmp(effective_type, "man") == 0) {
-            parse_man(input, source);
+            input->root = input_markup_with_format(input, source, MARKUP_MAN);
         }
         else if (strcmp(effective_type, "eml") == 0) {
             parse_eml(input, source);
@@ -633,7 +633,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_mark(input, source);
         }
         else if (strcmp(effective_type, "org") == 0) {
-            parse_org(input, source);
+            input->root = input_markup_with_format(input, source, MARKUP_ORG);
         }
         else if (strcmp(effective_type, "css") == 0) {
             parse_css(input, source);

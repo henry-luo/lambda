@@ -49,6 +49,44 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
 static void format_cm_children(CommonMarkHtmlContext& ctx, const ElementReader& elem);
 static void format_cm_text(CommonMarkHtmlContext& ctx, const char* text, size_t len);
 
+// Helper to check if a string is the internal "lambda.nil" representation (treated as empty)
+static inline bool is_lambda_nil(const char* str, size_t len) {
+    return len == 10 && str && strncmp(str, "lambda.nil", 10) == 0;
+}
+
+// Helper to check if a String* has valid non-nil content
+static inline bool has_valid_content(String* str) {
+    return str && str->chars && str->len > 0 && !is_lambda_nil(str->chars, str->len);
+}
+
+// URL encoding for href/src attributes (percent-encode special chars)
+static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t len) {
+    StringBuf* sb = ctx.output();
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)text[i];
+        // Percent-encode spaces and other unsafe characters
+        if (c == ' ') {
+            stringbuf_append_str(sb, "%20");
+        } else if (c == '"') {
+            stringbuf_append_str(sb, "%22");
+        } else if (c == '<') {
+            stringbuf_append_str(sb, "%3C");
+        } else if (c == '>') {
+            stringbuf_append_str(sb, "%3E");
+        } else if (c == '`') {
+            stringbuf_append_str(sb, "%60");
+        } else if (c == '[') {
+            stringbuf_append_str(sb, "%5B");
+        } else if (c == ']') {
+            stringbuf_append_str(sb, "%5D");
+        } else if (c == '\\') {
+            stringbuf_append_str(sb, "%5C");
+        } else {
+            stringbuf_append_char(sb, c);
+        }
+    }
+}
+
 // HTML entity encoding for text content
 static void format_cm_text(CommonMarkHtmlContext& ctx, const char* text, size_t len) {
     StringBuf* sb = ctx.output();
@@ -147,7 +185,9 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
     }
     else if (strcmp(tag, "code") == 0) {
         // Check if this is a block-level code (has code attribute/property)
-        bool is_block = elem.get_string_attr("info") != nullptr ||
+        String* type_attr = elem.get_string_attr("type");
+        bool is_block = (type_attr && strcmp(type_attr->chars, "block") == 0) ||
+                        elem.get_string_attr("info") != nullptr ||
                         elem.get_string_attr("language") != nullptr;
 
         if (is_block) {
@@ -254,12 +294,12 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
         String* title = elem.get_string_attr("title");
 
         stringbuf_append_str(sb, "<a href=\"");
-        if (href && href->chars) {
-            format_cm_text(ctx, href->chars, href->len);
+        if (has_valid_content(href)) {
+            format_cm_url(ctx, href->chars, href->len);
         }
         stringbuf_append_str(sb, "\"");
 
-        if (title && title->chars && title->len > 0) {
+        if (has_valid_content(title)) {
             stringbuf_append_str(sb, " title=\"");
             format_cm_text(ctx, title->chars, title->len);
             stringbuf_append_str(sb, "\"");
@@ -274,16 +314,16 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
         String* title = elem.get_string_attr("title");
 
         stringbuf_append_str(sb, "<img src=\"");
-        if (src && src->chars) {
-            format_cm_text(ctx, src->chars, src->len);
+        if (has_valid_content(src)) {
+            format_cm_url(ctx, src->chars, src->len);
         }
         stringbuf_append_str(sb, "\" alt=\"");
-        if (alt && alt->chars) {
+        if (alt && alt->chars && !is_lambda_nil(alt->chars, alt->len)) {
             format_cm_text(ctx, alt->chars, alt->len);
         }
         stringbuf_append_str(sb, "\"");
 
-        if (title && title->chars && title->len > 0) {
+        if (has_valid_content(title)) {
             stringbuf_append_str(sb, " title=\"");
             format_cm_text(ctx, title->chars, title->len);
             stringbuf_append_str(sb, "\"");
@@ -300,6 +340,33 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
     else if (strcmp(tag, "doc") == 0 || strcmp(tag, "document") == 0 ||
              strcmp(tag, "body") == 0 || strcmp(tag, "span") == 0) {
         format_cm_children(ctx, elem);
+    }
+    // HTML block - raw passthrough without escaping
+    else if (strcmp(tag, "html-block") == 0) {
+        for (int i = 0; i < elem.childCount(); i++) {
+            ItemReader child = elem.childAt(i);
+            if (child.isString()) {
+                String* str = child.asString();
+                if (str && str->chars) {
+                    // Output raw HTML without escaping
+                    format_cm_raw_text(ctx, str->chars, str->len);
+                }
+            }
+        }
+        stringbuf_append_char(sb, '\n');
+    }
+    // Inline raw HTML - passthrough without escaping
+    else if (strcmp(tag, "raw-html") == 0) {
+        for (int i = 0; i < elem.childCount(); i++) {
+            ItemReader child = elem.childAt(i);
+            if (child.isString()) {
+                String* str = child.asString();
+                if (str && str->chars) {
+                    // Output raw HTML without escaping
+                    format_cm_raw_text(ctx, str->chars, str->len);
+                }
+            }
+        }
     }
     // Unknown elements - try to format as generic
     else {
