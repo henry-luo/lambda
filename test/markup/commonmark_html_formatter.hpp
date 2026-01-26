@@ -197,6 +197,9 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
 
         if (is_block) {
             String* info = elem.get_string_attr("info");
+            if (!info || info->len == 0) {
+                info = elem.get_string_attr("language");
+            }
             if (info && info->len > 0) {
                 stringbuf_append_str(sb, "<pre><code class=\"language-");
                 format_cm_text(ctx, info->chars, info->len);
