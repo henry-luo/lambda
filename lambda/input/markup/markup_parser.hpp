@@ -40,6 +40,25 @@ struct ParseConfig {
 };
 
 /**
+ * LinkDefinition - Stores a link reference definition
+ *
+ * CommonMark: [label]: url "title"
+ * The label is normalized (case-insensitive, whitespace collapsed).
+ */
+struct LinkDefinition {
+    char label[256];     // normalized label (lowercase, whitespace collapsed)
+    char url[1024];      // destination URL
+    char title[512];     // optional title
+    bool has_title;
+
+    LinkDefinition() : has_title(false) {
+        label[0] = '\0';
+        url[0] = '\0';
+        title[0] = '\0';
+    }
+};
+
+/**
  * ParserState - Current parsing state
  */
 struct ParserState {
@@ -92,6 +111,9 @@ struct ParserState {
     }
 };
 
+// Maximum number of link definitions per document
+constexpr int MAX_LINK_DEFINITIONS = 256;
+
 /**
  * MarkupParser - Main parser class for lightweight markup
  *
@@ -113,6 +135,10 @@ public:
 
     // Parsing state
     ParserState state;
+
+    // Link reference definitions
+    LinkDefinition link_defs_[MAX_LINK_DEFINITIONS];
+    int link_def_count_;
 
     // ========================================================================
     // Construction / Destruction
@@ -239,6 +265,44 @@ public:
     SourceLocation location() const {
         return tracker.location();
     }
+
+    // ========================================================================
+    // Link Reference Definition Management
+    // ========================================================================
+
+    /**
+     * Normalize a link label for case-insensitive matching
+     *
+     * CommonMark: Labels are normalized by:
+     * - Converting to lowercase
+     * - Collapsing whitespace to single space
+     * - Trimming leading/trailing whitespace
+     */
+    static void normalizeLabel(const char* label, size_t len, char* out, size_t out_size);
+
+    /**
+     * Add a link reference definition
+     *
+     * @param label The link label (will be normalized)
+     * @param label_len Length of label
+     * @param url The destination URL
+     * @param url_len Length of URL
+     * @param title Optional title (nullptr if none)
+     * @param title_len Length of title
+     * @return true if added successfully, false if duplicate or limit reached
+     */
+    bool addLinkDefinition(const char* label, size_t label_len,
+                           const char* url, size_t url_len,
+                           const char* title, size_t title_len);
+
+    /**
+     * Look up a link reference definition
+     *
+     * @param label The link label to look up (will be normalized)
+     * @param label_len Length of label
+     * @return Pointer to LinkDefinition or nullptr if not found
+     */
+    const LinkDefinition* getLinkDefinition(const char* label, size_t label_len) const;
 
 private:
     // Split content into lines

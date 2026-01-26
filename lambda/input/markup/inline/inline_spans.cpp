@@ -46,12 +46,17 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
+    log_debug("parse_inline_spans: input='%s', len=%zu", text, strlen(text));
+
     // For simple text without markup, return as string
     // Check for any potential inline markup characters
     if (!strpbrk(text, "*_`[!~\\$:^{@'")) {
+        log_debug("parse_inline_spans: no markup chars, returning as plain string");
         String* content = create_string(parser, text);
         return Item{.item = s2it(content)};
     }
+
+    log_debug("parse_inline_spans: creating span, parsing inline content");
 
     // Create span container for mixed inline content
     Element* span = create_element(parser, "span");
@@ -345,10 +350,48 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             continue;
         }
 
-        // Handle escape sequences
-        if (*pos == '\\' && *(pos+1)) {
-            // Skip backslash and add next character literally
-            pos++;
+        // Handle escape sequences (CommonMark §2.4)
+        if (*pos == '\\') {
+            char next = *(pos+1);
+            log_debug("escape: found backslash, next char='%c' (0x%02x)", next, (unsigned char)next);
+
+            // Hard line break: backslash at end of line
+            if (next == '\n' || next == '\r') {
+                // Flush accumulated text
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                // Create <br> element for hard line break
+                Element* br = create_element(parser, "br");
+                if (br) {
+                    list_push((List*)span, Item{.item = (uint64_t)br});
+                    increment_element_content_length(span);
+                }
+
+                pos += 2;
+                // Skip optional \r after \n or vice versa (CRLF handling)
+                if ((next == '\r' && *pos == '\n') || (next == '\n' && *pos == '\r')) {
+                    pos++;
+                }
+                continue;
+            }
+
+            // Escapable punctuation: add the character literally without backslash
+            if (next && is_escapable(next)) {
+                log_debug("escape: handling escapable char '%c'", next);
+                pos++; // Skip backslash
+                stringbuf_append_char(sb, *pos);
+                pos++;
+                continue;
+            }
+
+            // Not an escape sequence: treat backslash as literal
+            log_debug("escape: not escapable, keeping backslash");
             stringbuf_append_char(sb, *pos);
             pos++;
             continue;

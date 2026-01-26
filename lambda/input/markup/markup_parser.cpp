@@ -28,6 +28,7 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
     , lines(nullptr)
     , line_count(0)
     , current_line(0)
+    , link_def_count_(0)
 {
     // Get format adapter
     if (config.format == Format::AUTO_DETECT) {
@@ -246,6 +247,113 @@ void MarkupParser::noteUnresolvedReference(const char* ref_type, const char* ref
 
     addMarkupError(MarkupErrorCategory::REFERENCE, msg,
                    "Define the reference or check spelling");
+}
+
+// ============================================================================
+// Link Reference Definition Management
+// ============================================================================
+
+void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size_t out_size) {
+    if (!label || !out || out_size == 0) return;
+
+    size_t out_pos = 0;
+    bool in_whitespace = true; // start true to skip leading whitespace
+
+    for (size_t i = 0; i < len && out_pos < out_size - 1; i++) {
+        char c = label[i];
+
+        // Check for whitespace (space, tab, newline)
+        bool is_ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+
+        if (is_ws) {
+            if (!in_whitespace && out_pos < out_size - 1) {
+                // collapse whitespace to single space
+                out[out_pos++] = ' ';
+            }
+            in_whitespace = true;
+        } else {
+            // convert to lowercase
+            if (c >= 'A' && c <= 'Z') {
+                c = c - 'A' + 'a';
+            }
+            out[out_pos++] = c;
+            in_whitespace = false;
+        }
+    }
+
+    // trim trailing space
+    if (out_pos > 0 && out[out_pos - 1] == ' ') {
+        out_pos--;
+    }
+
+    out[out_pos] = '\0';
+}
+
+bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
+                                      const char* url, size_t url_len,
+                                      const char* title, size_t title_len) {
+    if (!label || label_len == 0 || !url || url_len == 0) {
+        return false;
+    }
+
+    if (link_def_count_ >= MAX_LINK_DEFINITIONS) {
+        log_debug("markup_parser: link definition limit reached (%d)", MAX_LINK_DEFINITIONS);
+        return false;
+    }
+
+    // normalize the label
+    char normalized[256];
+    normalizeLabel(label, label_len, normalized, sizeof(normalized));
+
+    // check for duplicate (first definition wins per CommonMark)
+    for (int i = 0; i < link_def_count_; i++) {
+        if (strcmp(link_defs_[i].label, normalized) == 0) {
+            // duplicate, ignore
+            return false;
+        }
+    }
+
+    // add new definition
+    LinkDefinition& def = link_defs_[link_def_count_];
+
+    strncpy(def.label, normalized, sizeof(def.label) - 1);
+    def.label[sizeof(def.label) - 1] = '\0';
+
+    size_t copy_len = (url_len < sizeof(def.url) - 1) ? url_len : sizeof(def.url) - 1;
+    memcpy(def.url, url, copy_len);
+    def.url[copy_len] = '\0';
+
+    if (title && title_len > 0) {
+        copy_len = (title_len < sizeof(def.title) - 1) ? title_len : sizeof(def.title) - 1;
+        memcpy(def.title, title, copy_len);
+        def.title[copy_len] = '\0';
+        def.has_title = true;
+    } else {
+        def.title[0] = '\0';
+        def.has_title = false;
+    }
+
+    link_def_count_++;
+    log_debug("markup_parser: added link definition [%s] -> %s", def.label, def.url);
+    return true;
+}
+
+const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t label_len) const {
+    if (!label || label_len == 0) {
+        return nullptr;
+    }
+
+    // normalize the label for lookup
+    char normalized[256];
+    normalizeLabel(label, label_len, normalized, sizeof(normalized));
+
+    for (int i = 0; i < link_def_count_; i++) {
+        if (strcmp(link_defs_[i].label, normalized) == 0) {
+            return &link_defs_[i];
+        }
+    }
+
+    return nullptr;
 }
 
 } // namespace markup
