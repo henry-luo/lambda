@@ -273,6 +273,7 @@ typedef struct Context {
     void* (*context_alloc)(int size, TypeId type_id);
     bool run_main; // whether to run main procedure on start
     bool disable_string_merging; // disable automatic string merging in list_push
+    uintptr_t stack_limit; // stack overflow check limit (from lambda_stack_init)
 } Context;
 
 #ifndef LAMBDA_STATIC

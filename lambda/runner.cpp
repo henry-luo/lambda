@@ -385,6 +385,9 @@ void runner_setup_context(Runner* runner) {
     // Initialize stack overflow protection (once per thread)
     lambda_stack_init();
     
+    // Store stack_limit in context for fast access from JIT-compiled code
+    runner->context.stack_limit = _lambda_stack_limit;
+    
     runner->context.pool = runner->script->pool;
     runner->context.type_list = runner->script->type_list;
     
