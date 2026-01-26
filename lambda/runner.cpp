@@ -1,7 +1,7 @@
 #include <time.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
-#include "lambda_error.h"
+#include "lambda-error.h"
 
 #if _WIN32
 #include <windows.h>
