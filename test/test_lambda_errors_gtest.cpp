@@ -213,6 +213,136 @@ TEST_F(ErrorFormattingTest, ErrorCategoryName) {
 }
 
 //==============================================================================
+// Source Context Tests
+//==============================================================================
+
+class SourceContextTest : public ::testing::Test {
+protected:
+    void SetUp() override {}
+    void TearDown() override {}
+    
+    const char* sample_source = 
+        "let x = 10\n"
+        "let y = 20\n"
+        "let z = x + y + undefined_var\n"
+        "print(z)\n";
+};
+
+TEST_F(SourceContextTest, GetSourceLine) {
+    // line 1
+    char* line1 = err_get_source_line(sample_source, 1);
+    ASSERT_NE(line1, nullptr);
+    EXPECT_STREQ(line1, "let x = 10");
+    free(line1);
+    
+    // line 3
+    char* line3 = err_get_source_line(sample_source, 3);
+    ASSERT_NE(line3, nullptr);
+    EXPECT_STREQ(line3, "let z = x + y + undefined_var");
+    free(line3);
+    
+    // line beyond source
+    char* line10 = err_get_source_line(sample_source, 10);
+    EXPECT_EQ(line10, nullptr);
+}
+
+TEST_F(SourceContextTest, GetSourceLineCount) {
+    // sample_source has 4 lines, but trailing newline counts as start of line 5
+    int count = err_get_source_line_count(sample_source);
+    EXPECT_GE(count, 4);  // at least 4 lines
+    
+    // single line with no newline
+    EXPECT_EQ(err_get_source_line_count("hello"), 1);
+    
+    // empty source
+    EXPECT_EQ(err_get_source_line_count(""), 1);
+    EXPECT_EQ(err_get_source_line_count(nullptr), 0);
+}
+
+TEST_F(SourceContextTest, ExtractContext) {
+    SourceLocation loc = {
+        .file = "test.ls",
+        .line = 3,
+        .column = 17,
+        .end_line = 3,
+        .end_column = 29,  // span "undefined_var"
+        .source = nullptr
+    };
+    
+    LambdaError* error = err_create(ERR_UNDEFINED_VARIABLE, "undefined variable 'undefined_var'", &loc);
+    
+    // extract context (stores source reference)
+    err_extract_context(error, sample_source, 2);
+    EXPECT_EQ(error->location.source, sample_source);
+    
+    err_free(error);
+}
+
+TEST_F(SourceContextTest, FormatWithContextLines) {
+    SourceLocation loc = {
+        .file = "test.ls",
+        .line = 3,
+        .column = 17,
+        .end_line = 3,
+        .end_column = 29,
+        .source = nullptr
+    };
+    
+    LambdaError* error = err_create(ERR_UNDEFINED_VARIABLE, "undefined variable 'undefined_var'", &loc);
+    err_extract_context(error, sample_source, 1);
+    
+    char* formatted = err_format_with_context(error, 1);
+    ASSERT_NE(formatted, nullptr);
+    
+    // should contain location prefix
+    EXPECT_NE(strstr(formatted, "test.ls:3:17"), nullptr) 
+        << "Should contain location prefix\n" << formatted;
+    
+    // should contain error code
+    EXPECT_NE(strstr(formatted, "E202"), nullptr) 
+        << "Should contain error code\n" << formatted;
+    
+    // should contain the error line
+    EXPECT_NE(strstr(formatted, "let z = x + y + undefined_var"), nullptr)
+        << "Should contain source line\n" << formatted;
+    
+    // should contain carets for span
+    EXPECT_NE(strstr(formatted, "^"), nullptr)
+        << "Should contain caret pointer\n" << formatted;
+    
+    free(formatted);
+    err_free(error);
+}
+
+TEST_F(SourceContextTest, FormatWithMultipleContextLines) {
+    SourceLocation loc = {
+        .file = "script.ls",
+        .line = 3,
+        .column = 5,
+        .end_line = 3,
+        .end_column = 5,
+        .source = nullptr
+    };
+    
+    LambdaError* error = err_create(ERR_TYPE_MISMATCH, "expected int, found string", &loc);
+    err_extract_context(error, sample_source, 2);
+    
+    char* formatted = err_format_with_context(error, 2);
+    ASSERT_NE(formatted, nullptr);
+    
+    // with context_lines=2, should show lines 1,2,3,4,5 (but only 4 exist)
+    EXPECT_NE(strstr(formatted, "let x = 10"), nullptr)
+        << "Should contain context line before\n" << formatted;
+    EXPECT_NE(strstr(formatted, "let y = 20"), nullptr)
+        << "Should contain context line before\n" << formatted;
+    EXPECT_NE(strstr(formatted, "let z ="), nullptr)
+        << "Should contain error line\n" << formatted;
+    
+    free(formatted);
+    err_free(error);
+}
+
+//==============================================================================
 // Stack Trace Tests (basic - full test requires runtime context)
 //==============================================================================
 
