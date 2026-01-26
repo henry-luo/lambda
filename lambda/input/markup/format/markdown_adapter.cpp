@@ -74,13 +74,19 @@ public:
                         while (hash_start > info.text_start && *(hash_start - 1) == '#') {
                             hash_start--;
                         }
-                        // Must be preceded by whitespace to be closing sequence
-                        if (hash_start > info.text_start && (*(hash_start - 1) == ' ' || *(hash_start - 1) == '\t')) {
-                            info.text_end = hash_start - 1;
-                            // Trim trailing whitespace before the closing #s
-                            while (info.text_end > info.text_start &&
-                                   (*(info.text_end - 1) == ' ' || *(info.text_end - 1) == '\t')) {
-                                info.text_end--;
+                        // Must be preceded by whitespace OR be at start of content (entire content is closing #s)
+                        if (hash_start == info.text_start ||
+                            (hash_start > info.text_start && (*(hash_start - 1) == ' ' || *(hash_start - 1) == '\t'))) {
+                            if (hash_start == info.text_start) {
+                                // Entire content is just closing #s - result is empty
+                                info.text_end = info.text_start;
+                            } else {
+                                info.text_end = hash_start - 1;
+                                // Trim trailing whitespace before the closing #s
+                                while (info.text_end > info.text_start &&
+                                       (*(info.text_end - 1) == ' ' || *(info.text_end - 1) == '\t')) {
+                                    info.text_end--;
+                                }
                             }
                         }
                         break;

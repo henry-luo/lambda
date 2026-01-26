@@ -196,7 +196,8 @@ static const char* try_parse_html_tag(const char* start) {
     }
 
     // Open tag: parse attributes
-    bool need_whitespace = false;  // After tag name, attributes can start without ws
+    // CommonMark: "An attribute consists of whitespace, an attribute name, ..."
+    // So whitespace is required before each attribute, including the first one.
 
     while (*p) {
         const char* before_ws = p;
@@ -207,8 +208,8 @@ static const char* try_parse_html_tag(const char* start) {
         if (*p == '>') return p + 1;
         if (p[0] == '/' && p[1] == '>') return p + 2;  // Self-closing
 
-        // Must have whitespace before another attribute
-        if (need_whitespace && !had_whitespace) {
+        // Must have whitespace before any attribute (including first)
+        if (!had_whitespace) {
             return nullptr;
         }
 
@@ -249,8 +250,7 @@ static const char* try_parse_html_tag(const char* start) {
                 }
             }
         }
-        // After parsing an attribute, need whitespace before next attribute
-        need_whitespace = true;
+        // Loop will check for whitespace before next attribute
     }
 
     return nullptr;  // Didn't find >
@@ -274,7 +274,7 @@ static inline bool is_uri_scheme_char(char c) {
  * CommonMark spec: A URI autolink consists of <, an absolute URI, and >.
  * An absolute URI is a scheme followed by : followed by zero or more characters
  * other than ASCII control characters, space, <, and >.
- * Scheme: [A-Za-z][A-Za-z0-9+.-]{0,31}
+ * Scheme: [A-Za-z][A-Za-z0-9+.-]{1,31} (2-32 chars total)
  */
 static const char* try_parse_autolink_uri(const char* start, const char** url_start, const char** url_end) {
     if (*start != '<') return nullptr;
@@ -285,15 +285,15 @@ static const char* try_parse_autolink_uri(const char* start, const char** url_st
     if (!is_ascii_letter(*p)) return nullptr;
     p++;
 
-    // Read scheme: [A-Za-z0-9+.-]{0,31}
+    // Read scheme: [A-Za-z0-9+.-]{1,31} (need at least 1 more for min 2 char scheme)
     int scheme_len = 1;
     while (is_uri_scheme_char(*p) && scheme_len < 32) {
         scheme_len++;
         p++;
     }
 
-    // Must have : after scheme
-    if (*p != ':') return nullptr;
+    // Must have : after scheme, and scheme must be at least 2 chars
+    if (*p != ':' || scheme_len < 2) return nullptr;
     p++;
 
     *url_start = start + 1;
