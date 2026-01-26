@@ -10,6 +10,7 @@
  */
 #include "markup_parser.hpp"
 #include "format_adapter.hpp"
+#include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
 #include "lib/log.h"
 #include <cstring>
@@ -184,6 +185,22 @@ Item MarkupParser::parseContent(const char* content) {
     // Reset state
     resetState();
 
+    // Pre-scan for link reference definitions (CommonMark: they can appear anywhere)
+    // This ensures forward references work correctly
+    if (config.format == Format::MARKDOWN) {
+        for (int i = 0; i < line_count; i++) {
+            const char* line = lines[i];
+            if (line && is_link_definition_start(line)) {
+                // Try to parse the link definition
+                int saved_line = current_line;
+                current_line = i;
+                parse_link_definition(this, line);
+                current_line = saved_line;
+            }
+        }
+        log_debug("markup_parser: pre-scanned %d link definitions", link_def_count_);
+    }
+
     // Parse document using modular block parsers
     log_debug("markup_parser: parsing %d lines with format '%s'",
               line_count, adapter_->name());
@@ -278,6 +295,44 @@ void MarkupParser::noteUnresolvedReference(const char* ref_type, const char* ref
 // Link Reference Definition Management
 // ============================================================================
 
+/**
+ * is_escapable_char - Check if character can be backslash-escaped per CommonMark
+ */
+static bool is_escapable_char(char c) {
+    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
+           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
+           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
+           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
+           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
+           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
+           c == '}' || c == '~';
+}
+
+/**
+ * unescape_to_buffer - Process backslash escapes in a string into a buffer
+ *
+ * Copies the input string to the output buffer, processing backslash escapes.
+ * For example, \* becomes * and \[ becomes [.
+ */
+static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_t dst_size) {
+    if (!src || !dst || dst_size == 0) return;
+
+    size_t out_pos = 0;
+    const char* end = src + src_len;
+
+    while (src < end && out_pos < dst_size - 1) {
+        if (*src == '\\' && src + 1 < end && is_escapable_char(*(src + 1))) {
+            // skip the backslash, copy the escaped character
+            src++;
+            dst[out_pos++] = *src++;
+        } else {
+            dst[out_pos++] = *src++;
+        }
+    }
+
+    dst[out_pos] = '\0';
+}
+
 void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size_t out_size) {
     if (!label || !out || out_size == 0) return;
 
@@ -344,14 +399,11 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
     strncpy(def.label, normalized, sizeof(def.label) - 1);
     def.label[sizeof(def.label) - 1] = '\0';
 
-    size_t copy_len = (url_len < sizeof(def.url) - 1) ? url_len : sizeof(def.url) - 1;
-    memcpy(def.url, url, copy_len);
-    def.url[copy_len] = '\0';
+    // unescape backslash escapes in URL and title
+    unescape_to_buffer(url, url_len, def.url, sizeof(def.url));
 
     if (title && title_len > 0) {
-        copy_len = (title_len < sizeof(def.title) - 1) ? title_len : sizeof(def.title) - 1;
-        memcpy(def.title, title, copy_len);
-        def.title[copy_len] = '\0';
+        unescape_to_buffer(title, title_len, def.title, sizeof(def.title));
         def.has_title = true;
     } else {
         def.title[0] = '\0';

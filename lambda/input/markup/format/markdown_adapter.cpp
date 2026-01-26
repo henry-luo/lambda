@@ -105,6 +105,29 @@ public:
                 return info; // This line is a thematic break, not header text
             }
 
+            // Setext heading content cannot start with block structure indicators
+            // (blockquotes, list items) - those take precedence
+            if (*p == '>') {
+                return info; // Blockquote marker, not setext heading content
+            }
+            // Check for list markers: -, +, *, or digits followed by . or )
+            if (*p == '-' || *p == '+' || *p == '*') {
+                const char* after = p + 1;
+                if (*after == ' ' || *after == '\t' || *after == '\0' || *after == '\r' || *after == '\n') {
+                    return info; // List marker, not setext heading content
+                }
+            }
+            if (isdigit((unsigned char)*p)) {
+                const char* d = p;
+                while (isdigit((unsigned char)*d)) d++;
+                if (*d == '.' || *d == ')') {
+                    const char* after = d + 1;
+                    if (*after == ' ' || *after == '\t' || *after == '\0' || *after == '\r' || *after == '\n') {
+                        return info; // Ordered list marker, not setext heading content
+                    }
+                }
+            }
+
             // Check the underline (next_line)
             const char* ul = next_line;
             int ul_spaces = 0;
