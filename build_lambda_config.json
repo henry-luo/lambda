@@ -259,6 +259,10 @@
             "lang": "c++17",
             "source_patterns": [
                 "lambda/input/input*.cpp",
+                "lambda/input/markup/*.cpp",
+                "lambda/input/markup/block/*.cpp",
+                "lambda/input/markup/inline/*.cpp",
+                "lambda/input/markup/format/*.cpp",
                 "lambda/format/format*.cpp"
             ],
             "exclude_patterns": [
