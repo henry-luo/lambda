@@ -199,8 +199,9 @@ typedef struct FuncDebugInfo {
 
 // Build debug info table from MIR-compiled functions (call after MIR_link)
 // Collects function addresses, sorts by address, and computes boundaries
+// If func_name_map is provided, maps MIR internal names to Lambda user-friendly names
 // Returns opaque pointer to internal list (sorted by address)
-void* build_debug_info_table(void* mir_ctx);
+void* build_debug_info_table(void* mir_ctx, void* func_name_map);
 
 // Look up debug info for a native address using binary search
 // Returns NULL if address is not in any Lambda function (runtime/system code)

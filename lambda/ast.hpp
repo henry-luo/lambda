@@ -345,6 +345,10 @@ struct Script : Input {
     
     // Debug info for stack traces (function address → source mapping)
     ArrayList* debug_info;      // list of FuncDebugInfo*
+    
+    // Function name mapping: MIR internal name → Lambda human-readable name
+    // Used by build_debug_info_table() to get user-friendly names
+    struct hashmap* func_name_map;  // maps char* (MIR name) → char* (Lambda name)
 };
 
 typedef struct Runtime Runtime;

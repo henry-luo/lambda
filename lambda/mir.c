@@ -414,6 +414,7 @@ void jit_cleanup(MIR_context_t ctx) {
 // lambda_error.cpp since they don't use MIR APIs.
 
 #include "lambda_error.h"
+#include "../lib/hashmap.h"
 
 // Simple dynamic array for debug info (matches struct in lambda_error.cpp)
 typedef struct {
@@ -434,13 +435,15 @@ static int compare_debug_info(const void* a, const void* b) {
 // Build debug info table from MIR-compiled functions
 // This collects all function addresses, sorts them, and computes boundaries
 // using address ordering (next func start = current func end)
-void* build_debug_info_table(void* mir_ctx) {
+// If func_name_map is provided, it maps MIR internal names to Lambda user-friendly names
+void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
     if (!mir_ctx) {
         log_debug("build_debug_info_table: mir_ctx is NULL");
         return NULL;
     }
     
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
+    struct hashmap* name_map = (struct hashmap*)func_name_map;
     
     // Create list to hold debug info entries
     DebugInfoList* debug_list = (DebugInfoList*)malloc(sizeof(DebugInfoList));
@@ -472,12 +475,24 @@ void* build_debug_info_table(void* mir_ctx) {
                 void* code_addr = item->u.func->machine_code ? item->u.func->machine_code : item->addr;
                 info->native_addr_start = code_addr;
                 info->native_addr_end = NULL;  // computed later
-                info->lambda_func_name = item->u.func->name;
+                
+                // Look up Lambda name from map, fall back to MIR name
+                const char* mir_name = item->u.func->name;
+                const char* lambda_name = mir_name;  // default to MIR name
+                if (name_map) {
+                    // map stores char*[2] = {mir_name, lambda_name}
+                    const char** found = (const char**)hashmap_get(name_map, &mir_name);
+                    if (found) {
+                        lambda_name = found[1];  // second element is Lambda name
+                        log_debug("build_debug_info_table: mapped MIR name '%s' -> Lambda name '%s'", mir_name, lambda_name);
+                    }
+                }
+                info->lambda_func_name = lambda_name;
                 info->source_file = NULL;  // could be set from AST if available
                 info->source_line = 0;
                 
                 log_debug("build_debug_info_table: func '%s' addr=%p machine_code=%p call_addr=%p",
-                          item->u.func->name, item->addr, item->u.func->machine_code, item->u.func->call_addr);
+                          lambda_name, item->addr, item->u.func->machine_code, item->u.func->call_addr);
                 
                 // grow list if needed
                 if (debug_list->length >= debug_list->capacity) {
