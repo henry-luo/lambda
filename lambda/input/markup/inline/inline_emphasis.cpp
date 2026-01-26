@@ -1,17 +1,18 @@
 /**
  * inline_emphasis.cpp - Emphasis (bold/italic) parser
  *
- * Parses bold and italic text using format-appropriate delimiters:
+ * Parses bold and italic text using CommonMark flanking rules:
  * - Markdown: **bold**, *italic*, __bold__, _italic_
  * - MediaWiki: '''bold''', ''italic''
  * - Other formats via adapter delimiters
  *
- * Phase 3 of Markup Parser Refactoring:
- * Extracted from input-markup.cpp parse_bold_italic() (lines 1997-2080)
+ * CommonMark §6.2: Emphasis and strong emphasis
+ * Uses flanking delimiter run rules for proper parsing.
  */
 #include "inline_common.hpp"
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 
 namespace lambda {
 namespace markup {
@@ -33,6 +34,109 @@ static inline void increment_element_content_length(Element* elem) {
 }
 
 /**
+ * is_punctuation - Check if character is Unicode punctuation
+ *
+ * For ASCII, this includes: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
+ */
+static inline bool is_punctuation(char c) {
+    return is_ascii_punctuation(c);
+}
+
+/**
+ * is_whitespace - Check if character is Unicode whitespace
+ */
+static inline bool is_whitespace(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+/**
+ * Determine if a delimiter run is left-flanking
+ *
+ * CommonMark: A left-flanking delimiter run is a delimiter run that is:
+ * (1) not followed by Unicode whitespace, and either
+ * (2a) not followed by a Unicode punctuation character, or
+ * (2b) followed by a Unicode punctuation character and preceded by
+ *      Unicode whitespace or a Unicode punctuation character.
+ */
+static bool is_left_flanking(const char* text, const char* run_start, const char* run_end) {
+    char after = *run_end;
+    if (!after || is_whitespace(after)) return false;
+
+    char before = (run_start > text) ? *(run_start - 1) : ' ';
+
+    if (!is_punctuation(after)) {
+        return true; // (2a)
+    }
+
+    // (2b) followed by punctuation, check if preceded by whitespace or punctuation
+    return is_whitespace(before) || is_punctuation(before);
+}
+
+/**
+ * Determine if a delimiter run is right-flanking
+ *
+ * CommonMark: A right-flanking delimiter run is a delimiter run that is:
+ * (1) not preceded by Unicode whitespace, and either
+ * (2a) not preceded by a Unicode punctuation character, or
+ * (2b) preceded by a Unicode punctuation character and followed by
+ *      Unicode whitespace or a Unicode punctuation character.
+ */
+static bool is_right_flanking(const char* text, const char* run_start, const char* run_end) {
+    char before = (run_start > text) ? *(run_start - 1) : ' ';
+    if (is_whitespace(before)) return false;
+
+    char after = *run_end;
+    if (!after) after = ' '; // treat end of string as space
+
+    if (!is_punctuation(before)) {
+        return true; // (2a)
+    }
+
+    // (2b) preceded by punctuation, check if followed by whitespace or punctuation
+    return is_whitespace(after) || is_punctuation(after);
+}
+
+/**
+ * Determine if delimiter run can open emphasis
+ *
+ * For * : left-flanking
+ * For _ : left-flanking AND (not right-flanking OR preceded by punctuation)
+ */
+static bool can_open(char marker, const char* text, const char* run_start, const char* run_end) {
+    bool left = is_left_flanking(text, run_start, run_end);
+    if (!left) return false;
+
+    if (marker == '*') return true;
+
+    // For underscore
+    bool right = is_right_flanking(text, run_start, run_end);
+    if (!right) return true;
+
+    char before = (run_start > text) ? *(run_start - 1) : ' ';
+    return is_punctuation(before);
+}
+
+/**
+ * Determine if delimiter run can close emphasis
+ *
+ * For * : right-flanking
+ * For _ : right-flanking AND (not left-flanking OR followed by punctuation)
+ */
+static bool can_close(char marker, const char* text, const char* run_start, const char* run_end) {
+    bool right = is_right_flanking(text, run_start, run_end);
+    if (!right) return false;
+
+    if (marker == '*') return true;
+
+    // For underscore
+    bool left = is_left_flanking(text, run_start, run_end);
+    if (!left) return true;
+
+    char after = *run_end;
+    return is_punctuation(after);
+}
+
+/**
  * parse_emphasis - Parse bold and italic text
  *
  * Handles:
@@ -45,6 +149,7 @@ static inline void increment_element_content_length(Element* elem) {
  * @return Item containing emphasis element, or ITEM_UNDEFINED if not matched
  */
 Item parse_emphasis(MarkupParser* parser, const char** text) {
+    const char* full_text = *text; // for flanking checks (we need preceding context)
     const char* start = *text;
     char marker = *start;  // * or _
 
@@ -53,56 +158,83 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Count consecutive markers
-    int count = 0;
+    // Count consecutive markers (opening run)
+    int open_count = 0;
     const char* content_start = start;
     while (*content_start == marker) {
-        count++;
+        open_count++;
         content_start++;
     }
 
-    if (count == 0) {
+    if (open_count == 0) {
         (*text)++;
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Find closing markers
+    // Check if this can open emphasis
+    if (!can_open(marker, full_text, start, content_start)) {
+        (*text)++;
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Find matching closing run
     const char* pos = content_start;
-    const char* end = nullptr;
-    int end_count = 0;
+    const char* close_start = nullptr;
+    int close_count = 0;
 
     while (*pos) {
         if (*pos == marker) {
-            const char* marker_start = pos;
-            int marker_count = 0;
+            const char* run_start = pos;
+            int run_len = 0;
             while (*pos == marker) {
-                marker_count++;
+                run_len++;
                 pos++;
             }
 
-            if (marker_count >= count) {
-                end = marker_start;
-                end_count = marker_count;
-                break;
+            // Check if this run can close
+            if (can_close(marker, full_text, run_start, pos)) {
+                // CommonMark rule: if opener and closer have different run lengths,
+                // they can still match but consume the minimum
+                if (run_len >= open_count || (run_len >= 1 && open_count >= 1)) {
+                    close_start = run_start;
+                    close_count = run_len;
+                    break;
+                }
             }
+        } else if (*pos == '\\' && *(pos+1)) {
+            // Skip escaped character
+            pos += 2;
         } else {
             pos++;
         }
     }
 
-    if (!end) {
+    if (!close_start) {
         // No closing marker found, treat as plain text
         (*text)++;
         return Item{.item = ITEM_UNDEFINED};
     }
 
+    // Determine how many delimiters to use (rule of 3)
+    // If sum of open and close is multiple of 3, use min; otherwise use as is
+    int use_count = (open_count < close_count) ? open_count : close_count;
+    if (use_count > 3) use_count = 3;
+
+    // For rule of 3: if both are multiples of 3 and their sum is multiple of 3,
+    // we should not match (to allow *foo**bar* patterns)
+    // This is a simplification - full CommonMark needs stack-based algorithm
+
+    // Adjust content_start based on use_count
+    const char* actual_content_start = start + use_count;
+    const char* actual_content_end = close_start;
+
     // Create appropriate element based on marker count
     Element* elem;
-    if (count >= 3) {
-        // Bold+italic: create strong with nested em
+    if (use_count >= 3) {
+        // Bold+italic: create strong with nested em (or em with nested strong)
         elem = create_element(parser, "strong");
         if (!elem) {
-            *text = end + count;
+            *text = close_start + use_count;
             return Item{.item = ITEM_ERROR};
         }
 
@@ -110,10 +242,10 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
         Element* inner_em = create_element(parser, "em");
         if (inner_em) {
             // Extract content
-            size_t content_len = end - content_start;
+            size_t content_len = actual_content_end - actual_content_start;
             char* content = (char*)malloc(content_len + 1);
             if (content) {
-                strncpy(content, content_start, content_len);
+                memcpy(content, actual_content_start, content_len);
                 content[content_len] = '\0';
 
                 // Recursively parse inner content
@@ -129,19 +261,19 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
             list_push((List*)elem, Item{.item = (uint64_t)inner_em});
             increment_element_content_length(elem);
         }
-    } else if (count >= 2) {
+    } else if (use_count >= 2) {
         // Bold
         elem = create_element(parser, "strong");
         if (!elem) {
-            *text = end + count;
+            *text = close_start + use_count;
             return Item{.item = ITEM_ERROR};
         }
 
         // Extract and parse content
-        size_t content_len = end - content_start;
+        size_t content_len = actual_content_end - actual_content_start;
         char* content = (char*)malloc(content_len + 1);
         if (content) {
-            strncpy(content, content_start, content_len);
+            memcpy(content, actual_content_start, content_len);
             content[content_len] = '\0';
 
             Item inner_content = parse_inline_spans(parser, content);
@@ -155,15 +287,15 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
         // Italic
         elem = create_element(parser, "em");
         if (!elem) {
-            *text = end + count;
+            *text = close_start + use_count;
             return Item{.item = ITEM_ERROR};
         }
 
         // Extract and parse content
-        size_t content_len = end - content_start;
+        size_t content_len = actual_content_end - actual_content_start;
         char* content = (char*)malloc(content_len + 1);
         if (content) {
-            strncpy(content, content_start, content_len);
+            memcpy(content, actual_content_start, content_len);
             content[content_len] = '\0';
 
             Item inner_content = parse_inline_spans(parser, content);
@@ -175,8 +307,8 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
         }
     }
 
-    // Move past closing markers (use original count, not end_count)
-    *text = end + count;
+    // Move past closing markers
+    *text = close_start + use_count;
     return Item{.item = (uint64_t)elem};
 }
 
