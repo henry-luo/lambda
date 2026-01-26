@@ -185,6 +185,225 @@ bool should_use_tco(AstFuncNode* func_node) {
     return has_tail;
 }
 
+/**
+ * Check if an expression contains ANY recursive call to the given function
+ * (regardless of position - tail or non-tail).
+ */
+static bool has_any_recursive_call(AstNode* expr, AstFuncNode* func_node) {
+    if (!expr || !func_node) return false;
+    
+    switch (expr->node_type) {
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)expr;
+        // Check if this call is recursive
+        if (is_recursive_call(call, func_node)) return true;
+        // Also check the arguments for recursive calls
+        AstNode* arg = call->argument;
+        while (arg) {
+            if (has_any_recursive_call(arg, func_node)) return true;
+            arg = arg->next;
+        }
+        // Check the callee expression (for chained calls)
+        return has_any_recursive_call(call->function, func_node);
+    }
+    
+    case AST_NODE_PRIMARY:
+        return has_any_recursive_call(((AstPrimaryNode*)expr)->expr, func_node);
+    
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_IF_STAM: {
+        AstIfNode* if_node = (AstIfNode*)expr;
+        if (has_any_recursive_call(if_node->cond, func_node)) return true;
+        if (has_any_recursive_call(if_node->then, func_node)) return true;
+        if (has_any_recursive_call(if_node->otherwise, func_node)) return true;
+        return false;
+    }
+    
+    case AST_NODE_BINARY: {
+        AstBinaryNode* bin = (AstBinaryNode*)expr;
+        return has_any_recursive_call(bin->left, func_node) || 
+               has_any_recursive_call(bin->right, func_node);
+    }
+    
+    case AST_NODE_UNARY:
+        return has_any_recursive_call(((AstUnaryNode*)expr)->operand, func_node);
+    
+    case AST_NODE_LIST:
+    case AST_NODE_CONTENT: {
+        AstListNode* list = (AstListNode*)expr;
+        AstNode* item = list->item;
+        while (item) {
+            if (has_any_recursive_call(item, func_node)) return true;
+            item = item->next;
+        }
+        // Also check declarations
+        AstNode* decl = list->declare;
+        while (decl) {
+            if (has_any_recursive_call(decl, func_node)) return true;
+            decl = decl->next;
+        }
+        return false;
+    }
+    
+    case AST_NODE_ASSIGN: {
+        AstNamedNode* asn = (AstNamedNode*)expr;
+        return has_any_recursive_call(asn->as, func_node);
+    }
+    
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM: {
+        AstForNode* for_node = (AstForNode*)expr;
+        if (has_any_recursive_call(for_node->loop, func_node)) return true;
+        return has_any_recursive_call(for_node->then, func_node);
+    }
+    
+    case AST_NODE_LOOP: {
+        AstNamedNode* loop = (AstNamedNode*)expr;
+        return has_any_recursive_call(loop->as, func_node);
+    }
+    
+    case AST_NODE_INDEX_EXPR:
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)expr;
+        return has_any_recursive_call(field->object, func_node) ||
+               has_any_recursive_call(field->field, func_node);
+    }
+    
+    case AST_NODE_ARRAY: {
+        AstArrayNode* arr = (AstArrayNode*)expr;
+        AstNode* item = arr->item;
+        while (item) {
+            if (has_any_recursive_call(item, func_node)) return true;
+            item = item->next;
+        }
+        return false;
+    }
+    
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT: {
+        AstMapNode* map = (AstMapNode*)expr;
+        AstNode* item = map->item;
+        while (item) {
+            if (has_any_recursive_call(item, func_node)) return true;
+            item = item->next;
+        }
+        if (expr->node_type == AST_NODE_ELEMENT) {
+            AstNode* content = ((AstElementNode*)expr)->content;
+            while (content) {
+                if (has_any_recursive_call(content, func_node)) return true;
+                content = content->next;
+            }
+        }
+        return false;
+    }
+    
+    default:
+        // Literals, identifiers, etc. don't contain calls
+        return false;
+    }
+}
+
+/**
+ * Check if an expression has recursive calls that are NOT in tail position.
+ * This traverses the AST and finds recursive calls, excluding those in tail position.
+ */
+static bool has_non_tail_recursive_call(AstNode* expr, AstFuncNode* func_node, bool in_tail_position) {
+    if (!expr || !func_node) return false;
+    
+    switch (expr->node_type) {
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)expr;
+        // If this call is recursive and NOT in tail position, it's a non-tail recursive call
+        if (is_recursive_call(call, func_node) && !in_tail_position) {
+            return true;
+        }
+        // Check arguments - they are NEVER in tail position
+        AstNode* arg = call->argument;
+        while (arg) {
+            if (has_non_tail_recursive_call(arg, func_node, false)) return true;
+            arg = arg->next;
+        }
+        // Callee is not in tail position either
+        return has_non_tail_recursive_call(call->function, func_node, false);
+    }
+    
+    case AST_NODE_PRIMARY:
+        return has_non_tail_recursive_call(((AstPrimaryNode*)expr)->expr, func_node, in_tail_position);
+    
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* if_node = (AstIfNode*)expr;
+        // Condition is NOT in tail position
+        if (has_non_tail_recursive_call(if_node->cond, func_node, false)) return true;
+        // Both branches inherit tail position from parent
+        if (has_non_tail_recursive_call(if_node->then, func_node, in_tail_position)) return true;
+        if (has_non_tail_recursive_call(if_node->otherwise, func_node, in_tail_position)) return true;
+        return false;
+    }
+    
+    case AST_NODE_BINARY: {
+        // Binary operations: neither operand is in tail position (result is computed after)
+        AstBinaryNode* bin = (AstBinaryNode*)expr;
+        return has_non_tail_recursive_call(bin->left, func_node, false) || 
+               has_non_tail_recursive_call(bin->right, func_node, false);
+    }
+    
+    case AST_NODE_UNARY:
+        // Unary operand is not in tail position
+        return has_non_tail_recursive_call(((AstUnaryNode*)expr)->operand, func_node, false);
+    
+    case AST_NODE_LIST: {
+        AstListNode* list = (AstListNode*)expr;
+        // Declarations are not in tail position
+        AstNode* decl = list->declare;
+        while (decl) {
+            if (has_non_tail_recursive_call(decl, func_node, false)) return true;
+            decl = decl->next;
+        }
+        // All items except the last are not in tail position
+        AstNode* item = list->item;
+        while (item) {
+            bool is_last = (item->next == nullptr);
+            if (has_non_tail_recursive_call(item, func_node, is_last && in_tail_position)) return true;
+            item = item->next;
+        }
+        return false;
+    }
+    
+    case AST_NODE_ASSIGN: {
+        // The assigned expression is not in tail position
+        AstNamedNode* asn = (AstNamedNode*)expr;
+        return has_non_tail_recursive_call(asn->as, func_node, false);
+    }
+    
+    default:
+        // For other node types, recursively check but assume not in tail position
+        // This is conservative but safe
+        return has_any_recursive_call(expr, func_node) && !in_tail_position;
+    }
+}
+
+/**
+ * Determine if a function with TCO is fully safe (no stack growth).
+ * A TCO function is safe if ALL its recursive calls are in tail position.
+ * If there are non-tail recursive calls, it still needs stack checks.
+ */
+bool is_tco_function_safe(AstFuncNode* func_node) {
+    if (!func_node || !func_node->body) return false;
+    
+    // Check if there are any recursive calls NOT in tail position
+    bool has_non_tail = has_non_tail_recursive_call(func_node->body, func_node, true);
+    
+    if (has_non_tail) {
+        log_debug("TCO: function '%.*s' has non-tail recursive calls, needs stack check",
+            (int)func_node->name->len, func_node->name->chars);
+        return false;
+    }
+    
+    log_debug("TCO: function '%.*s' is fully safe (all recursion is tail recursion)",
+        (int)func_node->name->len, func_node->name->chars);
+    return true;
+}
+
 void SafetyAnalyzer::init_system_functions() {
     // System functions that accept user callbacks - callers should check
     const char* callback_funcs[] = {

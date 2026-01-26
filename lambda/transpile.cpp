@@ -2635,11 +2635,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     }
     
     // Check if this function should use Tail Call Optimization
-    bool use_tco = should_use_tco(fn_node);
+    // A function can only use TCO if ALL recursive calls are in tail position
+    // (otherwise, transforming just the tail calls would break the function)
+    bool use_tco = should_use_tco(fn_node) && is_tco_function_safe(fn_node);
     
     // Stack overflow check for potentially recursive functions
     // TCO functions don't need stack checks since they won't grow the stack
-    bool needs_stack_check = !use_tco;  // Skip stack check for TCO-optimized functions
+    bool needs_stack_check = !use_tco;
+    
     if (needs_stack_check) {
         strbuf_append_str(tp->code_buf, " LAMBDA_STACK_CHECK(\"");
         // Use function name if available, otherwise use assignment name
