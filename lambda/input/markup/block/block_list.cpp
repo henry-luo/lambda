@@ -273,18 +273,18 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             if (item_content && *item_content && is_list_item(item_content)) {
                 // The content is a nested list - recursively extract nested list content
                 // We directly create the nested list elements here instead of modifying parser state
-                
+
                 // Create the nested list by parsing the content as a list item line
                 char nested_marker = get_list_marker(item_content);
                 bool nested_is_ordered = is_ordered_marker(nested_marker);
-                
+
                 Element* nested_list = create_element(parser, nested_is_ordered ? "ol" : "ul");
                 if (nested_list) {
                     Element* nested_item = create_element(parser, "li");
                     if (nested_item) {
                         // Get the content after the nested marker
                         const char* nested_content = get_list_item_content(item_content, nested_is_ordered);
-                        
+
                         // Check for further nesting
                         if (nested_content && *nested_content && is_list_item(nested_content)) {
                             // Triple nesting: recursively handle (limit to simple case)
@@ -300,11 +300,11 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                                 increment_element_content_length(nested_item);
                             }
                         }
-                        
+
                         list_push((List*)nested_list, Item{.item = (uint64_t)nested_item});
                         increment_element_content_length(nested_list);
                     }
-                    
+
                     list_push((List*)item, Item{.item = (uint64_t)nested_list});
                     increment_element_content_length(item);
                 }
@@ -365,20 +365,20 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
     // If the list is loose, wrap each item's direct text content in <p> tags
     if (is_loose) {
         add_attribute_to_element(parser, list, "loose", "true");
-        
+
         // Iterate through list items and wrap text content in <p>
         List* list_items = (List*)list;
         for (long li = 0; li < list_items->length; li++) {
             Element* item = (Element*)list_items->items[li].item;
             if (!item) continue;
-            
+
             List* item_children = (List*)item;
             if (item_children->length == 0) continue;
-            
+
             // Check if first child is text/span (not already a block element)
             Item first_child = item_children->items[0];
             TypeId first_type = get_type_id(first_child);
-            
+
             if (first_type == LMD_TYPE_STRING || first_type == LMD_TYPE_SYMBOL) {
                 // Wrap in paragraph
                 Element* p = create_element(parser, "p");
@@ -392,7 +392,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 if (first_elem && first_elem->type) {
                     TypeElmt* elmt_type = (TypeElmt*)first_elem->type;
                     const char* tag = elmt_type->name.str;
-                    
+
                     // If it's a span (inline container), wrap in paragraph
                     if (tag && strcmp(tag, "span") == 0) {
                         Element* p = create_element(parser, "p");
