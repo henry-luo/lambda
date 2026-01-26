@@ -3,9 +3,34 @@
  * @brief Lambda Structured Error Handling Implementation
  */
 
-// Enable POSIX functions like strdup
+// Enable POSIX/GNU functions before any system includes
 #if !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L
+#endif
+#if !defined(_GNU_SOURCE) && (defined(__linux__) || defined(__APPLE__))
+#define _GNU_SOURCE
+#endif
+
+// Platform-specific includes (must come before other includes for feature macros)
+#if defined(__APPLE__) || defined(__linux__)
+#include <execinfo.h>
+#include <pthread.h>
+
+// dladdr and Dl_info for resolving C function names from addresses
+extern "C" {
+    typedef struct {
+        const char  *dli_fname;  // Pathname of shared object
+        void        *dli_fbase;  // Base address of shared object
+        const char  *dli_sname;  // Name of nearest symbol
+        void        *dli_saddr;  // Address of nearest symbol
+    } Dl_info;
+    
+    int dladdr(const void *addr, Dl_info *info);
+}
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
 #endif
 
 #include "lambda_error.h"
@@ -18,15 +43,6 @@
 #include <stdarg.h>
 
 // Note: MIR headers removed - build_debug_info_table is now in mir.c
-
-#if defined(__APPLE__) || defined(__linux__)
-#include <execinfo.h>
-#include <pthread.h>
-#endif
-
-#if defined(_WIN32)
-#include <windows.h>
-#endif
 
 // ============================================================================
 // Helper: string duplication (portable replacement for strdup)
@@ -476,9 +492,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
     StackFrame* result = NULL;
     StackFrame** tail = &result;
     int depth = 0;
-    int skip_frames = 2;  // skip err_capture_stack_trace and its caller
-    int frames_skipped = 0;
-    int lambda_frames_found = 0;
+    int total_frames_found = 0;
     
     void** frame_ptr = (void**)fp;
     
@@ -507,14 +521,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
         log_debug("err_capture_stack_trace: depth=%d fp=%p return_addr=%p prev_fp=%p",
                   depth, frame_ptr, return_addr, prev_fp);
         
-        // Skip the first few frames (internal functions)
-        if (frames_skipped < skip_frames) {
-            frames_skipped++;
-            frame_ptr = (void**)prev_fp;
-            continue;
-        }
-        
-        // Look up return address in debug info table
+        // Look up return address in debug info table (Lambda JIT functions)
         FuncDebugInfo* info = lookup_debug_info(debug_info_list, return_addr);
         
         if (info) {
@@ -528,15 +535,58 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
             frame->function_name = info->lambda_func_name;
             frame->location.file = info->source_file;
             frame->location.line = info->source_line;
+            frame->is_native = false;
             frame->next = NULL;
             
             *tail = frame;
             tail = &frame->next;
-            lambda_frames_found++;
+            total_frames_found++;
             depth++;
         }
-        // Note: We only include Lambda frames, not runtime frames
-        // This keeps the stack trace focused on user code
+#if defined(__APPLE__) || defined(__linux__)
+        else {
+            // Try to resolve C function name using dladdr
+            Dl_info dl_info;
+            if (dladdr(return_addr, &dl_info) && dl_info.dli_sname) {
+                const char* name = dl_info.dli_sname;
+                
+                // Filter functions to include:
+                // - fn_* (Lambda sys funcs)
+                // Skip:
+                // - set_runtime_error, err_* (error machinery)
+                // - start, main (system entry points - except Lambda main)
+                // - internal runtime functions
+                
+                bool is_lambda_sys_func = (strncmp(name, "fn_", 3) == 0);
+                bool is_error_machinery = (strncmp(name, "set_runtime_error", 17) == 0) ||
+                                          (strncmp(name, "err_", 4) == 0);
+                bool is_system_entry = (strcmp(name, "start") == 0) ||
+                                       (strcmp(name, "main") == 0);  // C main, not Lambda main
+                
+                if (is_lambda_sys_func && !is_error_machinery) {
+                    log_debug("err_capture_stack_trace: found C func '%s' at %p",
+                              name, return_addr);
+                    
+                    StackFrame* frame = (StackFrame*)calloc(1, sizeof(StackFrame));
+                    if (!frame) break;
+                    
+                    frame->function_name = err_strdup(name);
+                    frame->location.file = NULL;
+                    frame->location.line = 0;
+                    frame->is_native = true;
+                    frame->next = NULL;
+                    
+                    *tail = frame;
+                    tail = &frame->next;
+                    total_frames_found++;
+                    depth++;
+                } else {
+                    log_debug("err_capture_stack_trace: skipping C func '%s' at %p",
+                              name, return_addr);
+                }
+            }
+        }
+#endif
         
         // Follow chain: check prev_fp is valid (must be higher address on stack)
         if (prev_fp == NULL) {
@@ -553,7 +603,7 @@ StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames) {
         frame_ptr = (void**)prev_fp;
     }
     
-    log_info("err_capture_stack_trace: captured %d Lambda frames", lambda_frames_found);
+    log_info("err_capture_stack_trace: captured %d frames (Lambda + C)", total_frames_found);
     return result;
 }
 
@@ -685,8 +735,12 @@ char* err_format_with_context(LambdaError* error, int context_lines) {
         StackFrame* frame = error->stack_trace;
         int depth = 0;
         while (frame && (size_t)pos < sizeof(buffer) - 100) {
-            pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  %d: at %s", depth,
-                frame->function_name ? frame->function_name : "<unknown>");
+            const char* name = frame->function_name ? frame->function_name : "<unknown>";
+            if (frame->is_native) {
+                pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  %d: at %s [native]", depth, name);
+            } else {
+                pos += snprintf(buffer + pos, sizeof(buffer) - pos, "  %d: at %s", depth, name);
+            }
             if (frame->location.file) {
                 pos += snprintf(buffer + pos, sizeof(buffer) - pos, " (%s:%u)", 
                     frame->location.file, frame->location.line);
@@ -720,8 +774,12 @@ void err_print_stack_trace(StackFrame* trace) {
     fprintf(stderr, "Stack trace:\n");
     int depth = 0;
     while (trace) {
-        fprintf(stderr, "  %d: at %s", depth,
-            trace->function_name ? trace->function_name : "<unknown>");
+        const char* name = trace->function_name ? trace->function_name : "<unknown>";
+        if (trace->is_native) {
+            fprintf(stderr, "  %d: at %s [native]", depth, name);
+        } else {
+            fprintf(stderr, "  %d: at %s", depth, name);
+        }
         if (trace->location.file) {
             fprintf(stderr, " (%s:%u)", trace->location.file, trace->location.line);
         }
