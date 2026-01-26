@@ -20,6 +20,9 @@
 // Unified LaTeX pipeline
 #include "tex/tex_document_model.hpp"
 
+// Error handling with stack traces
+#include "lambda_error.h"
+
 // Graph layout includes
 #include "../radiant/layout_graph.hpp"
 #include "../radiant/graph_to_svg.hpp"
@@ -49,6 +52,13 @@ extern "C" {
     void write_text_file(const char *filename, const char *content);
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
+
+// Thread-local context from runner.cpp (for error handling)
+extern __thread EvalContext* context;
+
+// Accessor for persistent last error from runner.cpp
+LambdaError* get_persistent_last_error();
+void clear_persistent_last_error();
 
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 AstValidationResult* exec_validation(int argc, char* argv[]);
@@ -343,7 +353,17 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     // Check if the result is an error
     if (output_input->root.type_id() == LMD_TYPE_ERROR) {
         log_debug("Script returned ItemError");
-        fprintf(stderr, "Error: Script execution failed: %s\n", script_path);
+        
+        // Print detailed error with stack trace if available
+        // Use persistent error since context may have gone out of scope
+        LambdaError* last_error = get_persistent_last_error();
+        if (last_error) {
+            err_print(last_error);
+            clear_persistent_last_error();  // free after printing
+        } else {
+            fprintf(stderr, "Error: Script execution failed: %s\n", script_path);
+        }
+        
         // Clean up the error output (it has its own pool)
         // The Input struct was allocated from its own pool, so we just destroy the pool
         if (output_input->pool) {
