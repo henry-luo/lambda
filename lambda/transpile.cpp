@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/hashmap.h"
 
 extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
@@ -8,6 +9,78 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
+
+// hashmap comparison and hashing functions for func_name_map
+static int func_name_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    return strcmp(*(const char**)a, *(const char**)b);
+}
+
+static uint64_t func_name_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const char* name = *(const char**)item;
+    return hashmap_sip(name, strlen(name), seed0, seed1);
+}
+
+// Register a function name mapping: MIR name -> Lambda name
+// This is called during transpilation to build the name mapping table
+// For closures/anonymous functions, defer registration until transpile_fn_expr where we know the assign name
+static void register_func_name(Transpiler* tp, AstFuncNode* fn_node) {
+    // For anonymous functions (no fn_node->name), don't register here
+    // They will be registered in transpile_fn_expr with the assign name context
+    if (!fn_node->name || !fn_node->name->chars) {
+        return;
+    }
+    
+    // create the map if it doesn't exist
+    if (!tp->func_name_map) {
+        tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, NULL, NULL);
+    }
+    
+    // build MIR name (internal name like _outer36)
+    StrBuf* mir_name_buf = strbuf_new_cap(64);
+    write_fn_name(mir_name_buf, fn_node, NULL);
+    char* mir_name = strdup(mir_name_buf->str);
+    strbuf_free(mir_name_buf);
+    
+    // use the function name
+    const char* lambda_name = fn_node->name->chars;
+    
+    // store in map: key is MIR name, value is Lambda name (strdup both for ownership)
+    char* entry[2] = { mir_name, strdup(lambda_name) };
+    hashmap_set(tp->func_name_map, entry);
+    
+    log_debug("register_func_name: '%s' -> '%s'", mir_name, lambda_name);
+}
+
+// Register a closure/anonymous function name at the point where we know its contextual name
+static void register_func_name_with_context(Transpiler* tp, AstFuncNode* fn_node) {
+    // create the map if it doesn't exist
+    if (!tp->func_name_map) {
+        tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, NULL, NULL);
+    }
+    
+    // build MIR name (internal name like _f317)
+    StrBuf* mir_name_buf = strbuf_new_cap(64);
+    write_fn_name(mir_name_buf, fn_node, NULL);
+    char* mir_name = strdup(mir_name_buf->str);
+    strbuf_free(mir_name_buf);
+    
+    // determine Lambda name: prefer fn name, then current_assign_name, then <anonymous>
+    const char* lambda_name = NULL;
+    if (fn_node->name && fn_node->name->chars) {
+        lambda_name = fn_node->name->chars;
+    } else if (tp->current_assign_name && tp->current_assign_name->chars) {
+        lambda_name = tp->current_assign_name->chars;
+    } else {
+        lambda_name = "<anonymous>";
+    }
+    
+    // store in map: key is MIR name, value is Lambda name (strdup both for ownership)
+    char* entry[2] = { mir_name, strdup(lambda_name) };
+    hashmap_set(tp->func_name_map, entry);
+    
+    log_debug("register_func_name_with_context: '%s' -> '%s'", mir_name, lambda_name);
+}
 
 void write_node_source(Transpiler* tp, TSNode node) {
     int start_byte = ts_node_start_byte(node);
@@ -2397,6 +2470,9 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     bool is_closure = (fn_node->captures != nullptr);
     
+    // Register function name mapping for stack traces (MIR name -> Lambda name)
+    register_func_name(tp, fn_node);
+    
     // Note: closure env struct is defined in pre_define_closure_envs()
     
     strbuf_append_char(tp->code_buf, '\n');
@@ -2546,6 +2622,10 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     int arity = fn_type ? fn_type->param_count : 0;
+    
+    // Register closure name mapping for stack traces (MIR name -> Lambda name)
+    // This is done here because at this point we have access to current_assign_name
+    register_func_name_with_context(tp, fn_node);
     
     if (fn_node->captures) {
         // closure: allocate env, populate captured values, call to_closure
