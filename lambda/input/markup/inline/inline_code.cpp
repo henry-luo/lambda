@@ -113,23 +113,49 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
         strncpy(content, start, content_len);
         content[content_len] = '\0';
 
-        // Trim leading/trailing space if using double backticks
-        // This handles cases like `` `code` `` → `code`
-        char* trimmed = content;
-        size_t trimmed_len = content_len;
-        if (backticks > 1 && content_len > 0) {
-            if (content[0] == ' ') {
-                trimmed++;
-                trimmed_len--;
+        // CommonMark spec: Line endings are converted to spaces
+        // Replace \r\n, \r, \n with single space
+        char* write_ptr = content;
+        const char* read_ptr = content;
+        while (*read_ptr) {
+            if (*read_ptr == '\r' || *read_ptr == '\n') {
+                // Skip \r\n as single unit
+                if (*read_ptr == '\r' && *(read_ptr + 1) == '\n') {
+                    read_ptr++;
+                }
+                read_ptr++;
+                *write_ptr++ = ' ';
+            } else {
+                *write_ptr++ = *read_ptr++;
             }
-            if (trimmed_len > 0 && trimmed[trimmed_len - 1] == ' ') {
-                trimmed_len--;
+        }
+        *write_ptr = '\0';
+        size_t normalized_len = write_ptr - content;
+
+        // CommonMark spec: If the resulting string both begins AND ends with
+        // a space character, but does not consist entirely of space characters,
+        // a single space character is removed from the front and back.
+        char* trimmed = content;
+        size_t trimmed_len = normalized_len;
+
+        if (trimmed_len >= 2 && trimmed[0] == ' ' && trimmed[trimmed_len - 1] == ' ') {
+            // Check if it's not all spaces
+            bool has_non_space = false;
+            for (size_t i = 0; i < trimmed_len; i++) {
+                if (trimmed[i] != ' ') {
+                    has_non_space = true;
+                    break;
+                }
+            }
+            if (has_non_space) {
+                trimmed++;
+                trimmed_len -= 2;
             }
         }
 
         // Create content string (use trimmed if applicable)
         String* code_text;
-        if (trimmed != content || trimmed_len != content_len) {
+        if (trimmed != content || trimmed_len != normalized_len) {
             char* final_content = (char*)malloc(trimmed_len + 1);
             if (final_content) {
                 strncpy(final_content, trimmed, trimmed_len);
