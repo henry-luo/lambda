@@ -68,6 +68,7 @@ typedef struct Heap Heap;
 typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
 typedef struct num_stack_t num_stack_t;
+struct LambdaError;  // forward declaration
 
 typedef struct EvalContext : Context {
     Heap* heap;
@@ -79,6 +80,11 @@ typedef struct EvalContext : Context {
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
     SchemaValidator* validator; // Schema validator for document validation
+    
+    // Error handling and stack trace support
+    ArrayList* debug_info;      // function address → source mapping for stack traces
+    const char* current_file;   // current source file (for error reporting)
+    LambdaError* last_error;    // most recent runtime error (owned)
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

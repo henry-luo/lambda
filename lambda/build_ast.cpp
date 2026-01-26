@@ -1,7 +1,9 @@
 #include "transpiler.hpp"
+#include "lambda_error.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/log.h"
+#include "../lib/arraylist.h"
 #include <errno.h>
 #include <algorithm>  // for std::max
 
@@ -203,14 +205,63 @@ bool types_compatible(Type* arg_type, Type* param_type) {
 void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     tp->error_count++;
     
-    // Format and log error message
+    // Format error message
     char error_msg[512];
     va_list args;
     va_start(args, format);
     vsnprintf(error_msg, sizeof(error_msg), format, args);
     va_end(args);
     
+    // Create structured error
+    SourceLocation loc = src_loc(tp->reference, line, 1);
+    loc.source = tp->source;
+    LambdaError* error = err_create(ERR_TYPE_MISMATCH, error_msg, &loc);
+    
+    // Store in error list if available
+    if (tp->errors) {
+        arraylist_append(tp->errors, error);
+    }
+    
+    // Also log for backward compatibility
     log_error("type_error (line %d): %s", line, error_msg);
+    
+    // Check threshold
+    if (tp->error_count >= tp->max_errors) {
+        log_error("error_threshold: max errors (%d) reached", tp->max_errors);
+    }
+}
+
+// Record a semantic error with error code
+void record_semantic_error(Transpiler* tp, TSNode node, LambdaErrorCode code, const char* format, ...) {
+    tp->error_count++;
+    
+    // Get location from TSNode
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+    
+    // Format error message
+    char error_msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(error_msg, sizeof(error_msg), format, args);
+    va_end(args);
+    
+    // Create structured error with span
+    SourceLocation loc = src_loc_span(tp->reference, 
+        start.row + 1, start.column + 1,
+        end.row + 1, end.column + 1);
+    loc.source = tp->source;
+    LambdaError* error = err_create(code, error_msg, &loc);
+    
+    // Store in error list if available
+    if (tp->errors) {
+        arraylist_append(tp->errors, error);
+    }
+    
+    // Also log for backward compatibility
+    log_error("error[E%d] at %s:%u:%u: %s", code, 
+        tp->reference ? tp->reference : "<unknown>",
+        start.row + 1, start.column + 1, error_msg);
     
     // Check threshold
     if (tp->error_count >= tp->max_errors) {
@@ -495,6 +546,21 @@ void* alloc_const(Transpiler* tp, size_t size) {
     return bytes;
 }
 
+// check if a name is a reserved type keyword
+bool is_type_keyword(StrView name) {
+    static const char* type_keywords[] = {
+        "null", "any", "error", "bool", "int", "int64", "float", "decimal", "number",
+        "date", "time", "datetime", "symbol", "string", "binary",
+        "list", "array", "map", "element", "entity", "object", "type", "function"
+    };
+    for (size_t i = 0; i < sizeof(type_keywords) / sizeof(type_keywords[0]); i++) {
+        if (strview_equal(&name, type_keywords[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
     NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
@@ -560,13 +626,15 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
 
     // defensive check: if either object or field building failed, return error
     if (!ast_node->object || !ast_node->field) {
-        log_error("Error: Failed to build field expression - object or field is null");
+        record_semantic_error(tp, array_node, ERR_SYNTAX_ERROR, 
+            "Failed to build field expression - invalid object or field");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
     // additional safety: check if object has valid type
     if (!ast_node->object->type) {
-        log_error("Error: Field expression object missing type information");
+        record_semantic_error(tp, array_node, ERR_INTERNAL_ERROR,
+            "Field expression object missing type information");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
     }
@@ -673,7 +741,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             if (!tp->current_scope->is_proc) {
                 const char* fn_name = is_method_call ? method_name.str : func_name.str;
                 int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
-                log_error("Error: procedure '%.*s' cannot be called in a function",
+                record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                    "procedure '%.*s' cannot be called in a function",
                     fn_name_len, fn_name);
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
@@ -702,7 +771,8 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
             TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
             if (func_type->is_proc && !tp->current_scope->is_proc) {
-                log_error("Error: procedure '%.*s' cannot be called in a function",
+                record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                    "procedure '%.*s' cannot be called in a function",
                     (int)func_name.length, func_name.str);
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
@@ -1319,7 +1389,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
     else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_POW; }
     else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
-    else if (strview_equal(&op, "_/")) { ast_node->op = OPERATOR_IDIV; }
+    else if (strview_equal(&op, "div")) { ast_node->op = OPERATOR_IDIV; }
     else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
     else if (strview_equal(&op, "==")) { ast_node->op = OPERATOR_EQ; }
     else if (strview_equal(&op, "!=")) { ast_node->op = OPERATOR_NE; }
@@ -1611,6 +1681,13 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
+    // check if the variable name is a reserved type keyword
+    if (!is_type_definition && is_type_keyword(name_view)) {
+        int line = ts_node_start_point(name).row + 1;
+        record_type_error(tp, line, "Error: '%.*s' is a reserved type keyword and cannot be used as a variable name",
+            (int)name_view.length, name_view.str);
+    }
+
     TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
     TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
 
@@ -1773,8 +1850,8 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
 }
 
 AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     log_debug("build type annotation");
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     StrView type_name = ts_node_source(tp, type_node);
     if (strview_equal(&type_name, "null")) {
         ast_node->type = (Type*)&LIT_TYPE_NULL;
@@ -2935,7 +3012,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_INDEX:
         // This is likely a parsing error - index tokens should not appear as standalone expressions
         // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
-        log_error("Error: Unexpected index token - check for malformed range syntax (use 'to' instead of '..')");
+        // or case like "12.34.56"
+        record_semantic_error(tp, expr_node, ERR_INVALID_LITERAL,
+            "Unexpected token - possible malformed number or range (use 'to' instead of '..')");
         return NULL;
     default:
         log_debug("unknown syntax node: %s", ts_node_type(expr_node));

@@ -399,11 +399,11 @@
             "named": false
           },
           {
-            "type": "_/",
+            "type": "and",
             "named": false
           },
           {
-            "type": "and",
+            "type": "div",
             "named": false
           },
           {
@@ -759,19 +759,7 @@
           "named": true
         },
         {
-          "type": "binary_expr",
-          "named": true
-        },
-        {
           "type": "content",
-          "named": true
-        },
-        {
-          "type": "fn_expr",
-          "named": true
-        },
-        {
-          "type": "for_expr",
           "named": true
         },
         {
@@ -779,19 +767,11 @@
           "named": true
         },
         {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "primary_expr",
+          "type": "map",
           "named": true
         },
         {
           "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
           "named": true
         }
       ]
@@ -2652,10 +2632,6 @@
     "named": false
   },
   {
-    "type": "_/",
-    "named": false
-  },
-  {
     "type": "and",
     "named": false
   },
@@ -2716,6 +2692,10 @@
     "named": true
   },
   {
+    "type": "div",
+    "named": false
+  },
+  {
     "type": "element",
     "named": false
   },
@@ -2741,11 +2721,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -2873,11 +2853,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

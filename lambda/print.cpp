@@ -208,8 +208,13 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
         if (!field->name) { // nested map
             log_debug("nested map at field %d: %p", i, data);
             Map *nest_map = *(Map**)data;
-            TypeMap *nest_map_type = (TypeMap*)nest_map->type;
-            print_named_items(strbuf, nest_map_type, nest_map->data, depth, indent, is_attrs);
+            if (!nest_map) {
+                log_error("expected a map, got null pointer at field %d", i);
+                strbuf_append_str(strbuf, "[null nested map]");
+            } else {
+                TypeMap *nest_map_type = (TypeMap*)nest_map->type;
+                print_named_items(strbuf, nest_map_type, nest_map->data, depth, indent, is_attrs);
+            }
         }
         else {
             // Safety check for field name and type
