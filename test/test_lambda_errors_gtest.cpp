@@ -366,6 +366,91 @@ TEST_F(NegativeScriptTest, InvalidTypeAnnotation) {
 }
 
 //==============================================================================
+// Categorized Negative Tests - Organized by error category
+//==============================================================================
+
+// --- Syntax Error Tests (1xx) ---
+
+TEST_F(NegativeScriptTest, SyntaxError_UnterminatedString) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/unterminated_string.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_MissingParen) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/missing_paren.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_MissingBrace) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/missing_brace.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_InvalidNumber) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/invalid_number.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_UnexpectedToken) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/unexpected_token.ls");
+}
+
+TEST_F(NegativeScriptTest, SyntaxError_UnexpectedEOF) {
+    ExpectErrorWithoutCrash("test/lambda/negative/syntax/unexpected_eof.ls");
+}
+
+// --- Semantic Error Tests (2xx) ---
+
+TEST_F(NegativeScriptTest, SemanticError_UndefinedVariable) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/undefined_variable.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_UndefinedFunction) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/undefined_function.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_TypeMismatch) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/type_mismatch.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ArityMismatch) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/arity_mismatch.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_DuplicateParam) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_param.ls");
+}
+
+// --- Runtime Error Tests (3xx) ---
+
+TEST_F(NegativeScriptTest, RuntimeError_NullReference) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/null_reference.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_DivisionByZero) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/division_by_zero.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_IndexOutOfBounds) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/index_out_of_bounds.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_InvalidOperation) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/invalid_operation.ls");
+}
+
+// Note: Stack overflow test is disabled by default as it may be slow or affect CI
+// TEST_F(NegativeScriptTest, RuntimeError_StackOverflow) {
+//     ExpectErrorWithoutCrash("test/lambda/negative/runtime/stack_overflow.ls");
+// }
+
+// --- I/O Error Tests (4xx) ---
+
+TEST_F(NegativeScriptTest, IOError_FileNotFound) {
+    ExpectErrorWithoutCrash("test/lambda/negative/io/file_not_found.ls");
+}
+
+TEST_F(NegativeScriptTest, IOError_ParseError) {
+    ExpectErrorWithoutCrash("test/lambda/negative/io/parse_error.ls");
+}
+
+//==============================================================================
 // Main
 //==============================================================================
 
