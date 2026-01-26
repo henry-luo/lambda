@@ -372,6 +372,136 @@ To add support for a new markup format:
 
 4. **Add file extension mapping** in `detect_format_from_extension()`.
 
+## HTML5 Integration for Nested HTML
+
+Markdown documents can contain raw HTML that should pass through without markdown processing. The markup parser integrates with Lambda's HTML5 parser to build a proper DOM tree from all HTML fragments encountered during parsing.
+
+### Architecture
+
+```
+Markdown Document
+      │
+      ▼
+┌─────────────────────┐
+│   MarkupParser      │
+│                     │
+│  html5_parser_ ─────┼──► Html5Parser (fragment mode)
+│                     │         │
+└─────────────────────┘         ▼
+      │                   Accumulates all HTML
+      │                         │
+      ▼                         ▼
+┌─────────────────────────────────────┐
+│            Output Document          │
+│                                     │
+│  doc                                │
+│  ├── body (markdown content)        │
+│  │   ├── html-block (raw HTML)      │
+│  │   ├── p (paragraphs)             │
+│  │   │   └── raw-html (inline HTML) │
+│  │   └── ...                        │
+│  └── html-dom (parsed HTML5 DOM)    │
+│      └── table, div, etc...         │
+└─────────────────────────────────────┘
+```
+
+### Key Components
+
+1. **`Html5Parser* html5_parser_`** - A shared HTML5 fragment parser that accumulates all HTML content from the markdown document into a single DOM tree.
+
+2. **`getOrCreateHtml5Parser()`** - Lazily creates the HTML5 parser on first HTML encounter.
+
+3. **`parseHtmlFragment(const char* html)`** - Feeds HTML content (block or inline) to the shared parser.
+
+4. **`getHtmlBody()`** - Retrieves the parsed HTML body element after document parsing completes.
+
+### HTML Block Handling
+
+When a block-level HTML element is detected (CommonMark types 1-7), the parser:
+
+1. Collects all lines belonging to the HTML block
+2. Creates an `html-block` element with the raw content (for verbatim output)
+3. Feeds the HTML to the shared HTML5 parser via `parseHtmlFragment()`
+
+```cpp
+// block_html.cpp
+Item parse_html_block(MarkupParser* parser, const char* line) {
+    // ... collect HTML block content into sb ...
+
+    // Feed to HTML5 parser for DOM construction
+    parser->parseHtmlFragment(sb->str->chars);
+
+    // Also preserve raw content for output
+    Element* html_elem = create_element(parser, "html-block");
+    // ... add raw content as child ...
+}
+```
+
+### Inline HTML Handling
+
+Inline HTML tags (`<em>`, `</em>`, `<a href="...">`, etc.) are similarly processed:
+
+1. The inline parser detects and extracts the HTML tag/comment/CDATA
+2. Creates a `raw-html` element with the verbatim content
+3. Feeds the HTML to the shared parser
+
+### HTML5 Fragment Parsing
+
+The HTML5 parser operates in "fragment mode" for markdown integration:
+
+```cpp
+// html5_tree_builder.cpp
+Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input) {
+    Html5Parser* parser = html5_parser_create(pool, arena, input);
+
+    // Set up minimal document structure: #document -> html -> body
+    parser->document = builder.element("#document").final().element;
+    parser->html_element = builder.element("html").final().element;
+    Element* body = builder.element("body").final().element;
+
+    // Start in body mode (fragments are parsed as body content)
+    parser->mode = HTML5_MODE_IN_BODY;
+
+    return parser;
+}
+```
+
+This allows:
+- Parsing without requiring a complete HTML document
+- Proper handling of nested structures (tables, lists, etc.)
+- Application of HTML5 parsing rules (implicit tbody, etc.)
+
+### Document Output
+
+After parsing completes, the `html-dom` element is added to the document if any HTML was encountered:
+
+```cpp
+// block_document.cpp
+Item parse_document(MarkupParser* parser) {
+    // ... parse all blocks ...
+
+    // Add HTML DOM if HTML was parsed
+    Element* html_body = parser->getHtmlBody();
+    if (html_body && html_body->length > 0) {
+        Element* html_dom = create_element(parser, "html-dom");
+        // Copy children from HTML5 body
+        for (size_t i = 0; i < html_body->length; i++) {
+            list_push((List*)html_dom, html_body->items[i]);
+        }
+        list_push((List*)doc, Item{.element = html_dom});
+    }
+
+    return Item{.element = doc};
+}
+```
+
+### Benefits
+
+- **Single DOM tree** - All HTML fragments are parsed into one coherent DOM
+- **Proper nesting** - HTML5 parser handles implicit elements and nesting rules
+- **Dual output** - Raw HTML preserved in `html-block`/`raw-html` for verbatim output, parsed DOM in `html-dom` for semantic processing
+- **Lazy initialization** - HTML5 parser only created when HTML content is encountered
+
 ## Testing
 
 Unit tests are in `test/test_markup_modular_gtest.cpp`:
