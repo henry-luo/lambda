@@ -33,7 +33,7 @@ static const std::vector<std::string> KEYWORDS = {
 };
 
 static const std::vector<std::string> OPERATORS = {
-    "+", "-", "*", "/", "_/", "%", "^",
+    "+", "-", "*", "/", "div", "%", "^",
     "==", "!=", "<", ">", "<=", ">=",
     "and", "or", "not"
 };

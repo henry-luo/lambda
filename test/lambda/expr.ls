@@ -4,7 +4,7 @@ let b=" world", c=12;
 if c > 10 { 'great' }
 
 // 'b' should overide global 'b'
-(let a=0.5, let b=2, a + 3 * b, 100.5, 3 + 7.4, 5 / 2, 5_/2, 3^3, 17 % 9, (2.5 > 1), 
+(let a=0.5, let b=2, a + 3 * b, 100.5, 3 + 7.4, 5 / 2, 5 div 2, 3^3, 17 % 9, (2.5 > 1), 
   (5 <= 5.0), ((7-3.5) > 5), "hello"++"world",
   if (100>90) 'great' else 'not great')
 
@@ -33,7 +33,9 @@ let d:float = 123
 let nested = {a:678, {b:123, c:456}, d:789}
 nested.a;  nested.b;  nested.c;  nested.d;
 
-<elmt a:12, &{b:34}, c:56>
+let mp2 = {d:78}
+<elmt a:12, {b:34}, c:56, {mp2}>  // dynamic attrs
+<elmt ;{mp2}>  // mp2 now is content
 
 "Test range exprs:"
 1 to 0;  // should be []

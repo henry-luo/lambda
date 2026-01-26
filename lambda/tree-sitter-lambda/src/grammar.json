@@ -2365,7 +2365,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "_/"
+                  "value": "div"
                 }
               },
               {
@@ -3333,17 +3333,8 @@
                       "name": "attr"
                     },
                     {
-                      "type": "SEQ",
-                      "members": [
-                        {
-                          "type": "STRING",
-                          "value": "&"
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "_attr_expr"
-                        }
-                      ]
+                      "type": "SYMBOL",
+                      "name": "map"
                     }
                   ]
                 },
@@ -3364,17 +3355,8 @@
                             "name": "attr"
                           },
                           {
-                            "type": "SEQ",
-                            "members": [
-                              {
-                                "type": "STRING",
-                                "value": "&"
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "_attr_expr"
-                              }
-                            ]
+                            "type": "SYMBOL",
+                            "name": "map"
                           }
                         ]
                       }
@@ -3417,8 +3399,34 @@
               "type": "CHOICE",
               "members": [
                 {
-                  "type": "SYMBOL",
-                  "name": "content"
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "CHOICE",
+                      "members": [
+                        {
+                          "type": "CHOICE",
+                          "members": [
+                            {
+                              "type": "PATTERN",
+                              "value": "\\r\\n|\\n"
+                            },
+                            {
+                              "type": "STRING",
+                              "value": ";"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "BLANK"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "content"
+                    }
+                  ]
                 },
                 {
                   "type": "BLANK"
@@ -3973,7 +3981,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "_/"
+                  "value": "div"
                 }
               },
               {
