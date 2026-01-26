@@ -42,7 +42,7 @@ int get_list_indentation(const char* line) {
 /**
  * get_list_marker - Get the list marker character from a line
  *
- * Returns: -, *, + for unordered; '.' for ordered (1., 2., etc.); 0 if not a list
+ * Returns: -, *, + for unordered; '.' or ')' for ordered; 0 if not a list
  */
 char get_list_marker(const char* line) {
     if (!line) return 0;
@@ -59,12 +59,13 @@ char get_list_marker(const char* line) {
         return 0;
     }
 
-    // Check for ordered markers (1., 2., etc.)
+    // Check for ordered markers (1., 2., 1), 2), etc.)
     if (isdigit(*pos)) {
         while (isdigit(*pos)) pos++;
         if (*pos == '.' || *pos == ')') {
+            char delim = *pos;
             if (*(pos + 1) == ' ' || *(pos + 1) == '\t' || *(pos + 1) == '\0') {
-                return '.';
+                return delim;  // Return actual delimiter: '.' or ')'
             }
         }
     }
@@ -77,6 +78,15 @@ char get_list_marker(const char* line) {
  */
 bool is_ordered_marker(char marker) {
     return marker == '.' || marker == ')';
+}
+
+/**
+ * markers_compatible - Check if two list markers are compatible (same list)
+ *
+ * For CommonMark: Same unordered marker (- or * or +) or same ordered delimiter (. or ))
+ */
+static bool markers_compatible(char marker1, char marker2) {
+    return marker1 == marker2;
 }
 
 /**
@@ -201,6 +211,10 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
         parser->state.list_depth++;
     }
 
+    // Track if the list is "loose" (has blank lines between items)
+    bool is_loose = false;
+    bool had_blank_before_item = false;
+
     while (parser->current_line < parser->line_count) {
         const char* line = parser->lines[parser->current_line];
 
@@ -215,6 +229,8 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
             if ((is_list_item(next) && next_indent >= base_indent) ||
                 (!is_list_item(next) && next_indent > base_indent)) {
+                // List continues - mark that we had a blank line
+                had_blank_before_item = true;
                 parser->current_line++;
                 continue;
             } else {
@@ -234,9 +250,16 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             char line_marker = get_list_marker(line);
             bool line_is_ordered = is_ordered_marker(line_marker);
 
-            // Check if this item belongs to our list type
-            if (line_is_ordered != is_ordered) {
-                break; // Different list type, end current list
+            // If there was a blank line before this item, the list is loose
+            if (had_blank_before_item && ((List*)list)->length > 0) {
+                is_loose = true;
+            }
+            had_blank_before_item = false;
+
+            // Check if this item belongs to our list (same marker type)
+            // CommonMark: Different markers (-, *, +) or (., )) start new lists
+            if (!markers_compatible(marker, line_marker)) {
+                break; // Different marker type, end current list
             }
 
             // Create list item
@@ -246,8 +269,47 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             // Get content after marker
             const char* item_content = get_list_item_content(line, line_is_ordered);
 
-            // Parse immediate inline content
-            if (item_content && *item_content) {
+            // Check if the content itself starts with a list marker (nested list case: "- - foo")
+            if (item_content && *item_content && is_list_item(item_content)) {
+                // The content is a nested list - recursively extract nested list content
+                // We directly create the nested list elements here instead of modifying parser state
+                
+                // Create the nested list by parsing the content as a list item line
+                char nested_marker = get_list_marker(item_content);
+                bool nested_is_ordered = is_ordered_marker(nested_marker);
+                
+                Element* nested_list = create_element(parser, nested_is_ordered ? "ol" : "ul");
+                if (nested_list) {
+                    Element* nested_item = create_element(parser, "li");
+                    if (nested_item) {
+                        // Get the content after the nested marker
+                        const char* nested_content = get_list_item_content(item_content, nested_is_ordered);
+                        
+                        // Check for further nesting
+                        if (nested_content && *nested_content && is_list_item(nested_content)) {
+                            // Triple nesting: recursively handle (limit to simple case)
+                            Item inner_text = parse_inline_spans(parser, nested_content);
+                            if (inner_text.item != ITEM_ERROR && inner_text.item != ITEM_UNDEFINED) {
+                                list_push((List*)nested_item, inner_text);
+                                increment_element_content_length(nested_item);
+                            }
+                        } else if (nested_content && *nested_content) {
+                            Item inner_text = parse_inline_spans(parser, nested_content);
+                            if (inner_text.item != ITEM_ERROR && inner_text.item != ITEM_UNDEFINED) {
+                                list_push((List*)nested_item, inner_text);
+                                increment_element_content_length(nested_item);
+                            }
+                        }
+                        
+                        list_push((List*)nested_list, Item{.item = (uint64_t)nested_item});
+                        increment_element_content_length(nested_list);
+                    }
+                    
+                    list_push((List*)item, Item{.item = (uint64_t)nested_list});
+                    increment_element_content_length(item);
+                }
+            } else if (item_content && *item_content) {
+                // Parse as inline content
                 Item text_content = parse_inline_spans(parser, item_content);
                 if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
                     list_push((List*)item, text_content);
@@ -298,6 +360,51 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
         parser->state.list_depth--;
         parser->state.list_markers[parser->state.list_depth] = 0;
         parser->state.list_levels[parser->state.list_depth] = 0;
+    }
+
+    // If the list is loose, wrap each item's direct text content in <p> tags
+    if (is_loose) {
+        add_attribute_to_element(parser, list, "loose", "true");
+        
+        // Iterate through list items and wrap text content in <p>
+        List* list_items = (List*)list;
+        for (long li = 0; li < list_items->length; li++) {
+            Element* item = (Element*)list_items->items[li].item;
+            if (!item) continue;
+            
+            List* item_children = (List*)item;
+            if (item_children->length == 0) continue;
+            
+            // Check if first child is text/span (not already a block element)
+            Item first_child = item_children->items[0];
+            TypeId first_type = get_type_id(first_child);
+            
+            if (first_type == LMD_TYPE_STRING || first_type == LMD_TYPE_SYMBOL) {
+                // Wrap in paragraph
+                Element* p = create_element(parser, "p");
+                if (p) {
+                    list_push((List*)p, first_child);
+                    increment_element_content_length(p);
+                    item_children->items[0] = Item{.item = (uint64_t)p};
+                }
+            } else if (first_type == LMD_TYPE_ELEMENT) {
+                Element* first_elem = (Element*)first_child.item;
+                if (first_elem && first_elem->type) {
+                    TypeElmt* elmt_type = (TypeElmt*)first_elem->type;
+                    const char* tag = elmt_type->name.str;
+                    
+                    // If it's a span (inline container), wrap in paragraph
+                    if (tag && strcmp(tag, "span") == 0) {
+                        Element* p = create_element(parser, "p");
+                        if (p) {
+                            list_push((List*)p, first_child);
+                            increment_element_content_length(p);
+                            item_children->items[0] = Item{.item = (uint64_t)p};
+                        }
+                    }
+                }
+            }
+        }
     }
 
     return Item{.item = (uint64_t)list};
