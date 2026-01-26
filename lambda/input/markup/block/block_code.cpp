@@ -193,10 +193,14 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
 
     parser->current_line++; // Skip opening fence
 
+    // Record start line for error reporting
+    size_t fence_start_line = parser->current_line;
+
     // Collect code content until closing fence
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
+    bool found_close = false;
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
@@ -212,6 +216,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
             }
             if (close_len >= fence_len) {
                 parser->current_line++; // Skip closing fence
+                found_close = true;
                 break;
             }
         }
@@ -222,6 +227,13 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         }
         stringbuf_append_str(sb, current);
         parser->current_line++;
+    }
+
+    // Warn if code fence was not closed
+    if (!found_close) {
+        char fence_str[16];
+        snprintf(fence_str, sizeof(fence_str), "%c%c%c", fence_char, fence_char, fence_char);
+        parser->warnUnclosed(fence_str, fence_start_line);
     }
 
     // Create code content (no inline parsing for code blocks)

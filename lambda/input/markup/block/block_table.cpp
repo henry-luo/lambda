@@ -251,6 +251,12 @@ Item parse_table(MarkupParser* parser, const char* line) {
         first_row = false;
     }
 
+    // Warn if table has no rows
+    TypeElmt* table_type = (TypeElmt*)table->type;
+    if (table_type->content_length == 0) {
+        parser->warnInvalidSyntax("table", "at least one row with | delimiters");
+    }
+
     return Item{.item = (uint64_t)table};
 }
 
