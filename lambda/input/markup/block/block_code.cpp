@@ -42,6 +42,22 @@ static size_t process_backslash_escapes(char* str, size_t len) {
 }
 
 /**
+ * count_fence_indent - Count leading spaces (not tabs) in a line
+ *
+ * CommonMark: The line with the opening fence may be indented 0-3 spaces,
+ * and that indentation should be removed from code lines.
+ */
+static int count_fence_indent(const char* line) {
+    if (!line) return 0;
+    int count = 0;
+    while (*line == ' ') {
+        count++;
+        line++;
+    }
+    return count;
+}
+
+/**
  * is_code_fence - Check if a line is a code fence opener/closer
  *
  * Checks for ``` or ~~~ with at least 3 characters.
@@ -288,6 +304,9 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         return parse_indented_code_block(parser, line);
     }
 
+    // Track opening fence indentation (to strip from content lines)
+    int fence_indent = count_fence_indent(line);
+
     // Create code element for fenced code block
     Element* code = create_element(parser, "code");
     if (!code) {
@@ -310,8 +329,15 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
             fence_char = fence_info.fence_char;
             fence_len = fence_info.fence_length;
             if (fence_info.info_string && fence_info.info_length > 0) {
-                size_t copy_len = fence_info.info_length < sizeof(lang) - 1
-                                  ? fence_info.info_length : sizeof(lang) - 1;
+                // CommonMark: language is only the first word of info string
+                // Find end of first word (stop at whitespace)
+                const char* word_end = fence_info.info_string;
+                while (word_end < fence_info.info_string + fence_info.info_length &&
+                       *word_end && !isspace((unsigned char)*word_end)) {
+                    word_end++;
+                }
+                size_t word_len = word_end - fence_info.info_string;
+                size_t copy_len = word_len < sizeof(lang) - 1 ? word_len : sizeof(lang) - 1;
                 memcpy(lang, fence_info.info_string, copy_len);
                 lang[copy_len] = '\0';
                 // Process backslash escapes in info string
@@ -389,32 +415,53 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
+    bool has_content = false;  // Track if we've added any lines (including blank)
+
     bool found_close = false;
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
         // Check for closing fence (same type, at least same length)
+        // CommonMark: closing fence can be indented 0-3 spaces (not 4+)
         const char* pos = current;
-        skip_whitespace(&pos);
+        int close_indent = 0;
+        while (*pos == ' ' && close_indent < 4) {
+            pos++;
+            close_indent++;
+        }
 
-        if (*pos == fence_char) {
+        if (close_indent < 4 && *pos == fence_char) {
             int close_len = 0;
             while (*pos == fence_char) {
                 close_len++;
                 pos++;
             }
-            if (close_len >= fence_len) {
+            // Check rest of line is whitespace only (CommonMark requirement)
+            while (*pos == ' ' || *pos == '\t') pos++;
+            if (close_len >= fence_len && (*pos == '\0' || *pos == '\n' || *pos == '\r')) {
                 parser->current_line++; // Skip closing fence
                 found_close = true;
                 break;
             }
         }
 
+        // Strip fence indentation from content lines
+        // (up to fence_indent spaces are removed from start of line)
+        const char* content_start = current;
+        int spaces_to_strip = 0;
+        while (*content_start == ' ' && spaces_to_strip < fence_indent) {
+            content_start++;
+            spaces_to_strip++;
+        }
+
         // Add line to code content
-        if (sb->length > 0) {
+        // Add newline separator between lines (not before first line)
+        if (has_content) {
             stringbuf_append_char(sb, '\n');
         }
-        stringbuf_append_str(sb, current);
+        // Append line content (may be empty for blank lines)
+        stringbuf_append_str(sb, content_start);
+        has_content = true;
         parser->current_line++;
     }
 
@@ -426,7 +473,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
     }
 
     // CommonMark: Code block content ends with a newline
-    if (sb->length > 0) {
+    if (has_content) {
         stringbuf_append_char(sb, '\n');
 
         // Create code content (no inline parsing for code blocks)
@@ -435,7 +482,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         list_push((List*)code, text_item);
         increment_element_content_length(code);
     }
-    // If no content (sb->length == 0), leave the code element empty
+    // If no content (has_content == false), leave the code element empty
 
     return Item{.item = (uint64_t)code};
 }

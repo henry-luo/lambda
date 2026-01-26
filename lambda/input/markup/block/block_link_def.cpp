@@ -197,15 +197,17 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
     }
 
     // Add the link definition to parser
-    bool added = parser->addLinkDefinition(
+    // Note: addLinkDefinition returns false for duplicates, but the syntax was valid
+    parser->addLinkDefinition(
         label_start, label_end - label_start,
         url_start, url_end - url_start,
         title_start, title_start ? (title_end - title_start) : 0
     );
 
     // Note: caller is responsible for incrementing current_line
-
-    return added;
+    // Return true to indicate this was a valid link definition (syntax-wise)
+    // even if it was a duplicate and not added to the collection
+    return true;
 }
 
 /**
