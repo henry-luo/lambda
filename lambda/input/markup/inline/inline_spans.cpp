@@ -53,7 +53,12 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     // Also include newline since we need to check for hard line breaks (2+ spaces before \n)
     if (!strpbrk(text, "*_`[!~\\$:^{@'<&\n\r")) {
         log_debug("parse_inline_spans: no markup chars, returning as plain string");
-        String* content = create_string(parser, text);
+        // Strip trailing spaces (hard line breaks at end of paragraph are ignored)
+        size_t len = strlen(text);
+        while (len > 0 && text[len - 1] == ' ') {
+            len--;
+        }
+        String* content = parser->builder.createString(text, len);
         return Item{.item = s2it(content)};
     }
 
@@ -126,15 +131,27 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 stringbuf_reset(sb);
             }
 
+            // Count opening backticks first (for proper failure handling)
+            const char* backtick_start = pos;
+            int opening_count = 0;
+            while (*pos == '`') {
+                opening_count++;
+                pos++;
+            }
+            pos = backtick_start;  // Reset for parse_code_span
+
             Item code_item = parse_code_span(parser, &pos);
             if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, code_item);
                 increment_element_content_length(span);
                 continue;
             }
-            // Code span failed - treat backtick as literal text
-            stringbuf_append_char(sb, *pos);
-            pos++;
+            // Code span failed - treat ALL opening backticks as literal text
+            // (CommonMark: backtick strings are maximal runs, can't retry with fewer)
+            for (int i = 0; i < opening_count; i++) {
+                stringbuf_append_char(sb, '`');
+            }
+            pos = backtick_start + opening_count;  // Skip past all backticks
             continue;
         }
 
@@ -479,6 +496,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         }
 
         // Check for hard line break: 2+ spaces followed by newline
+        // Or soft line break: 1 space followed by newline (space is stripped)
         if (*pos == ' ') {
             // Count trailing spaces
             const char* space_start = pos;
@@ -514,6 +532,14 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     if (*pos == '\r' && *(pos+1) == '\n') pos += 2;
                     else pos++;
                     continue;
+                } else {
+                    // Soft line break (1 space before newline) - strip the space
+                    // Just skip to after the newline, the newline will be added as-is
+                    // (don't add the space to buffer)
+                    if (*pos == '\r' && *(pos+1) == '\n') pos += 2;
+                    else pos++;
+                    stringbuf_append_char(sb, '\n');  // Add newline to buffer
+                    continue;
                 }
             }
 
@@ -531,10 +557,18 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
     // Flush any remaining text
     if (sb->length > 0) {
-        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-        Item text_item = {.item = s2it(text_content)};
-        list_push((List*)span, text_item);
-        increment_element_content_length(span);
+        // Strip trailing spaces at end of paragraph (they don't produce a hard break)
+        while (sb->length > 0 && sb->str->chars[sb->length - 1] == ' ') {
+            sb->length--;
+        }
+        sb->str->chars[sb->length] = '\0';  // null terminate
+
+        if (sb->length > 0) {
+            String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+            Item text_item = {.item = s2it(text_content)};
+            list_push((List*)span, text_item);
+            increment_element_content_length(span);
+        }
         stringbuf_reset(sb);  // Reset for any subsequent/parent calls
     }
 
