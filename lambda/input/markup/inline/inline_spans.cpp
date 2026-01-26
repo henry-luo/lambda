@@ -427,6 +427,30 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             continue;
         }
 
+        // Check for entity reference (&)
+        if (*pos == '&') {
+            // Flush text first
+            if (sb->length > 0) {
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                stringbuf_reset(sb);
+            }
+
+            Item entity_item = parse_entity_reference(parser, &pos);
+            if (entity_item.item != ITEM_ERROR && entity_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, entity_item);
+                increment_element_content_length(span);
+                continue;
+            }
+
+            // Not a valid entity, add & to buffer
+            stringbuf_append_char(sb, *pos);
+            pos++;
+            continue;
+        }
+
         // Regular character - add to buffer
         stringbuf_append_char(sb, *pos);
         pos++;
