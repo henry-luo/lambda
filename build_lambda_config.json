@@ -272,7 +272,7 @@
                 "lambda/shape_pool.cpp",
                 "lambda/shape_builder.cpp",
                 "lambda/lambda-data.cpp",
-                "lambda/lambda_error.cpp",
+                "lambda/lambda-error.cpp",
                 "lambda/build_ast.cpp",
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",

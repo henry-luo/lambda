@@ -9,7 +9,7 @@
 //==============================================================================
 
 #include <gtest/gtest.h>
-#include "../lambda/lambda_error.h"
+#include "../lambda/lambda-error.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arraylist.h"
 #include <string>
