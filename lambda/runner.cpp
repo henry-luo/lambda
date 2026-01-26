@@ -1,6 +1,7 @@
 #include <time.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
+#include "lambda_error.h"
 
 #if _WIN32
 #include <windows.h>
@@ -331,7 +332,20 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
     transpiler.error_count = 0;
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
+    transpiler.errors = arraylist_new(8);  // initialize error list for structured errors
     transpile_script(&transpiler, new_script, script_path);
+    
+    // Print structured errors if any
+    if (transpiler.errors && transpiler.errors->length > 0) {
+        fprintf(stderr, "\n");
+        for (int i = 0; i < transpiler.errors->length; i++) {
+            LambdaError* error = (LambdaError*)transpiler.errors->data[i];
+            err_print(error);
+            fprintf(stderr, "\n");
+        }
+        fprintf(stderr, "%d error(s) found.\n", transpiler.errors->length);
+    }
+    
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
