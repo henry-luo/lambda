@@ -1,68 +1,206 @@
 /**
- * block_common.hpp - Shared interface for block parsers
+ * block_common.hpp - Shared block-level parsing interface
  *
- * This header provides common types and function declarations
- * used by block-level parsers (header, list, code, quote, table, etc.).
+ * This header defines the common interface and utilities for all block-level
+ * parsers. Block parsers handle document structure elements like headers,
+ * lists, code blocks, blockquotes, tables, etc.
+ *
+ * Each block parser file (block_header.cpp, block_list.cpp, etc.) implements
+ * one or more block parsing functions that follow a common pattern:
+ *   - Take a MarkupParser* and optionally the current line
+ *   - Use the FormatAdapter for format-specific detection
+ *   - Return an Item containing the parsed Element or error
+ *   - Advance parser->current_line as appropriate
  */
 #ifndef BLOCK_COMMON_HPP
 #define BLOCK_COMMON_HPP
 
+#include "../markup_common.hpp"
 #include "../markup_parser.hpp"
+#include "../format_adapter.hpp"
+#include "../../input-context.hpp"
+#include "../../../mark_builder.hpp"
+#include "lib/strbuf.h"
+#include "lib/log.h"
+#include <cstring>
+#include <cctype>
 
 namespace lambda {
 namespace markup {
 
+// Forward declarations
+class MarkupParser;
+class FormatAdapter;
+
 // ============================================================================
-// Block Parser Interface
+// Block Parser Function Signatures
 // ============================================================================
 
 /**
- * Block parsers follow this pattern:
- *
- * 1. Receive MarkupParser* and current line
- * 2. Use adapter to detect block type specifics
- * 3. Create element using builder
- * 4. Parse content (may recurse for nested blocks)
- * 5. Advance parser->current_line as needed
- * 6. Return Item containing the created element
- *
- * Returns ITEM_NULL if no block was parsed (e.g., blank line)
- * Returns ITEM_ERROR on fatal errors
+ * Parse a header element (h1-h6)
+ * Handles ATX-style (#), Setext-style (underline), wiki (==), org (*), etc.
  */
+Item parse_header(MarkupParser* parser, const char* line);
+
+/**
+ * Parse a list structure (ul/ol with nested li elements)
+ * Handles ordered and unordered lists with proper nesting
+ */
+Item parse_list_item(MarkupParser* parser, const char* line);
+Item parse_list_structure(MarkupParser* parser, int base_indent);
+Item parse_nested_list_content(MarkupParser* parser, int base_indent);
+
+/**
+ * Parse a code block (fenced or indented)
+ * Handles ```, ~~~, indented blocks, and format-specific variants
+ */
+Item parse_code_block(MarkupParser* parser, const char* line);
+
+/**
+ * Parse a blockquote element
+ * Handles > prefix and nested blockquotes
+ */
+Item parse_blockquote(MarkupParser* parser, const char* line);
+
+/**
+ * Parse a table structure
+ * Handles GFM tables, wiki tables, RST tables, etc.
+ */
+Item parse_table_row(MarkupParser* parser, const char* line);
+Item parse_table_cell_content(MarkupParser* parser, const char* text);
+
+/**
+ * Parse a math block ($$...$$)
+ * Handles display math with LaTeX/AsciiMath content
+ */
+Item parse_math_block(MarkupParser* parser, const char* line);
+
+/**
+ * Parse a horizontal rule/divider
+ * Handles ---, ***, ___, etc.
+ */
+Item parse_divider(MarkupParser* parser);
+
+/**
+ * Parse a paragraph (fallback block type)
+ * Collects text lines until a different block type is encountered
+ */
+Item parse_paragraph(MarkupParser* parser, const char* line);
+
+/**
+ * Parse inline content within a block
+ * Called by block parsers to process text content
+ */
+Item parse_inline_spans(MarkupParser* parser, const char* text);
 
 // ============================================================================
-// Helper Functions
+// Block Detection Utilities
 // ============================================================================
 
 /**
- * Create a block element with given tag name
+ * Detect the type of block that starts at the given line
  */
-inline Element* create_block_element(MarkupParser* parser, const char* tag) {
-    return parser->builder_.element(tag).final().element;
+BlockType detect_block_type(MarkupParser* parser, const char* line);
+
+/**
+ * Check if a line is empty or contains only whitespace
+ */
+inline bool is_empty_line(const char* line) {
+    if (!line) return true;
+    while (*line) {
+        if (*line != ' ' && *line != '\t' && *line != '\r' && *line != '\n') {
+            return false;
+        }
+        line++;
+    }
+    return true;
 }
 
 /**
- * Add attribute to element
+ * Check if a line is a code fence (``` or ~~~)
  */
-void add_block_attribute(Element* elem, const char* name, const char* value);
+bool is_code_fence(const char* line);
 
 /**
- * Add child item to element
+ * Check if a line is a thematic break (---, ***, ___)
  */
-void add_block_child(Element* elem, Item child);
+bool is_thematic_break(const char* line);
 
 /**
- * Collect consecutive lines matching a predicate
- * Returns the collected text and advances parser->current_line
+ * Check if a line is a list item
  */
-std::string collect_lines_while(MarkupParser* parser,
-                                bool (*predicate)(const char* line, void* ctx),
-                                void* ctx = nullptr);
+bool is_list_item(const char* line);
 
 /**
- * Check if line continues a paragraph (not a block start)
+ * Get the list marker character from a list item line
  */
-bool is_paragraph_continuation(MarkupParser* parser, const char* line);
+char get_list_marker(const char* line);
+
+/**
+ * Check if a marker indicates an ordered list
+ */
+bool is_ordered_marker(char marker);
+
+/**
+ * Get indentation level (number of leading spaces)
+ */
+int get_list_indentation(const char* line);
+
+/**
+ * Get header level from a line (0 if not a header)
+ */
+int get_header_level(MarkupParser* parser, const char* line);
+
+// ============================================================================
+// Element Creation Utilities
+// ============================================================================
+
+/**
+ * Create a new element with the given tag name
+ * Uses the parser's MarkBuilder
+ */
+inline Element* create_element(MarkupParser* parser, const char* tag) {
+    return parser->builder.element(tag).final().element;
+}
+
+/**
+ * Add an attribute to an element
+ */
+void add_attribute_to_element(MarkupParser* parser, Element* elem,
+                              const char* name, const char* value);
+
+/**
+ * Create a string in the parser's memory pool
+ */
+inline String* create_string(MarkupParser* parser, const char* text) {
+    return parser->builder.createString(text);
+}
+
+/**
+ * Increment an element's content length counter
+ */
+inline void increment_element_content_length(Element* elem) {
+    if (elem && elem->type) {
+        TypeElmt* elmt_type = (TypeElmt*)elem->type;
+        elmt_type->content_length++;
+    }
+}
+
+// ============================================================================
+// Text Processing Utilities
+// ============================================================================
+
+// Note: skip_whitespace is defined in markup_common.hpp
+
+/**
+ * Detect math flavor from content (latex, ascii, etc.)
+ */
+const char* detect_math_flavor(const char* content);
+
+/**
+ * Parse math content using the appropriate parser
+ */
+Item parse_math_content(InputContext& ctx, const char* content, const char* flavor);
 
 } // namespace markup
 } // namespace lambda
