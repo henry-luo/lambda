@@ -606,36 +606,42 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
             
-            // check if this is a parameter in the current closure (need to unbox since params are Item)
-            if (tp->current_closure && entry_node && entry_node->node_type == AST_NODE_PARAM) {
-                // parameter in closure - needs unboxing from Item
-                TypeId type_id = pri_node->type->type_id;
-                if (type_id == LMD_TYPE_INT) {
-                    strbuf_append_str(tp->code_buf, "it2i(_");
-                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                    strbuf_append_char(tp->code_buf, ')');
-                } else if (type_id == LMD_TYPE_INT64) {
-                    strbuf_append_str(tp->code_buf, "it2l(_");
-                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                    strbuf_append_char(tp->code_buf, ')');
-                } else if (type_id == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "it2f(_");
-                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                    strbuf_append_char(tp->code_buf, ')');
-                } else if (type_id == LMD_TYPE_BOOL) {
-                    strbuf_append_str(tp->code_buf, "it2b(_");
-                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                    strbuf_append_char(tp->code_buf, ')');
-                } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
-                    strbuf_append_str(tp->code_buf, "it2s(_");
-                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
-                    strbuf_append_char(tp->code_buf, ')');
-                } else {
-                    // for Item or container types, return directly (already Item)
-                    strbuf_append_char(tp->code_buf, '_');
-                    strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+            // check if this is an optional/default parameter (needs unboxing since it's passed as Item)
+            if (entry_node && entry_node->node_type == AST_NODE_PARAM) {
+                TypeParam* param_type = (TypeParam*)entry_node->type;
+                // Unbox if: (1) it's in a closure, OR (2) it has default value or is optional
+                bool needs_unboxing = tp->current_closure || param_type->is_optional || param_type->default_value;
+                
+                if (needs_unboxing) {
+                    // parameter passed as Item - needs unboxing to actual type
+                    TypeId type_id = pri_node->type->type_id;
+                    if (type_id == LMD_TYPE_INT) {
+                        strbuf_append_str(tp->code_buf, "it2i(_");
+                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_INT64) {
+                        strbuf_append_str(tp->code_buf, "it2l(_");
+                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_FLOAT) {
+                        strbuf_append_str(tp->code_buf, "it2f(_");
+                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_BOOL) {
+                        strbuf_append_str(tp->code_buf, "it2b(_");
+                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_BINARY) {
+                        strbuf_append_str(tp->code_buf, "it2s(_");
+                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else {
+                        // for Item or container types, return directly (already Item)
+                        strbuf_append_char(tp->code_buf, '_');
+                        strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                    }
+                    return;
                 }
-                return;
             }
             
             if (entry_node) {
@@ -2428,7 +2434,11 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     if (is_closure) {
         strbuf_append_str(tp->code_buf, "Item");
     } else {
-        Type *ret_type = fn_node->body->type;
+        TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+        Type *ret_type = fn_type->returned ? fn_type->returned : (fn_node->body ? fn_node->body->type : &TYPE_ANY);
+        if (!ret_type) {
+            ret_type = &TYPE_ANY;
+        }
         write_type(tp->code_buf, ret_type);
     }
     strbuf_append_char(tp->code_buf, ' ');
@@ -2477,7 +2487,13 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
-    Type *ret_type = fn_node->body->type;
+    Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
+    if (!ret_type && fn_node->body) {
+        ret_type = fn_node->body->type;
+    }
+    if (!ret_type) {
+        ret_type = &TYPE_ANY;
+    }
     if (is_closure) {
         strbuf_append_str(tp->code_buf, "Item");
     } else {
@@ -2556,7 +2572,20 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, ";\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");
-        if (is_closure) {
+        // Check if we need to box the return value
+        // Box if: (1) it's a closure, OR (2) return type is Item but body type is a scalar
+        bool needs_boxing = is_closure;
+        if (!needs_boxing && ret_type->type_id == LMD_TYPE_ANY && fn_node->body->type) {
+            TypeId body_type_id = fn_node->body->type->type_id;
+            // Box scalar types when returning as Item
+            needs_boxing = (body_type_id == LMD_TYPE_INT || body_type_id == LMD_TYPE_INT64 ||
+                           body_type_id == LMD_TYPE_FLOAT || body_type_id == LMD_TYPE_BOOL ||
+                           body_type_id == LMD_TYPE_STRING || body_type_id == LMD_TYPE_SYMBOL ||
+                           body_type_id == LMD_TYPE_BINARY || body_type_id == LMD_TYPE_DECIMAL ||
+                           body_type_id == LMD_TYPE_DTIME);
+        }
+        
+        if (needs_boxing) {
             transpile_box_item(tp, fn_node->body);
         } else {
             transpile_expr(tp, fn_node->body);
@@ -3107,6 +3136,26 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             pre_define_closure_envs(tp, child);
         }
         child = child->next;
+    }
+
+    // Forward declare all top-level functions to support out-of-order definitions
+    child = script->child;
+    while (child) {
+        if (child->node_type == AST_NODE_CONTENT) {
+            AstNode* item = ((AstListNode*)child)->item;
+            while (item) {
+                if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC) {
+                    forward_declare_func(tp, (AstFuncNode*)item);
+                }
+                item = item->next;
+            }
+            child = child->next;
+        } else if (child->node_type == AST_NODE_FUNC || child->node_type == AST_NODE_PROC) {
+            forward_declare_func(tp, (AstFuncNode*)child);
+            child = child->next;
+        } else {
+            child = child->next;
+        }
     }
 
     // declare global vars, types, define fns, etc.
