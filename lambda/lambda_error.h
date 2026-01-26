@@ -219,6 +219,11 @@ void err_set_cause(LambdaError* error, LambdaError* cause);
 StackFrame* err_capture_stack_trace(void* debug_info_list, int max_frames);
 void err_set_stack_trace(LambdaError* error, StackFrame* trace);
 
+// Source context extraction
+void err_extract_context(LambdaError* error, const char* source, int context_lines);
+char* err_get_source_line(const char* source, uint32_t line_number);
+int err_get_source_line_count(const char* source);
+
 // Error output
 char* err_format(LambdaError* error);
 char* err_format_with_context(LambdaError* error, int context_lines);
