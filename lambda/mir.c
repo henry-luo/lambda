@@ -7,6 +7,7 @@
 #include "mir-gen.h"
 #include "c2mir.h"
 #include "lambda.h"
+#include "lambda-error.h"
 
 typedef struct jit_item {
     const char *code;
@@ -149,7 +150,9 @@ func_obj_t func_list[] = {
     {"it2i", (fn_ptr) it2i},
     {"to_fn", (fn_ptr) to_fn},
     {"to_fn_n", (fn_ptr) to_fn_n},
+    {"to_fn_named", (fn_ptr) to_fn_named},
     {"to_closure", (fn_ptr) to_closure},
+    {"to_closure_named", (fn_ptr) to_closure_named},
     {"heap_calloc", (fn_ptr) heap_calloc},
     {"fn_call", (fn_ptr) fn_call},
     {"fn_call0", (fn_ptr) fn_call0},
@@ -167,6 +170,7 @@ func_obj_t func_list[] = {
     {"fn_input2", (fn_ptr) fn_input2},
     {"fn_format1", (fn_ptr) fn_format1},
     {"fn_format2", (fn_ptr) fn_format2},
+    {"fn_error", (fn_ptr) fn_error},
     {"fn_datetime", (fn_ptr) fn_datetime},
     {"fn_index", (fn_ptr) fn_index},
     {"fn_member", (fn_ptr) fn_member},
@@ -199,11 +203,17 @@ void *import_resolver(const char *name) {
     return NULL;
 }
 
-MIR_context_t jit_init() {
+MIR_context_t jit_init(unsigned int optimize_level) {
     MIR_context_t ctx = MIR_init();
     c2mir_init(ctx);
     MIR_gen_init(ctx); // init the JIT generator
-    MIR_gen_set_optimize_level(ctx, 1); // set optimization level (0-3)
+    // Level 0: Only register allocator and machine code generator (no inlining)
+    // Level 1: Adds code selection (more compact/faster code)
+    // Level 2: Adds CSE/GVN and constant propagation (default)
+    // Level 3: Adds register renaming and loop invariant code motion
+    // Note: MIR inlines CALL instructions for functions under 50 instructions at levels > 0
+    log_info("MIR JIT optimization level: %u", optimize_level);
+    MIR_gen_set_optimize_level(ctx, optimize_level);
     return ctx;
 }
 
@@ -392,4 +402,141 @@ void jit_cleanup(MIR_context_t ctx) {
     MIR_gen_finish(ctx);
     c2mir_finish(ctx);
     MIR_finish(ctx);
+}
+
+// ============================================================================
+// Debug Info Table for Native Stack Walking
+// ============================================================================
+// This code is in mir.c because it uses MIR APIs (MIR_get_module_list)
+// which are only linked into the main lambda executable.
+//
+// The lookup_debug_info() and free_debug_info_table() functions are in
+// lambda-error.cpp since they don't use MIR APIs.
+
+#include "lambda-error.h"
+#include "../lib/hashmap.h"
+
+// Simple dynamic array for debug info (matches struct in lambda-error.cpp)
+typedef struct {
+    FuncDebugInfo** items;
+    size_t length;
+    size_t capacity;
+} DebugInfoList;
+
+// Comparator for sorting FuncDebugInfo by address
+static int compare_debug_info(const void* a, const void* b) {
+    FuncDebugInfo* fa = *(FuncDebugInfo**)a;
+    FuncDebugInfo* fb = *(FuncDebugInfo**)b;
+    if (fa->native_addr_start < fb->native_addr_start) return -1;
+    if (fa->native_addr_start > fb->native_addr_start) return 1;
+    return 0;
+}
+
+// Build debug info table from MIR-compiled functions
+// This collects all function addresses, sorts them, and computes boundaries
+// using address ordering (next func start = current func end)
+// If func_name_map is provided, it maps MIR internal names to Lambda user-friendly names
+void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
+    if (!mir_ctx) {
+        log_debug("build_debug_info_table: mir_ctx is NULL");
+        return NULL;
+    }
+    
+    MIR_context_t ctx = (MIR_context_t)mir_ctx;
+    struct hashmap* name_map = (struct hashmap*)func_name_map;
+    
+    // Create list to hold debug info entries
+    DebugInfoList* debug_list = (DebugInfoList*)malloc(sizeof(DebugInfoList));
+    if (!debug_list) {
+        log_error("build_debug_info_table: failed to allocate debug_list");
+        return NULL;
+    }
+    debug_list->capacity = 64;
+    debug_list->length = 0;
+    debug_list->items = (FuncDebugInfo**)malloc(sizeof(FuncDebugInfo*) * debug_list->capacity);
+    if (!debug_list->items) {
+        log_error("build_debug_info_table: failed to allocate debug_list items");
+        free(debug_list);
+        return NULL;
+    }
+    
+    // Iterate all modules and collect function addresses
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); 
+         module != NULL; 
+         module = DLIST_NEXT(MIR_module_t, module)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
+             item != NULL;
+             item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type == MIR_func_item && item->addr != NULL) {
+                FuncDebugInfo* info = (FuncDebugInfo*)calloc(1, sizeof(FuncDebugInfo));
+                if (!info) continue;
+                
+                // Use machine_code if available, otherwise addr
+                void* code_addr = item->u.func->machine_code ? item->u.func->machine_code : item->addr;
+                info->native_addr_start = code_addr;
+                info->native_addr_end = NULL;  // computed later
+                
+                // Look up Lambda name from map, fall back to MIR name
+                const char* mir_name = item->u.func->name;
+                const char* lambda_name = mir_name;  // default to MIR name
+                if (name_map) {
+                    // map stores char*[2] = {mir_name, lambda_name}
+                    const char** found = (const char**)hashmap_get(name_map, &mir_name);
+                    if (found) {
+                        lambda_name = found[1];  // second element is Lambda name
+                        log_debug("build_debug_info_table: mapped MIR name '%s' -> Lambda name '%s'", mir_name, lambda_name);
+                    }
+                }
+                info->lambda_func_name = lambda_name;
+                info->source_file = NULL;  // could be set from AST if available
+                info->source_line = 0;
+                
+                log_debug("build_debug_info_table: func '%s' addr=%p machine_code=%p call_addr=%p",
+                          lambda_name, item->addr, item->u.func->machine_code, item->u.func->call_addr);
+                
+                // grow list if needed
+                if (debug_list->length >= debug_list->capacity) {
+                    size_t new_cap = debug_list->capacity * 2;
+                    FuncDebugInfo** new_items = (FuncDebugInfo**)realloc(debug_list->items, sizeof(FuncDebugInfo*) * new_cap);
+                    if (!new_items) {
+                        free(info);
+                        continue;
+                    }
+                    debug_list->items = new_items;
+                    debug_list->capacity = new_cap;
+                }
+                debug_list->items[debug_list->length++] = info;
+                
+                log_debug("build_debug_info_table: added func '%s' at %p", 
+                          info->lambda_func_name, info->native_addr_start);
+            }
+        }
+    }
+    
+    if (debug_list->length == 0) {
+        log_debug("build_debug_info_table: no functions found");
+        free(debug_list->items);
+        free(debug_list);
+        return NULL;
+    }
+    
+    // Sort by address
+    qsort(debug_list->items, debug_list->length, sizeof(FuncDebugInfo*), compare_debug_info);
+    
+    // Compute end addresses using next function's start
+    for (size_t i = 0; i < debug_list->length; i++) {
+        FuncDebugInfo* info = debug_list->items[i];
+        if (i + 1 < debug_list->length) {
+            FuncDebugInfo* next = debug_list->items[i + 1];
+            info->native_addr_end = next->native_addr_start;
+        } else {
+            // Last function: use conservative size (64KB should cover any function)
+            info->native_addr_end = (char*)info->native_addr_start + 65536;
+        }
+        log_debug("build_debug_info_table: func '%s' range [%p, %p)", 
+                  info->lambda_func_name, info->native_addr_start, info->native_addr_end);
+    }
+    
+    log_info("build_debug_info_table: built table with %zu functions", debug_list->length);
+    return debug_list;
 }
