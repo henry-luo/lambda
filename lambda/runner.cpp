@@ -377,9 +377,14 @@ void runner_init(Runtime *runtime, Runner* runner) {
 
 #include "../lib/url.h"
 #include "validator/validator.hpp"
+#include "lambda-stack.h"
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");
+    
+    // Initialize stack overflow protection (once per thread)
+    lambda_stack_init();
+    
     runner->context.pool = runner->script->pool;
     runner->context.type_list = runner->script->type_list;
     
