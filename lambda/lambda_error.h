@@ -167,6 +167,7 @@ typedef struct SourceLocation {
 typedef struct StackFrame {
     const char* function_name;  // function name (or "<script>" for top-level)
     SourceLocation location;    // call site location
+    bool is_native;             // true if this is a C/native function
     struct StackFrame* next;    // next frame (toward main)
 } StackFrame;
 
