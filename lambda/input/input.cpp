@@ -34,6 +34,11 @@ void parse_org(Input* input, const char* org_string);
 void parse_css(Input* input, const char* css_string);
 void parse_jsx(Input* input, const char* jsx_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
+
+// New modular markup parser (replaces old input_markup)
+extern "C" Item input_markup_modular(Input *input, const char* content);
+
+// Old markup parser - kept for backward compatibility during transition
 Item input_markup(Input *input, const char* content);
 
 // Import MarkupFormat enum from markup-parser.h
@@ -586,10 +591,10 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_xml(input, source);
         }
         else if (strcmp(effective_type, "markdown") == 0) {
-            input->root = input_markup(input, source);
+            input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "rst") == 0) {
-            input->root = input_markup(input, source);
+            input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
             // Use HTML5 compliant parser
@@ -609,7 +614,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_pdf(input, source, strlen(source));
         }
         else if (strcmp(effective_type, "wiki") == 0) {
-            input->root = input_markup(input, source);
+            input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "asciidoc") == 0 || strcmp(effective_type, "adoc") == 0) {
             input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
@@ -627,7 +632,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_ics(input, source);
         }
         else if (strcmp(effective_type, "textile") == 0) {
-            input->root = input_markup(input, source);
+            input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "mark") == 0) {
             parse_mark(input, source);
@@ -665,7 +670,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_math(input, source, math_flavor);
         }
         else if (strcmp(effective_type, "markup") == 0) {
-            input->root = input_markup(input, source);
+            input->root = input_markup_modular(input, source);
         }
         else if (strcmp(effective_type, "graph") == 0) {
             const char* graph_flavor = (flavor && flavor->chars) ? flavor->chars : "dot";
