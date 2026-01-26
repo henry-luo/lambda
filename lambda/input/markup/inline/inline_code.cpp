@@ -91,8 +91,8 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
     }
 
     if (!end) {
-        // No matching closing backticks
-        (*text)++;
+        // No matching closing backticks - return UNDEFINED without modifying text
+        // Caller will treat the backtick as literal text
         return Item{.item = ITEM_UNDEFINED};
     }
 

@@ -78,7 +78,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (*pos == '*' || *pos == '_') {
             // Try to parse emphasis - don't flush buffer yet in case it fails
             const char* try_pos = pos;
-            Item inline_item = parse_emphasis(parser, &try_pos);
+            Item inline_item = parse_emphasis(parser, &try_pos, text);
 
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
                 // Success - flush buffer first, then add emphasis element
@@ -93,9 +93,13 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 increment_element_content_length(span);
                 pos = try_pos;  // Advance past the emphasis
             } else {
-                // Emphasis parsing failed - treat marker as plain text
-                stringbuf_append_char(sb, *pos);
-                pos++;
+                // Emphasis parsing failed - treat entire marker run as plain text
+                // This prevents second marker from being tried as opener
+                char marker = *pos;
+                while (*pos == marker) {
+                    stringbuf_append_char(sb, *pos);
+                    pos++;
+                }
             }
             continue;
         }
@@ -115,7 +119,11 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, code_item);
                 increment_element_content_length(span);
+                continue;
             }
+            // Code span failed - treat backtick as literal text
+            stringbuf_append_char(sb, *pos);
+            pos++;
             continue;
         }
 
@@ -128,6 +136,14 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
                 stringbuf_reset(sb);
+            }
+
+            // Try autolink first (<http://...> or <email@...>)
+            Item autolink_item = parse_autolink(parser, &pos);
+            if (autolink_item.item != ITEM_ERROR && autolink_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, autolink_item);
+                increment_element_content_length(span);
+                continue;
             }
 
             Item html_item = parse_raw_html(parser, &pos);
@@ -448,6 +464,52 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             // Not a valid entity, add & to buffer
             stringbuf_append_char(sb, *pos);
             pos++;
+            continue;
+        }
+
+        // Check for hard line break: 2+ spaces followed by newline
+        if (*pos == ' ') {
+            // Count trailing spaces
+            const char* space_start = pos;
+            while (*pos == ' ') pos++;
+            int space_count = (int)(pos - space_start);
+
+            // Check if followed by newline
+            if (*pos == '\n' || *pos == '\r') {
+                if (space_count >= 2) {
+                    // Hard line break - trim trailing spaces from buffer and add <br>
+                    // First strip any trailing spaces already in buffer
+                    while (sb->length > 0 && sb->str->chars[sb->length - 1] == ' ') {
+                        sb->length--;
+                    }
+
+                    // Flush text
+                    if (sb->length > 0) {
+                        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                        Item text_item = {.item = s2it(text_content)};
+                        list_push((List*)span, text_item);
+                        increment_element_content_length(span);
+                        stringbuf_reset(sb);
+                    }
+
+                    // Create <br> element
+                    Element* br = create_element(parser, "br");
+                    if (br) {
+                        list_push((List*)span, Item{.item = (uint64_t)br});
+                        increment_element_content_length(span);
+                    }
+
+                    // Skip the newline
+                    if (*pos == '\r' && *(pos+1) == '\n') pos += 2;
+                    else pos++;
+                    continue;
+                }
+            }
+
+            // Not a hard break - add all the spaces to buffer
+            for (int i = 0; i < space_count; i++) {
+                stringbuf_append_char(sb, ' ');
+            }
             continue;
         }
 
