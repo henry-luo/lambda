@@ -3237,22 +3237,20 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
 
 // Stack overflow check code to be included in transpiled output
 // Uses portable approach compatible with MIR C compiler
-// Note: We call functions instead of accessing variables directly (MIR limitation)
+// Access stack_limit directly from runtime context (rt->stack_limit) for speed
 static const char* stack_check_code = R"(
 // Stack overflow protection declarations
-extern uintptr_t get_stack_limit(void);
 extern void lambda_stack_overflow_error(const char* func_name);
-extern Item get_item_error(void);
 
-// Portable stack check using local variable address
+// Fast stack check using local variable address and context's cached stack_limit
 #define LAMBDA_STACK_CHECK(func_name) \
-    do { \
+    { \
         volatile char _stack_marker; \
-        if ((uintptr_t)&_stack_marker < get_stack_limit()) { \
+        if ((uintptr_t)&_stack_marker < rt->stack_limit) { \
             lambda_stack_overflow_error(func_name); \
-            return get_item_error(); \
+            return ITEM_ERROR; \
         } \
-    } while(0)
+    }
 )";
 
 void transpile_ast_root(Transpiler* tp, AstScript *script) {
@@ -3261,8 +3259,12 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, stack_check_code);
     // all (nested) function definitions need to be hoisted to global level
     log_debug("define_ast_node ...");
-    // defines global runtime context
-    strbuf_append_str(tp->code_buf, "\nContext *rt;\n");
+    // Import shared runtime context pointer from native runtime
+    // This ensures all modules (main + imports) share the same rt
+    // _lambda_rt is a Context* in the native runtime, and its address is exported
+    // MIR import resolves to the address of _lambda_rt, so we declare it as Context*
+    strbuf_append_str(tp->code_buf, "\nextern Context* _lambda_rt;\n");
+    strbuf_append_str(tp->code_buf, "#define rt _lambda_rt\n");
     
     // Pre-define all closure environment structs before any function definitions
     // This ensures structs are available when functions reference them
@@ -3318,7 +3320,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
 
     // global evaluation, wrapped inside main()
     log_debug("transpile main() ...");
-    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime) {\n rt = runtime;\n");
+    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime) {\n _lambda_rt = runtime;\n");
 
     // transpile body content
     strbuf_append_str(tp->code_buf, " Item result = ({");
