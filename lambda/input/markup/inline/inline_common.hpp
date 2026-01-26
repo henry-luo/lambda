@@ -35,9 +35,10 @@ namespace markup {
  *
  * @param parser The markup parser
  * @param text Pointer to current position (updated on success)
+ * @param text_start Start of the full text (for flanking context), or nullptr
  * @return Item containing emphasis element, or ITEM_UNDEFINED if not matched
  */
-Item parse_emphasis(MarkupParser* parser, const char** text);
+Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_start = nullptr);
 
 /**
  * parse_code_span - Parse inline code spans
@@ -171,6 +172,17 @@ Item parse_entity_reference(MarkupParser* parser, const char** text);
  * @return Item containing raw-html element, or ITEM_UNDEFINED if not matched
  */
 Item parse_raw_html(MarkupParser* parser, const char** text);
+
+/**
+ * parse_autolink - Parse autolinks
+ *
+ * Handles: <http://example.com>, <email@example.com>
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing link element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_autolink(MarkupParser* parser, const char** text);
 
 // ============================================================================
 // Format-Specific Inline Parsers
