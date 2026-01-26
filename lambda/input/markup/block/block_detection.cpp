@@ -66,6 +66,32 @@ static bool is_math_block_start(const char* line) {
 }
 
 /**
+ * is_indented_code_line - Check if a line is indented code (4+ spaces)
+ *
+ * CommonMark: A line indented with 4 or more spaces starts an indented code block.
+ * Does not apply inside list items (handled separately).
+ */
+static bool is_indented_code_line(const char* line) {
+    if (!line) return false;
+
+    int spaces = 0;
+    const char* p = line;
+
+    // Count leading spaces (tabs count as 4 spaces for this check)
+    while (*p == ' ' || *p == '\t') {
+        if (*p == '\t') {
+            spaces = ((spaces / 4) + 1) * 4;
+        } else {
+            spaces++;
+        }
+        p++;
+    }
+
+    // Must have 4+ spaces and non-empty content
+    return spaces >= 4 && *p != '\0' && *p != '\n' && *p != '\r';
+}
+
+/**
  * detect_block_type - Determine the block type for a line
  *
  * Uses the format adapter for format-specific detection, then
@@ -130,12 +156,24 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         if (adapter->detectThematicBreak(line)) {
             return BlockType::DIVIDER;
         }
+
+        // Indented code block detection (only if not in list context)
+        // Check via adapter first
+        const char* code_start = nullptr;
+        if (!parser->state.list_depth && adapter->detectIndentedCode(line, &code_start)) {
+            return BlockType::CODE_BLOCK;
+        }
     }
 
     // Fallback: Generic detection for common patterns
 
     // Code fence (``` or ~~~)
     if (is_code_fence(pos)) {
+        return BlockType::CODE_BLOCK;
+    }
+
+    // Indented code block (4+ spaces, not inside list)
+    if (!parser->state.list_depth && is_indented_code_line(line)) {
         return BlockType::CODE_BLOCK;
     }
 
