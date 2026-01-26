@@ -93,6 +93,118 @@ static void extract_language(const char* line, char* lang, size_t lang_size) {
 }
 
 /**
+ * is_indented_code_line - Check if a line has 4+ space indentation
+ */
+static bool is_indented_code_line(const char* line, const char** content_start) {
+    if (!line) return false;
+
+    int spaces = 0;
+    const char* p = line;
+
+    while (*p == ' ' || *p == '\t') {
+        if (*p == '\t') {
+            spaces = ((spaces / 4) + 1) * 4;
+        } else {
+            spaces++;
+        }
+        p++;
+    }
+
+    if (spaces >= 4) {
+        // Content starts 4 spaces in (remove only first 4 spaces)
+        if (content_start) {
+            const char* start = line;
+            int removed = 0;
+            while (removed < 4 && (*start == ' ' || *start == '\t')) {
+                if (*start == '\t') {
+                    removed = ((removed / 4) + 1) * 4;
+                } else {
+                    removed++;
+                }
+                start++;
+            }
+            *content_start = start;
+        }
+        return true;
+    }
+    return false;
+}
+
+/**
+ * parse_indented_code_block - Parse an indented code block (4+ spaces)
+ *
+ * CommonMark: An indented code block is composed of one or more indented chunks
+ * separated by blank lines. An indented chunk is a sequence of non-blank lines,
+ * each preceded by four or more spaces of indentation.
+ */
+static Item parse_indented_code_block(MarkupParser* parser, const char* line) {
+    // Create code element
+    Element* code = create_element(parser, "code");
+    if (!code) {
+        parser->current_line++;
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Mark as block-level code
+    add_attribute_to_element(parser, code, "type", "block");
+
+    StringBuf* sb = parser->sb;
+    stringbuf_reset(sb);
+
+    while (parser->current_line < parser->line_count) {
+        const char* current = parser->lines[parser->current_line];
+        const char* content_start = nullptr;
+
+        // Check if line is indented code (4+ spaces)
+        if (is_indented_code_line(current, &content_start)) {
+            if (sb->length > 0) {
+                stringbuf_append_char(sb, '\n');
+            }
+            stringbuf_append_str(sb, content_start);
+            parser->current_line++;
+        }
+        // Blank lines can be part of indented code block
+        else if (is_blank_line(current)) {
+            // Look ahead to see if there's more indented code
+            bool more_code = false;
+            for (int ahead = parser->current_line + 1; ahead < parser->line_count; ahead++) {
+                const char* future = parser->lines[ahead];
+                if (is_indented_code_line(future, nullptr)) {
+                    more_code = true;
+                    break;
+                }
+                if (!is_blank_line(future)) {
+                    break;
+                }
+            }
+
+            if (more_code) {
+                // Include blank line in code
+                if (sb->length > 0) {
+                    stringbuf_append_char(sb, '\n');
+                }
+                parser->current_line++;
+            } else {
+                // End of code block
+                break;
+            }
+        }
+        else {
+            // Non-indented, non-blank line ends the code block
+            break;
+        }
+    }
+
+    // Create code content
+    String* code_content = parser->builder.createString(sb->str->chars, sb->length);
+    Item text_item = {.item = s2it(code_content)};
+    list_push((List*)code, text_item);
+    increment_element_content_length(code);
+
+    return Item{.item = (uint64_t)code};
+}
+
+/**
  * parse_code_block - Parse a fenced or indented code block
  *
  * Creates a <code> element with type="block" attribute.
@@ -105,7 +217,14 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
 
     FormatAdapter* adapter = parser->adapter();
 
-    // Create code element
+    // Check for indented code block first (4+ spaces)
+    const char* indent_content = nullptr;
+    if (is_indented_code_line(line, &indent_content)) {
+        // Not a fenced block, parse as indented
+        return parse_indented_code_block(parser, line);
+    }
+
+    // Create code element for fenced code block
     Element* code = create_element(parser, "code");
     if (!code) {
         parser->current_line++;

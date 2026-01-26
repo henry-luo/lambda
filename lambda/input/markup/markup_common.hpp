@@ -22,6 +22,41 @@ class MarkupParser;
 class FormatAdapter;
 
 // ============================================================================
+// Escape Character Handling (CommonMark §2.4)
+// ============================================================================
+
+/**
+ * ESCAPABLE_CHARS - Characters that can be escaped with a backslash
+ *
+ * CommonMark specifies that any ASCII punctuation character can be escaped.
+ * The backslash before a punctuation character is treated as an escape.
+ */
+static constexpr const char* ESCAPABLE_CHARS =
+    "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+/**
+ * is_escapable - Check if a character can be escaped with backslash
+ *
+ * @param c The character to check
+ * @return true if the character is an ASCII punctuation that can be escaped
+ */
+inline bool is_escapable(char c) {
+    // ascii punctuation range check for performance
+    if (c < '!' || c > '~') return false;
+    return strchr(ESCAPABLE_CHARS, c) != nullptr;
+}
+
+/**
+ * is_ascii_punctuation - Check if a character is ASCII punctuation
+ *
+ * CommonMark defines ASCII punctuation as any of:
+ * !, ", #, $, %, &, ', (, ), *, +, ,, -, ., /, :, ;, <, =, >, ?, @, [, \, ], ^, _, `, {, |, }, ~
+ */
+inline bool is_ascii_punctuation(char c) {
+    return is_escapable(c);
+}
+
+// ============================================================================
 // Format Identification
 // ============================================================================
 

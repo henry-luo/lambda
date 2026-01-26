@@ -4,7 +4,9 @@
  * Parses inline links:
  * - [text](url) - inline link
  * - [text](url "title") - link with title
- * - [text][ref] - reference link (future)
+ * - [text][ref] - reference link
+ * - [text][] - collapsed reference link
+ * - [text] - shortcut reference link
  *
  * Phase 3 of Markup Parser Refactoring:
  * Extracted from input-markup.cpp parse_link() (lines 2142-2224)
@@ -43,9 +45,108 @@ static inline void add_attribute_to_element(MarkupParser* parser, Element* elem,
 }
 
 /**
+ * create_link_from_definition - Create link element from a LinkDefinition
+ */
+static Item create_link_from_definition(MarkupParser* parser,
+                                         const LinkDefinition* def,
+                                         const char* link_text, size_t text_len) {
+    Element* link = create_element(parser, "a");
+    if (!link) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add href attribute
+    add_attribute_to_element(parser, link, "href", def->url);
+
+    // Add title attribute if present
+    if (def->has_title && def->title[0]) {
+        add_attribute_to_element(parser, link, "title", def->title);
+    }
+
+    // Parse link text content
+    if (text_len > 0) {
+        char* text_copy = (char*)malloc(text_len + 1);
+        if (text_copy) {
+            memcpy(text_copy, link_text, text_len);
+            text_copy[text_len] = '\0';
+
+            Item inner_content = parse_inline_spans(parser, text_copy);
+            if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
+                list_push((List*)link, inner_content);
+                increment_element_content_length(link);
+            }
+            free(text_copy);
+        }
+    }
+
+    return Item{.item = (uint64_t)link};
+}
+
+/**
+ * parse_reference_link - Parse reference-style links
+ *
+ * Handles: [text][ref], [text][], [text]
+ */
+static Item parse_reference_link(MarkupParser* parser, const char** text,
+                                  const char* text_start, const char* text_end) {
+    const char* pos = text_end + 1; // after closing ]
+    size_t link_text_len = text_end - text_start;
+
+    const char* ref_start = nullptr;
+    const char* ref_end = nullptr;
+
+    // Check what follows the first ]
+    if (*pos == '[') {
+        // [text][ref] or [text][] form
+        pos++; // skip [
+        ref_start = pos;
+
+        // Find closing ]
+        while (*pos && *pos != ']' && *pos != '\n') {
+            if (*pos == '\\' && *(pos+1)) {
+                pos += 2;
+            } else {
+                pos++;
+            }
+        }
+
+        if (*pos != ']') {
+            return Item{.item = ITEM_UNDEFINED};
+        }
+
+        ref_end = pos;
+        pos++; // skip ]
+
+        // If ref is empty [], use link text as ref
+        if (ref_end == ref_start) {
+            ref_start = text_start;
+            ref_end = text_end;
+        }
+    } else {
+        // Shortcut reference link [text]
+        ref_start = text_start;
+        ref_end = text_end;
+    }
+
+    // Look up the reference
+    const LinkDefinition* def = parser->getLinkDefinition(ref_start, ref_end - ref_start);
+    if (!def) {
+        // Not a valid reference link
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Create link from definition
+    Item result = create_link_from_definition(parser, def, text_start, link_text_len);
+    if (result.item != ITEM_ERROR && result.item != ITEM_UNDEFINED) {
+        *text = pos;
+    }
+    return result;
+}
+
+/**
  * parse_link - Parse inline links
  *
- * Handles: [text](url), [text](url "title")
+ * Handles: [text](url), [text](url "title"), [text][ref], [text][], [text]
  *
  * @param parser The markup parser
  * @param text Pointer to current position (updated on success)
@@ -86,10 +187,10 @@ Item parse_link(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Check for (url) after ]
+    // Check for (url) after ] for inline link
     if (*pos != '(') {
-        // Might be reference-style link [text][ref], but skip for now
-        return Item{.item = ITEM_UNDEFINED};
+        // Try reference-style link: [text][ref], [text][], or [text]
+        return parse_reference_link(parser, text, text_start, text_end);
     }
 
     pos++; // Skip (

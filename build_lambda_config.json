@@ -1404,6 +1404,20 @@
                         "icon": "\ud83d\udcdd"
                     },
                     {
+                        "source": "test_markup_modular_gtest.cpp",
+                        "name": "Markup Modular Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_markup_modular_gtest.exe",
+                        "icon": "\ud83e\udde9"
+                    },
+                    {
                         "source": "test_entity_emoji_gtest.cpp",
                         "name": "Entity/Emoji Symbol Tests",
                         "dependencies": [

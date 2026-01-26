@@ -151,6 +151,17 @@ int get_list_indentation(const char* line);
  */
 int get_header_level(MarkupParser* parser, const char* line);
 
+/**
+ * Check if a line might start a link reference definition
+ */
+bool is_link_definition_start(const char* line);
+
+/**
+ * Parse a link reference definition and add it to the parser
+ * Returns true if successfully parsed, false otherwise
+ */
+bool parse_link_definition(MarkupParser* parser, const char* line);
+
 // ============================================================================
 // Element Creation Utilities
 // ============================================================================
