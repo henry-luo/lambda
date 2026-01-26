@@ -77,6 +77,17 @@ bool is_recursive_call(AstCallNode* call_node, AstFuncNode* func_node);
  */
 bool should_use_tco(AstFuncNode* func_node);
 
+/**
+ * Check if a TCO function is fully safe (no stack growth at all).
+ * A function is safe if ALL recursive calls are in tail position.
+ * This means: if tail calls are removed (transformed to goto), and
+ * there are no other recursive calls, then the function is safe.
+ * 
+ * @param func_node Function to analyze (should already be TCO-eligible)
+ * @return true if function is safe after TCO transformation
+ */
+bool is_tco_function_safe(AstFuncNode* func_node);
+
 class SafetyAnalyzer {
 public:
     SafetyAnalyzer() { init_system_functions(); }
