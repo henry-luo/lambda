@@ -76,20 +76,26 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     while (*pos) {
         // Check for emphasis markers (* or _)
         if (*pos == '*' || *pos == '_') {
-            // Flush accumulated text
-            if (sb->length > 0) {
-                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
-            }
+            // Try to parse emphasis - don't flush buffer yet in case it fails
+            const char* try_pos = pos;
+            Item inline_item = parse_emphasis(parser, &try_pos);
 
-            // Parse bold/italic
-            Item inline_item = parse_emphasis(parser, &pos);
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
+                // Success - flush buffer first, then add emphasis element
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
                 list_push((List*)span, inline_item);
                 increment_element_content_length(span);
+                pos = try_pos;  // Advance past the emphasis
+            } else {
+                // Emphasis parsing failed - treat marker as plain text
+                stringbuf_append_char(sb, *pos);
+                pos++;
             }
             continue;
         }
