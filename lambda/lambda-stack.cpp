@@ -109,8 +109,3 @@ void lambda_stack_overflow_error(const char* func_name) {
     // Set runtime error using the no-trace version (safe in low-stack conditions)
     set_runtime_error_no_trace(ERR_STACK_OVERFLOW, message);
 }
-
-// Wrapper function to get stack limit (for MIR compatibility)
-extern "C" uintptr_t get_stack_limit(void) {
-    return _lambda_stack_limit;
-}

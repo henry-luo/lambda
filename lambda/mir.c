@@ -10,9 +10,11 @@
 #include "lambda-error.h"
 
 // Stack overflow protection functions
-extern uintptr_t get_stack_limit(void);
 extern void lambda_stack_overflow_error(const char* func_name);
-extern Item get_item_error(void);
+
+// Shared runtime context pointer - all JIT modules import this
+// This ensures imported modules share the same runtime context as the main module
+Context* _lambda_rt = NULL;
 
 typedef struct jit_item {
     const char *code;
@@ -35,9 +37,7 @@ func_obj_t func_list[] = {
     // C library functions
     {"memset", (fn_ptr) memset},
     // Stack overflow protection
-    {"get_stack_limit", (fn_ptr) get_stack_limit},
     {"lambda_stack_overflow_error", (fn_ptr) lambda_stack_overflow_error},
-    {"get_item_error", (fn_ptr) get_item_error},
     // {"printf", (fn_ptr) printf}, // printf does not work
     {"array", (fn_ptr) array},
     {"array_int", (fn_ptr) array_int},
@@ -195,6 +195,8 @@ func_obj_t func_list[] = {
     {"pn_fetch", (fn_ptr) pn_fetch},
     {"pn_output2", (fn_ptr) pn_output2},
     {"pn_output3", (fn_ptr) pn_output3},
+    // shared runtime context pointer
+    {"_lambda_rt", (fn_ptr) &_lambda_rt},
 };
 
 void *import_resolver(const char *name) {
