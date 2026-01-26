@@ -7,7 +7,7 @@
 #include "mir-gen.h"
 #include "c2mir.h"
 #include "lambda.h"
-#include "lambda_error.h"
+#include "lambda-error.h"
 
 typedef struct jit_item {
     const char *code;
@@ -411,12 +411,12 @@ void jit_cleanup(MIR_context_t ctx) {
 // which are only linked into the main lambda executable.
 //
 // The lookup_debug_info() and free_debug_info_table() functions are in
-// lambda_error.cpp since they don't use MIR APIs.
+// lambda-error.cpp since they don't use MIR APIs.
 
-#include "lambda_error.h"
+#include "lambda-error.h"
 #include "../lib/hashmap.h"
 
-// Simple dynamic array for debug info (matches struct in lambda_error.cpp)
+// Simple dynamic array for debug info (matches struct in lambda-error.cpp)
 typedef struct {
     FuncDebugInfo** items;
     size_t length;

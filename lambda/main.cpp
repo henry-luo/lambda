@@ -21,7 +21,7 @@
 #include "tex/tex_document_model.hpp"
 
 // Error handling with stack traces
-#include "lambda_error.h"
+#include "lambda-error.h"
 
 // Graph layout includes
 #include "../radiant/layout_graph.hpp"
