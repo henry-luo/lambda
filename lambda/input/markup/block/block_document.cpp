@@ -74,7 +74,6 @@ Item parse_block_element(MarkupParser* parser) {
             return parse_math_block(parser, line);
 
         case BlockType::DIVIDER:
-            parser->current_line++;
             return parse_divider(parser);
 
         case BlockType::PARAGRAPH:

@@ -195,6 +195,11 @@ static Item parse_indented_code_block(MarkupParser* parser, const char* line) {
         }
     }
 
+    // CommonMark: Code block content ends with a newline
+    if (sb->length > 0) {
+        stringbuf_append_char(sb, '\n');
+    }
+
     // Create code content
     String* code_content = parser->builder.createString(sb->str->chars, sb->length);
     Item text_item = {.item = s2it(code_content)};
@@ -355,11 +360,17 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         parser->warnUnclosed(fence_str, fence_start_line);
     }
 
-    // Create code content (no inline parsing for code blocks)
-    String* code_content = parser->builder.createString(sb->str->chars, sb->length);
-    Item text_item = {.item = s2it(code_content)};
-    list_push((List*)code, text_item);
-    increment_element_content_length(code);
+    // CommonMark: Code block content ends with a newline
+    if (sb->length > 0) {
+        stringbuf_append_char(sb, '\n');
+
+        // Create code content (no inline parsing for code blocks)
+        String* code_content = parser->builder.createString(sb->str->chars, sb->length);
+        Item text_item = {.item = s2it(code_content)};
+        list_push((List*)code, text_item);
+        increment_element_content_length(code);
+    }
+    // If no content (sb->length == 0), leave the code element empty
 
     return Item{.item = (uint64_t)code};
 }

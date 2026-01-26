@@ -114,6 +114,12 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
 
     // Use adapter for format-specific detection first
     if (adapter) {
+        // Thematic break detection - MUST come before list detection
+        // because "-" can start both a list and a thematic break
+        if (adapter->detectThematicBreak(line)) {
+            return BlockType::DIVIDER;
+        }
+
         // Header detection
         const char* next_line = nullptr;
         if (parser->current_line + 1 < parser->line_count) {
@@ -150,11 +156,6 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         }
         if (adapter->detectTable(line, table_next)) {
             return BlockType::TABLE;
-        }
-
-        // Thematic break detection
-        if (adapter->detectThematicBreak(line)) {
-            return BlockType::DIVIDER;
         }
 
         // Indented code block detection (only if not in list context)
