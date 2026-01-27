@@ -180,6 +180,7 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->ast_pool = pool_create(); // Memory pool
     tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->code_buf = strbuf_new();
+    tp->func_buf = strbuf_new();  // Buffer for function expressions
     tp->error_buf = NULL;
 
     // Initialize Tree-sitter parser
@@ -193,6 +194,7 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->function_counter = 0;
     tp->temp_var_counter = 0;
     tp->label_counter = 0;
+    tp->in_expression = false;
     tp->has_errors = false;
     tp->runtime = runtime;
 
@@ -219,6 +221,9 @@ void js_transpiler_destroy(JsTranspiler* tp) {
     }
     if (tp->code_buf) {
         strbuf_free(tp->code_buf);
+    }
+    if (tp->func_buf) {
+        strbuf_free(tp->func_buf);
     }
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);
@@ -335,14 +340,24 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     context->pool = context->heap->pool;
     
     // Initialize name_pool for string interning (required for heap_create_name)
+    log_debug("Creating name_pool with pool=%p", (void*)context->pool);
     context->name_pool = name_pool_create(context->pool, nullptr);
+    log_debug("name_pool_create returned: %p", (void*)context->name_pool);
     if (!context->name_pool) {
         log_error("Failed to create JS runtime name_pool");
     }
     
+    log_debug("JS context setup: context=%p, pool=%p, name_pool=%p", 
+              (void*)context, (void*)context->pool, (void*)context->name_pool);
+    
+    // Set up _lambda_rt for JIT code to access the runtime context
+    // The JIT code uses 'rt' macro which points to _lambda_rt
+    _lambda_rt = (Context*)&js_context;
+    
     // Execute the JIT compiled JavaScript code
     log_notice("Executing JIT compiled JavaScript code...");
-    Item result = js_main(_lambda_rt);
+    // Pass the JS context (not _lambda_rt which is for Lambda scripts)
+    Item result = js_main((Context*)&js_context);
     
     // Copy the result value before destroying the heap
     // For simple scalars (int, bool), the value is in the Item itself

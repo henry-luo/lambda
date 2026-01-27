@@ -8,6 +8,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/hashmap.h"
 #include <cstring>
 #include <cmath>
 #include <cstdlib>
@@ -504,15 +505,157 @@ extern "C" Item js_typeof(Item value) {
 }
 
 // =============================================================================
+// Object Functions
+// =============================================================================
+
+// Structure for JS object entries (key-value pairs)
+struct JsObjectEntry {
+    String* key;
+    Item value;
+};
+
+// Hash function for JS object entries
+static uint64_t js_object_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const JsObjectEntry* entry = (const JsObjectEntry*)item;
+    return hashmap_sip(entry->key->chars, entry->key->len, seed0, seed1);
+}
+
+// Compare function for JS object entries
+static int js_object_compare(const void *a, const void *b, void *udata) {
+    const JsObjectEntry* ea = (const JsObjectEntry*)a;
+    const JsObjectEntry* eb = (const JsObjectEntry*)b;
+    if (ea->key->len != eb->key->len) return 1;
+    return strncmp(ea->key->chars, eb->key->chars, ea->key->len);
+}
+
+// Create a new JS object using hashmap
+extern "C" Item js_new_object() {
+    // Create a hashmap to store object properties
+    HashMap* obj = hashmap_new(sizeof(JsObjectEntry), 4, 0, 0, 
+        js_object_hash, js_object_compare, NULL, NULL);
+    // Store as pointer with LMD_TYPE_MAP type (we'll use type_id to differentiate)
+    // Actually we need a way to store this - let's use a wrapper struct
+    // For now, we'll allocate a Map-like structure and store the hashmap pointer
+    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->data = (void*)obj;  // Store hashmap in data field
+    wrapper->type = NULL;  // NULL type indicates JS object
+    return (Item){.map = wrapper};
+}
+
+extern "C" Item js_property_get(Item object, Item key) {
+    TypeId type = get_type_id(object);
+    
+    if (type == LMD_TYPE_MAP) {
+        Map* m = object.map;
+        // Check if this is a JS object (indicated by NULL type)
+        if (m->type == NULL && m->data != NULL) {
+            // This is a JS object using hashmap
+            HashMap* hm = (HashMap*)m->data;
+            String* str_key = NULL;
+            
+            TypeId key_type = get_type_id(key);
+            if (key_type == LMD_TYPE_STRING) {
+                str_key = it2s(key);
+            } else if (key_type == LMD_TYPE_SYMBOL) {
+                str_key = it2s(key);
+            } else {
+                // Convert to string for property access
+                return ItemNull;
+            }
+            
+            JsObjectEntry lookup = {.key = str_key, .value = ItemNull};
+            const JsObjectEntry* found = (const JsObjectEntry*)hashmap_get(hm, &lookup);
+            if (found) {
+                return found->value;
+            }
+            return ItemNull;
+        }
+        // Regular Lambda map
+        return map_get(object.map, key);
+    } else if (type == LMD_TYPE_ELEMENT) {
+        return elmt_get(object.element, key);
+    } else if (type == LMD_TYPE_ARRAY) {
+        // Array index access
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            // Check for "length" property
+            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                return (Item){.item = i2it(object.array->length)};
+            }
+        }
+        // Numeric index access
+        int idx = (int)js_get_number(key);
+        if (idx >= 0 && idx < object.array->length) {
+            return object.array->items[idx];
+        }
+        return ItemNull;
+    }
+    
+    return ItemNull;
+}
+
+extern "C" Item js_property_set(Item object, Item key, Item value) {
+    TypeId type = get_type_id(object);
+    
+    if (type == LMD_TYPE_MAP) {
+        Map* m = object.map;
+        // Check if this is a JS object (indicated by NULL type)
+        if (m->type == NULL && m->data != NULL) {
+            // This is a JS object using hashmap
+            HashMap* hm = (HashMap*)m->data;
+            String* str_key = NULL;
+            
+            TypeId key_type = get_type_id(key);
+            if (key_type == LMD_TYPE_STRING) {
+                str_key = it2s(key);
+            } else if (key_type == LMD_TYPE_SYMBOL) {
+                str_key = it2s(key);
+            } else {
+                // Can't set non-string key
+                return value;
+            }
+            
+            JsObjectEntry entry = {.key = str_key, .value = value};
+            hashmap_set(hm, &entry);
+            return value;
+        }
+        // Regular Lambda map - not supported for set
+        log_debug("js_property_set: Setting property on Lambda map (not supported)");
+        return value;
+    }
+    
+    return value;
+}
+
+extern "C" Item js_property_access(Item object, Item key) {
+    // Same as js_property_get but used for member expressions
+    return js_property_get(object, key);
+}
+
+// =============================================================================
 // Array Functions
 // =============================================================================
 
+// Helper to make JS undefined value
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
 extern "C" Item js_array_new(int length) {
     Array* arr = array();
-    // Pre-allocate capacity if needed
-    Item null_item = {.item = ITEM_NULL};
-    for (int i = 0; i < length; i++) {
-        list_push(arr, null_item);
+    // Pre-allocate the array with space for all elements
+    if (length > 0) {
+        // Allocate items array directly
+        arr->capacity = length + 4;
+        arr->items = (Item*)malloc(arr->capacity * sizeof(Item));
+        // Set length to the target size
+        arr->length = length;
+        // Initialize all slots to undefined
+        Item undef = make_js_undefined();
+        for (int i = 0; i < length; i++) {
+            arr->items[i] = undef;
+        }
     }
     return (Item){.array = arr};
 }
@@ -574,5 +717,74 @@ extern "C" void js_console_log(Item value) {
     if (get_type_id(str) == LMD_TYPE_STRING) {
         String* s = it2s(str);
         printf("%.*s\n", (int)s->len, s->chars);
+    }
+}
+
+// =============================================================================
+// Function Functions
+// =============================================================================
+
+// Structure to wrap JS function pointers
+struct JsFunction {
+    TypeId type_id;  // Always LMD_TYPE_FUNC
+    void* func_ptr;  // Pointer to the compiled function
+    int param_count; // Number of parameters
+};
+
+extern "C" Item js_new_function(void* func_ptr, int param_count) {
+    JsFunction* fn = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = func_ptr;
+    fn->param_count = param_count;
+    return (Item){.function = (Function*)fn};
+}
+
+// Call a JavaScript function stored as an Item
+extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        log_error("js_call_function: not a function");
+        return ItemNull;
+    }
+    
+    JsFunction* fn = (JsFunction*)func_item.function;
+    if (!fn || !fn->func_ptr) {
+        log_error("js_call_function: null function pointer");
+        return ItemNull;
+    }
+    
+    // Cast function pointer and call based on argument count
+    // Note: This is a simplified version that handles common cases
+    typedef Item (*FnPtr0)();
+    typedef Item (*FnPtr1)(Item);
+    typedef Item (*FnPtr2)(Item, Item);
+    typedef Item (*FnPtr3)(Item, Item, Item);
+    typedef Item (*FnPtr4)(Item, Item, Item, Item);
+    
+    switch (arg_count) {
+        case 0:
+            return ((FnPtr0)fn->func_ptr)();
+        case 1:
+            return ((FnPtr1)fn->func_ptr)(args ? args[0] : ItemNull);
+        case 2:
+            return ((FnPtr2)fn->func_ptr)(
+                args ? args[0] : ItemNull,
+                args && arg_count > 1 ? args[1] : ItemNull
+            );
+        case 3:
+            return ((FnPtr3)fn->func_ptr)(
+                args ? args[0] : ItemNull,
+                args && arg_count > 1 ? args[1] : ItemNull,
+                args && arg_count > 2 ? args[2] : ItemNull
+            );
+        case 4:
+            return ((FnPtr4)fn->func_ptr)(
+                args ? args[0] : ItemNull,
+                args && arg_count > 1 ? args[1] : ItemNull,
+                args && arg_count > 2 ? args[2] : ItemNull,
+                args && arg_count > 3 ? args[3] : ItemNull
+            );
+        default:
+            log_error("js_call_function: too many arguments (%d)", arg_count);
+            return ItemNull;
     }
 }

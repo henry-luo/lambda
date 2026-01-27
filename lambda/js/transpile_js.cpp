@@ -83,8 +83,12 @@ void transpile_js_box_item(JsTranspiler* tp, JsAstNode* item) {
         case JS_AST_NODE_CALL_EXPRESSION:
         case JS_AST_NODE_MEMBER_EXPRESSION:
         case JS_AST_NODE_ARRAY_EXPRESSION:
+        case JS_AST_NODE_OBJECT_EXPRESSION:
         case JS_AST_NODE_CONDITIONAL_EXPRESSION:
         case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
+        case JS_AST_NODE_FUNCTION_EXPRESSION:
+        case JS_AST_NODE_ARROW_FUNCTION:
+        case JS_AST_NODE_TEMPLATE_LITERAL:
             // These expressions already return Item through runtime functions
             transpile_js_expression(tp, item);
             return;
@@ -126,16 +130,11 @@ void transpile_js_box_item(JsTranspiler* tp, JsAstNode* item) {
             strbuf_append_char(tp->code_buf, ')');
             break;
         case LMD_TYPE_STRING:
-            if (item->type->is_literal) {
-                strbuf_append_str(tp->code_buf, "const_s2it(");
-                // TODO: Handle string constants properly
-                strbuf_append_str(tp->code_buf, "0"); // Placeholder
-                strbuf_append_char(tp->code_buf, ')');
-            } else {
-                strbuf_append_str(tp->code_buf, "s2it(");
-                transpile_js_expression(tp, item);
-                strbuf_append_char(tp->code_buf, ')');
-            }
+            // For JavaScript, we always need heap_create_name for string literals
+            // The string value from JS AST is the raw C string that needs to be converted to String*
+            strbuf_append_str(tp->code_buf, "s2it(heap_create_name(");
+            transpile_js_expression(tp, item);
+            strbuf_append_str(tp->code_buf, "))");
             break;
         case LMD_TYPE_ARRAY:
         case LMD_TYPE_MAP:
@@ -364,11 +363,13 @@ void transpile_js_unary_expression(JsTranspiler* tp, JsUnaryNode* unary_node) {
             strbuf_append_char(tp->code_buf, ')');
             break;
         case JS_OP_PLUS:
+        case JS_OP_ADD:  // Handle both + and unary +
             strbuf_append_str(tp->code_buf, "js_unary_plus(");
             transpile_js_box_item(tp, unary_node->operand);
             strbuf_append_char(tp->code_buf, ')');
             break;
         case JS_OP_MINUS:
+        case JS_OP_SUB:  // Handle both - and unary -
             strbuf_append_str(tp->code_buf, "js_unary_minus(");
             transpile_js_box_item(tp, unary_node->operand);
             strbuf_append_char(tp->code_buf, ')');
@@ -396,6 +397,75 @@ void transpile_js_unary_expression(JsTranspiler* tp, JsUnaryNode* unary_node) {
         default:
             log_error("Unknown JavaScript unary operator: %d", unary_node->op);
             strbuf_append_str(tp->code_buf, "ITEM_NULL");
+    }
+}
+
+// Transpile JavaScript assignment expression
+void transpile_js_assignment_expression(JsTranspiler* tp, JsAssignmentNode* assign_node) {
+    if (!assign_node->left || !assign_node->right) {
+        log_error("Invalid assignment expression");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+    
+    // For simple variable assignment (x = expr)
+    if (assign_node->left->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)assign_node->left;
+        
+        strbuf_append_str(tp->code_buf, "(");
+        write_js_var_name(tp->code_buf, id->name);
+        strbuf_append_str(tp->code_buf, " = ");
+        
+        switch (assign_node->op) {
+            case JS_OP_ASSIGN:
+                transpile_js_box_item(tp, assign_node->right);
+                break;
+            case JS_OP_ADD_ASSIGN:
+                strbuf_append_str(tp->code_buf, "js_add(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, assign_node->right);
+                strbuf_append_str(tp->code_buf, ")");
+                break;
+            case JS_OP_SUB_ASSIGN:
+                strbuf_append_str(tp->code_buf, "js_subtract(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, assign_node->right);
+                strbuf_append_str(tp->code_buf, ")");
+                break;
+            case JS_OP_MUL_ASSIGN:
+                strbuf_append_str(tp->code_buf, "js_multiply(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, assign_node->right);
+                strbuf_append_str(tp->code_buf, ")");
+                break;
+            case JS_OP_DIV_ASSIGN:
+                strbuf_append_str(tp->code_buf, "js_divide(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, assign_node->right);
+                strbuf_append_str(tp->code_buf, ")");
+                break;
+            case JS_OP_MOD_ASSIGN:
+                strbuf_append_str(tp->code_buf, "js_modulo(");
+                write_js_var_name(tp->code_buf, id->name);
+                strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, assign_node->right);
+                strbuf_append_str(tp->code_buf, ")");
+                break;
+            default:
+                log_error("Unknown assignment operator: %d", assign_node->op);
+                transpile_js_box_item(tp, assign_node->right);
+        }
+        
+        strbuf_append_str(tp->code_buf, ")");
+    } else {
+        // For member expression assignment (obj.prop = expr, arr[i] = expr)
+        // TODO: implement property/element assignment
+        log_error("Complex assignment targets not yet supported");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
 }
 
@@ -438,6 +508,38 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
         }
         return;
     }
+    
+    // Check if callee is a simple identifier that might be a user-defined function
+    if (call_node->callee && call_node->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)call_node->callee;
+        NameEntry* entry = js_scope_lookup(tp, id->name);
+        
+        // Check if the identifier refers to a function declaration
+        if (entry && entry->node && 
+            ((JsAstNode*)entry->node)->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* func = (JsFunctionNode*)entry->node;
+            
+            // Generate direct function call
+            write_js_fn_name(tp->code_buf, func, 0);  // counter is not used since we use byte offset
+            strbuf_append_char(tp->code_buf, '(');
+            
+            // Generate arguments
+            JsAstNode* arg = call_node->arguments;
+            bool first = true;
+            while (arg) {
+                if (!first) strbuf_append_str(tp->code_buf, ", ");
+                transpile_js_box_item(tp, arg);
+                first = false;
+                arg = arg->next;
+            }
+            
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+    }
+    
+    // Fall back to dynamic call for non-identifiers or unknown functions
+    // This handles cases like obj.method() or callbacks
     
     // Count arguments
     int arg_count = 0;
@@ -488,9 +590,9 @@ void transpile_js_member_expression(JsTranspiler* tp, JsMemberNode* member_node)
         // obj.key - convert identifier to string
         if (member_node->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)member_node->property;
-            strbuf_append_str(tp->code_buf, "s2it(\"");
+            strbuf_append_str(tp->code_buf, "s2it(heap_create_name(\"");
             strbuf_append_str_n(tp->code_buf, id->name->chars, id->name->len);
-            strbuf_append_str(tp->code_buf, "\")");
+            strbuf_append_str(tp->code_buf, "\"))");
         } else {
             transpile_js_box_item(tp, member_node->property);
         }
@@ -501,7 +603,7 @@ void transpile_js_member_expression(JsTranspiler* tp, JsMemberNode* member_node)
 
 // Transpile JavaScript array expression
 void transpile_js_array_expression(JsTranspiler* tp, JsArrayNode* array_node) {
-    strbuf_append_format(tp->code_buf, "({\n  Item arr = js_new_array(%d);\n", array_node->length);
+    strbuf_append_format(tp->code_buf, "({\n  Item arr = js_array_new(%d);\n", array_node->length);
     
     JsAstNode* element = array_node->elements;
     int index = 0;
@@ -531,9 +633,9 @@ void transpile_js_object_expression(JsTranspiler* tp, JsObjectNode* object_node)
                 transpile_js_box_item(tp, prop->key);
             } else if (prop->key->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* id = (JsIdentifierNode*)prop->key;
-                strbuf_append_str(tp->code_buf, "s2it(\"");
+                strbuf_append_str(tp->code_buf, "s2it(heap_create_name(\"");
                 strbuf_append_str_n(tp->code_buf, id->name->chars, id->name->len);
-                strbuf_append_str(tp->code_buf, "\")");
+                strbuf_append_str(tp->code_buf, "\"))");
             } else {
                 transpile_js_box_item(tp, prop->key);
             }
@@ -762,7 +864,8 @@ void transpile_js_conditional_expression(JsTranspiler* tp, JsConditionalNode* co
 // Transpile JavaScript template literal
 void transpile_js_template_literal(JsTranspiler* tp, JsTemplateLiteralNode* template_node) {
     strbuf_append_str(tp->code_buf, "({\n");
-    strbuf_append_str(tp->code_buf, "  StringBuf* template_buf = stringbuf_new(pool);\n");
+    // Use _lambda_rt->pool which is properly set up before JIT execution
+    strbuf_append_str(tp->code_buf, "  StringBuf* template_buf = stringbuf_new(rt->pool);\n");
     
     JsAstNode* quasi = template_node->quasis;
     JsAstNode* expr = template_node->expressions;
@@ -791,7 +894,10 @@ void transpile_js_template_literal(JsTranspiler* tp, JsTemplateLiteralNode* temp
         quasi = quasi->next;
     }
     
-    strbuf_append_str(tp->code_buf, "  s2it(stringbuf_to_string(template_buf));\n");
+    // Use a temp variable to avoid double evaluation of stringbuf_to_string
+    // (s2it macro evaluates its argument twice in the ternary expression)
+    strbuf_append_str(tp->code_buf, "  String* _template_result = stringbuf_to_string(template_buf);\n");
+    strbuf_append_str(tp->code_buf, "  s2it(_template_result);\n");
     strbuf_append_str(tp->code_buf, "})");
 }
 
@@ -986,11 +1092,20 @@ void transpile_js_expression(JsTranspiler* tp, JsAstNode* expr) {
             break;
         case JS_AST_NODE_FUNCTION_EXPRESSION:
         case JS_AST_NODE_ARROW_FUNCTION: {
-            // For function expressions, generate function and return function pointer
+            // For function expressions, we need to output the function definition
+            // to a separate buffer (func_buf) that will be placed before js_main
             JsFunctionNode* func = (JsFunctionNode*)expr;
+            
+            // Save current code buffer and switch to func_buf for function definition
+            StrBuf* saved_buf = tp->code_buf;
+            tp->code_buf = tp->func_buf;
+            
             transpile_js_function(tp, func);
             
-            // Return function as Item
+            // Restore code buffer
+            tp->code_buf = saved_buf;
+            
+            // Return function as Item (in the original code location)
             strbuf_append_str(tp->code_buf, "js_new_function((void*)");
             write_js_fn_name(tp->code_buf, func, tp->function_counter - 1);
             strbuf_append_str(tp->code_buf, ", ");
@@ -1012,6 +1127,9 @@ void transpile_js_expression(JsTranspiler* tp, JsAstNode* expr) {
             break;
         case JS_AST_NODE_TEMPLATE_LITERAL:
             transpile_js_template_literal(tp, (JsTemplateLiteralNode*)expr);
+            break;
+        case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
+            transpile_js_assignment_expression(tp, (JsAssignmentNode*)expr);
             break;
         default:
             log_error("Unsupported JavaScript expression type: %d", expr->node_type);
@@ -1082,11 +1200,11 @@ void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
             if (expr_stmt->expression) {
                 // printf("DEBUG: Expression node_type: %d\n", expr_stmt->expression->node_type);
                 fflush(stdout);
+                // Add newline and indentation for statements inside blocks
+                strbuf_append_str(tp->code_buf, "\n    ");
+                transpile_js_box_item(tp, expr_stmt->expression);
+                strbuf_append_str(tp->code_buf, ";");
             }
-            // For the main result, just generate the expression directly
-            // printf("DEBUG: About to transpile expression\n");
-            fflush(stdout);
-            transpile_js_box_item(tp, expr_stmt->expression);
             // printf("DEBUG: Expression transpiled successfully\n");
             fflush(stdout);
             break;
@@ -1150,17 +1268,52 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, "extern int js_array_length(Item array);\n");
     strbuf_append_str(tp->code_buf, "extern Item js_array_push(Item array, Item value);\n");
     strbuf_append_str(tp->code_buf, "extern void js_console_log(Item value);\n");
+    // Object functions
+    strbuf_append_str(tp->code_buf, "extern Item js_new_object(void);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_property_get(Item object, Item key);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_property_set(Item object, Item key, Item value);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_property_access(Item object, Item key);\n");
+    // Function functions
+    strbuf_append_str(tp->code_buf, "extern Item js_new_function(void* func_ptr, int param_count);\n");
+    strbuf_append_str(tp->code_buf, "extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);\n");
+    // Lambda runtime functions needed for JS
+    strbuf_append_str(tp->code_buf, "extern String* heap_create_name(const char* name);\n");
+    // StringBuf functions for template literals
+    strbuf_append_str(tp->code_buf, "typedef struct StringBuf StringBuf;\n");
+    strbuf_append_str(tp->code_buf, "extern StringBuf* stringbuf_new(Pool *pool);\n");
+    strbuf_append_str(tp->code_buf, "extern void stringbuf_append_str(StringBuf *sb, const char *str);\n");
+    strbuf_append_str(tp->code_buf, "extern void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t n);\n");
+    strbuf_append_str(tp->code_buf, "extern String* stringbuf_to_string(StringBuf *sb);\n");
+    // Runtime context for pool access (used by template literals)
+    strbuf_append_str(tp->code_buf, "extern Context* _lambda_rt;\n");
+    strbuf_append_str(tp->code_buf, "#define rt _lambda_rt\n");
     strbuf_append_str(tp->code_buf, "\n");
     
-    // Generate main function (js_init_global_object removed - not needed)
+    // First pass: transpile all function declarations at top level (before js_main)
+    // This ensures C functions are defined before they're used
+    JsAstNode* stmt = program->body;
+    while (stmt) {
+        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            transpile_js_function(tp, (JsFunctionNode*)stmt);
+        }
+        stmt = stmt->next;
+    }
+    
+    // Save the header code buf
+    StrBuf* header_buf = tp->code_buf;
+    
+    // Create a new buffer for js_main body
+    StrBuf* main_buf = strbuf_new();
+    tp->code_buf = main_buf;
+    
+    // Generate main function signature
     strbuf_append_str(tp->code_buf, "Item js_main(Context *ctx) {\n");
     
-    // First pass: find the last expression statement (which will be the return value)
-    JsAstNode* stmt = program->body;
+    // Find the last expression statement (which will be the return value)
+    stmt = program->body;
     JsAstNode* last_expr_stmt = NULL;
     bool has_content = false;
     
-    // printf("DEBUG: Program has body: %s\n", stmt ? "YES" : "NO");
     while (stmt) {
         if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
             last_expr_stmt = stmt;
@@ -1169,11 +1322,15 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
         stmt = stmt->next;
     }
     
-    // Second pass: transpile all statements, but skip the last expression statement
-    // (which will be used as the return value)
+    // Second pass: transpile all statements except function declarations
+    // (function declarations were already emitted outside js_main)
     stmt = program->body;
     while (stmt) {
-        // printf("DEBUG: Processing statement node_type: %d\n", stmt->node_type);
+        // Skip function declarations (already transpiled)
+        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            stmt = stmt->next;
+            continue;
+        }
         
         if (stmt == last_expr_stmt) {
             // Skip - will be used as return value
@@ -1192,7 +1349,6 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
         
         stmt = stmt->next;
     }
-    // printf("DEBUG: Total statements processed, has_content: %s\n", has_content ? "YES" : "NO");
     
     // Generate the final result assignment
     strbuf_append_str(tp->code_buf, "\n  Item result = ");
@@ -1213,4 +1369,17 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, ";\n\n");
     strbuf_append_str(tp->code_buf, "  return result;\n");
     strbuf_append_str(tp->code_buf, "}\n");
+    
+    // Now combine the buffers: header + func_buf + main_buf
+    // First, output any function expressions that were collected during transpilation
+    if (tp->func_buf && tp->func_buf->length > 0) {
+        strbuf_append_str_n(header_buf, tp->func_buf->str, tp->func_buf->length);
+    }
+    
+    // Then append main_buf to header_buf
+    strbuf_append_str_n(header_buf, main_buf->str, main_buf->length);
+    
+    // Restore the original code_buf pointer and free the temporary main_buf
+    tp->code_buf = header_buf;
+    strbuf_free(main_buf);
 }
