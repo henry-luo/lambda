@@ -2188,7 +2188,9 @@
                         ],
                         "binary": "test_html_encoder_gtest.exe",
                         "additional_sources": [
-                            "lambda/format/html_encoder.cpp"
+                            "lambda/format/html_encoder.cpp",
+                            "lib/strbuf.c",
+                            "lib/log.c"
                         ],
                         "icon": "\ud83d\udd12"
                     }

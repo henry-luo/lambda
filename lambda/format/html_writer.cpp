@@ -5,7 +5,7 @@
 #include "../input/input.hpp"
 #include "../../lib/log.h"
 #include <cstring>
-#include <algorithm>
+#include <string>  // TODO: remove when NodeHtmlWriter is migrated
 
 namespace lambda {
 
@@ -18,7 +18,12 @@ TextHtmlWriter::TextHtmlWriter(Pool* pool, bool pretty_print)
       indent_level_(0), 
       pretty_print_(pretty_print),
       pool_(pool),
-      in_tag_(false) {
+      in_tag_(false),
+      tag_stack_top_(-1) {
+    // initialize tag_stack_ to NULL
+    for (int i = 0; i < HTML_TAG_STACK_MAX; i++) {
+        tag_stack_[i] = nullptr;
+    }
 }
 
 TextHtmlWriter::~TextHtmlWriter() {
@@ -98,8 +103,8 @@ bool TextHtmlWriter::removeLastOpenedTagIfEmpty(const char* tag) {
                 
                 // Reset in_tag state and pop from tag_stack_
                 in_tag_ = false;
-                if (!tag_stack_.empty() && tag_stack_.back() == tag) {
-                    tag_stack_.pop_back();
+                if (tag_stack_top_ >= 0 && strcmp(tag_stack_[tag_stack_top_], tag) == 0) {
+                    tag_stack_top_--;
                 }
                 return true;
             }
@@ -118,8 +123,8 @@ bool TextHtmlWriter::removeLastOpenedTagIfEmpty(const char* tag) {
             buf_->str[buf_->length] = '\0';
             
             // Pop from tag_stack_ if the top matches
-            if (!tag_stack_.empty() && tag_stack_.back() == tag) {
-                tag_stack_.pop_back();
+            if (tag_stack_top_ >= 0 && strcmp(tag_stack_[tag_stack_top_], tag) == 0) {
+                tag_stack_top_--;
             }
             return true;
         }
@@ -132,8 +137,8 @@ bool TextHtmlWriter::isTagOpen(const char* tag) const {
     // Check if a specific tag is currently in the open tag stack
     if (!tag) return false;
     
-    for (const auto& t : tag_stack_) {
-        if (t == tag) {
+    for (int i = 0; i <= tag_stack_top_; i++) {
+        if (strcmp(tag_stack_[i], tag) == 0) {
             return true;
         }
     }
@@ -173,11 +178,14 @@ void TextHtmlWriter::openTag(const char* tag, const char* classes,
     }
     
     in_tag_ = true;  // Mark that we're inside a tag
-    tag_stack_.push_back(tag);  // Track open tag
+    // Track open tag - push to stack
+    if (tag_stack_top_ < HTML_TAG_STACK_MAX - 1) {
+        tag_stack_[++tag_stack_top_] = tag;
+    }
     
     // Debug: track paragraph opens
     if (strcmp(tag, "p") == 0) {
-        log_debug("openTag(p): stack size now %zu", tag_stack_.size());
+        log_debug("openTag(p): stack size now %d", tag_stack_top_ + 1);
     }
 }
 
@@ -200,35 +208,42 @@ void TextHtmlWriter::openTagRaw(const char* tag, const char* raw_attrs) {
     }
     
     in_tag_ = true;  // Mark that we're inside a tag
-    tag_stack_.push_back(tag);  // Track open tag
+    // Track open tag - push to stack
+    if (tag_stack_top_ < HTML_TAG_STACK_MAX - 1) {
+        tag_stack_[++tag_stack_top_] = tag;
+    }
 }
 
 void TextHtmlWriter::closeTag(const char* tag) {
     closeTagStart();  // Close tag start if needed
     
     // If tag is nullptr, close the most recent tag from stack
-    std::string tag_name;
+    const char* tag_name = nullptr;
     if (tag == nullptr || tag[0] == '\0') {
-        if (!tag_stack_.empty()) {
-            tag_name = tag_stack_.back();
-            tag_stack_.pop_back();
+        if (tag_stack_top_ >= 0) {
+            tag_name = tag_stack_[tag_stack_top_];
+            tag_stack_top_--;
         } else {
             return;  // No tags to close
         }
     } else {
         tag_name = tag;
-        // Remove from stack if present
-        for (auto it = tag_stack_.rbegin(); it != tag_stack_.rend(); ++it) {
-            if (*it == tag_name) {
-                tag_stack_.erase((it + 1).base());
+        // Remove from stack if present - search from top
+        for (int i = tag_stack_top_; i >= 0; i--) {
+            if (strcmp(tag_stack_[i], tag) == 0) {
+                // Shift remaining elements down
+                for (int j = i; j < tag_stack_top_; j++) {
+                    tag_stack_[j] = tag_stack_[j + 1];
+                }
+                tag_stack_top_--;
                 break;
             }
         }
     }
     
     // Debug: track paragraph closes
-    if (tag_name == "p") {
-        log_debug("closeTag(p): stack size now %zu", tag_stack_.size());
+    if (strcmp(tag_name, "p") == 0) {
+        log_debug("closeTag(p): stack size now %d", tag_stack_top_ + 1);
     }
     
     if (pretty_print_) {
@@ -236,7 +251,7 @@ void TextHtmlWriter::closeTag(const char* tag) {
     }
     
     strbuf_append_str(buf_, "</");
-    strbuf_append_str(buf_, tag_name.c_str());
+    strbuf_append_str(buf_, tag_name);
     strbuf_append_char(buf_, '>');
     
     if (pretty_print_) {
