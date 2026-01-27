@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>  // for va_list
 #include "../lib/log.h"
+#include "../lib/stringbuf.h"  // for StringBuf functions
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
@@ -158,12 +159,14 @@ func_obj_t func_list[] = {
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
     {"it2i", (fn_ptr) it2i},
+    {"it2s", (fn_ptr) it2s},
     {"to_fn", (fn_ptr) to_fn},
     {"to_fn_n", (fn_ptr) to_fn_n},
     {"to_fn_named", (fn_ptr) to_fn_named},
     {"to_closure", (fn_ptr) to_closure},
     {"to_closure_named", (fn_ptr) to_closure_named},
     {"heap_calloc", (fn_ptr) heap_calloc},
+    {"heap_create_name", (fn_ptr) heap_create_name},
     {"fn_call", (fn_ptr) fn_call},
     {"fn_call0", (fn_ptr) fn_call0},
     {"fn_call1", (fn_ptr) fn_call1},
@@ -231,12 +234,23 @@ func_obj_t func_list[] = {
     {"js_unary_plus", (fn_ptr) js_unary_plus},
     {"js_unary_minus", (fn_ptr) js_unary_minus},
     {"js_typeof", (fn_ptr) js_typeof},
+    {"js_new_object", (fn_ptr) js_new_object},
+    {"js_property_get", (fn_ptr) js_property_get},
+    {"js_property_set", (fn_ptr) js_property_set},
+    {"js_property_access", (fn_ptr) js_property_access},
     {"js_array_new", (fn_ptr) js_array_new},
     {"js_array_get", (fn_ptr) js_array_get},
     {"js_array_set", (fn_ptr) js_array_set},
     {"js_array_length", (fn_ptr) js_array_length},
     {"js_array_push", (fn_ptr) js_array_push},
+    {"js_new_function", (fn_ptr) js_new_function},
+    {"js_call_function", (fn_ptr) js_call_function},
     {"js_console_log", (fn_ptr) js_console_log},
+    // StringBuf functions for template literals
+    {"stringbuf_new", (fn_ptr) stringbuf_new},
+    {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},
+    {"stringbuf_append_str_n", (fn_ptr) stringbuf_append_str_n},
+    {"stringbuf_to_string", (fn_ptr) stringbuf_to_string},
 };
 
 void *import_resolver(const char *name) {
