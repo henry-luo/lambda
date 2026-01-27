@@ -211,12 +211,6 @@ void HtmlGenerator::text(const char* content) {
     // html-generator.ls text method
     if (!content) return;
 
-    // Skip EMPTY_STRING sentinel ("lambda.nil")
-    size_t len = strlen(content);
-    if (len == 10 && strncmp(content, "lambda.nil", 10) == 0) {
-        return;
-    }
-
     // In verbatim mode or monospace font, preserve all and don't process typography
     // Monospace fonts (like \texttt) should not use ligatures or dash conversion
     if (verbatim_mode_ || currentFont().family == FontFamily::Typewriter) {

@@ -84,7 +84,7 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
     if (sb->length > 0) {
         return ctx->builder.createString(sb->str->chars, sb->length);
     }
-    return &EMPTY_STRING;
+    return nullptr;  // empty string maps to null
 }
 
 // CSV parser
@@ -118,7 +118,7 @@ void parse_csv(Input* input, const char* csv_string) {
             String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_num);
 
             // Check for duplicate headers
-            if (field && field != &EMPTY_STRING) {
+            if (field) {
                 for (size_t i = 0; i < headers->length; i++) {
                     Item existing = headers->items[i];
                     if (existing.item != ITEM_NULL) {
@@ -128,11 +128,11 @@ void parse_csv(Input* input, const char* csv_string) {
                         }
                     }
                 }
-            } else if (field == &EMPTY_STRING) {
+            } else {
                 ctx.addWarning("Empty header name at column %d", field_num);
             }
 
-            Item item = field ? (field == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(field)}) : (Item){.item = 0};
+            Item item = field ? (Item){.item = s2it(field)} : (Item){.item = ITEM_NULL};
             array_append(headers, item, input->pool);
             field_num++;
             if (*csv == separator) csv++;
@@ -172,9 +172,9 @@ void parse_csv(Input* input, const char* csv_string) {
                     Item header_item = headers->items[field_index];
                     if (header_item.item != ITEM_NULL) {
                         String* key = header_item.get_string();
-                        if (key && key != &EMPTY_STRING) {
-                            // Add field to map - handles NULL and empty strings appropriately
-                            if (field == &EMPTY_STRING || !field) {
+                        if (key) {
+                            // Add field to map - handles NULL appropriately
+                            if (!field) {
                                 row_builder.putNull(key->chars);
                             } else {
                                 row_builder.put(key, (Item){.item = s2it(field)});
@@ -208,8 +208,8 @@ void parse_csv(Input* input, const char* csv_string) {
             while (*csv && *csv != '\n' && *csv != '\r') {
                 String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_index);
 
-                // Append field to array - handles NULL and empty strings
-                if (field == &EMPTY_STRING || !field) {
+                // Append field to array - handles NULL appropriately
+                if (!field) {
                     fields_builder.append(ctx.builder.createNull());
                 } else {
                     fields_builder.append((Item){.item = s2it(field)});

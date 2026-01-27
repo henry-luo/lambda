@@ -69,17 +69,17 @@ MarkBuilder::~MarkBuilder() {
 //------------------------------------------------------------------------------
 
 String* MarkBuilder::createName(const char* name) {
-    if (!name) return &EMPTY_STRING;
+    if (!name) return nullptr;
     return createName(name, strlen(name));
 }
 
 String* MarkBuilder::createName(const char* name, size_t len) {
-    if (!name || len == 0) return &EMPTY_STRING;
+    if (!name || len == 0) return nullptr;
     return name_pool_create_len(name_pool_, name, len);
 }
 
 String* MarkBuilder::createNameFromStrView(StrView name) {
-    if (!name.str || name.length == 0) return &EMPTY_STRING;
+    if (!name.str || name.length == 0) return nullptr;
     return name_pool_create_strview(name_pool_, name);
 }
 
@@ -88,12 +88,12 @@ String* MarkBuilder::createNameFromStrView(StrView name) {
 //------------------------------------------------------------------------------
 
 String* MarkBuilder::createSymbol(const char* symbol) {
-    if (!symbol) return &EMPTY_STRING;
+    if (!symbol) return nullptr;
     return createSymbol(symbol, strlen(symbol));
 }
 
 String* MarkBuilder::createSymbol(const char* symbol, size_t len) {
-    if (!symbol || len == 0) return &EMPTY_STRING;
+    if (!symbol || len == 0) return nullptr;
     return name_pool_create_symbol_len(name_pool_, symbol, len);
 }
 
@@ -106,12 +106,12 @@ String* MarkBuilder::createSymbolFromStrView(StrView symbol) {
 //------------------------------------------------------------------------------
 
 String* MarkBuilder::createString(const char* str) {
-    if (!str) return &EMPTY_STRING;
+    if (!str) return nullptr;
     return createString(str, strlen(str));
 }
 
 String* MarkBuilder::createString(const char* str, size_t len) {
-    if (!str || len == 0) return &EMPTY_STRING;
+    if (!str || len == 0) return nullptr;
 
     // Allocate from arena (fast sequential allocation, no deduplication)
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
@@ -123,12 +123,12 @@ String* MarkBuilder::createString(const char* str, size_t len) {
 }
 
 String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
-    if (!sb || sb->length == 0) return &EMPTY_STRING;
+    if (!sb || sb->length == 0) return nullptr;
     return createString(sb->str->chars, sb->length);
 }
 
 String* MarkBuilder::emptyString() {
-    return &EMPTY_STRING;
+    return nullptr;
 }
 
 //------------------------------------------------------------------------------
@@ -141,22 +141,22 @@ Item MarkBuilder::createNameItem(const char* name) {
 
 Item MarkBuilder::createSymbolItem(const char* symbol) {
     String* sym = createSymbol(symbol);
-    // Empty symbol maps to null
-    if (sym == &EMPTY_STRING) return createNull();
+    // Empty symbol maps to null (createSymbol returns nullptr for empty)
+    if (!sym) return createNull();
     return (Item){.item = y2it(sym)};
 }
 
 Item MarkBuilder::createStringItem(const char* str) {
     String* s = createString(str);
-    // Empty string maps to null
-    if (s == &EMPTY_STRING) return createNull();
+    // Empty string maps to null (createString returns nullptr for empty)
+    if (!s) return createNull();
     return (Item){.item = s2it(s)};
 }
 
 Item MarkBuilder::createStringItem(const char* str, size_t len) {
     String* s = createString(str, len);
-    // Empty string maps to null
-    if (s == &EMPTY_STRING) return createNull();
+    // Empty string maps to null (createString returns nullptr for empty)
+    if (!s) return createNull();
     return (Item){.item = s2it(s)};
 }
 

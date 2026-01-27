@@ -121,7 +121,7 @@ static void format_paragraph(StringBuf* sb, Element* elem) {
         TypeId child_type_id = get_type_id(child_item);
         if (child_type_id == LMD_TYPE_STRING) {
             String* str = child_item.get_string();
-            if (str && str != &EMPTY_STRING) {
+            if (str && str) {
                 append_string(sb, str->chars);
             }
         }
@@ -146,7 +146,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -158,7 +158,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -171,7 +171,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -184,7 +184,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -197,7 +197,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -210,7 +210,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -223,7 +223,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             }
@@ -317,7 +317,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
                 Item def_item = def_list->items[i];
                 if (get_type_id(def_item) == LMD_TYPE_STRING) {
                     String* str = def_item.get_string();
-                    if (str && str != &EMPTY_STRING) {
+                    if (str && str) {
                         append_string(sb, str->chars);
                     }
                 } else if (get_type_id(def_item) == LMD_TYPE_ELEMENT) {
@@ -428,7 +428,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             } else if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
@@ -448,7 +448,7 @@ static void format_list_item(StringBuf* sb, Element* elem) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_STRING) {
             String* str = child_item.get_string();
-            if (str && str != &EMPTY_STRING) {
+            if (str && str) {
                 append_string(sb, str->chars);
             }
         }
@@ -741,7 +741,7 @@ static void format_footnote_definition(StringBuf* sb, Element* elem) {
             Item content_item = content_list->items[i];
             if (get_type_id(content_item) == LMD_TYPE_STRING) {
                 String* str = content_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             } else if (get_type_id(content_item) == LMD_TYPE_ELEMENT) {
@@ -763,7 +763,7 @@ static void format_directive(StringBuf* sb, Element* elem) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_STRING) {
             String* str = child_item.get_string();
-            if (str && str != &EMPTY_STRING) {
+            if (str && str) {
                 append_string(sb, str->chars);
             }
         }
@@ -780,7 +780,7 @@ static void format_table_cell(StringBuf* sb, Element* elem) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_STRING) {
             String* str = child_item.get_string();
-            if (str && str != &EMPTY_STRING) {
+            if (str && str) {
                 append_string(sb, str->chars);
             }
         }
@@ -901,7 +901,7 @@ static void format_org_element(StringBuf* sb, Element* elem) {
 
             if (child_type == LMD_TYPE_STRING) {
                 String* str = child_item.get_string();
-                if (str && str != &EMPTY_STRING) {
+                if (str && str) {
                     append_string(sb, str->chars);
                 }
             } else if (child_type == LMD_TYPE_ELEMENT) {
@@ -919,7 +919,7 @@ static void format_org_text(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
         String* str = item.get_string();
-        if (str && str != &EMPTY_STRING) {
+        if (str && str) {
             append_string(sb, str->chars);
         }
     } else if (type == LMD_TYPE_ELEMENT) {
