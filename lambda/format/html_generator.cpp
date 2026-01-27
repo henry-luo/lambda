@@ -1,5 +1,19 @@
 // html_generator.cpp - Implementation of HTML generator for LaTeX documents
 // Translates latex.js html-generator.ls to C++
+//
+// TODO: Migration to lib/ data structures needed (remove std::*)
+// Current std::* usages:
+// - std::string: processTypography() return type (use StrBuf*)
+// - std::string: Local variables in text(), length() methods (use StrBuf* or char buffers)
+// - std::stringstream: getFontClass(), getFontStyle() (use StrBuf*)
+// - std::algorithm: May need qsort/custom implementations
+//
+// Migration strategy:
+// 1. processTypography(): Return StrBuf* or write to output buffer
+// 2. getFontClass(), getFontStyle(): Use StrBuf* with strbuf_append_*()
+// 3. length() methods: Return const char* (arena-allocated) or write to buffer
+// 4. Local std::string variables: Use char arrays or StrBuf*
+// 5. Update capture mode: startCapture()/endCapture() with StrBuf*
 
 #include "html_generator.hpp"
 #include "../../lib/log.h"
