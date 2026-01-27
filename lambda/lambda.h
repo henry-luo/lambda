@@ -223,6 +223,8 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 
 // Memory allocation for closure environments
 void* heap_calloc(size_t size, TypeId type_id);
+// String creation for name pooling
+String* heap_create_name(const char* name);
 
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
