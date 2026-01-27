@@ -8,6 +8,7 @@
 #include "c2mir.h"
 #include "lambda.h"
 #include "lambda-error.h"
+#include "js/js_runtime.h"
 
 // Stack overflow protection functions
 extern void lambda_stack_overflow_error(const char* func_name);
@@ -197,6 +198,45 @@ func_obj_t func_list[] = {
     {"pn_output3", (fn_ptr) pn_output3},
     // shared runtime context pointer
     {"_lambda_rt", (fn_ptr) &_lambda_rt},
+    
+    // JavaScript runtime functions
+    {"js_to_number", (fn_ptr) js_to_number},
+    {"js_to_string", (fn_ptr) js_to_string},
+    {"js_to_boolean", (fn_ptr) js_to_boolean},
+    {"js_is_truthy", (fn_ptr) js_is_truthy},
+    {"js_add", (fn_ptr) js_add},
+    {"js_subtract", (fn_ptr) js_subtract},
+    {"js_multiply", (fn_ptr) js_multiply},
+    {"js_divide", (fn_ptr) js_divide},
+    {"js_modulo", (fn_ptr) js_modulo},
+    {"js_power", (fn_ptr) js_power},
+    {"js_equal", (fn_ptr) js_equal},
+    {"js_not_equal", (fn_ptr) js_not_equal},
+    {"js_strict_equal", (fn_ptr) js_strict_equal},
+    {"js_strict_not_equal", (fn_ptr) js_strict_not_equal},
+    {"js_less_than", (fn_ptr) js_less_than},
+    {"js_less_equal", (fn_ptr) js_less_equal},
+    {"js_greater_than", (fn_ptr) js_greater_than},
+    {"js_greater_equal", (fn_ptr) js_greater_equal},
+    {"js_logical_and", (fn_ptr) js_logical_and},
+    {"js_logical_or", (fn_ptr) js_logical_or},
+    {"js_logical_not", (fn_ptr) js_logical_not},
+    {"js_bitwise_and", (fn_ptr) js_bitwise_and},
+    {"js_bitwise_or", (fn_ptr) js_bitwise_or},
+    {"js_bitwise_xor", (fn_ptr) js_bitwise_xor},
+    {"js_bitwise_not", (fn_ptr) js_bitwise_not},
+    {"js_left_shift", (fn_ptr) js_left_shift},
+    {"js_right_shift", (fn_ptr) js_right_shift},
+    {"js_unsigned_right_shift", (fn_ptr) js_unsigned_right_shift},
+    {"js_unary_plus", (fn_ptr) js_unary_plus},
+    {"js_unary_minus", (fn_ptr) js_unary_minus},
+    {"js_typeof", (fn_ptr) js_typeof},
+    {"js_array_new", (fn_ptr) js_array_new},
+    {"js_array_get", (fn_ptr) js_array_get},
+    {"js_array_set", (fn_ptr) js_array_set},
+    {"js_array_length", (fn_ptr) js_array_length},
+    {"js_array_push", (fn_ptr) js_array_push},
+    {"js_console_log", (fn_ptr) js_console_log},
 };
 
 void *import_resolver(const char *name) {
