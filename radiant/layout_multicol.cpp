@@ -2,8 +2,15 @@
 #include "layout.hpp"
 #include "../lib/log.h"
 #include <math.h>
-#include <algorithm>
-#include <vector>
+
+// Max number of blocks that can be distributed in multicol layout
+#define MAX_MULTICOL_BLOCKS 1024
+
+// min/max macros for int and float
+#define MIN_INT(a, b) ((a) < (b) ? (a) : (b))
+#define MAX_INT(a, b) ((a) > (b) ? (a) : (b))
+#define MIN_FLOAT(a, b) ((a) < (b) ? (a) : (b))
+#define MAX_FLOAT(a, b) ((a) > (b) ? (a) : (b))
 
 /**
  * CSS Multi-column Layout Implementation
@@ -56,7 +63,7 @@ void calculate_multicol_dimensions(
     if (column_count > 0 && column_width > 0) {
         // Both specified: use min of count and what fits
         int max_by_width = (int)floorf((available_width + gap) / (column_width + gap));
-        column_count = std::min(column_count, std::max(1, max_by_width));
+        column_count = MIN_INT(column_count, MAX_INT(1, max_by_width));
         // Recalculate width to fill available space
         column_width = (available_width - (column_count - 1) * gap) / column_count;
     }
@@ -67,7 +74,7 @@ void calculate_multicol_dimensions(
     else if (column_width > 0) {
         // Only width specified: fit as many as possible
         column_count = (int)floorf((available_width + gap) / (column_width + gap));
-        column_count = std::max(1, column_count);
+        column_count = MAX_INT(1, column_count);
         // Recalculate width to fill available space
         column_width = (available_width - (column_count - 1) * gap) / column_count;
     }
@@ -78,8 +85,8 @@ void calculate_multicol_dimensions(
     }
 
     // Ensure at least 1 column
-    column_count = std::max(1, column_count);
-    column_width = std::max(0.0f, column_width);
+    column_count = MAX_INT(1, column_count);
+    column_width = MAX_FLOAT(0.0f, column_width);
 
     log_debug("[MULTICOL] Computed: count=%d, width=%.1f, gap=%.1f",
               column_count, column_width, gap);
@@ -225,7 +232,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         float orig_y;       // Original Y position
         bool spans_all;     // column-span: all
     };
-    std::vector<BlockInfo> blocks;
+    BlockInfo blocks[MAX_MULTICOL_BLOCKS];
+    int block_count = 0;
 
     child = block->first_child;
     while (child) {
@@ -246,7 +254,13 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                 bool spans_all = child_elem->multicol &&
                                  child_elem->multicol->span == COLUMN_SPAN_ALL;
 
-                blocks.push_back({child_block, block_height, child_block->y, spans_all});
+                if (block_count < MAX_MULTICOL_BLOCKS) {
+                    blocks[block_count].block = child_block;
+                    blocks[block_count].height = block_height;
+                    blocks[block_count].orig_y = child_block->y;
+                    blocks[block_count].spans_all = spans_all;
+                    block_count++;
+                }
 
                 log_debug("[MULTICOL] Block %s: height=%.1f, y=%.1f, spans_all=%d",
                           child_block->node_name(), block_height, child_block->y, spans_all);
@@ -255,7 +269,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         child = child->next_sibling;
     }
 
-    if (blocks.empty()) {
+    if (block_count == 0) {
         log_debug("[MULTICOL] No block children to distribute");
         return;
     }
@@ -269,14 +283,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     float max_column_height = 0;
     bool first_block_in_col0 = true;  // Track first block in column 0
 
-    for (size_t i = 0; i < blocks.size(); i++) {
+    for (int i = 0; i < block_count; i++) {
         BlockInfo& info = blocks[i];
         ViewBlock* child_block = info.block;
 
         // Handle column-span: all
         if (info.spans_all) {
             // Spanning element spans all columns
-            max_column_height = std::max(max_column_height, column_y);
+            max_column_height = MAX_FLOAT(max_column_height, column_y);
 
             child_block->x = 0;
             child_block->y = max_column_height;
@@ -303,7 +317,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         if (should_break) {
             log_debug("[MULTICOL] Column break: column %d -> %d at y=%.1f",
                       current_column, current_column + 1, column_y);
-            max_column_height = std::max(max_column_height, column_y);
+            max_column_height = MAX_FLOAT(max_column_height, column_y);
             current_column++;
             column_y = 0;
         }
@@ -338,7 +352,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // Final column height
-    max_column_height = std::max(max_column_height, column_y);
+    max_column_height = MAX_FLOAT(max_column_height, column_y);
 
     // Calculate total height including padding
     float content_start_y = 0;

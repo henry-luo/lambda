@@ -20,9 +20,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <chrono>
-#include <string>
-#include <algorithm>
+#include <chrono>       // timing - acceptable
+#include <string>       // TODO: migrate CSS rule indexing to use HashMap/ArrayList
+#include <algorithm>    // TODO: replace std::sort with custom sort
 #include <unistd.h>
 #include <limits.h>
 extern "C" {
