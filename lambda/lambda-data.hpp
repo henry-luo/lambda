@@ -383,6 +383,7 @@ void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
 
 extern Type TYPE_NULL;
+extern Type TYPE_UNDEFINED;  // JavaScript undefined
 extern Type TYPE_BOOL;
 extern Type TYPE_INT;
 extern Type TYPE_INT64;
