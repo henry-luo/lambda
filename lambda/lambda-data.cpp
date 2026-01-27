@@ -66,9 +66,6 @@ TypeElmt EmptyElmt;
 
 Item ItemNull = {._type_id = LMD_TYPE_NULL};
 Item ItemError = {._type_id = LMD_TYPE_ERROR};
-String EMPTY_STRING = {.len = sizeof("lambda.nil") - 1, .ref_cnt = 0, .chars = "lambda.nil"};
-// TRUE_EMPTY_STRING is a real empty string for HTML boolean attributes
-String TRUE_EMPTY_STRING = {.len = 0, .ref_cnt = 0, .chars = ""};
 
 // Note: ConstItem has const members and cannot be assigned after initialization.
 // These are zero-initialized and should be used via reinterpret_cast from appropriate Items.

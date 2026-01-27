@@ -315,12 +315,12 @@ static void format_mdx_item_reader(StringBuf* sb, const ItemReader& item) {
 // Main MDX formatting function
 String* format_mdx(Pool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) {
-        return &EMPTY_STRING;
+        return nullptr;
     }
 
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
-        return &EMPTY_STRING;
+        return nullptr;
     }
 
     // use MarkReader API
@@ -340,5 +340,5 @@ String* format_mdx(Pool* pool, Item root_item) {
     }
 
     String* result = stringbuf_to_string(sb);
-    return result ? result : &EMPTY_STRING;
+    return result;
 }

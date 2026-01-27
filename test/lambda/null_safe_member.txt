@@ -1,0 +1,17 @@
+"Test 1 - direct null member access:x.a =x.foo =Test 2 - chained null member access:x.a.b.c =Test 3 - null in nested map:m.a =m.a.foo =m.b.c ="
+1
+"Test 4 - deep nesting with null:deep.level1.level2 =deep.level1.level2.level3 =deep.level1.level2.level3.level4 =Test 5 - missing field returns null:obj.a ="
+1
+"obj.c =obj.missing =Test 6 - element with null attribute:elm.a ="
+1
+"elm.b =elm.b.foo =elm.c ="
+3
+"Test 7 - method style calls on null:arr.len() ="
+0
+"Test 8 - index access on null:my_list[0] =my_list[1] =Test 9 - null propagation pattern:user.name =Aliceuser.address =user.address.city =Test 10 - comparison with null result:data.x == null ="
+true
+"data.x.y == null ="
+true
+"data.missing == null ="
+true
+"Test 11 - null propagation through map chain:config.db.host =localhostconfig.db.ssl =config.db.ssl.cert =config.cache =config.cache.size =Test 12 - array with null and non-null maps:items[0].name =Aitems[1] =items[1].name =items[2].name =C"
