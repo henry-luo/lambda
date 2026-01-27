@@ -318,6 +318,53 @@ Item MarkupParser::parseContent(const char* content) {
         log_debug("markup_parser: pre-scanned %d link definitions", link_def_count_);
     }
 
+    // Pre-scan for RST link definitions: .. _label: URL
+    if (config.format == Format::RST) {
+        for (int i = 0; i < line_count; i++) {
+            const char* line = lines[i];
+            if (!line) continue;
+
+            // Skip leading whitespace
+            const char* p = line;
+            while (*p == ' ' || *p == '\t') p++;
+
+            // Check for RST link definition: .. _label: URL
+            if (strncmp(p, ".. _", 4) == 0) {
+                p += 4;
+                const char* label_start = p;
+
+                // Find label end (terminated by :)
+                while (*p && *p != ':' && *p != '\n' && *p != '\r') {
+                    p++;
+                }
+
+                if (*p == ':') {
+                    size_t label_len = p - label_start;
+                    p++; // skip :
+
+                    // Skip whitespace
+                    while (*p == ' ' || *p == '\t') p++;
+
+                    // Get URL (rest of line)
+                    const char* url_start = p;
+                    while (*p && *p != '\n' && *p != '\r') p++;
+                    size_t url_len = p - url_start;
+
+                    // Trim trailing whitespace
+                    while (url_len > 0 && (url_start[url_len-1] == ' ' || url_start[url_len-1] == '\t')) {
+                        url_len--;
+                    }
+
+                    if (label_len > 0 && url_len > 0) {
+                        addLinkDefinition(label_start, label_len, url_start, url_len, nullptr, 0);
+                        log_debug("markup_parser: RST link def found at line %d", i);
+                    }
+                }
+            }
+        }
+        log_debug("markup_parser: pre-scanned %d RST link definitions", link_def_count_);
+    }
+
     // Parse document using modular block parsers
     log_debug("markup_parser: parsing %d lines with format '%s'",
               line_count, adapter_->name());
@@ -768,9 +815,12 @@ extern "C" Item input_markup_with_format(Input* input, const char* content, Mark
         return Item{.item = ITEM_ERROR};
     }
 
+    log_debug("input_markup_with_format: called with format=%d", (int)format);
+
     // Create parser config with specified format
     ParseConfig cfg;
     cfg.format = markup_format_to_format(format);
+    log_debug("input_markup_with_format: set cfg.format=%d", (int)cfg.format);
     cfg.strict_mode = false;
     cfg.collect_metadata = true;
     cfg.resolve_refs = true;

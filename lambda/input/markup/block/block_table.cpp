@@ -10,6 +10,7 @@
  */
 #include "block_common.hpp"
 #include <cstdlib>
+#include <vector>
 
 namespace lambda {
 namespace markup {
@@ -170,6 +171,127 @@ Item parse_table_row(MarkupParser* parser, const char* line) {
 }
 
 /**
+ * is_rst_simple_table_border - Check if line is RST simple table border (=== ===)
+ */
+static bool is_rst_simple_table_border(const char* line) {
+    if (!line) return false;
+    const char* p = line;
+    while (*p == ' ') p++;
+    if (*p != '=') return false;
+    // Must have at least 2 consecutive =
+    int count = 0;
+    while (*p == '=') { count++; p++; }
+    return count >= 2;
+}
+
+/**
+ * parse_rst_simple_table_row - Parse a row of RST simple table
+ *
+ * Splits content based on column positions from border line.
+ */
+static Item parse_rst_simple_table_row(MarkupParser* parser, const char* line,
+                                        const char* border) {
+    Element* row = create_element(parser, "tr");
+    if (!row) return Item{.item = ITEM_ERROR};
+
+    // Find column boundaries from border line
+    std::vector<int> col_starts;
+    std::vector<int> col_ends;
+
+    const char* bp = border;
+    int pos = 0;
+
+    while (*bp) {
+        // Skip spaces
+        while (*bp == ' ') { bp++; pos++; }
+        if (*bp != '=') break;
+
+        // Start of column
+        col_starts.push_back(pos);
+        while (*bp == '=') { bp++; pos++; }
+        col_ends.push_back(pos);
+    }
+
+    // Extract content from each column
+    size_t line_len = strlen(line);
+    for (size_t i = 0; i < col_starts.size(); i++) {
+        int start = col_starts[i];
+        int end = col_ends[i];
+        if (i + 1 < col_starts.size()) {
+            // Use space between columns
+            end = col_starts[i + 1];
+        }
+
+        // Extract cell content
+        char cell_buf[256] = {0};
+        int cell_len = 0;
+        for (int j = start; j < end && (size_t)j < line_len; j++) {
+            cell_buf[cell_len++] = line[j];
+        }
+        cell_buf[cell_len] = '\0';
+
+        // Trim whitespace
+        char* cell_text = cell_buf;
+        while (*cell_text == ' ') cell_text++;
+        int len = strlen(cell_text);
+        while (len > 0 && cell_text[len-1] == ' ') len--;
+        cell_text[len] = '\0';
+
+        // Create table cell
+        Element* cell = create_element(parser, "td");
+        if (cell) {
+            if (*cell_text) {
+                Item cell_content = parse_inline_spans(parser, cell_text);
+                if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)cell, cell_content);
+                    increment_element_content_length(cell);
+                }
+            }
+            list_push((List*)row, Item{.item = (uint64_t)cell});
+            increment_element_content_length(row);
+        }
+    }
+
+    return Item{.item = (uint64_t)row};
+}
+
+/**
+ * parse_rst_simple_table - Parse RST simple table format
+ */
+static Item parse_rst_simple_table(MarkupParser* parser, const char* line) {
+    Element* table = create_element(parser, "table");
+    if (!table) return Item{.item = ITEM_ERROR};
+
+    // Save the border line for column detection
+    const char* border = line;
+    parser->current_line++; // Skip first border line
+
+    while (parser->current_line < parser->line_count) {
+        const char* current = parser->lines[parser->current_line];
+
+        // Empty line or another border ends table section
+        if (is_empty_line(current)) {
+            break;
+        }
+
+        if (is_rst_simple_table_border(current)) {
+            parser->current_line++; // Skip border line
+            continue; // May have more rows after header separator
+        }
+
+        // Parse content row
+        Item row_item = parse_rst_simple_table_row(parser, current, border);
+        if (row_item.item != ITEM_ERROR && row_item.item != ITEM_UNDEFINED) {
+            list_push((List*)table, row_item);
+            increment_element_content_length(table);
+        }
+        parser->current_line++;
+    }
+
+    return Item{.item = (uint64_t)table};
+}
+
+/**
  * is_asciidoc_table_delimiter - Check for |=== table delimiter
  */
 static bool is_asciidoc_table_delimiter(const char* line) {
@@ -187,6 +309,11 @@ static bool is_asciidoc_table_delimiter(const char* line) {
 Item parse_table(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
+    }
+
+    // Check for RST simple table (starts with ===)
+    if (parser->config.format == Format::RST && is_rst_simple_table_border(line)) {
+        return parse_rst_simple_table(parser, line);
     }
 
     Element* table = create_element(parser, "table");
