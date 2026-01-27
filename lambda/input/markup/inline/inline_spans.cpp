@@ -518,6 +518,29 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             char next = *(pos+1);
             log_debug("escape: found backslash, next char='%c' (0x%02x)", next, (unsigned char)next);
 
+            // Man page font escapes: \fB, \fI, \fR, \fP
+            if (format == Format::MAN && next == 'f') {
+                // Flush text first
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                Item font_item = parse_man_font_escape(parser, &pos);
+                if (font_item.item != ITEM_ERROR && font_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, font_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+                // Font escape failed, treat as literal
+                stringbuf_append_char(sb, *pos);
+                pos++;
+                continue;
+            }
+
             // Hard line break: backslash at end of line
             if (next == '\n' || next == '\r') {
                 // Flush accumulated text
