@@ -17,6 +17,33 @@ namespace lambda {
 namespace markup {
 
 /**
+ * expand_tabs_in_string - Expand tabs to spaces based on 4-character tab stops
+ *
+ * CommonMark: Tabs in lines are expanded to spaces with a tab stop of 4 characters.
+ * The column position is tracked to properly align tabs.
+ *
+ * @param str The input string (may contain tabs)
+ * @param sb The StringBuf to append expanded content to
+ * @param start_column The starting column position (for continuation lines)
+ */
+static void expand_tabs_in_string(const char* str, StringBuf* sb, int start_column = 0) {
+    int col = start_column;
+    for (const char* p = str; *p && *p != '\n' && *p != '\r'; p++) {
+        if (*p == '\t') {
+            // Expand tab to spaces (tab stop every 4 characters)
+            int spaces_to_add = 4 - (col % 4);
+            for (int i = 0; i < spaces_to_add; i++) {
+                stringbuf_append_char(sb, ' ');
+            }
+            col += spaces_to_add;
+        } else {
+            stringbuf_append_char(sb, *p);
+            col++;
+        }
+    }
+}
+
+/**
  * is_escapable_punctuation - Check if character is escapable in CommonMark
  */
 static inline bool is_escapable_punctuation(char c) {
@@ -327,6 +354,7 @@ static Item parse_indented_code_block(MarkupParser* parser, const char* line) {
             if (sb->length > 0) {
                 stringbuf_append_char(sb, '\n');
             }
+            // Preserve tabs in code content - do NOT expand
             stringbuf_append_str(sb, content_start);
             parser->current_line++;
         }
@@ -568,6 +596,7 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
             stringbuf_append_char(sb, '\n');
         }
         // Append line content (may be empty for blank lines)
+        // Preserve tabs in code content - do NOT expand
         stringbuf_append_str(sb, content_start);
         has_content = true;
         parser->current_line++;
