@@ -962,13 +962,11 @@ void html5_insert_comment(Html5Parser* parser, Html5Token* token) {
         comment_len = token->data->len;
     }
 
-    // Create the comment element - need to handle empty comments specially
-    // because createString("") returns EMPTY_STRING which has "lambda.nil" content
+    // Create the comment element - empty data becomes null
     ElementBuilder elem_builder = builder.element("#comment");
 
     // Only set data attribute if there's actual content
     // For empty comments, we still need the data attribute but with empty value
-    // We'll handle this by creating a zero-length string if needed
     if (comment_len > 0) {
         elem_builder.attr("data", comment_data);
     } else {
@@ -1057,8 +1055,7 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
                     attr_name = html5_lookup_svg_attr(key);
                 }
 
-                // Get the actual String* pointer to preserve empty strings properly
-                // (going through cstring() would cause empty strings to be recreated as EMPTY_STRING)
+                // Get the actual String* pointer to preserve empty strings as null
                 String* str_value = value.asString();
                 if (str_value) {
                     eb.attr(attr_name, Item{.item = s2it(str_value)});

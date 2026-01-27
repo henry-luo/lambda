@@ -131,18 +131,11 @@ void dispatcher_destroy(FormatterDispatcher* d) {
 // Common Text Processing
 // ==============================================================================
 
-// format raw text without any escaping, handling EMPTY_STRING and lambda.nil
+// format raw text without any escaping, handling null strings
 void format_raw_text_common(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
 
-    // check if this is the EMPTY_STRING and handle it specially
-    if (str == &EMPTY_STRING) {
-        return; // don't output anything for empty string
-    } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-        return; // don't output anything for lambda.nil content
-    } else {
-        stringbuf_append_str_n(sb, str->chars, str->len);
-    }
+    stringbuf_append_str_n(sb, str->chars, str->len);
 }
 
 // helper function to get markdown escape sequence

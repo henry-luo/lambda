@@ -443,8 +443,6 @@ extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;
 extern Item ItemNull;
 extern Item ItemError;
-extern String EMPTY_STRING;
-extern String TRUE_EMPTY_STRING;  // Real empty string for HTML boolean attributes
 extern TypeInfo type_info[];
 
 typedef struct Input {
