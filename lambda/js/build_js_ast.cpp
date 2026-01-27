@@ -477,13 +477,39 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
     TSNode object_node = ts_node_child_by_field_name(member_node, "object", strlen("object"));
     member->object = build_js_expression(tp, object_node);
     
-    // Get property
-    TSNode property_node = ts_node_child_by_field_name(member_node, "property", strlen("property"));
-    member->property = build_js_expression(tp, property_node);
+    // Determine if computed (obj[prop]) or not (obj.prop) using node type string
+    const char* node_type = ts_node_type(member_node);
+    member->computed = (strcmp(node_type, "subscript_expression") == 0);
     
-    // Determine if computed (obj[prop]) or not (obj.prop)
-    TSSymbol symbol = ts_node_symbol(member_node);
-    member->computed = (symbol == JS_SYM_SUBSCRIPT_EXPRESSION);
+    // Get property - field name is "property" for member_expression, "index" for subscript_expression
+    TSNode property_node;
+    if (member->computed) {
+        property_node = ts_node_child_by_field_name(member_node, "index", strlen("index"));
+        // Debug: check if we got a valid node
+        if (ts_node_is_null(property_node)) {
+            log_error("subscript_expression: 'index' field is null, trying child iteration");
+            // Fall back: iterate children to find the index
+            uint32_t child_count = ts_node_child_count(member_node);
+            for (uint32_t i = 0; i < child_count; i++) {
+                TSNode child = ts_node_child(member_node, i);
+                const char* child_type = ts_node_type(child);
+                log_debug("  subscript child %d: %s", i, child_type);
+                // Look for the index (non-bracket child after the first '[')
+                if (strcmp(child_type, "[") == 0 && i + 1 < child_count) {
+                    property_node = ts_node_child(member_node, i + 1);
+                    break;
+                }
+            }
+        }
+    } else {
+        property_node = ts_node_child_by_field_name(member_node, "property", strlen("property"));
+    }
+    
+    if (ts_node_is_null(property_node)) {
+        log_error("build_js_member_expression: property node is null for %s", node_type);
+        return NULL;
+    }
+    member->property = build_js_expression(tp, property_node);
     
     // Property access returns ANY type by default
     member->base.type = &TYPE_ANY;
@@ -552,10 +578,17 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
 
 // Build JavaScript function node
 JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
-    JsFunctionNode* func = (JsFunctionNode*)alloc_js_ast_node(tp, JS_AST_NODE_FUNCTION_DECLARATION, func_node, sizeof(JsFunctionNode));
+    const char* node_type = ts_node_type(func_node);
+    bool is_arrow = (strcmp(node_type, "arrow_function") == 0);
+    bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0);
     
-    TSSymbol symbol = ts_node_symbol(func_node);
-    func->is_arrow = (symbol == JS_SYM_ARROW_FUNCTION);
+    JsAstNodeType ast_type = is_arrow ? JS_AST_NODE_ARROW_FUNCTION :
+                             is_expression ? JS_AST_NODE_FUNCTION_EXPRESSION :
+                             JS_AST_NODE_FUNCTION_DECLARATION;
+    
+    JsFunctionNode* func = (JsFunctionNode*)alloc_js_ast_node(tp, ast_type, func_node, sizeof(JsFunctionNode));
+    
+    func->is_arrow = is_arrow;
     func->is_async = false; // TODO: Check for async keyword
     func->is_generator = false; // TODO: Check for generator
     
@@ -566,7 +599,8 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         func->name = name_pool_create_strview(tp->name_pool, name_source);
     }
     
-    // Get parameters
+    // Get parameters - arrow functions can have "parameter" (singular) for single-param without parens
+    // or "parameters" (plural) for multiple params or parens
     TSNode params_node = ts_node_child_by_field_name(func_node, "parameters", strlen("parameters"));
     if (!ts_node_is_null(params_node)) {
         uint32_t param_count = ts_node_named_child_count(params_node);
@@ -584,6 +618,12 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
                 }
                 prev_param = param;
             }
+        }
+    } else {
+        // Check for single parameter (arrow function without parens: x => x * 2)
+        TSNode param_node = ts_node_child_by_field_name(func_node, "parameter", strlen("parameter"));
+        if (!ts_node_is_null(param_node)) {
+            func->params = build_js_identifier(tp, param_node);
         }
     }
     
@@ -666,20 +706,20 @@ JsAstNode* build_js_while_statement(JsTranspiler* tp, TSNode while_node) {
 JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
     JsForNode* for_stmt = (JsForNode*)alloc_js_ast_node(tp, JS_AST_NODE_FOR_STATEMENT, for_node, sizeof(JsForNode));
     
-    // Get init (optional)
-    TSNode init_node = ts_node_child_by_field_name(for_node, "init", strlen("init"));
+    // Get init (optional) - field name is "initializer" in tree-sitter-javascript
+    TSNode init_node = ts_node_child_by_field_name(for_node, "initializer", strlen("initializer"));
     if (!ts_node_is_null(init_node)) {
         for_stmt->init = build_js_statement(tp, init_node);
     }
     
-    // Get test condition (optional)
+    // Get test condition (optional) - field name is "condition"
     TSNode test_node = ts_node_child_by_field_name(for_node, "condition", strlen("condition"));
     if (!ts_node_is_null(test_node)) {
         for_stmt->test = build_js_expression(tp, test_node);
     }
     
-    // Get update (optional)
-    TSNode update_node = ts_node_child_by_field_name(for_node, "update", strlen("update"));
+    // Get update (optional) - field name is "increment" in tree-sitter-javascript
+    TSNode update_node = ts_node_child_by_field_name(for_node, "increment", strlen("increment"));
     if (!ts_node_is_null(update_node)) {
         for_stmt->update = build_js_expression(tp, update_node);
     }
@@ -1032,6 +1072,9 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         return (JsAstNode*)expr_stmt;
     } else if (strcmp(node_type, "comment") == 0) {
         // Skip comments - they don't generate any code
+        return NULL;
+    } else if (strcmp(node_type, "empty_statement") == 0) {
+        // Skip empty statements (standalone semicolons) - they don't generate any code
         return NULL;
     } else {
         log_error("Unsupported JavaScript statement type: %s", node_type);
