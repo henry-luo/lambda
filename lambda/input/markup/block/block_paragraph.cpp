@@ -200,6 +200,12 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                     break;  // Fenced code interrupts paragraphs
                 }
                 // Indented code block - doesn't interrupt, fall through
+            } else if (next_type == BlockType::RAW_HTML) {
+                // HTML block types 1-6 can interrupt paragraphs, type 7 cannot
+                if (html_block_can_interrupt_paragraph(current)) {
+                    break;  // HTML block types 1-6 interrupt paragraphs
+                }
+                // Type 7 HTML blocks don't interrupt - fall through
             }
 
             const char* content = current;
