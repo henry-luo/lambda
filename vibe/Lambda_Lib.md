@@ -3,11 +3,10 @@
 **Goal**: Remove `std::*` (std::string, std::vector, std::map, etc.) from Lambda runtime code and use only C types and data structures from `./lib`.
 
 **Rationale**: Tight control over basic data structures and types used in Lambda runtime for:
-- Predictable memory behavior with pool/arena allocation
-- Consistent memory management via reference counting
-- Better integration with the MIR JIT compiler
-- Reduced binary size and startup time
-- Full control over allocation strategies
+- Consistent and full **control over memory management**
+	- e.g. with pool/arena allocation, reference counting, etc.
+- **Reduced binary size** and startup time
+- Better and easier integration with the MIR JIT compiler (which is a C compiler)
 
 ---
 
