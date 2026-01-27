@@ -420,6 +420,91 @@ let x = get_value()
 if (x == null) "missing" else x  // Idiomatic null check
 ```
 
+### Member Access and Null Safety
+
+Lambda's `.` operator for member access has **built-in null safety**, similar to the optional chaining operator (`?.`) in JavaScript/TypeScript. When the object is `null`, accessing any member returns `null` instead of throwing an error.
+
+```lambda
+// Direct null member access
+let x = null
+x.name           // null (not an error)
+x.a.b.c          // null (null propagates through the chain)
+
+// Null in nested structures
+let user = {name: "Alice", address: null}
+user.name              // "Alice"
+user.address           // null
+user.address.city      // null (safe - no error)
+user.address.city.zip  // null (continues to propagate)
+```
+
+#### Null Propagation Chain
+
+Null propagates automatically through chained member access:
+
+```lambda
+// Given potentially null objects at any level
+let result = company.department.manager.name
+
+// Equivalent to this verbose null-checking in other languages:
+// if (company == null) null
+// else if (company.department == null) null
+// else if (company.department.manager == null) null
+// else company.department.manager.name
+```
+
+#### Method Calls on Null
+
+When the receiver of a method call is null, the call returns null without invoking the method:
+
+```lambda
+let items = null
+items.len()              // 0 (len of null is 0)
+items.reverse()          // null
+
+let arr = [1, 2, 3]
+arr.len()                // 3
+arr.reverse()            // [3, 2, 1]
+```
+
+#### Index Access on Null
+
+Index access on null also returns null:
+
+```lambda
+let data = null
+data[0]        // null
+data["key"]    // null
+
+let arr = [1, 2, 3]
+arr[0]         // 1
+arr[10]        // null (out of bounds also returns null)
+```
+
+#### Comparison with JavaScript
+
+| Syntax | JavaScript | Lambda |
+|--------|------------|--------|
+| Regular access | `obj.field` (throws if null) | `obj.field` (returns null if obj is null) |
+| Optional chaining | `obj?.field` | `obj.field` (same behavior) |
+| Method call | `obj.method()` (throws if null) | `obj.method()` (returns null if obj is null) |
+
+**Key Insight**: Lambda's `.` operator behaves like JavaScript's `?.` by default. This design choice eliminates null reference errors and enables clean, functional-style data processing.
+
+#### Practical Patterns
+
+```lambda
+// Safe nested access
+let config = input("config.json", 'json')
+let port = config.server.port      // null if any level is missing
+
+// Conditional with null check
+let city = if (user.address != null) user.address.city else "Unknown"
+
+// Using or for defaults
+let name = user.profile.display_name or user.name or "Anonymous"
+```
+
 ### Type Expressions
 
 ```lambda
@@ -1200,6 +1285,101 @@ string+            // Array of one or more strings
 Lambda Script provides a comprehensive set of built-in system functions for type conversion, mathematical operations, collection manipulation, and I/O.
 
 > **Full Documentation**: See [Lambda_Sys_Func_Reference.md](Lambda_Sys_Func_Reference.md) for complete system function documentation.
+
+### Method-Style Calls
+
+System functions can be called using **method-style syntax**, where the first argument becomes the receiver:
+
+```lambda
+// Traditional prefix style
+len(arr)                    // 5
+sum([1, 2, 3])              // 6
+slice("hello", 0, 3)        // "hel"
+
+// Method style (equivalent)
+arr.len()                   // 5
+[1, 2, 3].sum()             // 6
+"hello".slice(0, 3)         // "hel"
+```
+
+The transformation is simple: `obj.method(args...)` becomes `method(obj, args...)`.
+
+#### Supported Functions
+
+Most system functions that take an object as their first parameter support method-style calls:
+
+| Category | Prefix Style | Method Style |
+|----------|--------------|-------------|
+| **Type** | `len(arr)` | `arr.len()` |
+| **Type** | `type(val)` | `val.type()` |
+| **Type** | `string(42)` | `42.string()` |
+| **Type** | `int("123")` | `"123".int()` |
+| **String** | `slice(s, 0, 5)` | `s.slice(0, 5)` |
+| **String** | `contains(s, "x")` | `s.contains("x")` |
+| **String** | `starts_with(s, "a")` | `s.starts_with("a")` |
+| **Collection** | `reverse(arr)` | `arr.reverse()` |
+| **Collection** | `sort(arr)` | `arr.sort()` |
+| **Collection** | `unique(arr)` | `arr.unique()` |
+| **Collection** | `take(arr, 3)` | `arr.take(3)` |
+| **Collection** | `drop(arr, 2)` | `arr.drop(2)` |
+| **Stats** | `sum(nums)` | `nums.sum()` |
+| **Stats** | `min(nums)` | `nums.min()` |
+| **Stats** | `max(nums)` | `nums.max()` |
+| **Stats** | `avg(nums)` | `nums.avg()` |
+| **Math** | `abs(x)` | `x.abs()` |
+| **Math** | `round(x)` | `x.round()` |
+| **Math** | `floor(x)` | `x.floor()` |
+| **Math** | `ceil(x)` | `x.ceil()` |
+| **Math** | `sqrt(x)` | `x.sqrt()` |
+
+#### Method Chaining
+
+Method-style syntax enables fluent, readable chained operations:
+
+```lambda
+// Chained method calls - left to right flow
+let result = data
+    .filter(x => x > 0)
+    .map(x => x * 2)
+    .sort()
+    .take(10)
+    .sum()
+
+// Equivalent prefix style - nested, harder to read
+let result = sum(take(sort(map(filter(data, x => x > 0), x => x * 2)), 10))
+```
+
+#### Examples
+
+```lambda
+// String operations
+let s = "Hello, World!"
+s.len()                     // 13
+s.contains("World")         // true
+s.starts_with("Hello")      // true
+s.slice(0, 5)               // "Hello"
+
+// Array operations
+let nums = [3, 1, 4, 1, 5, 9, 2, 6]
+nums.len()                  // 8
+nums.sum()                  // 31
+nums.min()                  // 1
+nums.max()                  // 9
+nums.sort()                 // [1, 1, 2, 3, 4, 5, 6, 9]
+nums.unique()               // [3, 1, 4, 5, 9, 2, 6]
+nums.reverse()              // [6, 2, 9, 5, 1, 4, 1, 3]
+
+// Chained operations
+[5, 3, 1, 4, 2].sort().reverse()  // [5, 4, 3, 2, 1]
+
+// Type conversion
+42.string()                 // "42"
+"123".int()                 // 123
+3.14.floor()                // 3
+(-5).abs()                  // 5
+```
+
+**Note**: Both prefix and method styles are fully interchangeable. Choose the style that best fits your code's readability.
 
 ### Function Categories
 
