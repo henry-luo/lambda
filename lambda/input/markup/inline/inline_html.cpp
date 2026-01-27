@@ -81,8 +81,8 @@ static inline const char* skip_whitespace(const char* p) {
  * - Text must not contain --
  * - Ends with -->
  *
- * But for compatibility with browsers, we accept all comments that
- * start with <!-- and end with -->
+ * However, if text starts with '>' or '->', CommonMark still treats
+ * the construct up to that point as raw HTML (just not a valid comment).
  */
 static const char* try_parse_html_comment(const char* start) {
     // Must start with <!--
@@ -90,14 +90,38 @@ static const char* try_parse_html_comment(const char* start) {
 
     const char* p = start + 4;
 
+    // CommonMark: if text starts with '>' or '->', it's still raw HTML
+    // but terminates at that point
+    if (*p == '>') {
+        return p + 1;  // <!--> returns position after >
+    }
+    if (*p == '-' && *(p+1) == '>') {
+        return p + 2;  // <!---> returns position after ->
+    }
+
     // Find -->
     while (*p) {
         if (strncmp(p, "-->", 3) == 0) {
+            // CommonMark: text must not end with -
+            // The character before --> (i.e., at p-1) should not be -
+            if (p > start + 4 && *(p - 1) == '-') {
+                // The text ends with -, which is invalid
+                // But we still recognize this as raw HTML up to this point
+                return p + 3;
+            }
             return p + 3;
         }
-        // Cannot contain --
-        if (p[0] == '-' && p[1] == '-' && p[2] != '>') {
-            // Continue searching - CommonMark doesn't disallow -- inside
+        // CommonMark: text must not contain --
+        if (p[0] == '-' && p[1] == '-') {
+            // Contains --, which is invalid
+            // But we still recognize this as raw HTML, find the -->
+            while (*p) {
+                if (strncmp(p, "-->", 3) == 0) {
+                    return p + 3;
+                }
+                p++;
+            }
+            return nullptr;  // No closing -->
         }
         p++;
     }
@@ -222,11 +246,16 @@ static const char* try_parse_html_tag(const char* start) {
 
         while (is_attribute_name_char(*p)) p++;
 
-        p = skip_whitespace(p);
+        // Check for optional '=' (attribute value specification)
+        // CommonMark: "An attribute value specification consists of optional whitespace,
+        // a `=` character, optional whitespace, and an attribute value."
+        // So we only skip whitespace if we're about to see '='
+        const char* after_name = p;
+        const char* maybe_eq = skip_whitespace(p);
 
         // Check for attribute value
-        if (*p == '=') {
-            p++;
+        if (*maybe_eq == '=') {
+            p = maybe_eq + 1;  // skip the '='
             p = skip_whitespace(p);
 
             if (*p == '"') {
@@ -250,6 +279,8 @@ static const char* try_parse_html_tag(const char* start) {
                 }
             }
         }
+        // If no '=', this is a boolean attribute - don't consume whitespace
+        // p stays at after_name, loop will find whitespace before next attribute
         // Loop will check for whitespace before next attribute
     }
 

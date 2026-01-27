@@ -123,7 +123,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 stringbuf_reset(sb);  // Reset buffer for subsequent text
                 if (saved_buffer) free(saved_buffer);
             } else {
-                // Emphasis parsing failed - restore saved buffer and treat marker as text
+                // Emphasis parsing failed - restore saved buffer and treat markers as text
                 // Restore the buffer contents that may have been clobbered
                 stringbuf_reset(sb);
                 if (saved_buffer && saved_length > 0) {
@@ -132,10 +132,19 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     }
                 }
                 if (saved_buffer) free(saved_buffer);
-                // Treat entire marker run as plain text
-                // This prevents second marker from being tried as opener
-                char marker = *pos;
-                while (*pos == marker) {
+
+                // Check if parse_emphasis advanced the position (e.g., for runs that can't open)
+                // In that case, add all the skipped characters to the buffer
+                if (try_pos > pos) {
+                    // Add the entire run as plain text
+                    while (pos < try_pos) {
+                        stringbuf_append_char(sb, *pos);
+                        pos++;
+                    }
+                } else {
+                    // Treat ONLY ONE marker as plain text
+                    // This allows remaining markers to be tried as openers
+                    // (needed for cases like **foo* where * should match with second *)
                     stringbuf_append_char(sb, *pos);
                     pos++;
                 }
