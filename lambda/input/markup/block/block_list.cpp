@@ -281,6 +281,82 @@ static const char* strip_indentation(const char* line, int n) {
 }
 
 /**
+ * strip_indentation_with_tabs - Strip n columns from a line with proper tab expansion
+ *
+ * This function strips n columns from a line while properly handling tabs.
+ * Tabs expand to the next column that is a multiple of 4. When stripping:
+ * 1. We track the original column position of each character
+ * 2. Characters (or partial tabs) whose original column >= n are output
+ * 3. All tabs are expanded to spaces based on their original column positions
+ *
+ * Example: with n=2 and input "→→bar" (two tabs then "bar"):
+ * - Tab 1 at col 0 expands to col 4 (covers cols 0-3)
+ * - Tab 2 at col 4 expands to col 8 (covers cols 4-7)
+ * - bar starts at col 8
+ * - Stripping 2 cols: cols 2-3 from tab 1 (2 spaces) + cols 4-7 from tab 2 (4 spaces) + bar
+ * - Result: "      bar" (6 spaces + bar)
+ *
+ * Returns a newly allocated string that must be freed.
+ */
+static char* strip_indentation_with_tabs(const char* line, int n) {
+    if (!line) return strdup("");
+
+    // First pass: calculate total output columns needed
+    int orig_col = 0;
+    size_t expanded_len = 0;
+
+    for (const char* p = line; *p; p++) {
+        int char_end_col;
+        if (*p == '\t') {
+            char_end_col = (orig_col + 4) & ~3;  // Next multiple of 4
+        } else {
+            char_end_col = orig_col + 1;
+        }
+
+        // Count columns that are >= n
+        if (char_end_col > n) {
+            int start_output = (orig_col >= n) ? orig_col : n;
+            expanded_len += (char_end_col - start_output);
+        }
+
+        orig_col = char_end_col;
+    }
+
+    // Allocate result buffer
+    char* result = (char*)malloc(expanded_len + 1);
+    if (!result) return strdup("");
+
+    // Second pass: output characters as spaces for the columns >= n
+    char* out = result;
+    orig_col = 0;
+
+    for (const char* p = line; *p; p++) {
+        int char_end_col;
+        if (*p == '\t') {
+            char_end_col = (orig_col + 4) & ~3;  // Next multiple of 4
+            // Output spaces for columns >= n
+            if (char_end_col > n) {
+                int start_output = (orig_col >= n) ? orig_col : n;
+                for (int c = start_output; c < char_end_col; c++) {
+                    *out++ = ' ';
+                }
+            }
+        } else {
+            char_end_col = orig_col + 1;
+            // Output the character if its column >= n
+            if (orig_col >= n) {
+                *out++ = *p;
+            }
+        }
+
+        orig_col = char_end_col;
+    }
+    *out = '\0';
+
+    return result;
+}
+
+/**
  * strip_to_column - Strip line content to reach a specific column
  *
  * Unlike strip_indentation which only strips whitespace, this function
@@ -311,6 +387,83 @@ static const char* strip_to_column(const char* line, int target_col) {
     }
 
     return pos;
+}
+
+/**
+ * strip_to_column_with_tabs - Strip to column with proper tab expansion
+ *
+ * Like strip_to_column but returns an allocated string with tabs properly
+ * expanded. Used for list item first line content where tabs create indentation.
+ *
+ * Returns a newly allocated string that must be freed.
+ */
+static char* strip_to_column_with_tabs(const char* line, int target_col) {
+    if (!line) return strdup("");
+
+    // First pass: determine column and character positions
+    const char* pos = line;
+    int col = 0;
+    int virtual_spaces = 0;
+
+    while (*pos && col < target_col) {
+        if (*pos == '\t') {
+            // Tab advances to next multiple of 4
+            int next_col = (col + 4) & ~3;
+            if (next_col > target_col) {
+                // Tab straddles boundary
+                virtual_spaces = next_col - target_col;
+                col = next_col;
+                pos++;
+                break;
+            }
+            col = next_col;
+        } else {
+            col++;
+        }
+        pos++;
+    }
+
+    // Calculate expanded length for remaining content
+    size_t expanded_len = virtual_spaces;
+    int temp_col = col;
+    for (const char* p = pos; *p; p++) {
+        if (*p == '\t') {
+            int next = (temp_col + 4) & ~3;
+            expanded_len += (next - temp_col);
+            temp_col = next;
+        } else {
+            expanded_len++;
+            temp_col++;
+        }
+    }
+
+    // Allocate and build result
+    char* result = (char*)malloc(expanded_len + 1);
+    if (!result) return strdup(pos);
+
+    // Fill virtual spaces
+    char* out = result;
+    for (int i = 0; i < virtual_spaces; i++) {
+        *out++ = ' ';
+    }
+
+    // Expand tabs and copy remaining content
+    int out_col = col;
+    for (const char* p = pos; *p; p++) {
+        if (*p == '\t') {
+            int next = (out_col + 4) & ~3;
+            for (int i = out_col; i < next; i++) {
+                *out++ = ' ';
+            }
+            out_col = next;
+        } else {
+            *out++ = *p;
+            out_col++;
+        }
+    }
+    *out = '\0';
+
+    return result;
 }
 
 /**
@@ -521,8 +674,10 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         }
 
         // Line is properly indented - strip the indentation and add
-        const char* stripped = strip_indentation(line, content_column);
-        content_lines.push_back(strdup(stripped));
+        // Use strip_indentation_with_tabs to handle tabs that straddle the boundary
+        char* stripped = strip_indentation_with_tabs(line, content_column);
+        log_debug("list content: collected stripped line: '%s'", stripped);
+        content_lines.push_back(stripped);  // Already allocated by strip_indentation_with_tabs
         parser->current_line++;
     }
 
@@ -564,6 +719,21 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         if (is_empty_line(content_line)) {
             parser->current_line++;
             continue;
+        }
+
+        // Check for link definition first - these should be consumed silently
+        // (they were already added to the link map during pre-scan or are added now)
+        if (is_link_definition_start(content_line)) {
+            log_debug("list: found potential link def: '%s'", content_line);
+            int saved = parser->current_line;
+            if (parse_link_definition(parser, content_line)) {
+                // Link definition was successfully parsed - skip it
+                log_debug("list: link definition parsed, skipping");
+                parser->current_line++;
+                continue;
+            }
+            log_debug("list: not a valid link definition");
+            parser->current_line = saved;
         }
 
         // Detect block type of the stripped content
@@ -745,7 +915,8 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             const char* item_content = get_list_item_content(line, line_is_ordered);
 
             // Get properly stripped first line content (preserves indentation for code blocks)
-            const char* first_line_stripped = strip_to_column(line, content_column);
+            // Use strip_to_column_with_tabs for proper tab expansion
+            char* first_line_stripped = strip_to_column_with_tabs(line, content_column);
 
             // Check if the content is a thematic break (e.g., "- * * *" -> list item containing <hr />)
             // This must be checked BEFORE checking for nested list markers because "* * *" looks like a list marker
@@ -756,6 +927,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     list_push((List*)item, Item{.item = (uint64_t)hr});
                     increment_element_content_length(item);
                 }
+                free(first_line_stripped);
                 parser->current_line++;
             }
             // Check if the content itself starts with a list marker (nested list case: "- - foo")
@@ -766,6 +938,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     list_push((List*)item, nested_list);
                     increment_element_content_length(item);
                 }
+                free(first_line_stripped);
                 parser->current_line++;
             } else {
                 // Collect first line content and all continuation lines,
@@ -775,9 +948,12 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 std::vector<char*> content_lines;
 
                 // Add first line content (properly stripped to preserve code block indentation)
+                // first_line_stripped is already allocated by strip_to_column_with_tabs
                 bool first_line_empty = !first_line_stripped || !*first_line_stripped;
                 if (!first_line_empty) {
-                    content_lines.push_back(strdup(first_line_stripped));
+                    content_lines.push_back(first_line_stripped);
+                } else {
+                    free(first_line_stripped);
                 }
 
                 parser->current_line++;
@@ -846,28 +1022,48 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
                     int cont_indent = get_list_indentation(cont_line);
 
-                    // New list item at same/lower level ends this item
-                    if (is_list_item(cont_line) && cont_indent <= base_indent) {
+                    // Check if this line looks like a list item marker
+                    bool looks_like_list_item = is_list_item(cont_line);
+
+                    // CommonMark: A list item marker must begin with 0-3 spaces of indentation
+                    // relative to the containing block's margin (base_indent).
+                    // If indent > base_indent + 3, it's NOT a valid list item marker
+                    // and should be treated as literal text content.
+                    bool is_valid_sibling_item = looks_like_list_item && cont_indent <= base_indent + 3;
+
+                    // Valid sibling list item at same/lower level ends this item
+                    if (is_valid_sibling_item && cont_indent <= base_indent) {
                         break;
                     }
 
                     // Less indented than content column
                     if (cont_indent < content_column) {
+                        // If it looks like a list item but has too much indent (> base + 3),
+                        // it's not a valid list item - treat as literal text content
+                        if (looks_like_list_item && !is_valid_sibling_item) {
+                            // Strip to content column level but preserve the "- e" text
+                            // Since cont_indent < content_column, we need to treat the whole
+                            // line (from its indent) as literal text
+                            char* literal_stripped = strip_indentation_with_tabs(cont_line, cont_indent);
+                            content_lines.push_back(literal_stripped);
+                            parser->current_line++;
+                            continue;
+                        }
                         // Check for lazy continuation (paragraph continuation)
                         if (!had_blank && is_lazy_continuation(cont_line)) {
                             // For lazy continuation, strip whatever indentation exists
                             // (it's paragraph text, not indented code)
-                            const char* lazy_stripped = strip_indentation(cont_line, cont_indent);
-                            content_lines.push_back(strdup(lazy_stripped));
+                            char* lazy_stripped = strip_indentation_with_tabs(cont_line, cont_indent);
+                            content_lines.push_back(lazy_stripped);
                             parser->current_line++;
                             continue;
                         }
                         break;
                     }
 
-                    // Properly indented - strip and add
-                    const char* stripped = strip_indentation(cont_line, content_column);
-                    content_lines.push_back(strdup(stripped));
+                    // Properly indented - strip and add with proper tab expansion
+                    char* stripped = strip_indentation_with_tabs(cont_line, content_column);
+                    content_lines.push_back(stripped);
                     parser->current_line++;
                 }
 
@@ -899,8 +1095,9 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     parser->current_line = 0;
 
                     // Track for loose list detection:
-                    // We need to detect if there's a blank line between top-level blocks
+                    // We need to detect if there's a blank line in the content
                     int direct_block_count = 0;
+                    bool had_blank_in_content = false;
                     bool had_blank_before_block = false;
                     bool found_blank_between_direct_blocks = false;
 
@@ -909,12 +1106,30 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         const char* content_line = parser->lines[parser->current_line];
 
                         if (is_empty_line(content_line)) {
+                            // Mark that we have a blank in the content
+                            had_blank_in_content = true;
                             // Mark that we have a blank before the next block
                             if (direct_block_count > 0) {
                                 had_blank_before_block = true;
                             }
                             parser->current_line++;
                             continue;
+                        }
+
+                        // Check for link definition first - these should be consumed silently
+                        // (they were already added to the link map during pre-scan or are added now)
+                        log_debug("list structure: checking line '%s' for link def", content_line);
+                        if (is_link_definition_start(content_line)) {
+                            log_debug("list structure: is_link_definition_start returned true");
+                            int saved = parser->current_line;
+                            if (parse_link_definition(parser, content_line)) {
+                                // Link definition was successfully parsed - skip it
+                                log_debug("list structure: parse_link_definition returned true, skipping");
+                                parser->current_line++;
+                                continue;
+                            }
+                            log_debug("list structure: parse_link_definition returned false");
+                            parser->current_line = saved;
                         }
 
                         BlockType block_type = detect_block_type(parser, content_line);
@@ -977,8 +1192,14 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     free(lines_array);
 
                     // Check for loose list: If we found a blank line between two
-                    // direct top-level blocks, this list is loose
+                    // direct top-level blocks, OR if we had a blank followed by
+                    // a link definition (which produces no block), the list is loose
                     if (found_blank_between_direct_blocks) {
+                        is_loose = true;
+                    }
+                    // Also, if there was a blank after a block and the content ended
+                    // (e.g., blank followed by link definition), the list is loose
+                    if (had_blank_before_block && direct_block_count > 0) {
                         is_loose = true;
                     }
                 }
@@ -1036,7 +1257,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
             // Get content after marker
             const char* item_content = get_list_item_content(line, line_is_ordered);
-            const char* first_line_stripped = strip_to_column(line, item_content_column);
+            char* first_line_stripped = strip_to_column_with_tabs(line, item_content_column);
 
             // Add content if any
             if (first_line_stripped && *first_line_stripped) {
@@ -1047,10 +1268,39 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     increment_element_content_length(item);
                 }
             }
+            free(first_line_stripped);
 
             parser->current_line++;
             list_push((List*)list, Item{.item = (uint64_t)item});
             increment_element_content_length(list);
+        } else if (!had_blank_before_item && is_list_item(line) && line_indent - base_indent >= 4 && ((List*)list)->length > 0) {
+            // Line looks like a list item marker, but has 4+ spaces of indent relative to base
+            // AND there was no blank line before it (so it can be lazy continuation)
+            // CommonMark: This is NOT a valid list item marker - treat as content of last item
+            // If there WAS a blank line before, this becomes a code block instead (breaks)
+            Element* last_item = (Element*)((List*)list)->items[((List*)list)->length - 1].item;
+
+            // Strip all leading whitespace - the whole thing is literal text content
+            char* literal_text = strip_indentation_with_tabs(line, line_indent);
+
+            // Add as inline text content to the last item
+            // Create a soft break before the content (newline equivalent)
+            Element* softbreak = create_element(parser, "softbreak");
+            if (softbreak) {
+                list_push((List*)last_item, Item{.item = (uint64_t)softbreak});
+                increment_element_content_length(last_item);
+            }
+
+            // Add the literal text
+            if (literal_text && *literal_text) {
+                Item text_item = parse_inline_spans(parser, literal_text);
+                if (text_item.item != ITEM_ERROR && text_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)last_item, text_item);
+                    increment_element_content_length(last_item);
+                }
+            }
+            free(literal_text);
+            parser->current_line++;
         } else {
             // Not a list item and not properly indented, end list
             break;
@@ -1066,8 +1316,8 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
     // Handle tight vs loose list formatting
     if (!is_loose) {
-        // For tight lists, unwrap paragraphs to inline content
-        // This converts <li><p>foo</p><ul>...</ul></li> to <li>foo<ul>...</ul></li>
+        // For tight lists, unwrap ALL paragraphs to inline content
+        // This converts <li><h2>foo</h2><p>bar</p></li> to <li><h2>foo</h2>bar</li>
         List* list_items = (List*)list;
         for (long li = 0; li < list_items->length; li++) {
             Element* item = (Element*)list_items->items[li].item;
@@ -1076,43 +1326,37 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             List* item_children = (List*)item;
             if (item_children->length < 1) continue;
 
-            // Check if first child is a paragraph
-            Item first_child = item_children->items[0];
-            TypeId first_type = get_type_id(first_child);
+            // Collect all children, unwrapping any paragraphs
+            std::vector<Item> new_children;
+            for (long ci = 0; ci < item_children->length; ci++) {
+                Item child = item_children->items[ci];
+                TypeId child_type = get_type_id(child);
 
-            if (first_type == LMD_TYPE_ELEMENT) {
-                Element* first_elem = (Element*)first_child.item;
-                if (first_elem && first_elem->type) {
-                    TypeElmt* elmt_type = (TypeElmt*)first_elem->type;
-                    const char* tag = elmt_type->name.str;
+                if (child_type == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = (Element*)child.item;
+                    if (child_elem && child_elem->type) {
+                        TypeElmt* elmt_type = (TypeElmt*)child_elem->type;
+                        const char* tag = elmt_type->name.str;
 
-                    // If it's a paragraph, unwrap its contents
-                    if (tag && strcmp(tag, "p") == 0) {
-                        List* p_children = (List*)first_elem;
-                        if (p_children->length > 0) {
-                            // Save siblings (items after the paragraph)
-                            std::vector<Item> siblings;
-                            for (long si = 1; si < item_children->length; si++) {
-                                siblings.push_back(item_children->items[si]);
-                            }
-
-                            // Clear the list item's children
-                            item_children->length = 0;
-
-                            // Add paragraph's children directly to list item
+                        // If it's a paragraph, unwrap its contents
+                        if (tag && strcmp(tag, "p") == 0) {
+                            List* p_children = (List*)child_elem;
                             for (long pi = 0; pi < p_children->length; pi++) {
-                                list_push((List*)item, p_children->items[pi]);
-                                increment_element_content_length(item);
+                                new_children.push_back(p_children->items[pi]);
                             }
-
-                            // Add back the siblings
-                            for (size_t si = 0; si < siblings.size(); si++) {
-                                list_push((List*)item, siblings[si]);
-                                increment_element_content_length(item);
-                            }
+                            continue;  // Don't add the paragraph itself
                         }
                     }
                 }
+                // Not a paragraph - keep as is
+                new_children.push_back(child);
+            }
+
+            // Replace item's children with unwrapped version
+            item_children->length = 0;
+            for (size_t ni = 0; ni < new_children.size(); ni++) {
+                list_push((List*)item, new_children[ni]);
+                increment_element_content_length(item);
             }
         }
     } else {
