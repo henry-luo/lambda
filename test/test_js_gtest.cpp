@@ -226,6 +226,14 @@ TEST(JavaScriptTests, test_variables) {
     test_js_script_against_file("test/js/variables.js", "test/js/variables.txt");
 }
 
+TEST(JavaScriptTests, test_control_flow_basic) {
+    test_js_script_against_file("test/js/control_flow_basic.js", "test/js/control_flow_basic.txt");
+}
+
+TEST(JavaScriptTests, test_functions_basic) {
+    test_js_script_against_file("test/js/functions_basic.js", "test/js/functions_basic.txt");
+}
+
 TEST(JavaScriptTests, DISABLED_test_basic_expressions) {
     test_js_script_against_file("test/js/basic_expressions.js", "test/js/basic_expressions.txt");
 }
