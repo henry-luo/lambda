@@ -511,6 +511,158 @@ build_thorvg_v1_0_pre34_for_mac() {
     return 1
 }
 
+# Function to build Brotli for Mac (required by WOFF2)
+build_brotli_for_mac() {
+    echo "Building Brotli for Mac..."
+
+    # Check if already built
+    if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && [ -f "mac-deps/brotli/out/libbrotlicommon.a" ]; then
+        # Verify the library has expected symbols
+        if nm "mac-deps/brotli/out/libbrotlidec.a" 2>/dev/null | grep -q "BrotliDecoderDecompress"; then
+            echo "✅ Brotli already built and verified"
+            return 0
+        else
+            echo "Brotli found but missing expected symbols, rebuilding..."
+            rm -rf mac-deps/brotli 2>/dev/null || true
+        fi
+    fi
+
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+
+    # Clone brotli if not exists
+    if [ ! -d "mac-deps/brotli" ]; then
+        echo "Cloning Brotli repository..."
+        cd mac-deps
+        git clone https://github.com/google/brotli.git || {
+            echo "Warning: Could not clone Brotli repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+
+    cd mac-deps/brotli
+
+    # Clean previous builds
+    rm -rf out 2>/dev/null || true
+    mkdir -p out
+
+    echo "Configuring Brotli with CMake..."
+    cd out
+    if cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBROTLI_DISABLE_TESTS=ON \
+        ..; then
+
+        echo "Building Brotli..."
+        if make -j$(sysctl -n hw.ncpu); then
+            # Verify the build
+            if [ -f "libbrotlidec.a" ] && [ -f "libbrotlicommon.a" ]; then
+                if nm "libbrotlidec.a" | grep -q "BrotliDecoderDecompress"; then
+                    echo "✅ Brotli built successfully"
+                    echo "   - libbrotlidec.a: ✓ Available"
+                    echo "   - libbrotlicommon.a: ✓ Available"
+                    echo "   - Location: mac-deps/brotli/out/"
+                    cd - > /dev/null
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
+    echo "❌ Brotli build failed"
+    cd - > /dev/null
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build WOFF2 for Mac
+build_woff2_for_mac() {
+    echo "Building WOFF2 for Mac..."
+
+    # Check if already built
+    if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && [ -f "mac-deps/woff2/out/libwoff2common.a" ]; then
+        # Verify the library has expected symbols
+        if nm "mac-deps/woff2/out/libwoff2dec.a" 2>/dev/null | grep -q "ConvertWOFF2ToTTF"; then
+            echo "✅ WOFF2 already built and verified"
+            return 0
+        else
+            echo "WOFF2 found but missing expected symbols, rebuilding..."
+            rm -rf mac-deps/woff2 2>/dev/null || true
+        fi
+    fi
+
+    # Ensure Brotli is built first
+    if [ ! -f "mac-deps/brotli/out/libbrotlidec.a" ]; then
+        echo "Brotli not found, building first..."
+        if ! build_brotli_for_mac; then
+            echo "❌ Cannot build WOFF2 without Brotli"
+            return 1
+        fi
+    fi
+
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+
+    # Clone woff2 if not exists (use google/woff2 official repo)
+    if [ ! -d "mac-deps/woff2" ]; then
+        echo "Cloning WOFF2 repository..."
+        cd mac-deps
+        git clone --recursive https://github.com/google/woff2.git woff2 || {
+            echo "Warning: Could not clone WOFF2 repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+
+    cd mac-deps/woff2
+
+    # Clean previous builds
+    rm -rf out 2>/dev/null || true
+    mkdir -p out
+
+    echo "Configuring WOFF2 with CMake..."
+    cd out
+
+    # Point to our locally built Brotli
+    BROTLI_DIR="$SCRIPT_DIR/mac-deps/brotli"
+
+    if cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBROTLIDEC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
+        -DBROTLIDEC_LIBRARIES="$BROTLI_DIR/out/libbrotlidec.a;$BROTLI_DIR/out/libbrotlicommon.a" \
+        -DBROTLIENC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
+        -DBROTLIENC_LIBRARIES="$BROTLI_DIR/out/libbrotlienc.a;$BROTLI_DIR/out/libbrotlicommon.a" \
+        ..; then
+
+        echo "Building WOFF2..."
+        if make -j$(sysctl -n hw.ncpu); then
+            # Verify the build
+            if [ -f "libwoff2dec.a" ] && [ -f "libwoff2common.a" ]; then
+                if nm "libwoff2dec.a" | grep -q "ConvertWOFF2ToTTF"; then
+                    echo "✅ WOFF2 built successfully"
+                    echo "   - libwoff2dec.a: ✓ Available"
+                    echo "   - libwoff2common.a: ✓ Available"
+                    echo "   - Location: mac-deps/woff2/out/"
+                    cd - > /dev/null
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
+    echo "❌ WOFF2 build failed"
+    cd - > /dev/null
+    cd - > /dev/null
+    return 1
+}
+
 # Function to build Google Test for Mac
 build_gtest_for_mac() {
     echo "Building Google Test for Mac..."
@@ -1108,6 +1260,32 @@ else
     fi
 fi
 
+# Build Brotli for Mac (required by WOFF2)
+echo "Setting up Brotli..."
+if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && [ -f "mac-deps/brotli/out/libbrotlicommon.a" ]; then
+    echo "Brotli already available"
+else
+    if ! build_brotli_for_mac; then
+        echo "❌ Brotli build failed - required for WOFF2"
+        exit 1
+    else
+        echo "✅ Brotli built successfully"
+    fi
+fi
+
+# Build WOFF2 for Mac (required for WOFF2 font decompression)
+echo "Setting up WOFF2..."
+if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && [ -f "mac-deps/woff2/out/libwoff2common.a" ]; then
+    echo "WOFF2 already available"
+else
+    if ! build_woff2_for_mac; then
+        echo "❌ WOFF2 build failed - required for font decompression"
+        exit 1
+    else
+        echo "✅ WOFF2 built successfully"
+    fi
+fi
+
 # Setup FreeType 2.13.3 for Mac (required by Radiant project)
 echo "Setting up FreeType 2.13.3..."
 if ! setup_freetype_2_13_3_for_mac; then
@@ -1265,6 +1443,8 @@ echo "- ThorVG: $([ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ] && echo "�
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- Brotli: $([ -f "mac-deps/brotli/out/libbrotlidec.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- WOFF2: $([ -f "mac-deps/woff2/out/libwoff2dec.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: make build           # Build Lambda main project"
