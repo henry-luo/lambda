@@ -12,6 +12,12 @@
  * 2. Scratch values for multi-pass track sizing algorithm
  * 3. Track kind (Track vs Gutter) for gap handling
  * 4. Better fit-content() support
+ *
+ * TODO: std::* Migration Plan (Phase 5+)
+ * - std::numeric_limits<float>::infinity() → INFINITY macro from <math.h>
+ * - std::min/std::max → MIN_FLOAT/MAX_FLOAT macros (see layout_multicol.cpp)
+ * - <cmath> std::isinf → isinf() from <math.h>
+ * - <algorithm> include can be removed after min/max migration
  */
 
 #ifdef __cplusplus
