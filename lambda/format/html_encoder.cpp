@@ -1,68 +1,72 @@
 #include "html_encoder.hpp"
+#include <string.h>  // for strlen
 
 namespace html {
 
-std::string HtmlEncoder::escape(std::string_view text) {
-    if (!needs_escaping(text)) {
-        return std::string(text);
+void HtmlEncoder::escape(StrBuf* sb, const char* text, size_t len) {
+    if (!sb || !text) return;
+    if (len == 0) len = strlen(text);
+    
+    if (!needs_escaping(text, len)) {
+        strbuf_append_str_n(sb, text, len);
+        return;
     }
     
-    std::string result;
-    result.reserve(text.length() * 1.2); // Estimate 20% growth
-    
-    for (char c : text) {
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
         switch (c) {
             case '&':
-                result += "&amp;";
+                strbuf_append_str(sb, "&amp;");
                 break;
             case '<':
-                result += "&lt;";
+                strbuf_append_str(sb, "&lt;");
                 break;
             case '>':
-                result += "&gt;";
+                strbuf_append_str(sb, "&gt;");
                 break;
             case '"':
-                result += "&quot;";
+                strbuf_append_str(sb, "&quot;");
                 break;
             default:
-                result += c;
+                strbuf_append_char(sb, c);
         }
     }
-    
-    return result;
 }
 
-std::string HtmlEncoder::escape_attribute(std::string_view text) {
-    std::string result;
-    result.reserve(text.length() * 1.2);
+void HtmlEncoder::escape_attribute(StrBuf* sb, const char* text, size_t len) {
+    if (!sb || !text) return;
+    if (len == 0) len = strlen(text);
     
-    for (char c : text) {
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
         switch (c) {
             case '&':
-                result += "&amp;";
+                strbuf_append_str(sb, "&amp;");
                 break;
             case '<':
-                result += "&lt;";
+                strbuf_append_str(sb, "&lt;");
                 break;
             case '>':
-                result += "&gt;";
+                strbuf_append_str(sb, "&gt;");
                 break;
             case '"':
-                result += "&quot;";
+                strbuf_append_str(sb, "&quot;");
                 break;
             case '\'':
-                result += "&#39;";
+                strbuf_append_str(sb, "&#39;");
                 break;
             default:
-                result += c;
+                strbuf_append_char(sb, c);
         }
     }
-    
-    return result;
 }
 
-bool HtmlEncoder::needs_escaping(std::string_view text) {
-    for (char c : text) {
+bool HtmlEncoder::needs_escaping(const char* text, size_t len) {
+    if (!text) return false;
+    if (len == 0) len = strlen(text);
+    
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
         if (c == '&' || c == '<' || c == '>' || c == '"') {
             return true;
         }
