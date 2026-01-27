@@ -254,26 +254,20 @@ TEST_P(CommonMarkExampleTest, Example) {
     std::string normalized_actual = normalize_html(actual_html);
     std::string normalized_expected = normalize_html(ex.expected_html);
 
-    // Compare outputs
+    // Compare outputs using GTest assertion
+    EXPECT_EQ(normalized_expected, normalized_actual)
+        << "\n=== Example " << ex.example_number << " FAILED ===\n"
+        << "Section: " << ex.section << "\n"
+        << "Line: " << ex.line_number << "\n"
+        << "--- Markdown input ---\n" << ex.markdown << "\n"
+        << "--- Expected HTML ---\n" << ex.expected_html << "\n"
+        << "--- Actual HTML ---\n" << actual_html << "\n"
+        << "======================\n";
+
     if (normalized_actual == normalized_expected) {
         global_stats.passed++;
-        // Test passes silently
     } else {
         global_stats.failed++;
-
-        // Print detailed failure information
-        printf("\n");
-        printf("=== Example %d FAILED ===\n", ex.example_number);
-        printf("Section: %s\n", ex.section.c_str());
-        printf("Line: %d\n", ex.line_number);
-        printf("--- Markdown input ---\n%s\n", ex.markdown.c_str());
-        printf("--- Expected HTML ---\n%s\n", ex.expected_html.c_str());
-        printf("--- Actual HTML ---\n%s\n", actual_html.c_str());
-        printf("======================\n");
-
-        // For now, don't fail the test - just record the discrepancy
-        // Uncomment the next line to make failures cause test failure:
-        // FAIL() << "Example " << ex.example_number << " output mismatch";
     }
 }
 
