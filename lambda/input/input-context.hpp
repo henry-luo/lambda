@@ -6,7 +6,9 @@
 #include "source_tracker.hpp"
 #include "../mark_builder.hpp"
 #include "../lambda-data.hpp"
-#include <memory>
+#include "../../lib/strbuf.h"
+#include <cstdlib>
+#include <cstring>
 
 namespace lambda {
 
@@ -17,10 +19,12 @@ class InputContext {
 private:
     Input* input_;                   // The Input being parsed (not owned)
     ParseErrorList errors_;          // Error collection
-    std::string owned_source_;       // Owned copy of source - MUST be before tracker_!
+    char* owned_source_;             // Owned copy of source (malloc'd)
+    size_t owned_source_len_;        // Length of owned source
+    StrBuf* msg_buf_;                // Buffer for formatting error messages
 public:
     MarkBuilder builder;             // MarkBuilder for creating Items
-    SourceTracker tracker;          // Source position tracker (always owned)
+    SourceTracker tracker;           // Source position tracker (always owned)
     StringBuf* sb;                   // shared string buffer for temp work
 
     // Constructor without source text (empty tracker)
@@ -28,7 +32,9 @@ public:
         : input_(input)
         , builder(input)
         , errors_(100)  // Default max 100 errors
-        , owned_source_()
+        , owned_source_(nullptr)
+        , owned_source_len_(0)
+        , msg_buf_(strbuf_new_cap(256))
         , tracker("", 0)
         , sb(stringbuf_new(input->pool))
     {}
@@ -38,33 +44,28 @@ public:
         : input_(input)
         , builder(input)
         , errors_(100)
-        , owned_source_(source, len)  // Make a copy
-        , tracker(owned_source_.c_str(), owned_source_.length())
+        , owned_source_((char*)malloc(len + 1))
+        , owned_source_len_(len)
+        , msg_buf_(strbuf_new_cap(256))
+        , tracker(owned_source_, len)
         , sb(stringbuf_new(input->pool))
-    {}
-
-    // Constructor with source text from std::string
-    InputContext(Input* input, const std::string& source)
-        : input_(input)
-        , builder(input)
-        , errors_(100)
-        , owned_source_(source)  // Make a copy
-        , tracker(owned_source_.c_str(), owned_source_.length())
-        , sb(stringbuf_new(input->pool))
-    {}
+    {
+        if (owned_source_ && source) {
+            memcpy(owned_source_, source, len);
+            owned_source_[len] = '\0';
+        }
+    }
 
     // Constructor with source text from C string (calculates length)
     InputContext(Input* input, const char* source)
-        : input_(input)
-        , builder(input)
-        , errors_(100)
-        , owned_source_(source ? source : "")  // Make a copy
-        , tracker(owned_source_.c_str(), owned_source_.length())
-        , sb(stringbuf_new(input->pool))
+        : InputContext(input, source, source ? strlen(source) : 0)
     {}
 
-    // Destructor (no manual cleanup needed - all RAII)
-    ~InputContext() = default;
+    // Destructor
+    ~InputContext() {
+        if (owned_source_) free(owned_source_);
+        strbuf_free(msg_buf_);
+    }
 
     // Non-copyable (owns resources)
     InputContext(const InputContext&) = delete;
@@ -84,25 +85,19 @@ public:
 
     // Error handling - with location
     void addError(const SourceLocation& loc, const char* fmt, ...);
-    void addError(const SourceLocation& loc, const std::string& message);
-    void addError(const SourceLocation& loc, const std::string& message,
-                  const std::string& hint);
+    void addError(const SourceLocation& loc, const char* message,
+                  const char* hint);
 
     void addWarning(const SourceLocation& loc, const char* fmt, ...);
-    void addWarning(const SourceLocation& loc, const std::string& message);
 
     void addNote(const SourceLocation& loc, const char* fmt, ...);
-    void addNote(const SourceLocation& loc, const std::string& message);
 
     // Error handling - at current position (requires tracker)
     void addError(const char* fmt, ...);
-    void addError(const std::string& message);
 
     void addWarning(const char* fmt, ...);
-    void addWarning(const std::string& message);
 
     void addNote(const char* fmt, ...);
-    void addNote(const std::string& message);
 
     // Error state queries
     bool hasErrors() const { return errors_.hasErrors(); }
@@ -112,7 +107,7 @@ public:
     bool shouldStopParsing() const { return errors_.shouldStop(); }
 
     // Format and log all errors
-    std::string formatErrors() const { return errors_.formatErrors(); }
+    const char* formatErrors() { return errors_.formatErrors(); }
     void logErrors() const;
 
     // Configuration
