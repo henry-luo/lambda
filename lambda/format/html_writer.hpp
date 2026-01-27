@@ -7,10 +7,12 @@
 #include "../../lib/strbuf.h"
 #include "../mark_builder.hpp"
 #include "../lambda-data.hpp"
-#include <vector>  // TODO: migrate NodeHtmlWriter to avoid std::vector
 
 // Maximum nesting depth for HTML tags
 #define HTML_TAG_STACK_MAX 128
+
+// Maximum nesting depth for NodeHtmlWriter element stack
+#define NODE_ELEMENT_STACK_MAX 64
 
 namespace lambda {
 
@@ -105,11 +107,12 @@ private:
 };
 
 // Node mode implementation: generates Lambda Element tree using MarkBuilder
-// TODO: migrate to avoid std::vector - NodeHtmlWriter is not currently used
+// Uses fixed-size array stack instead of std::vector
 class NodeHtmlWriter : public HtmlWriter {
 private:
     MarkBuilder* builder_;
-    std::vector<ElementBuilder> stack_;  // Stack of open elements
+    ElementBuilder* stack_[NODE_ELEMENT_STACK_MAX];  // Fixed array of pointers to element builders
+    int stack_top_;                                   // Index of top element (-1 = empty)
     Pool* pool_;
     Input* input_;  // Need Input* for MarkBuilder
     ElementBuilder* pending_attributes_;  // For buffering attributes before children
@@ -143,7 +146,7 @@ public:
     
 private:
     ElementBuilder& current();
-    bool hasOpenElements() const { return !stack_.empty(); }
+    bool hasOpenElements() const { return stack_top_ >= 0; }
 };
 
 // Null mode implementation: discards all output (for label collection pass)
