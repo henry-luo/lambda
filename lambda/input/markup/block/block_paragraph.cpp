@@ -198,8 +198,16 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             return Item{.item = ITEM_ERROR};
         }
 
-        // Parse inline content for heading
-        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+        // Trim trailing whitespace from heading content
+        // (trailing tabs/spaces on the last line before the underline should be removed)
+        size_t heading_len = sb->length;
+        while (heading_len > 0 && (sb->str->chars[heading_len-1] == ' ' ||
+                                   sb->str->chars[heading_len-1] == '\t')) {
+            heading_len--;
+        }
+
+        // Parse inline content for heading with trimmed length
+        String* text_content = parser->builder.createString(sb->str->chars, heading_len);
         Item content = parse_inline_spans(parser, text_content->chars);
 
         if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
