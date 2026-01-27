@@ -9,25 +9,26 @@ SourceTracker::SourceTracker(const char* source, size_t len)
     , source_len_(len)
     , current_(source)
     , location_(0, 1, 1)
+    , line_count_(1)
     , line_index_built_(false)
+    , extract_buf_(strbuf_new_cap(256))
 {
-    line_starts_.push_back(0);  // Line 1 starts at offset 0
+    line_starts_[0] = 0;  // Line 1 starts at offset 0
 }
 
-SourceTracker::SourceTracker(const std::string& source)
-    : SourceTracker(source.c_str(), source.length())
-{
+SourceTracker::~SourceTracker() {
+    strbuf_free(extract_buf_);
 }
 
 void SourceTracker::buildLineIndex() {
     if (line_index_built_) return;
 
-    line_starts_.clear();
-    line_starts_.push_back(0);
+    line_count_ = 1;
+    line_starts_[0] = 0;
 
-    for (size_t i = 0; i < source_len_; ++i) {
+    for (size_t i = 0; i < source_len_ && line_count_ < MAX_LINE_STARTS; ++i) {
         if (source_[i] == '\n') {
-            line_starts_.push_back(i + 1);
+            line_starts_[line_count_++] = i + 1;
         }
     }
 
@@ -54,8 +55,8 @@ bool SourceTracker::advance(size_t count) {
             location_.column = 1;
 
             // Track line start for context extraction
-            if (!line_index_built_) {
-                line_starts_.push_back(location_.offset);
+            if (!line_index_built_ && line_count_ < MAX_LINE_STARTS) {
+                line_starts_[line_count_++] = location_.offset;
             }
         } else if (!isUtf8Continuation((unsigned char)c)) {
             // Only increment column for non-continuation bytes
@@ -103,25 +104,28 @@ bool SourceTracker::match(char c) {
     return !atEnd() && *current_ == c;
 }
 
-std::string SourceTracker::extract(size_t start_offset, size_t end_offset) const {
+const char* SourceTracker::extract(size_t start_offset, size_t end_offset) {
     if (start_offset >= source_len_ || end_offset > source_len_ || start_offset >= end_offset) {
         return "";
     }
-    return std::string(source_ + start_offset, end_offset - start_offset);
+
+    strbuf_reset(extract_buf_);
+    strbuf_append_str_n(extract_buf_, source_ + start_offset, end_offset - start_offset);
+    return extract_buf_->str;
 }
 
-std::string SourceTracker::extractLine(size_t line_num) const {
+const char* SourceTracker::extractLine(size_t line_num) {
     if (line_num < 1) return "";
 
     // Build line index if needed
-    const_cast<SourceTracker*>(this)->buildLineIndex();
+    buildLineIndex();
 
-    if (line_num > line_starts_.size()) return "";
+    if (line_num > line_count_) return "";
 
     size_t start = line_starts_[line_num - 1];
     size_t end = source_len_;
 
-    if (line_num < line_starts_.size()) {
+    if (line_num < line_count_) {
         end = line_starts_[line_num] - 1;  // Exclude the newline
     }
 
@@ -133,15 +137,15 @@ std::string SourceTracker::extractLine(size_t line_num) const {
     return extract(start, end);
 }
 
-std::string SourceTracker::getContextLine() const {
+const char* SourceTracker::getContextLine() {
     return extractLine(location_.line);
 }
 
 void SourceTracker::reset() {
     current_ = source_;
     location_ = SourceLocation(0, 1, 1);
-    line_starts_.clear();
-    line_starts_.push_back(0);
+    line_count_ = 1;
+    line_starts_[0] = 0;
     line_index_built_ = false;
 }
 

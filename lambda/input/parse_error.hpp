@@ -2,9 +2,10 @@
 #ifndef LAMBDA_PARSE_ERROR_HPP
 #define LAMBDA_PARSE_ERROR_HPP
 
-#include <string>
-#include <vector>
+#include "../../lib/arraylist.h"
+#include "../../lib/strbuf.h"
 #include <cstdint>
+#include <cstddef>
 
 namespace lambda {
 
@@ -32,21 +33,26 @@ enum class ParseErrorSeverity {
 struct ParseError {
     SourceLocation location;
     ParseErrorSeverity severity;
-    std::string message;
-    std::string context_line;   // Source line where error occurred
-    std::string hint;           // Optional hint for fixing the error
+    const char* message;        // Arena-allocated or static
+    const char* context_line;   // Source line where error occurred (may be null)
+    const char* hint;           // Optional hint for fixing the error (may be null)
+
+    ParseError() : location(), severity(ParseErrorSeverity::ERROR),
+                   message(nullptr), context_line(nullptr), hint(nullptr) {}
 
     ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
-               const std::string& msg)
-        : location(loc), severity(sev), message(msg) {}
+               const char* msg)
+        : location(loc), severity(sev), message(msg),
+          context_line(nullptr), hint(nullptr) {}
 
     ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
-               const std::string& msg, const std::string& ctx)
-        : location(loc), severity(sev), message(msg), context_line(ctx) {}
+               const char* msg, const char* ctx)
+        : location(loc), severity(sev), message(msg),
+          context_line(ctx), hint(nullptr) {}
 
     ParseError(const SourceLocation& loc, ParseErrorSeverity sev,
-               const std::string& msg, const std::string& ctx,
-               const std::string& h)
+               const char* msg, const char* ctx,
+               const char* h)
         : location(loc), severity(sev), message(msg),
           context_line(ctx), hint(h) {}
 };
@@ -54,54 +60,56 @@ struct ParseError {
 // Collection of parse errors with configurable limit
 class ParseErrorList {
 private:
-    std::vector<ParseError> errors_;
+    ArrayList* errors_;         // ArrayList of ParseError
+    StrBuf* format_buf_;        // Reusable buffer for formatting
     size_t max_errors_;
-    size_t error_count_;      // Count of ERROR severity
-    size_t warning_count_;    // Count of WARNING severity
+    size_t error_count_;        // Count of ERROR severity
+    size_t warning_count_;      // Count of WARNING severity
 
 public:
-    ParseErrorList(size_t max_errors = 100)
-        : max_errors_(max_errors), error_count_(0), warning_count_(0) {}
+    ParseErrorList(size_t max_errors = 100);
+    ~ParseErrorList();
 
-    // Add an error to the list
+    // Non-copyable
+    ParseErrorList(const ParseErrorList&) = delete;
+    ParseErrorList& operator=(const ParseErrorList&) = delete;
+
+    // Add an error to the list (message should be arena-allocated or static)
     bool addError(const ParseError& error);
 
     // Convenience methods for adding errors
-    void addError(const SourceLocation& loc, const std::string& msg);
-    void addError(const SourceLocation& loc, const std::string& msg,
-                  const std::string& context);
-    void addWarning(const SourceLocation& loc, const std::string& msg);
-    void addWarning(const SourceLocation& loc, const std::string& msg,
-                    const std::string& context);
-    void addNote(const SourceLocation& loc, const std::string& msg);
+    void addError(const SourceLocation& loc, const char* msg);
+    void addError(const SourceLocation& loc, const char* msg,
+                  const char* context);
+    void addWarning(const SourceLocation& loc, const char* msg);
+    void addWarning(const SourceLocation& loc, const char* msg,
+                    const char* context);
+    void addNote(const SourceLocation& loc, const char* msg);
 
     // Check if we should stop parsing (hit error limit)
-    bool shouldStop() const { return errors_.size() >= max_errors_; }
+    bool shouldStop() const { return (size_t)errors_->length >= max_errors_; }
 
     // Query error state
     bool hasErrors() const { return error_count_ > 0; }
     bool hasWarnings() const { return warning_count_ > 0; }
     size_t errorCount() const { return error_count_; }
     size_t warningCount() const { return warning_count_; }
-    size_t totalCount() const { return errors_.size(); }
+    size_t totalCount() const { return (size_t)errors_->length; }
 
     // Access errors
-    const std::vector<ParseError>& errors() const { return errors_; }
+    ParseError* getError(size_t index) const;
+    size_t size() const { return (size_t)errors_->length; }
 
-    // Format errors for display
-    std::string formatErrors() const;
-    std::string formatError(const ParseError& error, size_t index) const;
+    // Format errors for display (returns internal buffer - do not free)
+    const char* formatErrors();
+    void formatError(const ParseError& error, size_t index, StrBuf* buf) const;
 
     // Configuration
     void setMaxErrors(size_t max) { max_errors_ = max; }
     size_t maxErrors() const { return max_errors_; }
 
     // Clear all errors
-    void clear() {
-        errors_.clear();
-        error_count_ = 0;
-        warning_count_ = 0;
-    }
+    void clear();
 };
 
 } // namespace lambda
