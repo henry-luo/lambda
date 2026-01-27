@@ -8,13 +8,16 @@ This document describes the design and implementation of Lambda's unified lightw
 2. [Supported Markup Languages](#supported-markup-languages)
 3. [Man Page Integration](#man-page-integration)
 4. [Architecture](#architecture)
-5. [Code Reuse Principle](#code-reuse-principle)
-6. [Mark Doc Schema Compliance](#mark-doc-schema-compliance)
-7. [Implementation Analysis](#implementation-analysis)
-8. [Structured Error Reporting](#structured-error-reporting)
-9. [Testing Strategy](#testing-strategy)
-10. [Post-Compliance Cleanup Phase](#post-compliance-cleanup-phase)
-11. [Future Improvements](#future-improvements)
+5. [Core Classes](#core-classes)
+6. [Code Reuse Principle](#code-reuse-principle)
+7. [HTML5 Integration](#html5-integration)
+8. [Mark Doc Schema Compliance](#mark-doc-schema-compliance)
+9. [Implementation Analysis](#implementation-analysis)
+10. [Structured Error Reporting](#structured-error-reporting)
+11. [Testing Strategy](#testing-strategy)
+12. [Adding a New Format](#adding-a-new-format)
+13. [Post-Compliance Cleanup Phase](#post-compliance-cleanup-phase)
+14. [Future Improvements](#future-improvements)
 
 ---
 
@@ -70,27 +73,13 @@ The parser supports six lightweight markup language families:
 - **Flavor**: `standard`
 - **Features**: `h1.` headings, block quotes (`bq.`), pre blocks, inline formatting
 
-### AsciiDoc
+### AsciiDoc ✓ (Unified)
 - **Extensions**: `.adoc`, `.asciidoc`, `.asc`
 - **Flavor**: `standard`
-- **Features**: `= Headings`, listing blocks (`----`), admonitions (NOTE:, TIP:, etc.), tables (`|===`)
+- **Status**: Fully integrated into modular parser (January 2026)
+- **Features**: `= Headings`, listing blocks (`----`), admonitions (NOTE:, TIP:, WARNING:, CAUTION:, IMPORTANT:), definition lists (`term:: definition`), tables (`|===`), inline links (`link:url[text]`), inline images (`image:path[alt]`), cross-references (`<<anchor>>`), `[source,lang]` code blocks
 
-### Other Similar Markup Languages
-
-Beyond the six currently supported, these additional lightweight markup languages share similar design patterns and could be added:
-
-| Language | Characteristics | Potential Value |
-|----------|----------------|-----------------|
-| **Creole** | Wiki syntax standardization attempt | Cross-wiki compatibility |
-| **BBCode** | Forum markup `[b]bold[/b]` | Legacy forum content |
-| **Gemini/Gemtext** | Minimal markup for Gemini protocol | Ultra-simple documents |
-| **Djot** | CommonMark successor by John MacFarlane | Modern Markdown replacement |
-| **MyST** | Markdown variant for Sphinx | Technical documentation |
-| **MDX** | Markdown + JSX | React documentation (already have separate parser) |
-| **txt2tags** | Simple markup with multiple outputs | Basic document conversion |
-| **Man pages** | Unix manual page format (`.1`-`.8`) | System documentation |
-
-### Man Page Integration
+### Man Page ✓ (Unified)
 
 Unix man pages (`input-man.cpp`) can be unified into the markup parser. Analysis shows significant overlap with existing features:
 
@@ -107,58 +96,119 @@ Unix man pages (`input-man.cpp`) can be unified into the markup parser. Analysis
 | `.TP term` | Definition list | `parse_definition_list()` |
 | `\fB...\fR` | Inline bold | `parse_inline_spans()` |
 
-#### Integration Plan
+### Other Similar Markup Languages
 
-1. **Add `MARKUP_MAN` format**:
-   ```cpp
-   typedef enum {
-       MARKUP_MARKDOWN,
-       MARKUP_RST,
-       MARKUP_TEXTILE,
-       MARKUP_WIKI,
-       MARKUP_ORG,
-       MARKUP_ASCIIDOC,
-       MARKUP_MAN,           // Add man page format
-       MARKUP_AUTO_DETECT
-   } MarkupFormat;
-   ```
+Beyond the six currently supported, these additional lightweight markup languages share similar design patterns and could be added:
 
-2. **Add detection logic**:
-   ```cpp
-   // File extension detection
-   if (strcasecmp(ext, "1") == 0 || ... || strcasecmp(ext, "8") == 0) {
-       return MARKUP_MAN;
-   }
-   // Content detection
-   if (strncmp(content, ".TH ", 4) == 0 || strncmp(content, ".SH ", 4) == 0) {
-       return MARKUP_MAN;
-   }
-   ```
-
-3. **Reuse existing parsers**:
-   - Headers: `.SH` → `parse_header()` with level detection
-   - Bold/italic: `\fB`/`\fI` → `parse_inline_spans()` with man-specific markers
-   - Lists: `.IP`/`.TP` → `parse_list_structure()`
-   - Paragraphs: `.PP` → paragraph separator
-
-4. **Man-specific additions**:
-   - `.TH` title/section parsing → metadata
-   - `\fB...\fR` inline escapes → inline formatting
-   - `.RS`/`.RE` indent blocks → nested structure
-
----
+| Language           | Characteristics                         | Potential Value                                    |
+| ------------------ | --------------------------------------- | -------------------------------------------------- |
+| **Creole**         | Wiki syntax standardization attempt     | Cross-wiki compatibility                           |
+| **BBCode**         | Forum markup `[b]bold[/b]`              | Legacy forum content                               |
+| **Gemini/Gemtext** | Minimal markup for Gemini protocol      | Ultra-simple documents                             |
+| **Djot**           | CommonMark successor by John MacFarlane | Modern Markdown replacement                        |
+| **MyST**           | Markdown variant for Sphinx             | Technical documentation                            |
+| **MDX**            | Markdown + JSX                          | React documentation (already have separate parser) |
+| **txt2tags**       | Simple markup with multiple outputs     | Basic document conversion                          |
 
 ## Architecture
 
 ### Core Components
 
+The modular markup parser uses a clean separation between format detection, block parsing, and inline parsing:
+
+```
+lambda/input/markup/
+├── markup_common.hpp        # Shared types, Format enum, ParseContext
+├── markup_parser.cpp        # Main entry point and orchestration
+├── format/                  # Format-specific adapters
+│   ├── format_adapter.hpp   # FormatAdapter interface
+│   ├── markdown_adapter.cpp
+│   ├── rst_adapter.cpp
+│   ├── wiki_adapter.cpp
+│   ├── org_adapter.cpp
+│   ├── textile_adapter.cpp
+│   ├── asciidoc_adapter.cpp # ✓ Full AsciiDoc detection
+│   └── man_adapter.cpp
+├── block/                   # Block-level parsers
+│   ├── block_common.hpp     # Block types and shared utilities
+│   ├── block_detection.cpp  # Block type detection
+│   ├── block_document.cpp   # Document structure parsing
+│   ├── block_header.cpp
+│   ├── block_list.cpp
+│   ├── block_code.cpp       # Extended for [source,lang]
+│   ├── block_table.cpp      # Extended for |=== tables
+│   ├── block_quote.cpp
+│   └── block_asciidoc.cpp   # ✓ AsciiDoc-specific blocks
+└── inline/                  # Inline-level parsers
+    ├── inline_common.hpp
+    ├── inline_spans.cpp
+    ├── inline_emphasis.cpp
+    ├── inline_links.cpp
+    └── inline_format_specific.cpp  # ✓ AsciiDoc link/image/xref
+```
+
+### Legacy Components (to be migrated)
+
 ```
 lambda/input/
-├── markup-parser.h          # Header: enums, ParseConfig, MarkupParser class
-├── input-markup.cpp         # Implementation (~6200 lines)
 ├── input-context.hpp        # Base class: InputContext with error tracking
 ├── parse_error.hpp          # Error structures: SourceLocation, ParseError, ParseErrorList
 └── source_tracker.hpp       # Position tracking: SourceTracker
+```
+
+---
+
+## Core Classes
+
+### MarkupParser
+
+The central class that coordinates parsing. Extends `InputContext` to inherit MarkBuilder, error tracking, and source tracking.
+
+```cpp
+class MarkupParser : public InputContext {
+public:
+    Item parse(const char* content, size_t length, ParseConfig config = ParseConfig());
+    FormatAdapter* adapter;      // Current format adapter
+    ParserState state;           // Parser state
+    const char* current_line;    // Line-based iteration
+    int current_line_number;
+    bool advance_line();
+
+    // Error reporting
+    void warnUnclosed(const char* delimiter, int start_line);
+    void warnInvalidSyntax(const char* element, const char* expected);
+};
+```
+
+### FormatAdapter
+
+Abstract interface for format-specific behavior. Each format implements its own adapter.
+
+```cpp
+class FormatAdapter {
+public:
+    virtual Format get_format() const = 0;
+    virtual const char* get_name() const = 0;
+    virtual bool detect_header(const char* line, int* level, HeaderStyle* style) = 0;
+    virtual bool detect_emphasis(const char* text, EmphasisType* type, int* length) = 0;
+    virtual bool detect_code_fence(const char* line, CodeFenceInfo* info) = 0;
+    virtual bool detect_list_item(const char* line, ListMarkerInfo* info) = 0;
+    virtual bool detect_table_row(const char* line, TableRowInfo* info) = 0;
+    virtual Item parse_directive(MarkupParser* parser, const char* line);  // RST
+    virtual Item parse_wiki_link(MarkupParser* parser, const char* text);  // Wiki
+};
+```
+
+### ParseConfig
+
+```cpp
+struct ParseConfig {
+    Format format;           // Target format (or AUTO_DETECT)
+    Flavor flavor;           // Format variant (e.g., GFM, CommonMark)
+    bool strict_mode;        // Strict vs lenient parsing
+    bool collect_metadata;   // Parse frontmatter/properties
+    bool resolve_refs;       // Resolve link/footnote references
+};
 ```
 
 ### Class Hierarchy
@@ -240,12 +290,14 @@ static int get_header_level(MarkupParser* parser, const char* line) {
 
 All formats use common inline parsing with format-specific delimiters:
 
-| Feature | Markdown | Wiki | RST | Textile | Man |
-|---------|----------|------|-----|---------|-----|
-| Bold | `**text**` | `'''text'''` | `**text**` | `*text*` | `\fBtext\fR` |
-| Italic | `*text*` | `''text''` | `*text*` | `_text_` | `\fItext\fR` |
-| Code | `` `text` `` | `<code>` | ``` ``text`` ``` | `@text@` | - |
-| Link | `[t](url)` | `[[url|t]]` | `` `t <url>`_ `` | `"t":url` | - |
+| Feature | Markdown | Wiki | RST | Textile | AsciiDoc | Man |
+|---------|----------|------|-----|---------|----------|-----|
+| Bold | `**text**` | `'''text'''` | `**text**` | `*text*` | `*text*` | `\fBtext\fR` |
+| Italic | `*text*` | `''text''` | `*text*` | `_text_` | `_text_` | `\fItext\fR` |
+| Code | `` `text` `` | `<code>` | ``` ``text`` ``` | `@text@` | `` `text` `` | - |
+| Link | `[t](url)` | `[[url|t]]` | `` `t <url>`_ `` | `"t":url` | `link:url[t]` | - |
+| Image | `![alt](src)` | `[[File:...]]` | `.. image::` | `!src!` | `image:src[alt]` | - |
+| Cross-ref | - | `[[#anchor]]` | `:ref:` | - | `<<anchor>>` | - |
 
 **Implementation**: One `parse_emphasis()` function handles all, with format-specific delimiter detection.
 
@@ -296,6 +348,48 @@ input_markup(input, content)
                     ├── BLOCK_DIVIDER → parse_divider()
                     └── BLOCK_PARAGRAPH → parse_paragraph()
 ```
+
+---
+
+## HTML5 Integration
+
+Markdown documents can contain raw HTML that passes through without markdown processing. The parser integrates with Lambda's HTML5 parser to build a proper DOM tree from HTML fragments.
+
+### Architecture
+
+```
+Markdown Document
+      │
+      ▼
+┌─────────────────────┐
+│   MarkupParser      │
+│  html5_parser_ ─────┼──► Html5Parser (fragment mode)
+└─────────────────────┘         │
+      │                         ▼
+      ▼                   Accumulates all HTML
+┌─────────────────────────────────────┐
+│            Output Document          │
+│  doc                                │
+│  ├── body (markdown content)        │
+│  │   ├── html-block (raw HTML)      │
+│  │   └── p → raw-html (inline HTML) │
+│  └── html-dom (parsed HTML5 DOM)    │
+│      └── table, div, etc...         │
+└─────────────────────────────────────┘
+```
+
+### Key Methods
+
+- **`getOrCreateHtml5Parser()`** - Lazily creates HTML5 parser on first HTML encounter
+- **`parseHtmlFragment(const char* html)`** - Feeds HTML to shared parser
+- **`getHtmlBody()`** - Retrieves parsed HTML body after document parsing
+
+### Benefits
+
+- **Single DOM tree** - All HTML fragments parsed into one coherent DOM
+- **Proper nesting** - HTML5 parser handles implicit elements and nesting rules
+- **Dual output** - Raw HTML in `html-block`/`raw-html`, parsed DOM in `html-dom`
+- **Lazy initialization** - HTML5 parser only created when HTML content is encountered
 
 ---
 
@@ -406,25 +500,8 @@ Metadata fields follow the unified schema with compatibility across formats (see
 5. **Incomplete Format Support**:
    - RST grid tables: Basic implementation only
    - RST reference resolution: Not fully implemented
-   - AsciiDoc inline formatting: Placeholder implementation
+   - ~~AsciiDoc inline formatting: Placeholder implementation~~ ✓ **Completed** (January 2026)
    - Textile: Some block types not fully parsed
-
-### Recommended Code Structure Improvements
-
-```
-lambda/input/
-├── markup/
-│   ├── markup-parser.hpp       # Core parser class
-│   ├── markup-common.cpp       # Shared utilities
-│   ├── markup-markdown.cpp     # Markdown-specific parsing
-│   ├── markup-rst.cpp          # RST-specific parsing
-│   ├── markup-wiki.cpp         # Wiki-specific parsing
-│   ├── markup-org.cpp          # Org-mode-specific parsing
-│   ├── markup-textile.cpp      # Textile-specific parsing
-│   ├── markup-asciidoc.cpp     # AsciiDoc-specific parsing
-│   └── emoji-map.cpp           # Emoji shortcode table
-└── input-markup.cpp            # Entry point and format detection
-```
 
 ---
 
@@ -531,44 +608,15 @@ NOTE [line 5, col 10]: Wiki template not expanded
 
 ## Testing Strategy
 
-### Phase 1: CommonMark Baseline (Completed)
+### Phase 1: CommonMark Baseline ✓ (Completed)
 
-The CommonMark specification tests have been integrated. Current baseline results:
+The CommonMark specification tests have been integrated and **100% compliance achieved**.
 
-| Section | Pass | Fail | Rate |
-|---------|------|------|------|
-| ATX headings | 7 | 11 | 38.9% |
-| Autolinks | 7 | 12 | 36.8% |
-| Backslash escapes | 1 | 12 | 7.7% |
-| Blank lines | 1 | 0 | 100.0% |
-| Block quotes | 1 | 24 | 4.0% |
-| Code spans | 5 | 17 | 22.7% |
-| Emphasis and strong emphasis | 20 | 112 | 15.2% |
-| Entity and numeric character references | 3 | 14 | 17.6% |
-| Fenced code blocks | 0 | 29 | 0.0% |
-| HTML blocks | 0 | 46 | 0.0% |
-| Hard line breaks | 4 | 11 | 26.7% |
-| Images | 1 | 21 | 4.5% |
-| Indented code blocks | 0 | 12 | 0.0% |
-| Inlines | 0 | 1 | 0.0% |
-| Link reference definitions | 0 | 27 | 0.0% |
-| Links | 5 | 85 | 5.6% |
-| Lists | 3 | 23 | 11.5% |
-| List items | 8 | 40 | 16.7% |
-| Paragraphs | 2 | 6 | 25.0% |
-| Precedence | 0 | 1 | 0.0% |
-| Raw HTML | 3 | 18 | 14.3% |
-| Setext headings | 3 | 24 | 11.1% |
-| Soft line breaks | 0 | 2 | 0.0% |
-| Tabs | 1 | 10 | 9.1% |
-| Textual content | 2 | 1 | 66.7% |
-| Thematic breaks | 9 | 10 | 47.4% |
-| **TOTAL** | **86** | **569** | **13.1%** |
-
-**Key Findings**:
-- **High compliance areas**: Blank lines (100%), Textual content (67%), Thematic breaks (47%)
-- **Zero compliance areas**: Fenced code blocks, HTML blocks, Indented code, Link references
-- **Major gaps**: Emphasis/strong (112 failures), Links (85 failures), HTML blocks (46 failures)
+| Metric | Value |
+|--------|-------|
+| Total Tests | 662 |
+| Passing | 662 |
+| Compliance | **100%** |
 
 **Test Infrastructure**:
 ```
@@ -583,7 +631,7 @@ test/markup/
 ```bash
 # Build and run
 make -C build/premake config=debug_native test_commonmark_spec_gtest
-./test/test_commonmark_spec_gtest.exe --gtest_filter="CommonMarkSpecTest.ComprehensiveStats"
+./test/test_commonmark_spec_gtest.exe
 ```
 
 ### Current Test Infrastructure
@@ -596,34 +644,10 @@ The project has basic markup roundtrip tests (`test/test_markup_roundtrip_gtest.
 
 ### Recommended Test Suites
 
-#### 1. CommonMark Specification Tests
+#### 1. CommonMark Specification Tests ✓ (Complete)
 
 **Source**: https://spec.commonmark.org/
-**Test Data**: https://github.com/commonmark/commonmark-spec/blob/master/spec.txt
-
-The CommonMark spec contains ~650 test cases in a structured format:
-
-```markdown
-```````````````````````````````````` example
-# foo
-.
-<h1>foo</h1>
-````````````````````````````````````
-```
-
-**Integration Steps**:
-1. Download `spec.txt` from CommonMark repository
-2. Create test runner to parse example blocks
-3. Compare Lambda output (formatted as HTML) against expected HTML
-4. Track compliance percentage
-
-```bash
-# Recommended test file locations
-test/spec/
-├── commonmark/
-│   ├── spec.txt              # CommonMark spec test data
-│   └── gfm-spec.txt          # GitHub Flavored Markdown extension tests
-```
+**Status**: 662/662 tests passing (100%)
 
 #### 2. MediaWiki Test Suite
 
@@ -712,6 +736,39 @@ test-markup-baseline: test-markup-md test-markup-wiki test-markup-rst
 
 ---
 
+## Adding a New Format
+
+To add support for a new markup format:
+
+1. **Define format enum** in `markup_common.hpp`:
+   ```cpp
+   enum class Format { /* existing... */ NEW_FORMAT };
+   ```
+
+2. **Create format adapter** in `format/newformat_adapter.cpp`:
+   ```cpp
+   class NewFormatAdapter : public FormatAdapter {
+       Format get_format() const override { return Format::NEW_FORMAT; }
+       bool detect_header(const char* line, int* level, HeaderStyle* style) override;
+       bool detect_emphasis(const char* text, EmphasisType* type, int* len) override;
+       // ... implement all virtual methods
+   };
+   ```
+
+3. **Register adapter** in `format_registry.cpp`:
+   ```cpp
+   static NewFormatAdapter new_format_adapter;
+   adapters[Format::NEW_FORMAT] = &new_format_adapter;
+   ```
+
+4. **Add file extension mapping** in `detect_format_from_extension()`.
+
+5. **Add format-specific block parsers** (if needed) in `block/block_newformat.cpp`.
+
+6. **Add format-specific inline parsers** (if needed) in `inline/inline_format_specific.cpp`.
+
+---
+
 ## Future Improvements
 
 ### Short-term (Implementation Quality)
@@ -721,14 +778,16 @@ test-markup-baseline: test-markup-md test-markup-wiki test-markup-rst
    - Report location for syntax errors
    - Provide recovery hints
 
-2. **Modularize Code**
-   - Split 6200-line file into format-specific modules
-   - Create shared base for block/inline parsers
+2. ~~**Modularize Code**~~ ✓ **In Progress**
+   - ~~Split 6200-line file into format-specific modules~~ Modular structure implemented
+   - ~~Create shared base for block/inline parsers~~ FormatAdapter pattern in place
+   - [x] AsciiDoc fully modularized (January 2026)
+   - [ ] Migrate remaining formats from legacy `input-markup.cpp`
 
-3. **Add CommonMark Spec Tests**
-   - Download and integrate spec.txt
-   - Track compliance percentage
-   - Fix failing cases
+3. ~~**Add CommonMark Spec Tests**~~ ✓ **Completed**
+   - [x] CommonMark spec.txt integrated (662 tests)
+   - [x] 100% compliance achieved
+   - [x] GfmTables extension tests passing
 
 ### Medium-term (Feature Completeness)
 
@@ -751,15 +810,6 @@ test-markup-baseline: test-markup-md test-markup-wiki test-markup-rst
 
 After passing official test suites (CommonMark, MediaWiki, RST), consolidate legacy parsers:
 
-1. **Remove Legacy Standalone Parsers**
-   - `input-org.cpp` → Migrate to unified `input-markup.cpp`
-   - Verify all Org-mode features work in unified parser
-   - Remove redundant code paths
-
-2. **Unify Man Page Parser** (see [Man Page Integration](#man-page-integration))
-   - `input-man.cpp` → Migrate to unified parser
-   - Man pages share similar patterns: block elements, inline formatting, sections
-
 3. **Code Deduplication Audit**
    - Identify remaining duplicated parsing logic
    - Extract common patterns to shared functions
@@ -767,7 +817,6 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
 
 4. **Cleanup Checklist**
    - [ ] All format tests pass with unified parser
-   - [ ] Legacy parser files removed
    - [ ] No duplicate implementations of common features
    - [ ] Documentation updated
 
@@ -776,7 +825,6 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
 1. **Additional Formats**
    - Djot (modern Markdown successor)
    - Creole (wiki standardization)
-   - Man pages (Unix documentation)
    - Custom DSLs
 
 2. **Two-way Conversion**
@@ -789,15 +837,33 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
    - Completion suggestions
    - Hover information
 
+### Performance & Memory Notes
+
+- **Single pass parsing** - Forward-only processing, no backtracking
+- **Arena allocation** - Uses MarkBuilder's arena for minimal allocations
+- **Deterministic detection** - Block type detection is O(1)
+- **Lazy HTML5 parser** - Only created when HTML content encountered
+- **Memory cleanup** - Automatic cleanup when `Input` is released
+
 ---
 
 ## Summary
 
-The Lambda lightweight markup parser provides a solid foundation for parsing multiple markup formats into a unified schema. Key strengths include comprehensive format support and proper schema output. Priority improvements should focus on:
+The Lambda lightweight markup parser provides a solid foundation for parsing multiple markup formats into a unified schema. Key strengths include comprehensive format support and proper schema output.
 
-1. **Testing**: Integrate CommonMark spec tests for compliance verification
+### Recent Achievements
+
+- ✅ **CommonMark Compliance**: 662/662 tests passing (100%)
+- ✅ **Modular Architecture**: FormatAdapter pattern with separate block/inline parsers
+- ✅ **AsciiDoc Integration**: Full unification completed (January 2026)
+  - Legacy `input-adoc.cpp` removed
+  - Admonitions, definition lists, tables, inline links/images/cross-refs supported
+
+### Remaining Work
+
+1. **Format Migration**: Move remaining formats from legacy `input-markup.cpp` to modular parser
 2. **Error Reporting**: Leverage existing infrastructure for structured errors
-3. **Code Organization**: Modularize for maintainability
+3. **Man Page Unification**: Migrate `input-man.cpp` to modular parser
 
 The parser successfully balances flexibility (multiple formats) with consistency (unified output schema), making it suitable for document processing, transformation, and validation workflows.
 

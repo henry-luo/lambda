@@ -260,6 +260,54 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
  */
 Item parse_org_link(MarkupParser* parser, const char** text);
 
+/**
+ * parse_man_font_escape - Parse man page font escapes
+ *
+ * Handles: \fB (bold), \fI (italic), \fR/\fP (roman/previous)
+ *
+ * Man pages use troff font escapes for inline formatting:
+ * - \fBbold text\fR → <strong>bold text</strong>
+ * - \fIitalic text\fR → <em>italic text</em>
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing formatted element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_man_font_escape(MarkupParser* parser, const char** text);
+
+/**
+ * parse_asciidoc_link - Parse AsciiDoc link:url[text] syntax
+ *
+ * Handles: link:https://example.com[Example], link:path/file.html[Text]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing anchor element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_asciidoc_link(MarkupParser* parser, const char** text);
+
+/**
+ * parse_asciidoc_image - Parse AsciiDoc image:path[alt] syntax
+ *
+ * Handles: image:logo.png[Alt Text], image:images/photo.jpg[Photo, width=200]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing img element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_asciidoc_image(MarkupParser* parser, const char** text);
+
+/**
+ * parse_asciidoc_cross_reference - Parse AsciiDoc <<anchor>> syntax
+ *
+ * Handles: <<section_id>>, <<section_id,Display Text>>
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing anchor element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text);
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
