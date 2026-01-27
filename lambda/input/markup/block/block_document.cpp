@@ -20,6 +20,9 @@ extern Item parse_table(MarkupParser* parser, const char* line);
 extern Item parse_math_block(MarkupParser* parser, const char* line);
 extern Item parse_divider(MarkupParser* parser);
 extern Item parse_html_block(MarkupParser* parser, const char* line);
+extern Item parse_rst_line_block(MarkupParser* parser, const char* line);
+extern Item parse_rst_image_directive(MarkupParser* parser, const char* line);
+extern Item parse_rst_definition_list(MarkupParser* parser, const char* line);
 
 // AsciiDoc-specific block parsers
 extern Item parse_asciidoc_admonition(MarkupParser* parser, const char* line);
@@ -92,6 +95,17 @@ Item parse_block_element(MarkupParser* parser) {
             if (parser->config.format == Format::ASCIIDOC) {
                 return parse_asciidoc_admonition(parser, line);
             }
+            // RST directives
+            if (parser->config.format == Format::RST) {
+                const char* p = line;
+                while (*p == ' ') p++;
+                // RST image directive
+                if (strncmp(p, ".. image::", 10) == 0 || strncmp(p, ".. figure::", 11) == 0) {
+                    return parse_rst_image_directive(parser, line);
+                }
+                // RST line blocks (| prefix)
+                return parse_rst_line_block(parser, line);
+            }
             return parse_paragraph(parser, line);
 
         case BlockType::DEFINITION_LIST:
@@ -99,7 +113,16 @@ Item parse_block_element(MarkupParser* parser) {
             if (parser->config.format == Format::ASCIIDOC) {
                 return parse_asciidoc_definition_list(parser, line);
             }
+            // RST definition lists
+            if (parser->config.format == Format::RST) {
+                return parse_rst_definition_list(parser, line);
+            }
             return parse_paragraph(parser, line);
+
+        case BlockType::BLANK:
+            // Skip blank lines and RST link definitions
+            parser->current_line++;
+            return Item{.item = ITEM_UNDEFINED};
 
         case BlockType::PARAGRAPH:
         default:

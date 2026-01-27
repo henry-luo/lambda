@@ -523,6 +523,9 @@ void input_free_lines(char** lines, int line_count) {
 }
 
 extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
+    log_debug("input_from_source: ENTRY type='%s', flavor='%s'",
+              type ? type->chars : "null",
+              flavor ? flavor->chars : "null");
     const char* effective_type = NULL;
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
@@ -545,6 +548,8 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
     } else {
         effective_type = type->chars;
     }
+
+    log_debug("input_from_source: effective_type='%s'", effective_type ? effective_type : "null");
 
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
@@ -594,8 +599,29 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         else if (strcmp(effective_type, "markdown") == 0) {
             input->root = input_markup_modular(input, source);
         }
+        else if (strcmp(effective_type, "markup") == 0) {
+            // Generic markup type - use flavor to select format
+            const char* markup_flavor = (flavor && flavor->chars) ? flavor->chars : "markdown";
+            if (strcmp(markup_flavor, "rst") == 0) {
+                input->root = input_markup_with_format(input, source, MARKUP_RST);
+            } else if (strcmp(markup_flavor, "wiki") == 0) {
+                input->root = input_markup_with_format(input, source, MARKUP_WIKI);
+            } else if (strcmp(markup_flavor, "asciidoc") == 0 || strcmp(markup_flavor, "adoc") == 0) {
+                input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
+            } else if (strcmp(markup_flavor, "man") == 0) {
+                input->root = input_markup_with_format(input, source, MARKUP_MAN);
+            } else if (strcmp(markup_flavor, "org") == 0) {
+                input->root = input_markup_with_format(input, source, MARKUP_ORG);
+            } else if (strcmp(markup_flavor, "textile") == 0) {
+                input->root = input_markup_with_format(input, source, MARKUP_TEXTILE);
+            } else {
+                // Default to markdown
+                input->root = input_markup_modular(input, source);
+            }
+        }
         else if (strcmp(effective_type, "rst") == 0) {
-            input->root = input_markup_modular(input, source);
+            log_debug("input_from_source: matched 'rst' type, calling input_markup_with_format");
+            input->root = input_markup_with_format(input, source, MARKUP_RST);
         }
         else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
             // Use HTML5 compliant parser
@@ -615,7 +641,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_pdf(input, source, strlen(source));
         }
         else if (strcmp(effective_type, "wiki") == 0) {
-            input->root = input_markup_modular(input, source);
+            input->root = input_markup_with_format(input, source, MARKUP_WIKI);
         }
         else if (strcmp(effective_type, "asciidoc") == 0 || strcmp(effective_type, "adoc") == 0) {
             input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
@@ -727,6 +753,7 @@ static char* read_file_from_url(Url* url) {
 }
 
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
+    log_debug("input_from_url: ENTRY url='%s', type='%s'", url ? url->chars : "null", type ? type->chars : "null");
     log_debug("input_data at: %s, type: %s, cwd: %p", url ? url->chars : "null", type ? type->chars : "null", cwd);
 
     Url* abs_url;
