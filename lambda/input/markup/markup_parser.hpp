@@ -69,6 +69,7 @@ struct ParserState {
     char list_markers[MAX_LIST_DEPTH];
     int list_levels[MAX_LIST_DEPTH];
     int list_depth;
+    bool parsing_list_content;  // True when parsing collected list item content
 
     // Code block state
     bool in_code_block;
@@ -96,6 +97,7 @@ struct ParserState {
         memset(list_markers, 0, sizeof(list_markers));
         memset(list_levels, 0, sizeof(list_levels));
         list_depth = 0;
+        parsing_list_content = false;
 
         in_code_block = false;
         code_fence = CodeFenceInfo();
