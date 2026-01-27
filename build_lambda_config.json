@@ -298,14 +298,6 @@
                 "lambda/validator/error_reporting.cpp",
                 "lambda/validator/suggestions.cpp",
                 "lambda/format/format.cpp",
-                "lambda/format/html_writer.cpp",
-                "lambda/format/latex_generator.cpp",
-                "lambda/format/html_generator.cpp",
-                "lambda/format/latex_picture.cpp",
-                "lambda/format/latex_assets.cpp",
-                "lambda/format/latex_packages.cpp",
-                "lambda/format/latex_docclass.cpp",
-                "lambda/format/latex_hyphenation.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/parse_error.cpp",
@@ -2187,22 +2179,6 @@
                         ],
                         "binary": "test_latex_treesitter.exe",
                         "icon": "\ud83c\udf32"
-                    },
-                    {
-                        "source": "test/test_html_encoder_gtest.cpp",
-                        "name": "HTML Entity Encoder Tests",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_html_encoder_gtest.exe",
-                        "additional_sources": [
-                            "lambda/format/html_encoder.cpp",
-                            "lib/strbuf.c",
-                            "lib/log.c"
-                        ],
-                        "icon": "\ud83d\udd12"
                     }
                 ],
                 "type": "input",
