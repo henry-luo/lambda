@@ -1,13 +1,17 @@
 /**
  * inline_emphasis.cpp - Emphasis (bold/italic) parser
  *
- * Parses bold and italic text using CommonMark flanking rules:
- * - Markdown: **bold**, *italic*, __bold__, _italic_
- * - MediaWiki: '''bold''', ''italic''
- * - Other formats via adapter delimiters
+ * Implements CommonMark §6.2: Emphasis and strong emphasis
  *
- * CommonMark §6.2: Emphasis and strong emphasis
- * Uses flanking delimiter run rules for proper parsing.
+ * The CommonMark emphasis algorithm requires processing all delimiter runs
+ * in the text, then matching closers to openers bottom-up on a stack.
+ *
+ * Key insight: When called from parse_inline_spans, we only see one delimiter
+ * run at a time. But nested emphasis like `_foo _bar_ baz_` requires knowing
+ * about ALL delimiter runs to match correctly.
+ *
+ * Solution: Look ahead for all potential closers and track nesting depth.
+ * Match inner-most first (closest matching pair).
  */
 #include "inline_common.hpp"
 extern "C" {
@@ -26,8 +30,8 @@ static inline Element* create_element(MarkupParser* parser, const char* tag) {
 }
 
 // Helper: Create string from parser
-static inline String* create_string(MarkupParser* parser, const char* text) {
-    return parser->builder.createString(text);
+static inline String* create_string(MarkupParser* parser, const char* text, size_t len) {
+    return parser->builder.createString(text, len);
 }
 
 // Helper: Increment element content length
@@ -38,169 +42,187 @@ static inline void increment_element_content_length(Element* elem) {
 
 /**
  * is_punctuation - Check if character is Unicode punctuation
- *
- * For ASCII, this includes: !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~
  */
 static inline bool is_punctuation(char c) {
     return is_ascii_punctuation(c);
 }
 
 /**
- * is_whitespace - Check if character is ASCII whitespace
- */
-static inline bool is_whitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-}
-
-/**
  * is_unicode_whitespace - Check if position starts with Unicode whitespace
- * Handles both ASCII whitespace and UTF-8 encoded non-breaking space (U+00A0)
  */
 static inline bool is_unicode_whitespace(const char* p) {
-    if (!p || !*p) return true;  // treat end of string as whitespace per CommonMark
+    if (!p || !*p) return true;
     char c = *p;
-    // ASCII whitespace
     if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') return true;
-    // UTF-8 non-breaking space U+00A0 = 0xC2 0xA0
     if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xA0) return true;
     return false;
 }
 
 /**
  * is_preceded_by_unicode_whitespace - Check if position is preceded by Unicode whitespace
- * Also returns true if at start of string (no preceding character)
  */
 static inline bool is_preceded_by_unicode_whitespace(const char* text, const char* pos) {
-    if (pos <= text) return true;  // at start of string counts as whitespace
-    // Check for ASCII whitespace at pos-1
+    if (pos <= text) return true;
     char before = *(pos - 1);
     if (before == ' ' || before == '\t' || before == '\n' || before == '\r' || before == '\f' || before == '\v') return true;
-    // Check for UTF-8 NBSP (0xC2 0xA0) ending at pos-1
-    // If pos-1 is 0xA0 and pos-2 is 0xC2, then NBSP precedes pos
     if (pos > text + 1 && (unsigned char)*(pos - 2) == 0xC2 && (unsigned char)*(pos - 1) == 0xA0) return true;
     return false;
 }
 
 /**
  * Determine if a delimiter run is left-flanking
- *
- * CommonMark: A left-flanking delimiter run is a delimiter run that is:
- * (1) not followed by Unicode whitespace, and either
- * (2a) not followed by a Unicode punctuation character, or
- * (2b) followed by a Unicode punctuation character and preceded by
- *      Unicode whitespace or a Unicode punctuation character.
  */
 static bool is_left_flanking(const char* text, const char* run_start, const char* run_end) {
-    // (1) not followed by Unicode whitespace
     if (is_unicode_whitespace(run_end)) return false;
-
     char after = *run_end;
-    char before = (run_start > text) ? *(run_start - 1) : ' ';
     bool preceded_by_ws = is_preceded_by_unicode_whitespace(text, run_start);
-
+    char before = (run_start > text) ? *(run_start - 1) : ' ';
     if (!is_punctuation(after)) {
-        return true; // (2a)
+        return true;
     }
-
-    // (2b) followed by punctuation, check if preceded by whitespace or punctuation
     return preceded_by_ws || is_punctuation(before);
 }
 
 /**
  * Determine if a delimiter run is right-flanking
- *
- * CommonMark: A right-flanking delimiter run is a delimiter run that is:
- * (1) not preceded by Unicode whitespace, and either
- * (2a) not preceded by a Unicode punctuation character, or
- * (2b) preceded by a Unicode punctuation character and followed by
- *      Unicode whitespace or a Unicode punctuation character.
  */
 static bool is_right_flanking(const char* text, const char* run_start, const char* run_end) {
-    // (1) not preceded by Unicode whitespace
     if (is_preceded_by_unicode_whitespace(text, run_start)) return false;
-
     char before = (run_start > text) ? *(run_start - 1) : ' ';
-
     if (!is_punctuation(before)) {
-        return true; // (2a)
+        return true;
     }
-
-    // (2b) preceded by punctuation, check if followed by whitespace or punctuation
     char after = *run_end;
     bool followed_by_ws = is_unicode_whitespace(run_end);
     return followed_by_ws || is_punctuation(after);
 }
 
 /**
- * Determine if delimiter run can open emphasis
- *
- * For * : left-flanking
- * For _ : left-flanking AND (not right-flanking OR preceded by punctuation)
+ * Check if delimiter run can open emphasis
  */
 static bool can_open(char marker, const char* text, const char* run_start, const char* run_end) {
     bool left = is_left_flanking(text, run_start, run_end);
     if (!left) return false;
-
     if (marker == '*') return true;
-
-    // For underscore
     bool right = is_right_flanking(text, run_start, run_end);
     if (!right) return true;
-
     char before = (run_start > text) ? *(run_start - 1) : ' ';
     return is_punctuation(before);
 }
 
 /**
- * Determine if delimiter run can close emphasis
- *
- * For * : right-flanking
- * For _ : right-flanking AND (not left-flanking OR followed by punctuation)
+ * Check if delimiter run can close emphasis
  */
 static bool can_close(char marker, const char* text, const char* run_start, const char* run_end) {
     bool right = is_right_flanking(text, run_start, run_end);
     if (!right) return false;
-
     if (marker == '*') return true;
-
-    // For underscore
     bool left = is_left_flanking(text, run_start, run_end);
     if (!left) return true;
-
     char after = *run_end;
     return is_punctuation(after);
+}
+
+// maximum delimiter runs we track
+static const int MAX_RUNS = 128;
+
+struct DelimRun {
+    const char* start;       // pointer to start of run
+    const char* end;         // pointer to end of run (exclusive)
+    const char* orig_start;  // original start before matching
+    const char* orig_end;    // original end before matching
+    const char* match_close_pos;  // position of closer that matched this opener
+    int length;              // current length
+    int orig_length;         // original length
+    int match_use_count;     // number of delimiters used in match
+    char marker;             // '*' or '_'
+    bool opens;              // can open
+    bool closes;             // can close
+    bool active;             // still available for matching
+    int matched_with;        // index of run this matched with (-1 if unmatched)
+};
+
+/**
+ * find_all_runs - Collect all delimiter runs in text
+ */
+static int find_all_runs(const char* text, const char* full_text, DelimRun* runs, int max_runs) {
+    int count = 0;
+    const char* pos = text;
+
+    while (*pos && count < max_runs) {
+        if (*pos == '*' || *pos == '_') {
+            char marker = *pos;
+            const char* run_start = pos;
+            while (*pos == marker) pos++;
+            const char* run_end = pos;
+            int length = (int)(run_end - run_start);
+
+            runs[count].start = run_start;
+            runs[count].end = run_end;
+            runs[count].orig_start = run_start;
+            runs[count].orig_end = run_end;
+            runs[count].match_close_pos = nullptr;
+            runs[count].length = length;
+            runs[count].orig_length = length;
+            runs[count].match_use_count = 0;
+            runs[count].marker = marker;
+            runs[count].opens = can_open(marker, full_text, run_start, run_end);
+            runs[count].closes = can_close(marker, full_text, run_start, run_end);
+            runs[count].active = true;
+            runs[count].matched_with = -1;
+            count++;
+        } else if (*pos == '\\' && *(pos + 1)) {
+            pos += 2;
+        } else if (*pos == '`') {
+            // skip code spans
+            int backticks = 0;
+            const char* bt_start = pos;
+            while (*pos == '`') { backticks++; pos++; }
+            bool found = false;
+            while (*pos && !found) {
+                if (*pos == '`') {
+                    int closing = 0;
+                    while (*pos == '`') { closing++; pos++; }
+                    if (closing == backticks) found = true;
+                } else {
+                    pos++;
+                }
+            }
+            if (!found) pos = bt_start + backticks;
+        } else {
+            pos++;
+        }
+    }
+    return count;
 }
 
 /**
  * parse_emphasis - Parse bold and italic text
  *
- * Handles:
- * - **bold** and __bold__ → <strong>
- * - *italic* and _italic_ → <em>
- * - ***bolditalic*** → nested <strong><em>
+ * This function is called when parse_inline_spans encounters a * or _.
+ * We look ahead to find ALL delimiter runs, then match using CommonMark's
+ * bottom-up algorithm (inner-most matches first).
  *
  * @param parser The markup parser
  * @param text Pointer to current position (updated on success)
- * @param text_start Start of the full text (for flanking context), or nullptr
+ * @param text_start Start of the full text (for flanking context)
  * @return Item containing emphasis element, or ITEM_UNDEFINED if not matched
  */
 Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_start) {
     const char* start = *text;
-    // Use text_start if provided, otherwise use start (less context for flanking)
     const char* full_text = text_start ? text_start : start;
-    char marker = *start;  // * or _
+    char marker = *start;
 
-    // Must be * or _
     if (marker != '*' && marker != '_') {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Count consecutive markers (opening run)
+    // Count opening run
     int open_count = 0;
-    const char* content_start = start;
-    while (*content_start == marker) {
+    const char* open_end = start;
+    while (*open_end == marker) {
         open_count++;
-        content_start++;
+        open_end++;
     }
 
     if (open_count == 0) {
@@ -208,154 +230,146 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
     }
 
     // Check if this can open emphasis
-    bool opens = can_open(marker, full_text, start, content_start);
-    if (!opens) {
+    if (!can_open(marker, full_text, start, open_end)) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Find matching closing run
-    const char* pos = content_start;
-    const char* close_start = nullptr;
-    int close_count = 0;
+    // Collect all delimiter runs starting from our position
+    DelimRun runs[MAX_RUNS];
+    int num_runs = find_all_runs(start, full_text, runs, MAX_RUNS);
 
-    while (*pos) {
-        if (*pos == marker) {
-            const char* run_start = pos;
-            int run_len = 0;
-            while (*pos == marker) {
-                run_len++;
-                pos++;
-            }
+    if (num_runs < 2) {
+        return Item{.item = ITEM_UNDEFINED};  // need at least opener and closer
+    }
 
-            // Check if this run can close
-            if (can_close(marker, full_text, run_start, pos)) {
-                // For proper emphasis matching, we need closers that match the opener length
-                // or can consume part of it (for ***bold italic*** patterns)
-                // Simple rule: prefer exact match, or if sum is not multiple of 3
-                bool sum_multiple_of_3 = ((open_count + run_len) % 3 == 0);
+    // runs[0] is our opener
+    // Process emphasis: find closers, match to openers, from left to right
+    // When we find a closer, search backward for matching opener
 
-                // If both are multiples of 3, sum is multiple of 3 - needs special handling
-                // For now, require exact match or compatible lengths
-                if (run_len == open_count) {
-                    close_start = run_start;
-                    close_count = run_len;
-                    break;
+    // First, do the matching pass (modifies runs in place)
+    bool made_match = true;
+    while (made_match) {
+        made_match = false;
+
+        // Find first active closer
+        for (int ci = 1; ci < num_runs; ci++) {
+            DelimRun* closer = &runs[ci];
+            if (!closer->active || !closer->closes || closer->length == 0) continue;
+
+            // Search backward for matching opener
+            for (int oi = ci - 1; oi >= 0; oi--) {
+                DelimRun* opener = &runs[oi];
+                if (!opener->active || !opener->opens || opener->length == 0) continue;
+                if (opener->marker != closer->marker) continue;
+
+                // Rule of 3: if opener or closer can both open and close,
+                // (opener_len + closer_len) % 3 != 0 OR both divisible by 3
+                if ((opener->opens && opener->closes) || (closer->opens && closer->closes)) {
+                    int sum = opener->length + closer->length;
+                    if (sum % 3 == 0) {
+                        if (opener->length % 3 != 0 || closer->length % 3 != 0) {
+                            continue;  // skip this pair
+                        }
+                    }
                 }
-                // For mismatched lengths: if sum isn't multiple of 3, they can match
-                // This handles cases like ***foo* where ** opens and * closes one level
-                if (!sum_multiple_of_3 && run_len >= 1 && open_count >= 1) {
-                    close_start = run_start;
-                    close_count = run_len;
-                    break;
+
+                // Match found - consume delimiters
+                int use = (opener->length >= 2 && closer->length >= 2) ? 2 : 1;
+
+                // Record match info on opener: where the closer is and how many delims used
+                // ALWAYS update - we want the LAST match (outermost) for content boundaries
+                opener->matched_with = ci;
+                opener->match_close_pos = closer->start;  // position BEFORE we modify it
+                opener->match_use_count = use;
+
+                closer->matched_with = oi;
+
+                // Consume from the ENDS of runs (closer consumes from start, opener from end)
+                opener->length -= use;
+                opener->end -= use;
+                closer->length -= use;
+                closer->start += use;
+
+                if (opener->length == 0) opener->active = false;
+                if (closer->length == 0) closer->active = false;
+
+                // Deactivate runs between opener and closer
+                for (int k = oi + 1; k < ci; k++) {
+                    runs[k].active = false;
                 }
+
+                made_match = true;
+                break;
             }
-        } else if (*pos == '\\' && *(pos+1)) {
-            // Skip escaped character
-            pos += 2;
-        } else {
-            pos++;
+            if (made_match) break;
         }
     }
 
-    if (!close_start) {
-        // No closing marker found, treat as plain text (don't advance pos)
+    // Now check if our opener (runs[0]) was matched
+    // Original length was open_count, current length is runs[0].length
+    int consumed = open_count - runs[0].length;
+
+    if (consumed == 0) {
+        // Our opener wasn't matched at all
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Determine how many delimiters to use (rule of 3)
-    // If sum of open and close is multiple of 3, use min; otherwise use as is
-    int use_count = (open_count < close_count) ? open_count : close_count;
-    if (use_count > 3) use_count = 3;
+    // Get the match info from runs[0]
+    int closer_idx = runs[0].matched_with;
+    if (closer_idx < 0 || closer_idx >= num_runs) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
 
-    // For rule of 3: if both are multiples of 3 and their sum is multiple of 3,
-    // we should not match (to allow *foo**bar* patterns)
-    // This is a simplification - full CommonMark needs stack-based algorithm
+    // Use the recorded match position and use count
+    const char* found_close = runs[0].match_close_pos;
+    int use_count = runs[0].match_use_count;
 
-    // Adjust content_start based on use_count
-    const char* actual_content_start = start + use_count;
-    const char* actual_content_end = close_start;
+    if (!found_close || use_count == 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
 
-    // Create appropriate element based on marker count
-    Element* elem;
-    if (use_count >= 3) {
-        // Bold+italic: create strong with nested em (or em with nested strong)
-        elem = create_element(parser, "strong");
-        if (!elem) {
-            *text = close_start + use_count;
-            return Item{.item = ITEM_ERROR};
-        }
+    // Check for unmatched (leftover) opener delimiters
+    // runs[0].length is what remains after all matching - if > 0, those are unmatched
+    int unmatched_open = runs[0].length;
 
-        // Create inner em element
-        Element* inner_em = create_element(parser, "em");
-        if (inner_em) {
-            // Extract content
-            size_t content_len = actual_content_end - actual_content_start;
-            char* content = (char*)malloc(content_len + 1);
-            if (content) {
-                memcpy(content, actual_content_start, content_len);
-                content[content_len] = '\0';
+    // If there are truly unmatched openers, they become literal text.
+    // Return UNDEFINED to let caller handle one char at a time.
+    if (unmatched_open > 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
 
-                // Recursively parse inner content
-                Item inner_content = parse_inline_spans(parser, content);
-                if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
-                    list_push((List*)inner_em, inner_content);
-                    increment_element_content_length(inner_em);
-                }
-                free(content);
-            }
+    // For the LAST match (outermost emphasis):
+    // - use_count is how many delimiters this match consumed
+    // - Content starts after those delimiters: start + use_count
+    // - Content ends at found_close (position of this closer)
+    const char* content_start = start + use_count;
+    const char* content_end = found_close;
+    size_t content_len = content_end - content_start;
 
-            // Add em to strong
-            list_push((List*)elem, Item{.item = (uint64_t)inner_em});
+    // Create element
+    const char* tag = (use_count == 2) ? "strong" : "em";
+    Element* elem = create_element(parser, tag);
+    if (!elem) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Parse inner content (may contain more emphasis)
+    char* content = (char*)malloc(content_len + 1);
+    if (content) {
+        memcpy(content, content_start, content_len);
+        content[content_len] = '\0';
+
+        Item inner = parse_inline_spans(parser, content);
+        if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+            list_push((List*)elem, inner);
             increment_element_content_length(elem);
         }
-    } else if (use_count >= 2) {
-        // Bold
-        elem = create_element(parser, "strong");
-        if (!elem) {
-            *text = close_start + use_count;
-            return Item{.item = ITEM_ERROR};
-        }
-
-        // Extract and parse content
-        size_t content_len = actual_content_end - actual_content_start;
-        char* content = (char*)malloc(content_len + 1);
-        if (content) {
-            memcpy(content, actual_content_start, content_len);
-            content[content_len] = '\0';
-
-            Item inner_content = parse_inline_spans(parser, content);
-            if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
-                list_push((List*)elem, inner_content);
-                increment_element_content_length(elem);
-            }
-            free(content);
-        }
-    } else {
-        // Italic
-        elem = create_element(parser, "em");
-        if (!elem) {
-            *text = close_start + use_count;
-            return Item{.item = ITEM_ERROR};
-        }
-
-        // Extract and parse content
-        size_t content_len = actual_content_end - actual_content_start;
-        char* content = (char*)malloc(content_len + 1);
-        if (content) {
-            memcpy(content, actual_content_start, content_len);
-            content[content_len] = '\0';
-
-            Item inner_content = parse_inline_spans(parser, content);
-            if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
-                list_push((List*)elem, inner_content);
-                increment_element_content_length(elem);
-            }
-            free(content);
-        }
+        free(content);
     }
 
-    // Move past closing markers
-    *text = close_start + use_count;
+    // Advance position past used closing delimiters
+    *text = found_close + use_count;
+
     return Item{.item = (uint64_t)elem};
 }
 

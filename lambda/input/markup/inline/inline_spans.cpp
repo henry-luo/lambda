@@ -132,13 +132,11 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     }
                 }
                 if (saved_buffer) free(saved_buffer);
-                // Treat entire marker run as plain text
-                // This prevents second marker from being tried as opener
-                char marker = *pos;
-                while (*pos == marker) {
-                    stringbuf_append_char(sb, *pos);
-                    pos++;
-                }
+                // Treat ONLY ONE marker as plain text
+                // This allows remaining markers to be tried as openers
+                // (needed for cases like **foo* where * should match with second *)
+                stringbuf_append_char(sb, *pos);
+                pos++;
             }
             continue;
         }
