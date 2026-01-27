@@ -750,8 +750,9 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
             }
             if (!str) {
                 ctx.addError(value_loc, "Invalid string value");
+                return (Item){.item = ITEM_ERROR};
             }
-            return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = ITEM_ERROR};
+            return (Item){.item = s2it(str)};
         }
         case '\'': {
             String* str = NULL;
@@ -762,8 +763,9 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
             }
             if (!str) {
                 ctx.addError(value_loc, "Invalid literal string");
+                return (Item){.item = ITEM_ERROR};
             }
-            return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = ITEM_ERROR};
+            return (Item){.item = s2it(str)};
         }
         case 't':
             if (strncmp(*toml, "true", 4) == 0 && !isalnum(*(*toml + 4))) {

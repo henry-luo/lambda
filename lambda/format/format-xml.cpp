@@ -240,7 +240,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             while (child_iter.next(&child)) {
                 if (child.isString()) {
                     String* str = child.asString();
-                    if (str && str != &EMPTY_STRING) {
+                    if (str) {
                         stringbuf_append_char(ctx.output(), ' ');
                         stringbuf_append_str(ctx.output(), str->chars);
                     }
@@ -271,7 +271,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
                 if (value.isString()) {
                     String* str = value.asString();
-                    if (str && str != &EMPTY_STRING) {
+                    if (str) {
                         format_xml_string(ctx, str);
                     }
                 } else if (value.isInt()) {
@@ -299,13 +299,8 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             while (child_iter.next(&child)) {
                 if (child.isString()) {
                     String* str = child.asString();
-                    if (str && str != &EMPTY_STRING) {
-                        // Also check for literal "lambda.nil" content
-                        if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-                            // Skip "lambda.nil" content - don't output anything
-                        } else {
-                            format_xml_string(ctx, str);
-                        }
+                    if (str) {
+                        format_xml_string(ctx, str);
                     }
                 } else if (child.isSymbol()) {
                     // Symbol items (named entities) - output as &name;

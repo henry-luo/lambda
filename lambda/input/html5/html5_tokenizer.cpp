@@ -471,8 +471,8 @@ static void html5_commit_attribute(Html5Parser* parser) {
         parser->temp_buffer[parser->temp_buffer_len] = '\0';
         attr_value = builder.createString(parser->temp_buffer, parser->temp_buffer_len);
     } else {
-        // Create actual empty string for boolean attributes
-        // We can't use createString("", 0) because it returns EMPTY_STRING which has "lambda.nil"
+        // Create actual empty string for boolean HTML attributes (e.g., <input disabled>)
+        // We directly allocate a zero-length string since createString("", 0) returns nullptr
         attr_value = (String*)arena_alloc(parser->arena, sizeof(String) + 1);
         attr_value->ref_cnt = 1;
         attr_value->len = 0;
