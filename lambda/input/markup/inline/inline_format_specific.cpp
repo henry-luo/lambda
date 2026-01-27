@@ -178,6 +178,197 @@ Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** 
 }
 
 /**
+ * parse_rst_inline_link - Parse RST inline links with embedded URL
+ *
+ * Handles: `text <url>`_ format
+ *
+ * RST inline links have the URL embedded in angle brackets inside the backticks.
+ */
+Item parse_rst_inline_link(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    // Must start with backtick
+    if (*pos != '`') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* start = pos + 1;
+    pos = start;
+
+    // Find the closing backtick
+    const char* close_backtick = nullptr;
+    const char* angle_open = nullptr;
+    const char* angle_close = nullptr;
+
+    while (*pos && *pos != '\n' && *pos != '\r') {
+        if (*pos == '<' && !angle_open) {
+            angle_open = pos;
+        } else if (*pos == '>' && angle_open) {
+            angle_close = pos;
+        } else if (*pos == '`') {
+            close_backtick = pos;
+            break;
+        }
+        pos++;
+    }
+
+    // Must have `text <url>`_
+    if (!close_backtick || !angle_open || !angle_close) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Check for trailing underscore
+    if (*(close_backtick + 1) != '_') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Extract text (before the angle bracket)
+    const char* text_end = angle_open;
+    // Trim trailing spaces from text
+    while (text_end > start && *(text_end - 1) == ' ') {
+        text_end--;
+    }
+
+    size_t text_len = text_end - start;
+    if (text_len == 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Extract URL (between angle brackets)
+    const char* url_start = angle_open + 1;
+    size_t url_len = angle_close - url_start;
+
+    // Create anchor element
+    Element* link_elem = create_element(parser, "a");
+    if (!link_elem) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add href attribute
+    char* url = (char*)malloc(url_len + 1);
+    if (url) {
+        strncpy(url, url_start, url_len);
+        url[url_len] = '\0';
+        add_attribute_to_element(parser, link_elem, "href", url);
+        free(url);
+    }
+
+    // Add link text
+    char* link_text = (char*)malloc(text_len + 1);
+    if (link_text) {
+        strncpy(link_text, start, text_len);
+        link_text[text_len] = '\0';
+        String* text_str = create_string(parser, link_text);
+        if (text_str) {
+            list_push((List*)link_elem, Item{.item = s2it(text_str)});
+            increment_element_content_length(link_elem);
+        }
+        free(link_text);
+    }
+
+    *text = close_backtick + 2; // Skip `_
+    return Item{.item = (uint64_t)link_elem};
+}
+
+/**
+ * parse_rst_reference_link - Parse RST reference links
+ *
+ * Handles: `text`_ format (reference to a link definition)
+ *
+ * The URL is resolved from link definitions like: .. _text: url
+ */
+Item parse_rst_reference_link(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    // Must start with backtick
+    if (*pos != '`') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* start = pos + 1;
+    pos = start;
+
+    // Find closing backtick - must NOT contain angle brackets (that's inline link)
+    const char* close_backtick = nullptr;
+    bool has_angle = false;
+
+    while (*pos && *pos != '\n' && *pos != '\r') {
+        if (*pos == '<' || *pos == '>') {
+            has_angle = true;
+        }
+        if (*pos == '`') {
+            close_backtick = pos;
+            break;
+        }
+        pos++;
+    }
+
+    if (!close_backtick || has_angle) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Check for trailing underscore
+    if (*(close_backtick + 1) != '_') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Extract reference name
+    size_t ref_len = close_backtick - start;
+    if (ref_len == 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    char* ref_name = (char*)malloc(ref_len + 1);
+    if (!ref_name) {
+        return Item{.item = ITEM_ERROR};
+    }
+    strncpy(ref_name, start, ref_len);
+    ref_name[ref_len] = '\0';
+
+    // Look up the reference in link_defs_ (RST refs are case-insensitive)
+    const char* url = nullptr;
+    for (int i = 0; i < parser->link_def_count_; i++) {
+        // Compare case-insensitively
+        bool match = true;
+        size_t label_len = strlen(parser->link_defs_[i].label);
+        if (label_len == ref_len) {
+            for (size_t j = 0; j < ref_len; j++) {
+                if (tolower((unsigned char)ref_name[j]) != tolower((unsigned char)parser->link_defs_[i].label[j])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                url = parser->link_defs_[i].url;
+                break;
+            }
+        }
+    }
+
+    // Create anchor element
+    Element* link_elem = create_element(parser, "a");
+    if (!link_elem) {
+        free(ref_name);
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add href (use resolved URL or reference name as fallback)
+    add_attribute_to_element(parser, link_elem, "href", url ? url : ref_name);
+    add_attribute_to_element(parser, link_elem, "class", "reference");
+
+    // Add link text
+    String* text_str = create_string(parser, ref_name);
+    if (text_str) {
+        list_push((List*)link_elem, Item{.item = s2it(text_str)});
+        increment_element_content_length(link_elem);
+    }
+
+    free(ref_name);
+    *text = close_backtick + 2; // Skip `_
+    return Item{.item = (uint64_t)link_elem};
+}
+
+/**
  * parse_asciidoc_inline - Parse AsciiDoc inline content
  *
  * Handles AsciiDoc-specific inline syntax:
