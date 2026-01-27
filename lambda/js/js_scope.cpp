@@ -11,6 +11,12 @@
 #include <setjmp.h>
 #include <cstdlib>
 
+// External reference to Lambda runtime context pointer (defined in mir.c)
+extern "C" Context* _lambda_rt;
+
+// External reference to the global evaluation context (defined in runner.cpp)
+extern __thread EvalContext* context;
+
 // Scope management functions
 
 JsScope* js_scope_create(JsTranspiler* tp, JsScopeType scope_type, JsScope* parent) {
@@ -254,22 +260,14 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
 
     // Build JavaScript AST
     log_debug("Building JavaScript AST...");
-    // printf("DEBUG: About to call build_js_ast\n");
-    // fflush(stdout);
     JsAstNode* js_ast = build_js_ast(tp, root);
-    // printf("DEBUG: build_js_ast returned: %p\n", js_ast);
-    // fflush(stdout);
     if (!js_ast) {
         log_error("Failed to build JavaScript AST");
         return (Item){.item = ITEM_ERROR};
     }
 
     // Generate C code
-    // printf("DEBUG: About to call transpile_js_ast_root\n");
-    // fflush(stdout);
     transpile_js_ast_root(tp, js_ast);
-    // printf("DEBUG: transpile_js_ast_root completed\n");
-    // fflush(stdout);
 
     if (tp->has_errors) {
         if (tp->error_buf) {
@@ -280,109 +278,116 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
 
     // Get generated C code
     char* c_code = tp->code_buf->str;
-    // printf("DEBUG: Code buffer pointer: %p\n", c_code);
-    if (c_code) {
-        // printf("DEBUG: Code buffer length: %zu\n", strlen(c_code));
-    } else {
-        // printf("DEBUG: Code buffer is NULL!\n");
-    }
-    log_debug("Generated JavaScript C code (length: %zu):", c_code ? strlen(c_code) : 0);
-
-    // Print generated C code for debugging
-    // printf("=== Generated C Code ===\n");
-    if (strlen(c_code) > 0) {
-        // printf("%s\n", c_code);
-    } else {
-        // printf("(empty)\n");
+    size_t code_len = tp->code_buf->length;
+    
+    if (!c_code || code_len == 0) {
         log_error("Generated C code is empty!");
         return (Item){.item = ITEM_NULL};
     }
-    // printf("=== End Generated C Code ===\n");
-
-    // Execute the JavaScript operations directly using the runtime
-    // printf("DEBUG: Executing JavaScript operations directly...\n");
-
-    // Initialize JavaScript global object
-    // printf("DEBUG: Skipping js_init_global_object() for now to avoid segfault\n");
-    // fflush(stdout);
-    // js_init_global_object();  // TODO: Fix the d2it usage in this function
-    // printf("DEBUG: Continuing without global object initialization\n");
-    // fflush(stdout);
-
-    // For now, implement a simple interpreter for the generated operations
-    // Parse the generated C code and execute the operations
-
-    // Extract variable assignments and execute them
-    char* code_ptr = c_code;
-    Item js_a = {.item = ITEM_NULL};
-    Item js_b = {.item = ITEM_NULL};
-    Item js_result = {.item = ITEM_NULL};
-
-    // Look for: Item _js_a = d2it(5);
-    char* a_assign = strstr(code_ptr, "Item _js_a = d2it(");
-    if (a_assign) {
-        char* num_start = a_assign + strlen("Item _js_a = d2it(");
-        char* num_end = strchr(num_start, ')');
-        if (num_end) {
-            char num_str[32];
-            size_t num_len = num_end - num_start;
-            strncpy(num_str, num_start, num_len);
-            num_str[num_len] = '\0';
-            double value = atof(num_str);
-
-            // Allocate memory for the double value
-            double* a_ptr = (double*)malloc(sizeof(double));
-            *a_ptr = value;
-            js_a.item = d2it(a_ptr);
-            // printf("DEBUG: Executed _js_a = d2it(%f)\n", value);
+    
+    log_debug("Generated JavaScript C code (length: %zu)", code_len);
+    
+    // Write generated C code to file for debugging
+    FILE* debug_file = fopen("_transpiled_js.c", "w");
+    if (debug_file) {
+        fwrite(c_code, 1, code_len, debug_file);
+        fclose(debug_file);
+        log_debug("Wrote generated C code to _transpiled_js.c");
+    }
+    
+    // Initialize MIR JIT context
+    MIR_context_t jit_ctx = jit_init(2);  // Use optimization level 2
+    if (!jit_ctx) {
+        log_error("Failed to initialize MIR JIT context");
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // For now, we don't set up _lambda_rt - JS runtime functions
+    // don't need the full Lambda context (they use heap_alloc directly)
+    
+    // Compile the C code to MIR
+    log_debug("Compiling JavaScript to MIR...");
+    jit_compile_to_mir(jit_ctx, c_code, code_len, "javascript.js");
+    
+    // Generate native code for the js_main function
+    log_notice("Generating native code for JavaScript...");
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)jit_gen_func(jit_ctx, (char*)"js_main");
+    
+    if (!js_main) {
+        log_error("Failed to generate native code for js_main");
+        MIR_finish(jit_ctx);
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Set up a minimal evaluation context for JS runtime
+    // The push_d/push_l functions use the global 'context' variable
+    EvalContext js_context;
+    memset(&js_context, 0, sizeof(EvalContext));
+    js_context.num_stack = num_stack_create(16);  // Create num_stack for push_d/push_l
+    
+    // Save old context and set new one
+    EvalContext* old_context = context;
+    context = &js_context;
+    
+    // Initialize heap for JS execution
+    heap_init();
+    context->pool = context->heap->pool;
+    
+    // Initialize name_pool for string interning (required for heap_create_name)
+    context->name_pool = name_pool_create(context->pool, nullptr);
+    if (!context->name_pool) {
+        log_error("Failed to create JS runtime name_pool");
+    }
+    
+    // Execute the JIT compiled JavaScript code
+    log_notice("Executing JIT compiled JavaScript code...");
+    Item result = js_main(_lambda_rt);
+    
+    // Copy the result value before destroying the heap
+    // For simple scalars (int, bool), the value is in the Item itself
+    // For float, we need to copy the double value (it's on num_stack which we're about to destroy)
+    Item copied_result;
+    TypeId type_id = get_type_id(result);
+    if (type_id == LMD_TYPE_FLOAT) {
+        // Float values are stored on num_stack - need to copy the actual value
+        double value = it2d(result);
+        log_debug("JS result: float = %g", value);
+        // For now, return an int representation if it's a whole number
+        if (value == (int)value && value >= INT32_MIN && value <= INT32_MAX) {
+            copied_result = (Item){.item = i2it((int)value)};
+        } else {
+            // For true floats, we can't easily preserve them without heap
+            // Print and return null for now
+            printf("%g", value);
+            copied_result = (Item){.item = ITEM_NULL};
         }
+    } else if (type_id == LMD_TYPE_INT) {
+        // Int values are stored directly in the Item
+        copied_result = result;
+    } else if (type_id == LMD_TYPE_BOOL) {
+        copied_result = result;
+    } else if (type_id == LMD_TYPE_NULL) {
+        copied_result = result;
+    } else {
+        // For complex types, we can't preserve across heap destruction
+        log_debug("JS result has complex type %d, returning null", type_id);
+        copied_result = (Item){.item = ITEM_NULL};
     }
-
-    // Look for: Item _js_b = d2it(10);
-    char* b_assign = strstr(code_ptr, "Item _js_b = d2it(");
-    if (b_assign) {
-        char* num_start = b_assign + strlen("Item _js_b = d2it(");
-        char* num_end = strchr(num_start, ')');
-        if (num_end) {
-            char num_str[32];
-            size_t num_len = num_end - num_start;
-            strncpy(num_str, num_start, num_len);
-            num_str[num_len] = '\0';
-            double value = atof(num_str);
-
-            // Allocate memory for the double value
-            double* b_ptr = (double*)malloc(sizeof(double));
-            *b_ptr = value;
-            js_b.item = d2it(b_ptr);
-            // printf("DEBUG: Executed _js_b = d2it(%f)\n", value);
-        }
+    
+    // Clean up JS context
+    if (js_context.num_stack) {
+        num_stack_destroy((num_stack_t*)js_context.num_stack);
     }
-
-    // Look for: Item _js_result = d2it(js_add(_js_a,_js_b));
-    char* result_assign = strstr(code_ptr, "Item _js_result = d2it(js_add(_js_a,_js_b))");
-    if (result_assign) {
-        // Execute the addition
-        double a_val = js_a.get_double();
-        double b_val = js_b.get_double();
-        double result_val = a_val + b_val;
-
-        // Allocate memory for the result
-        double* result_ptr = (double*)malloc(sizeof(double));
-        *result_ptr = result_val;
-        js_result.item = d2it(result_ptr);
-        // printf("DEBUG: Executed _js_result = d2it(js_add(%f, %f)) = %f\n", a_val, b_val, result_val);
-    }
-
-    // Look for: Item result = _js_result;
-    char* final_assign = strstr(code_ptr, "Item result = _js_result");
-    if (final_assign) {
-        // printf("DEBUG: Executed result = _js_result\n");
-        // printf("DEBUG: Final JavaScript result: %f\n", *(double*)js_result.pointer);
-        return js_result;
-    }
-
-    // printf("DEBUG: Could not parse generated operations, returning null\n");
-    return (Item){.item = ITEM_NULL};
+    heap_destroy();
+    
+    // Restore old context
+    context = old_context;
+    
+    // Clean up MIR context
+    MIR_finish(jit_ctx);
+    
+    return copied_result;
 }
 
 // Main entry point
