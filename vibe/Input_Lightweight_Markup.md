@@ -79,50 +79,7 @@ The parser supports six lightweight markup language families:
 - **Status**: Fully integrated into modular parser (January 2026)
 - **Features**: `= Headings`, listing blocks (`----`), admonitions (NOTE:, TIP:, WARNING:, CAUTION:, IMPORTANT:), definition lists (`term:: definition`), tables (`|===`), inline links (`link:url[text]`), inline images (`image:path[alt]`), cross-references (`<<anchor>>`), `[source,lang]` code blocks
 
-#### AsciiDoc Integration Details (Completed January 2026)
-
-The legacy `input-adoc.cpp` parser (~580 lines) was fully merged into the modular markup parser architecture. Key implementation files:
-
-| File | Purpose |
-|------|---------|
-| `markup/format/asciidoc_adapter.cpp` | Format-specific detection rules |
-| `markup/block/block_asciidoc.cpp` | AsciiDoc block parsers (admonitions, definition lists) |
-| `markup/block/block_table.cpp` | Extended for `\|===` delimited tables |
-| `markup/block/block_code.cpp` | Extended for `[source,lang]` attributes |
-| `markup/inline/inline_format_specific.cpp` | AsciiDoc inline parsers |
-
-**AsciiDoc Adapter Methods**:
-- `detectAdmonition()` - Detects NOTE:, TIP:, WARNING:, CAUTION:, IMPORTANT: labels
-- `detectDefinitionList()` - Detects `term:: definition` syntax
-- `detectAttributeBlock()` - Detects `[source,lang]`, `[quote]`, etc.
-- `detectCrossReference()` - Detects `<<anchor>>` and `<<anchor,text>>` syntax
-- `isDelimitedBlockStart()` - Detects `====`, `----`, `****` delimiters
-
-**Block Parsers**:
-- `parse_asciidoc_admonition()` → `<div class="admonition {type}">` with nested paragraphs
-- `parse_asciidoc_definition_list()` → `<dl><dt>term</dt><dd>definition</dd></dl>`
-
-**Inline Parsers**:
-- `parse_asciidoc_link()` - `link:url[text]` → `<a href="url">text</a>`
-- `parse_asciidoc_image()` - `image:path[alt]` → `<img src="path" alt="alt">`
-- `parse_asciidoc_cross_reference()` - `<<anchor,text>>` → `<a href="#anchor">text</a>`
-
-### Other Similar Markup Languages
-
-Beyond the six currently supported, these additional lightweight markup languages share similar design patterns and could be added:
-
-| Language | Characteristics | Potential Value |
-|----------|----------------|-----------------|
-| **Creole** | Wiki syntax standardization attempt | Cross-wiki compatibility |
-| **BBCode** | Forum markup `[b]bold[/b]` | Legacy forum content |
-| **Gemini/Gemtext** | Minimal markup for Gemini protocol | Ultra-simple documents |
-| **Djot** | CommonMark successor by John MacFarlane | Modern Markdown replacement |
-| **MyST** | Markdown variant for Sphinx | Technical documentation |
-| **MDX** | Markdown + JSX | React documentation (already have separate parser) |
-| **txt2tags** | Simple markup with multiple outputs | Basic document conversion |
-| **Man pages** | Unix manual page format (`.1`-`.8`) | System documentation |
-
-### Man Page Integration
+### Man Page ✓ (Unified)
 
 Unix man pages (`input-man.cpp`) can be unified into the markup parser. Analysis shows significant overlap with existing features:
 
@@ -139,46 +96,19 @@ Unix man pages (`input-man.cpp`) can be unified into the markup parser. Analysis
 | `.TP term` | Definition list | `parse_definition_list()` |
 | `\fB...\fR` | Inline bold | `parse_inline_spans()` |
 
-#### Integration Plan
+### Other Similar Markup Languages
 
-1. **Add `MARKUP_MAN` format**:
-   ```cpp
-   typedef enum {
-       MARKUP_MARKDOWN,
-       MARKUP_RST,
-       MARKUP_TEXTILE,
-       MARKUP_WIKI,
-       MARKUP_ORG,
-       MARKUP_ASCIIDOC,
-       MARKUP_MAN,           // Add man page format
-       MARKUP_AUTO_DETECT
-   } MarkupFormat;
-   ```
+Beyond the six currently supported, these additional lightweight markup languages share similar design patterns and could be added:
 
-2. **Add detection logic**:
-   ```cpp
-   // File extension detection
-   if (strcasecmp(ext, "1") == 0 || ... || strcasecmp(ext, "8") == 0) {
-       return MARKUP_MAN;
-   }
-   // Content detection
-   if (strncmp(content, ".TH ", 4) == 0 || strncmp(content, ".SH ", 4) == 0) {
-       return MARKUP_MAN;
-   }
-   ```
-
-3. **Reuse existing parsers**:
-   - Headers: `.SH` → `parse_header()` with level detection
-   - Bold/italic: `\fB`/`\fI` → `parse_inline_spans()` with man-specific markers
-   - Lists: `.IP`/`.TP` → `parse_list_structure()`
-   - Paragraphs: `.PP` → paragraph separator
-
-4. **Man-specific additions**:
-   - `.TH` title/section parsing → metadata
-   - `\fB...\fR` inline escapes → inline formatting
-   - `.RS`/`.RE` indent blocks → nested structure
-
----
+| Language           | Characteristics                         | Potential Value                                    |
+| ------------------ | --------------------------------------- | -------------------------------------------------- |
+| **Creole**         | Wiki syntax standardization attempt     | Cross-wiki compatibility                           |
+| **BBCode**         | Forum markup `[b]bold[/b]`              | Legacy forum content                               |
+| **Gemini/Gemtext** | Minimal markup for Gemini protocol      | Ultra-simple documents                             |
+| **Djot**           | CommonMark successor by John MacFarlane | Modern Markdown replacement                        |
+| **MyST**           | Markdown variant for Sphinx             | Technical documentation                            |
+| **MDX**            | Markdown + JSX                          | React documentation (already have separate parser) |
+| **txt2tags**       | Simple markup with multiple outputs     | Basic document conversion                          |
 
 ## Architecture
 
@@ -221,7 +151,6 @@ lambda/input/markup/
 
 ```
 lambda/input/
-├── input-markup.cpp         # Legacy monolithic implementation (~6200 lines)
 ├── input-context.hpp        # Base class: InputContext with error tracking
 ├── parse_error.hpp          # Error structures: SourceLocation, ParseError, ParseErrorList
 └── source_tracker.hpp       # Position tracking: SourceTracker
@@ -573,35 +502,6 @@ Metadata fields follow the unified schema with compatibility across formats (see
    - RST reference resolution: Not fully implemented
    - ~~AsciiDoc inline formatting: Placeholder implementation~~ ✓ **Completed** (January 2026)
    - Textile: Some block types not fully parsed
-
-### Recommended Code Structure Improvements
-
-The modular parser structure is now in place under `lambda/input/markup/`. The recommended structure has been partially implemented:
-
-```
-lambda/input/markup/              # ✓ IMPLEMENTED
-├── markup_common.hpp             # ✓ Core types and ParseContext
-├── markup_parser.cpp             # ✓ Main orchestration
-├── format/                       # ✓ Format adapters
-│   ├── format_adapter.hpp        # ✓ Adapter interface
-│   ├── markdown_adapter.cpp      # ✓ Markdown rules
-│   ├── asciidoc_adapter.cpp      # ✓ Full AsciiDoc detection
-│   └── ...                       # Other format adapters
-├── block/                        # ✓ Block parsers
-│   ├── block_asciidoc.cpp        # ✓ NEW: AsciiDoc blocks
-│   └── ...                       # Other block parsers
-└── inline/                       # ✓ Inline parsers
-    ├── inline_format_specific.cpp # ✓ Extended with AsciiDoc
-    └── ...                       # Other inline parsers
-
-# Legacy (to be migrated):
-lambda/input/
-└── input-markup.cpp              # Legacy monolithic (~6200 lines)
-```
-
-**Migration Status**:
-- [x] AsciiDoc fully migrated to modular parser (January 2026)
-- [ ] Remaining formats to migrate from legacy `input-markup.cpp`
 
 ---
 
@@ -963,15 +863,6 @@ To add support for a new markup format:
 
 After passing official test suites (CommonMark, MediaWiki, RST), consolidate legacy parsers:
 
-1. **Remove Legacy Standalone Parsers**
-   - `input-org.cpp` → Migrate to unified `input-markup.cpp`
-   - Verify all Org-mode features work in unified parser
-   - Remove redundant code paths
-
-2. **Unify Man Page Parser** (see [Man Page Integration](#man-page-integration))
-   - `input-man.cpp` → Migrate to unified parser
-   - Man pages share similar patterns: block elements, inline formatting, sections
-
 3. **Code Deduplication Audit**
    - Identify remaining duplicated parsing logic
    - Extract common patterns to shared functions
@@ -979,8 +870,6 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
 
 4. **Cleanup Checklist**
    - [ ] All format tests pass with unified parser
-   - [x] AsciiDoc legacy parser (`input-adoc.cpp`) removed and unified (January 2026)
-   - [ ] Legacy parser files removed (remaining: `input-org.cpp`, `input-man.cpp`)
    - [ ] No duplicate implementations of common features
    - [ ] Documentation updated
 
@@ -989,7 +878,6 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
 1. **Additional Formats**
    - Djot (modern Markdown successor)
    - Creole (wiki standardization)
-   - Man pages (Unix documentation)
    - Custom DSLs
 
 2. **Two-way Conversion**
