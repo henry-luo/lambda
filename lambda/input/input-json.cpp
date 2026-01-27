@@ -222,7 +222,14 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
         }
 
         // Create key as a name (always pooled)
-        String* key = ctx.builder.createName(sb->str->chars, sb->length);
+        // Special case: empty key "" in JSON becomes "''" in Lambda
+        String* key;
+        if (sb->length == 0) {
+            // Empty JSON key maps to the literal string "''" (two single quotes)
+            key = ctx.builder.createName("''", 2);
+        } else {
+            key = ctx.builder.createName(sb->str->chars, sb->length);
+        }
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             while (**json && **json != ',' && **json != '}') {

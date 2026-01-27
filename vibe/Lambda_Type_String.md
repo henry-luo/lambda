@@ -103,7 +103,85 @@ normalize(accent, 'nfc')  // Ensures single code point form
 "Quote: \"text\""     // escaped quote
 ```
 
-### 1.3 Current String Operators
+### 1.4 Empty String Handling
+
+Lambda has special handling for empty strings that differs from most languages.
+
+#### Syntax
+
+Both single-quote and double-quote empty strings are valid syntax:
+```lambda
+""      // empty string literal (double quotes)
+''      // empty symbol literal (single quotes)
+```
+
+#### Data Model: Empty String → Null
+
+**Key Design Decision**: Lambda normalizes all empty strings to `null`.
+
+```lambda
+let s = ""
+s == null        // true - empty string IS null
+
+let sym = ''
+sym == null      // true - empty symbol IS null
+```
+
+**Rationale**:
+1. **Semantic clarity**: Empty string often means "no value" - same as null
+2. **Null safety**: Eliminates `if (s == null || s == "")` checks
+3. **Consistency**: One way to represent "no text value"
+
+#### Special Handling in Markup Formats
+
+Because empty strings become `null` internally, special handling is needed when serializing to/from various formats:
+
+| Format         | Input Behavior                   | Output Behavior            |
+| -------------- | -------------------------------- | -------------------------- |
+| **JSON value** | `""` → `null`                    | `null` → `null` (not `""`) |
+| **JSON key**   | `{"": val}` → key becomes `"''"` | `{"''": val}`              |
+| **HTML attr**  | `attr=""` → `null`               | `null` → `attr=""`         |
+| **XML/Other**  | Empty strings → `null`           | Similar to HTML            |
+
+##### JSON Handling
+
+**Values**: Empty strings in JSON values map to `null` and cannot roundtrip:
+```lambda
+// Input JSON: {"name": ""}
+// Lambda sees: {name: null}
+// Output JSON: {"name": null}  -- NOT {"name": ""}
+```
+
+**Keys**: Empty string keys are mapped to the literal string `''` (two single-quote characters):
+```lambda
+// Input JSON: {"": "empty key value"}
+// Lambda sees: {"''": "empty key value"}
+```
+
+This preserves the key while avoiding null key issues.
+
+##### HTML Attribute Handling
+
+HTML attributes with null values serialize back to empty strings:
+```lambda
+// Lambda element: <input value=null>
+// HTML output: <input value="">
+```
+
+This maintains HTML validity where empty attributes are common.
+
+##### Roundtrip Considerations
+
+| Scenario | Roundtrip Preserved? |
+|----------|---------------------|
+| Non-empty strings | ✅ Yes |
+| Empty string in JSON value | ❌ No (`""` → `null`) |
+| Empty string JSON key | ❌ No (`{"": val}` → `{"''": val}`) |
+| Empty HTML attribute | ✅ Yes (`""` → `null` → `""`) |
+
+**Note**: If exact empty string preservation is required, consider using a sentinel value like `" "` (single space) or a wrapper object.
+
+### 1.5 Current String Operators
 
 | Operator      | Syntax        | Description            | Example               | Result          |
 | ------------- | ------------- | ---------------------- | --------------------- | --------------- |
@@ -127,7 +205,7 @@ Lambda intentionally does **not** support `str * n` for string repetition.
 repeat("ab", 3)    // "ababab"
 ```
 
-### 1.4 Current String System Functions
+### 1.6 Current String System Functions
 
 | Function | Signature | Description | Example | Result |
 |----------|-----------|-------------|---------|--------|
@@ -137,7 +215,7 @@ repeat("ab", 3)    // "ababab"
 | `contains(s, sub)` | `(string, string) -> bool` | Check if contains substring | `contains("hello", "ell")` | `true` |
 | `normalize(s, form)` | `(string, symbol) -> string` | Unicode normalization | `normalize("é", 'nfc')` | normalized string |
 
-#### 1.4.1 `slice` Details
+#### 1.6.1 `slice` Details
 
 The `slice(s, start, end)` function is consistent with `slice()` for arrays and lists.
 
@@ -150,7 +228,7 @@ slice(s, 0, -1)      // "Hello, World" (excludes last char)
 slice(s, -6, -1)     // "World"
 ```
 
-#### 1.4.2 `normalize` Details
+#### 1.6.2 `normalize` Details
 
 Unicode normalization forms:
 ```lambda
@@ -160,7 +238,7 @@ normalize(text, 'nfkc')  // Compatibility Composition
 normalize(text, 'nfkd')  // Compatibility Decomposition
 ```
 
-### 1.5 String Concatenation Behavior
+### 1.7 String Concatenation Behavior
 
 The `++` operator (OPERATOR_JOIN) handles mixed types:
 ```lambda
@@ -169,7 +247,7 @@ The `++` operator (OPERATOR_JOIN) handles mixed types:
 "flag: " ++ true       // "flag: true"
 ```
 
-### 1.6 String Indexing and Slicing
+### 1.8 String Indexing and Slicing
 
 Strings support both single-character indexing and range-based slicing:
 
