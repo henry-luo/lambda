@@ -43,8 +43,11 @@ Item parse_block_element(MarkupParser* parser) {
     }
 
     // Try to parse link reference definitions first (they don't produce output)
+    // Note: Link definitions are pre-scanned by parseContent(), so the definition
+    // may already exist. parse_link_definition returns true if the syntax is valid,
+    // regardless of whether it was a duplicate.
     if (parser->config.format == Format::MARKDOWN && is_link_definition_start(line)) {
-        if (try_parse_link_definition(parser, line)) {
+        if (parse_link_definition(parser, line)) {
             parser->current_line++;
             return Item{.item = ITEM_UNDEFINED};
         }

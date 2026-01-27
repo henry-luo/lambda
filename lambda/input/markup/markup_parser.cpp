@@ -10,7 +10,9 @@
  */
 #include "markup_parser.hpp"
 #include "format_adapter.hpp"
+#include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
+#include "../html_entities.h"
 #include "lib/log.h"
 #include <cstring>
 #include <cstdlib>
@@ -184,6 +186,22 @@ Item MarkupParser::parseContent(const char* content) {
     // Reset state
     resetState();
 
+    // Pre-scan for link reference definitions (CommonMark: they can appear anywhere)
+    // This ensures forward references work correctly
+    if (config.format == Format::MARKDOWN) {
+        for (int i = 0; i < line_count; i++) {
+            const char* line = lines[i];
+            if (line && is_link_definition_start(line)) {
+                // Try to parse the link definition
+                int saved_line = current_line;
+                current_line = i;
+                parse_link_definition(this, line);
+                current_line = saved_line;
+            }
+        }
+        log_debug("markup_parser: pre-scanned %d link definitions", link_def_count_);
+    }
+
     // Parse document using modular block parsers
     log_debug("markup_parser: parsing %d lines with format '%s'",
               line_count, adapter_->name());
@@ -278,6 +296,131 @@ void MarkupParser::noteUnresolvedReference(const char* ref_type, const char* ref
 // Link Reference Definition Management
 // ============================================================================
 
+/**
+ * is_escapable_char - Check if character can be backslash-escaped per CommonMark
+ */
+static bool is_escapable_char(char c) {
+    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
+           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
+           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
+           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
+           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
+           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
+           c == '}' || c == '~';
+}
+
+/**
+ * unescape_to_buffer - Process backslash escapes and entity references in a string into a buffer
+ *
+ * Copies the input string to the output buffer, processing backslash escapes
+ * and HTML entity references (both named and numeric).
+ */
+static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_t dst_size) {
+    if (!src || !dst || dst_size == 0) return;
+
+    size_t out_pos = 0;
+    const char* pos = src;
+    const char* end = src + src_len;
+
+    while (pos < end && out_pos < dst_size - 1) {
+        if (*pos == '\\' && pos + 1 < end && is_escapable_char(*(pos + 1))) {
+            // skip the backslash, copy the escaped character
+            pos++;
+            dst[out_pos++] = *pos++;
+        } else if (*pos == '&') {
+            // Try to parse entity reference
+            const char* entity_start = pos + 1;
+            const char* entity_pos = entity_start;
+
+            if (entity_pos < end && *entity_pos == '#') {
+                // Numeric entity
+                entity_pos++;
+                uint32_t codepoint = 0;
+                bool valid = false;
+
+                if (entity_pos < end && (*entity_pos == 'x' || *entity_pos == 'X')) {
+                    // Hex
+                    entity_pos++;
+                    const char* num_start = entity_pos;
+                    while (entity_pos < end &&
+                           ((*entity_pos >= '0' && *entity_pos <= '9') ||
+                            (*entity_pos >= 'a' && *entity_pos <= 'f') ||
+                            (*entity_pos >= 'A' && *entity_pos <= 'F'))) {
+                        codepoint *= 16;
+                        if (*entity_pos >= '0' && *entity_pos <= '9')
+                            codepoint += *entity_pos - '0';
+                        else if (*entity_pos >= 'a' && *entity_pos <= 'f')
+                            codepoint += *entity_pos - 'a' + 10;
+                        else
+                            codepoint += *entity_pos - 'A' + 10;
+                        entity_pos++;
+                        if (codepoint > 0x10FFFF) break;
+                    }
+                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
+                        valid = true;
+                    }
+                } else {
+                    // Decimal
+                    const char* num_start = entity_pos;
+                    while (entity_pos < end && *entity_pos >= '0' && *entity_pos <= '9') {
+                        codepoint = codepoint * 10 + (*entity_pos - '0');
+                        entity_pos++;
+                        if (codepoint > 0x10FFFF) break;
+                    }
+                    if (entity_pos > num_start && entity_pos < end && *entity_pos == ';' && codepoint <= 0x10FFFF) {
+                        valid = true;
+                    }
+                }
+
+                if (valid && out_pos + 4 < dst_size) {
+                    if (codepoint == 0) codepoint = 0xFFFD;
+                    int utf8_len = unicode_to_utf8(codepoint, dst + out_pos);
+                    if (utf8_len > 0) {
+                        out_pos += utf8_len;
+                        pos = entity_pos + 1;
+                        continue;
+                    }
+                }
+            } else {
+                // Named entity
+                while (entity_pos < end &&
+                       ((*entity_pos >= 'a' && *entity_pos <= 'z') ||
+                        (*entity_pos >= 'A' && *entity_pos <= 'Z') ||
+                        (*entity_pos >= '0' && *entity_pos <= '9'))) {
+                    entity_pos++;
+                }
+
+                if (entity_pos > entity_start && entity_pos < end && *entity_pos == ';') {
+                    size_t name_len = entity_pos - entity_start;
+                    EntityResult result = html_entity_resolve(entity_start, name_len);
+
+                    if ((result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) && out_pos + strlen(result.decoded) < dst_size) {
+                        size_t decoded_len = strlen(result.decoded);
+                        memcpy(dst + out_pos, result.decoded, decoded_len);
+                        out_pos += decoded_len;
+                        pos = entity_pos + 1;
+                        continue;
+                    } else if ((result.type == ENTITY_UNICODE_SPACE || result.type == ENTITY_NAMED) && out_pos + 4 < dst_size) {
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, dst + out_pos);
+                        if (utf8_len > 0) {
+                            out_pos += utf8_len;
+                            pos = entity_pos + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Not a valid entity, copy & literally
+            dst[out_pos++] = *pos++;
+        } else {
+            dst[out_pos++] = *pos++;
+        }
+    }
+
+    dst[out_pos] = '\0';
+}
+
 void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size_t out_size) {
     if (!label || !out || out_size == 0) return;
 
@@ -317,7 +460,8 @@ void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size
 bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
                                       const char* url, size_t url_len,
                                       const char* title, size_t title_len) {
-    if (!label || label_len == 0 || !url || url_len == 0) {
+    // Label is required, URL can be empty (e.g., [foo]: <>)
+    if (!label || label_len == 0) {
         return false;
     }
 
@@ -344,14 +488,16 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
     strncpy(def.label, normalized, sizeof(def.label) - 1);
     def.label[sizeof(def.label) - 1] = '\0';
 
-    size_t copy_len = (url_len < sizeof(def.url) - 1) ? url_len : sizeof(def.url) - 1;
-    memcpy(def.url, url, copy_len);
-    def.url[copy_len] = '\0';
+    // unescape backslash escapes in URL and title
+    // Handle empty URLs (e.g., [foo]: <>)
+    if (url && url_len > 0) {
+        unescape_to_buffer(url, url_len, def.url, sizeof(def.url));
+    } else {
+        def.url[0] = '\0';  // empty URL
+    }
 
     if (title && title_len > 0) {
-        copy_len = (title_len < sizeof(def.title) - 1) ? title_len : sizeof(def.title) - 1;
-        memcpy(def.title, title, copy_len);
-        def.title[copy_len] = '\0';
+        unescape_to_buffer(title, title_len, def.title, sizeof(def.title));
         def.has_title = true;
     } else {
         def.title[0] = '\0';
