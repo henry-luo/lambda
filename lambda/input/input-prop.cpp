@@ -121,7 +121,7 @@ static String* parse_raw_value(InputContext& ctx, const char **prop) {
     if (sb->length > 0) {
         return builder.createString(sb->str->chars, sb->length);
     }
-    return &EMPTY_STRING;
+    return nullptr;  // empty string maps to null
 }
 
 static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {

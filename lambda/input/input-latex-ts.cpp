@@ -41,18 +41,6 @@ static void* memmem(const void* haystack, size_t haystack_len,
 
 using namespace lambda;
 
-// Helper: Check if an item is EMPTY_STRING (the lambda.nil sentinel)
-// Returns true if the item should be skipped when adding to elements
-static bool is_empty_string_sentinel(Item item) {
-    if (get_type_id(item) != LMD_TYPE_STRING) return false;
-    String* str = item.get_string();
-    if (!str) return false;
-    // Check for EMPTY_STRING sentinel (has content "lambda.nil" or length 0)
-    if (str->len == 0) return true;
-    if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) return true;
-    return false;
-}
-
 // Tree-sitter language declaration
 extern "C" {
     const TSLanguage* tree_sitter_latex(void);
@@ -1412,7 +1400,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     // Scanner now handles \verb properly, no special workarounds needed
 
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                    if (child_item.item != ITEM_NULL) {
                         root_builder.child(child_item);
                     }
                 }
@@ -1516,7 +1504,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
 
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                    if (child_item.item != ITEM_NULL) {
                         doc_builder.child(child_item);
                     }
                 }
@@ -1579,7 +1567,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
 
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                    if (child_item.item != ITEM_NULL) {
                         section_builder.child(child_item);
                     }
                 }
@@ -1804,7 +1792,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                             continue;
                         }
                         Item child_item = convert_latex_node(ctx, child, source);
-                        if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                        if (child_item.item != ITEM_NULL) {
                             seq_builder.child(child_item);
                         }
                     }
@@ -1896,7 +1884,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
                         Item child_item = convert_latex_node(ctx, child, source);
                         // Skip NULL items and empty string sentinels
-                        if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                        if (child_item.item != ITEM_NULL) {
                             elem_builder.child(child_item);
                         }
                     }
@@ -1941,7 +1929,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
                                     // First add the controlspace_command (will output ZWS + space)
                                     Item child_item = convert_latex_node(ctx, child, source);
-if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+if (child_item.item != ITEM_NULL) {
                                         elem_builder.child(child_item);
                                     }
 
@@ -1957,7 +1945,7 @@ if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
                     }
 
                     Item child_item = convert_latex_node(ctx, child, source);
-                    if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+                    if (child_item.item != ITEM_NULL) {
                         elem_builder.child(child_item);
                     }
                 }
@@ -2364,7 +2352,7 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
         }
 
         Item child_item = convert_latex_node(ctx, child, source);
-        if (child_item.item != ITEM_NULL && !is_empty_string_sentinel(child_item)) {
+        if (child_item.item != ITEM_NULL) {
             env_elem_builder.child(child_item);
         }
     }

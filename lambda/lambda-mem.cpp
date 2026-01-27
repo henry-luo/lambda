@@ -55,7 +55,7 @@ String* heap_create_name(const char* name, size_t len) {
 }
 
 String* heap_create_name(const char* name) {
-    if (!name) return &EMPTY_STRING;
+    if (!name) return nullptr;
     return heap_create_name(name, strlen(name));
 }
 
@@ -71,7 +71,7 @@ String* heap_create_symbol(const char* symbol, size_t len) {
 }
 
 String* heap_create_symbol(const char* symbol) {
-    if (!symbol) return &EMPTY_STRING;
+    if (!symbol) return nullptr;
     return heap_create_symbol(symbol, strlen(symbol));
 }
 
