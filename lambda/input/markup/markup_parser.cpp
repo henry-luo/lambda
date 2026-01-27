@@ -386,13 +386,13 @@ static const char* severity_name(ParseErrorSeverity sev) {
 }
 
 void MarkupParser::addMarkupError(MarkupErrorCategory category,
-                                   const std::string& message,
-                                   const std::string& hint) {
+                                   const char* message,
+                                   const char* hint) {
     // Get current source location
     SourceLocation loc = tracker.location();
 
     // Get context line
-    std::string context;
+    const char* context = nullptr;
     if (current_line >= 0 && current_line < line_count && lines[current_line]) {
         context = lines[current_line];
     }
@@ -412,44 +412,38 @@ void MarkupParser::addMarkupError(MarkupErrorCategory category,
     }
 
     // Create and add error
-    ParseError err(loc, severity, message.c_str(), context.c_str(), hint.c_str());
+    ParseError err(loc, severity, message, context ? context : "", hint ? hint : "");
     errors().addError(err);
 
     // Log for debugging
     log_debug("markup_parser: [%s] %s at line %zu: %s",
               category_name(category), severity_name(severity),
-              loc.line, message.c_str());
+              loc.line, message);
 }
 
 void MarkupParser::warnUnclosed(const char* delimiter, size_t start_line) {
-    std::string msg = "Unclosed ";
-    msg += delimiter;
-    msg += " (opened at line ";
-    msg += std::to_string(start_line);
-    msg += ")";
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Unclosed %s (opened at line %zu)", delimiter, start_line);
 
-    std::string hint = "Add closing ";
-    hint += delimiter;
+    char hint[64];
+    snprintf(hint, sizeof(hint), "Add closing %s", delimiter);
 
     addMarkupError(MarkupErrorCategory::UNCLOSED, msg, hint);
 }
 
 void MarkupParser::warnInvalidSyntax(const char* construct, const char* expected) {
-    std::string msg = "Invalid ";
-    msg += construct;
-    msg += " syntax";
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Invalid %s syntax", construct);
 
-    std::string hint = "Expected: ";
-    hint += expected;
+    char hint[128];
+    snprintf(hint, sizeof(hint), "Expected: %s", expected);
 
     addMarkupError(MarkupErrorCategory::SYNTAX, msg, hint);
 }
 
 void MarkupParser::noteUnresolvedReference(const char* ref_type, const char* ref_id) {
-    std::string msg = "Unresolved ";
-    msg += ref_type;
-    msg += " reference: ";
-    msg += ref_id;
+    char msg[256];
+    snprintf(msg, sizeof(msg), "Unresolved %s reference: %s", ref_type, ref_id);
 
     addMarkupError(MarkupErrorCategory::REFERENCE, msg,
                    "Define the reference or check spelling");

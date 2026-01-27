@@ -51,11 +51,8 @@ extern "C" {
 #include "../radiant/pdf/pdf_to_view.hpp"
 #include "../lambda/tex/tex_latex_bridge.hpp"
 #include "../lambda/tex/tex_pdf_out.hpp"
-
-// Forward declaration of format_latex_html_v2 in lambda namespace
-namespace lambda {
-    Item format_latex_html_v2(Input* input, bool text_mode);
-}
+#include "../lambda/tex/tex_document_model.hpp"
+#include "../lambda/tex/tex_tfm.hpp"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -2870,61 +2867,32 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Step 2: Generate complete HTML document with external CSS links
     log_debug("[Lambda LaTeX] Converting LaTeX to HTML with external CSS...");
 
-    // Compute relative path from LaTeX file location to lambda/input/latex/
-    // We need to find how many directories deep the file is from the CWD
-    char cwd[PATH_MAX];
-    if (getcwd(cwd, sizeof(cwd)) == nullptr) {
-        log_error("Failed to get current working directory");
-        return nullptr;
-    }
-    std::string cwd_str(cwd);
-    std::string latex_abs_dir = std::string(latex_filepath);
-    size_t last_slash = latex_abs_dir.rfind('/');
-    if (last_slash != std::string::npos) {
-        latex_abs_dir = latex_abs_dir.substr(0, last_slash);
-    }
-
-    // Get relative path from CWD to LaTeX directory
-    std::string rel_latex_dir;
-    if (latex_abs_dir.find(cwd_str) == 0) {
-        // LaTeX is under CWD
-        rel_latex_dir = latex_abs_dir.substr(cwd_str.length());
-        if (!rel_latex_dir.empty() && rel_latex_dir[0] == '/') {
-            rel_latex_dir = rel_latex_dir.substr(1);
-        }
-    } else {
-        rel_latex_dir = latex_abs_dir;  // Fallback to absolute
-    }
-
     log_info("[Lambda LaTeX] Starting LaTeX document load from %s", latex_filepath);
-
-    // Count directory depth
-    int depth = 0;
-    if (!rel_latex_dir.empty()) {
-        depth = 1;  // At least one directory
-        for (char c : rel_latex_dir) {
-            if (c == '/') depth++;
-        }
-    }
-
-    // Build relative path: go up 'depth' levels, then into lambda/input/latex/
-    std::string asset_base_url_str;
-    for (int i = 0; i < depth; i++) {
-        asset_base_url_str += "../";
-    }
-    asset_base_url_str += "lambda/input/latex/";
-
-    log_debug("[Lambda LaTeX] CWD: %s, LaTeX dir: %s, rel: %s, depth: %d, asset URL: %s",
-              cwd_str.c_str(), latex_abs_dir.c_str(), rel_latex_dir.c_str(), depth, asset_base_url_str.c_str());
 
     const char* doc_class = "article";  // Default document class
 
-    // Generate complete HTML document with linked CSS
-    const char* html_doc = format_latex_html_v2_document_c(latex_input, doc_class, asset_base_url_str.c_str(), 0);
-    if (!html_doc) {
-        log_error("Failed to generate HTML document from LaTeX");
+    // Generate complete HTML document using unified pipeline
+    tex::TFMFontManager* fonts = tex::create_font_manager(latex_input->arena);
+    tex::LaTeXContext ctx = tex::LaTeXContext::create(latex_input->arena, fonts, doc_class);
+    tex::TexDocumentModel* doc_model = tex::doc_model_from_latex(latex_input->root, latex_input->arena, ctx);
+    if (!doc_model || !doc_model->root) {
+        log_error("Failed to build document model from LaTeX");
         return nullptr;
     }
+
+    StrBuf* html_buf = strbuf_new_cap(8192);
+    tex::HtmlOutputOptions opts = tex::HtmlOutputOptions::defaults();
+    opts.standalone = true;
+    opts.pretty_print = true;
+    opts.include_css = true;
+    
+    bool success = tex::doc_model_to_html(doc_model, html_buf, opts);
+    if (!success || html_buf->length == 0) {
+        log_error("Failed to generate HTML document from LaTeX");
+        strbuf_free(html_buf);
+        return nullptr;
+    }
+    const char* html_doc = html_buf->str;
 
     // Log the first 100 characters to verify structure
     size_t html_len = strlen(html_doc);
