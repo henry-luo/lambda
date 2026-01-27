@@ -9,6 +9,8 @@
  */
 #include "block_common.hpp"
 #include <cstdlib>
+#include <cctype>
+#include <cstring>
 
 namespace lambda {
 namespace markup {
@@ -76,6 +78,86 @@ static int is_setext_underline(const char* line) {
 Item parse_paragraph(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
+    }
+
+    // Man page .B and .I directives: create a paragraph with formatted content
+    if (parser->config.format == Format::MAN) {
+        const char* first_line = parser->lines[parser->current_line];
+
+        // Handle .B (bold) directive - entire line is bold
+        if (strncmp(first_line, ".B ", 3) == 0 || strncmp(first_line, ".B\t", 3) == 0) {
+            Element* para = create_element(parser, "p");
+            if (!para) {
+                parser->current_line++;
+                return Item{.item = ITEM_ERROR};
+            }
+
+            Element* strong = create_element(parser, "strong");
+            if (strong) {
+                const char* content = first_line + 3;
+                while (*content == ' ' || *content == '\t') content++;
+                if (*content) {
+                    // Parse the content for nested formatting
+                    Item inner = parse_inline_spans(parser, content);
+                    if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+                        list_push((List*)strong, inner);
+                        increment_element_content_length(strong);
+                    }
+                }
+                list_push((List*)para, Item{.item = (uint64_t)strong});
+                increment_element_content_length(para);
+            }
+            parser->current_line++;
+            return Item{.item = (uint64_t)para};
+        }
+
+        // Handle .I (italic) directive - entire line is italic
+        if (strncmp(first_line, ".I ", 3) == 0 || strncmp(first_line, ".I\t", 3) == 0) {
+            Element* para = create_element(parser, "p");
+            if (!para) {
+                parser->current_line++;
+                return Item{.item = ITEM_ERROR};
+            }
+
+            Element* em = create_element(parser, "em");
+            if (em) {
+                const char* content = first_line + 3;
+                while (*content == ' ' || *content == '\t') content++;
+                if (*content) {
+                    // Parse the content for nested formatting
+                    Item inner = parse_inline_spans(parser, content);
+                    if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+                        list_push((List*)em, inner);
+                        increment_element_content_length(em);
+                    }
+                }
+                list_push((List*)para, Item{.item = (uint64_t)em});
+                increment_element_content_length(para);
+            }
+            parser->current_line++;
+            return Item{.item = (uint64_t)para};
+        }
+
+        // Handle .PP, .P, .LP (paragraph break) - skip these and return next block
+        if (strcmp(first_line, ".PP") == 0 || strcmp(first_line, ".P") == 0 ||
+            strcmp(first_line, ".LP") == 0) {
+            parser->current_line++;
+            return Item{.item = ITEM_UNDEFINED};  // Skip paragraph break directives
+        }
+
+        // Handle .RS (start indent) and .RE (end indent) - skip for now
+        if (strncmp(first_line, ".RS", 3) == 0 || strncmp(first_line, ".RE", 3) == 0) {
+            parser->current_line++;
+            return Item{.item = ITEM_UNDEFINED};
+        }
+
+        // Skip unknown man directives (lines starting with .)
+        // but don't skip regular text lines
+        if (first_line[0] == '.' && !isspace((unsigned char)first_line[1])) {
+            // Known directives that we don't handle yet - just skip
+            parser->current_line++;
+            return Item{.item = ITEM_UNDEFINED};
+        }
     }
 
     Element* para = create_element(parser, "p");
