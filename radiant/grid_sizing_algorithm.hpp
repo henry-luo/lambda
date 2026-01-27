@@ -14,6 +14,18 @@
  * 11.8 Stretch auto Tracks
  *
  * Based on Taffy's implementation with adaptations for Radiant's architecture.
+ *
+ * TODO: std::* Migration Plan (Phase 5+) - COMPLEX
+ * This file has extensive std::* usage requiring careful migration:
+ * - std::vector<EnhancedGridTrack>* → Pool-allocated arrays with count tracking
+ * - std::vector<size_t> eligible_indices → Fixed-size arrays with MAX_TRACKS limit
+ * - std::vector<GridItemContribution> → ArrayList* from lib/arraylist.h
+ * - std::function<...> callbacks → Function pointers with void* context
+ * - std::sort → qsort() from <stdlib.h>
+ * - std::isinf/std::abs → isinf()/fabs() from <math.h>
+ * - std::min/std::max → MIN_FLOAT/MAX_FLOAT macros
+ * - std::numeric_limits → INFINITY, FLT_MAX from <math.h>/<float.h>
+ * Estimated effort: Major refactoring (~500+ lines)
  */
 
 #ifndef RADIANT_GRID_SIZING_ALGORITHM_HPP

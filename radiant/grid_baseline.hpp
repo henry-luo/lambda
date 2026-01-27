@@ -6,6 +6,12 @@
  * Baseline alignment groups items by row and aligns them to a common baseline.
  *
  * Based on Taffy's resolve_item_baselines() implementation.
+ *
+ * TODO: std::* Migration Plan (Phase 5+)
+ * - std::vector<ItemBaselineInfo> items → Fixed array + count or ArrayList*
+ * - std::vector<RowBaselineGroup> → Fixed array with MAX_GRID_ROWS limit
+ * - std::vector<int> row_to_group_index → Fixed array with MAX_GRID_ROWS
+ * Estimated effort: Moderate refactoring (~100 lines)
  */
 
 #include <vector>
