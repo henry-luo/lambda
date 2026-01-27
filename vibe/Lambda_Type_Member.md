@@ -1,4 +1,4 @@
-# Lambda Member Function Support Proposal
+# Lambda Member Field and Function Support
 
 ## Executive Summary
 
@@ -7,6 +7,7 @@ This proposal outlines enhancements to Lambda to support **member function synta
 2. **Type Checking**: Validating that the object type matches the first parameter of the sys func
 3. **Type-Defined Methods**: Allowing types to define their own member functions (similar to JS/TS prototypes)
 4. **Extension Methods**: User-defined functions attachable to existing types
+5. **Null-Safe Member Access**: The `.` operator has built-in null-safety (like `?.` in JavaScript)
 
 ---
 
@@ -46,10 +47,82 @@ list.reverse()             // same as reverse(list)
 | **Discoverability** | IDE can suggest methods applicable to a type |
 | **Familiarity** | Aligns with JS/Python/Rust conventions |
 | **Flexibility** | Both styles remain valid; user chooses per context |
+| **Null Safety** | Built-in null propagation eliminates null-check boilerplate |
 
 ---
 
-## 2. Part 1: System Functions as Methods
+## 2. Null-Safe Member Access
+
+### 2.1 Semantics
+
+In Lambda, the `.` operator for member access has **built-in null-safety**, similar to the `?.` optional chaining operator in JavaScript/TypeScript. This eliminates the need for explicit null checks and provides a clean, functional approach to handling potentially null values.
+
+**Behavior:**
+- If the object is `null`, accessing any member returns `null` (no error)
+- If the object is non-null, member access proceeds normally
+- This applies to both field access (`obj.field`) and method calls (`obj.method()`)
+
+```lambda
+let user = null
+user.name           // null (not an error)
+user.name.len()     // null (null propagates through the chain)
+
+let user2 = { name: "Alice" }
+user2.name          // "Alice"
+user2.name.len()    // 5
+```
+
+### 2.2 Null Propagation Chain
+
+Null propagation works through the entire member access chain:
+
+```lambda
+// Given potentially null objects at any level
+let result = company.department.manager.name
+
+// Equivalent to this verbose null-checking code:
+let result = if (company == null) null
+             else if (company.department == null) null
+             else if (company.department.manager == null) null
+             else company.department.manager.name
+```
+
+### 2.3 Method Calls with Null Receiver
+
+When the receiver of a method call is null, the entire method call returns null without invoking the method:
+
+```lambda
+let items = null
+items.len()         // null (method not called)
+items.filter(f)     // null (method not called, f not evaluated)
+items.map(g).sum()  // null (entire chain returns null)
+
+let items2 = [1, 2, 3]
+items2.len()        // 3
+items2.filter(x => x > 1).sum()  // 5
+```
+
+### 2.4 Comparison with JavaScript
+
+| Syntax | JavaScript | Lambda |
+|--------|------------|--------|
+| Regular access | `obj.field` (throws if null) | `obj.field` (returns null if obj is null) |
+| Optional chaining | `obj?.field` | `obj.field` (same behavior) |
+| Method call | `obj.method()` (throws if null) | `obj.method()` (returns null if obj is null) |
+| Optional method | `obj?.method?.()` | `obj.method()` (same behavior) |
+
+**Key Insight**: Lambda's `.` operator behaves like JavaScript's `?.` operator by default. This is a deliberate design choice for a functional language where null propagation is preferred over exceptions.
+
+### 2.5 Rationale
+
+1. **Functional Purity**: Exceptions are side effects; returning null maintains referential transparency
+2. **Conciseness**: No need for separate `?.` operator or verbose null checks
+3. **Composability**: Null propagation composes naturally with function chaining
+4. **Safety**: Eliminates null reference errors at the language level
+
+---
+
+## 3. Part 1: System Functions as Methods
 
 ### 2.1 Mechanism: Method Call Desugaring
 
@@ -207,9 +280,9 @@ SysFuncInfo sys_funcs[] = {
 
 ---
 
-## 3. Part 2: Type Checking for Method Calls
+## 4. Part 2: Type Checking for Method Calls
 
-### 3.1 First Parameter Type Validation
+### 4.1 First Parameter Type Validation
 
 When resolving `obj.method(args)`, verify that `obj`'s type is compatible with the first parameter of `method`.
 
@@ -240,7 +313,7 @@ bool validate_method_call(Type* obj_type, SysFuncInfo* sys_fn) {
 }
 ```
 
-### 3.2 Error Messages
+### 4.2 Error Messages
 
 Provide clear error messages for type mismatches:
 
@@ -252,7 +325,7 @@ Error: Method 'sum' is not available for type 'string'
   Hint: 'sum' expects a numeric array or list
 ```
 
-### 3.3 Compile-Time vs Runtime Checking
+### 4.3 Compile-Time vs Runtime Checking
 
 - **Compile-time**: When object type is statically known, validate at AST build
 - **Runtime**: When object type is `any` or dynamic, defer check to runtime
@@ -273,9 +346,9 @@ if (obj_type->type_id == TYPE_ANY) {
 
 ---
 
-## 4. Part 3: User-Defined Type Methods
+## 5. Part 3: User-Defined Type Methods
 
-### 4.1 Syntax for Type Method Definition
+### 5.1 Syntax for Type Method Definition
 
 Allow methods to be defined within type declarations:
 
@@ -287,16 +360,16 @@ type Point {
     
     // Method definition
     fn distance(other: Point): float {
-        sqrt((self.x - other.x)^2 + (self.y - other.y)^2)
+        sqrt((this.x - other.x)^2 + (this.y - other.y)^2)
     }
     
     fn scale(factor: float): Point {
-        Point { x: self.x * factor, y: self.y * factor }
+        Point { x: this.x * factor, y: this.y * factor }
     }
     
     // Computed property (no params)
     fn magnitude(): float {
-        sqrt(self.x^2 + self.y^2)
+        sqrt(this.x^2 + this.y^2)
     }
 }
 
@@ -309,17 +382,19 @@ p1.magnitude()     // 5.0
 p1.scale(2.0)      // Point { x: 6, y: 8 }
 ```
 
-### 4.2 The `self` Keyword
+### 5.2 The `this` Keyword
 
-Within type methods, `self` refers to the instance:
+Within type methods, `this` refers to the current instance:
 
-| Context | `self` Meaning |
+| Context | `this` Meaning |
 |---------|----------------|
 | Method body | The object instance the method is called on |
-| Field access | `self.field` accesses instance fields |
-| Method call | `self.method()` calls another method |
+| Field access | `this.field` accesses instance fields |
+| Method call | `this.method()` calls another method on the same instance |
 
-### 4.3 Grammar Extension for Type Methods
+**Note**: Lambda uses `this` (like JavaScript/TypeScript/Java/C++) rather than `self` (like Python/Rust/Swift) for familiarity with the majority of mainstream languages.
+
+### 5.3 Grammar Extension for Type Methods
 
 ```javascript
 // grammar.js additions
@@ -345,14 +420,14 @@ object_type: $ => seq(
 ),
 ```
 
-### 4.4 AST Representation
+### 5.4 AST Representation
 
 ```cpp
 // ast.hpp additions
 
 typedef struct AstMethodNode : AstNode {
     String* name;           // method name
-    AstNamedNode* params;   // parameters (excluding implicit self)
+    AstNamedNode* params;   // parameters (excluding implicit this)
     AstNode* body;          // method body
     Type* return_type;      // return type
     bool is_static;         // class method vs instance method
@@ -367,7 +442,7 @@ typedef struct TypeObject : Type {
 } TypeObject;
 ```
 
-### 4.5 Method Resolution Order
+### 5.5 Method Resolution Order
 
 When `obj.method()` is called:
 
@@ -405,9 +480,9 @@ AstNode* resolve_method(Type* obj_type, StrView* method_name, int arg_count) {
 
 ---
 
-## 5. Part 4: Extension Methods
+## 6. Part 4: Extension Methods
 
-### 5.1 Concept
+### 6.1 Concept
 
 Allow users to add methods to existing types (including built-in types) without modifying the type definition:
 
@@ -416,12 +491,12 @@ Allow users to add methods to existing types (including built-in types) without 
 extend string {
     fn words(): array {
         // split by whitespace (placeholder impl)
-        split(self, " ")
+        split(this, " ")
     }
     
     fn capitalize(): string {
-        if (len(self) == 0) ""
-        else upper(self[0]) ++ slice(self, 1, len(self))
+        if (len(this) == 0) ""
+        else upper(this[0]) ++ slice(this, 1, len(this))
     }
 }
 
@@ -430,7 +505,7 @@ extend string {
 "hello".capitalize()        // "Hello"
 ```
 
-### 5.2 Grammar for Extension
+### 6.2 Grammar for Extension
 
 ```javascript
 // grammar.js
@@ -443,7 +518,7 @@ extend_stam: $ => seq(
 ),
 ```
 
-### 5.3 Scoping and Visibility
+### 6.3 Scoping and Visibility
 
 Extension methods are:
 - **Scoped to the module** where they are defined
@@ -454,8 +529,8 @@ Extension methods are:
 // math_ext.ls
 extend int {
     fn factorial(): int {
-        if (self <= 1) 1
-        else self * (self - 1).factorial()
+        if (this <= 1) 1
+        else this * (this - 1).factorial()
     }
 }
 
@@ -464,7 +539,7 @@ import "math_ext.ls"
 5.factorial()    // 120
 ```
 
-### 5.4 Precedence Rules
+### 6.4 Precedence Rules
 
 When multiple methods match:
 
@@ -477,7 +552,7 @@ When multiple methods match:
 
 ---
 
-## 6. Implementation Roadmap
+## 7. Implementation Roadmap
 
 ### Phase 1: Sys Func as Methods (MVP) ✅ COMPLETED
 
@@ -511,7 +586,7 @@ When multiple methods match:
 1. Grammar: Add `type_method` rule
 2. AST: Add `AstMethodNode`, extend `TypeObject`
 3. Method resolution in `build_ast.cpp`
-4. Transpilation: Generate method code with `self` binding
+// Transpilation: Generate method code with `this` binding
 5. Tests: Custom types with methods
 
 **Effort**: ~5-7 days
@@ -531,9 +606,9 @@ When multiple methods match:
 
 ---
 
-## 7. Additional Suggestions
+## 8. Additional Suggestions
 
-### 7.1 Method Chaining Syntax
+### 8.1 Method Chaining Syntax
 
 Support fluent API patterns:
 
@@ -548,31 +623,35 @@ data
 
 This works naturally once method syntax is supported.
 
-### 7.2 Optional Chaining (`?.`)
+### 8.2 Explicit Non-Null Access (`!.`)
 
-Support null-safe method calls:
+While `.` provides null-safe access by default, Lambda could support an explicit non-null assertion operator for cases where you want to fail fast on null:
 
 ```lambda
-// Optional chaining - returns null if receiver is null
-user?.name?.len()
+// Non-null assertion - throws error if receiver is null
+user!.name!.len()
 
 // Equivalent to:
-if (user != null) {
-    if (user.name != null) {
-        user.name.len()
-    } else null
-} else null
+if (user == null) error("Null reference")
+else if (user.name == null) error("Null reference")
+else user.name.len()
 ```
+
+**Use Case**: When null indicates a programming error and should fail immediately rather than propagate.
 
 **Grammar**:
 ```javascript
-optional_member_expr: $ => seq(
-    field('object', $.primary_expr), "?.",
+non_null_member_expr: $ => seq(
+    field('object', $.primary_expr), "!.",
     field('field', choice($.identifier, $.symbol))
 ),
 ```
 
-### 7.3 Static Methods
+**Note**: This is the inverse of JavaScript's approach where `.` throws and `?.` is safe. Lambda's approach:
+- `.` = null-safe (like JS `?.`)
+- `!.` = throws on null (like JS `.`)
+
+### 8.3 Static Methods
 
 Allow type-level (static) methods:
 
@@ -584,7 +663,7 @@ type Point {
     // Instance method
     fn scale(factor: float): Point { ... }
     
-    // Static method (no self)
+    // Static method (no this)
     static fn origin(): Point {
         Point { x: 0, y: 0 }
     }
@@ -593,7 +672,7 @@ type Point {
 Point.origin()    // Point { x: 0, y: 0 }
 ```
 
-### 7.4 Property Syntax (Getter Methods)
+### 8.4 Property Syntax (Getter Methods)
 
 Allow zero-parameter methods to be called without `()`:
 
@@ -603,7 +682,7 @@ type Circle {
     
     // Property (getter)
     prop area: float {
-        3.14159 * self.radius^2
+        3.14159 * this.radius^2
     }
 }
 
@@ -612,7 +691,7 @@ c.area           // 78.54 (no parentheses needed)
 c.area()         // Also works, same result
 ```
 
-### 7.5 Computed Properties with `get`/`set`
+### 8.5 Computed Properties with `get`/`set`
 
 For mutable contexts (procedural mode):
 
@@ -622,24 +701,24 @@ type Rectangle {
     var height: float
     
     prop area: float {
-        get { self.width * self.height }
+        get { this.width * this.height }
         set(value) { 
             // Maintain aspect ratio
-            let ratio = self.width / self.height
-            self.height = sqrt(value / ratio)
-            self.width = self.height * ratio
+            let ratio = this.width / this.height
+            this.height = sqrt(value / ratio)
+            this.width = this.height * ratio
         }
     }
 }
 ```
 
-### 7.6 Protocol/Interface Support
+### 8.6 Protocol/Interface Support
 
 Define method contracts that types must implement:
 
 ```lambda
 protocol Comparable {
-    fn compare(other: Self): int
+    fn compare(other: This): int
 }
 
 type Point implements Comparable {
@@ -647,7 +726,7 @@ type Point implements Comparable {
     y: int
     
     fn compare(other: Point): int {
-        let d1 = self.x^2 + self.y^2
+        let d1 = this.x^2 + this.y^2
         let d2 = other.x^2 + other.y^2
         if (d1 < d2) -1
         else if (d1 > d2) 1
@@ -658,15 +737,15 @@ type Point implements Comparable {
 
 ---
 
-## 8. Compatibility Considerations
+## 9. Compatibility Considerations
 
-### 8.1 Backward Compatibility
+### 9.1 Backward Compatibility
 
 - **Prefix syntax remains valid**: `len(x)` still works
 - **No breaking changes**: Existing code unchanged
 - **Gradual adoption**: Users can use either style
 
-### 8.2 Ambiguity Resolution
+### 9.2 Ambiguity Resolution
 
 If `obj.method` could be either a field access or method:
 
@@ -686,7 +765,7 @@ f.len()          // Error: field 'len' is not callable
 len(f)           // Sys func: 2 (number of fields)
 ```
 
-### 8.3 Reserved Method Names
+### 9.3 Reserved Method Names
 
 Some names might conflict between fields and methods:
 - `len`, `type`, `string` - commonly both sys funcs and potential field names
@@ -694,9 +773,9 @@ Some names might conflict between fields and methods:
 
 ---
 
-## 9. Examples
+## 10. Examples
 
-### 9.1 String Operations
+### 10.1 String Operations
 
 ```lambda
 // Traditional style
@@ -714,7 +793,7 @@ s.contains("World")             // true
 s.slice(7, 12).len()            // 5
 ```
 
-### 9.2 Array Processing
+### 10.2 Array Processing
 
 ```lambda
 let nums = [3, 1, 4, 1, 5, 9, 2, 6]
@@ -729,7 +808,7 @@ nums.unique().sort().sum()      // 30
 nums.unique().sort() |> sum     // 30 (with pipe operator)
 ```
 
-### 9.3 Custom Type with Methods
+### 10.3 Custom Type with Methods
 
 ```lambda
 type Vector2D {
@@ -737,20 +816,20 @@ type Vector2D {
     y: float
     
     fn add(other: Vector2D): Vector2D {
-        Vector2D { x: self.x + other.x, y: self.y + other.y }
+        Vector2D { x: this.x + other.x, y: this.y + other.y }
     }
     
     fn dot(other: Vector2D): float {
-        self.x * other.x + self.y * other.y
+        this.x * other.x + this.y * other.y
     }
     
     fn length(): float {
-        sqrt(self.x^2 + self.y^2)
+        sqrt(this.x^2 + this.y^2)
     }
     
     fn normalize(): Vector2D {
-        let len = self.length()
-        Vector2D { x: self.x / len, y: self.y / len }
+        let len = this.length()
+        Vector2D { x: this.x / len, y: this.y / len }
     }
 }
 
@@ -763,19 +842,53 @@ v1.normalize()        // Vector2D { x: 0.6, y: 0.8 }
 v1.add(v2).length()   // 5.0
 ```
 
+### 10.4 Null-Safe Chaining
+
+```lambda
+// Data structure with optional nested fields
+type User {
+    name: string
+    address: Address?    // optional
+}
+
+type Address {
+    city: string
+    zip: string?
+}
+
+let user1 = User { name: "Alice", address: Address { city: "NYC", zip: "10001" } }
+let user2 = User { name: "Bob", address: null }
+let user3 = null
+
+// Null-safe access - no errors, null propagates
+user1.address.city      // "NYC"
+user1.address.zip       // "10001"
+user2.address.city      // null (address is null)
+user3.name              // null (user3 is null)
+
+// Safe method chaining
+user1.address.city.len()   // 3
+user2.address.city.len()   // null
+user3.name.len()           // null
+
+// Practical pattern: provide defaults
+user2.address.city ?? "Unknown"   // "Unknown"
+```
+
 ---
 
-## 10. Summary
+## 11. Summary
 
 | Feature | Description | Priority |
 |---------|-------------|----------|
+| **Null-Safe Access** | `.` returns null if receiver is null | P0 (MVP) |
 | **Sys Func as Method** | `obj.method(args)` → `method(obj, args)` | P0 (MVP) |
 | **Type Checking** | Validate receiver type for method calls | P0 (MVP) |
 | **Type Methods** | Define methods within type declarations | P1 |
 | **Extension Methods** | Add methods to existing types | P2 |
-| **Optional Chaining** | `obj?.method()` null-safe calls | P2 |
+| **Non-Null Access** | `obj!.field` throws if obj is null | P2 |
 | **Static Methods** | Type-level methods without instance | P2 |
 | **Properties** | Zero-param methods as properties | P3 |
 | **Protocols** | Interface/trait contracts | P3 |
 
-The member function syntax enhances Lambda's expressiveness while maintaining its functional nature. The implementation can be phased, starting with sys func desugaring (simple AST transformation) and building toward full type-defined methods.
+The member function syntax enhances Lambda's expressiveness while maintaining its functional nature. The built-in null-safety of the `.` operator eliminates a common source of runtime errors while keeping the syntax clean. The implementation can be phased, starting with null-safe access and sys func desugaring (simple AST transformations) and building toward full type-defined methods.
