@@ -16,7 +16,7 @@ extern Item parse_paragraph(MarkupParser* parser, const char* line);
 extern Item parse_list_structure(MarkupParser* parser, int base_indent);
 extern Item parse_code_block(MarkupParser* parser, const char* line);
 extern Item parse_blockquote(MarkupParser* parser, const char* line);
-extern Item parse_table_row(MarkupParser* parser, const char* line);
+extern Item parse_table(MarkupParser* parser, const char* line);
 extern Item parse_math_block(MarkupParser* parser, const char* line);
 extern Item parse_divider(MarkupParser* parser);
 extern Item parse_html_block(MarkupParser* parser, const char* line);
@@ -72,7 +72,7 @@ Item parse_block_element(MarkupParser* parser) {
             return parse_blockquote(parser, line);
 
         case BlockType::TABLE:
-            return parse_table_row(parser, line);
+            return parse_table(parser, line);
 
         case BlockType::MATH:
             return parse_math_block(parser, line);
