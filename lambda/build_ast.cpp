@@ -941,22 +941,56 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 }
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    // todo: exclude zero-length string
+    // Empty strings ("" or '') map to null in Lambda
     String* str;
     log_debug("build lit string with symbol: %d", symbol);
+
+    int cnt = ts_node_named_child_count(node);
+    log_debug("string child count:: %d", cnt);
+    
+    // Handle empty string/symbol case - no content children means empty literal
+    // When string is "" or symbol is '', cnt == 0 (no string_content/symbol_content children)
+    // But for SYM_IDENT, cnt is also 0 (identifiers don't have named children)
+    // Only return null for actual string/symbol literals that are empty
+    if (cnt == 0 && (symbol == SYM_STRING || symbol == SYM_SYMBOL)) {
+        log_debug("build_lit_string: empty string/symbol literal, returning null type");
+        return &LIT_NULL;
+    }
+    
+    // Calculate content length
+    int len = 0;
+    TSNode child;
+    if (cnt == 0) {
+        // For identifiers (SYM_IDENT), use the node itself
+        child = node;
+        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
+        len = end - start;
+    } else if (cnt == 1) {
+        child = ts_node_named_child(node, 0);
+        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
+        len = end - start;
+        // Check if content is empty after parsing (shouldn't happen normally)
+        if (len == 0) {
+            log_debug("build_lit_string: empty content child, returning null type");
+            return &LIT_NULL;
+        }
+    }
+    
     TypeString* str_type = (TypeString*)alloc_type(tp->pool,
         symbol == SYM_STRING ? LMD_TYPE_STRING :
         symbol == SYM_BINARY ? LMD_TYPE_BINARY :
         LMD_TYPE_SYMBOL, sizeof(TypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
 
-    int cnt = ts_node_named_child_count(node);
-    log_debug("string child count:: %d", cnt);
     if (cnt <= 1) {
-        // for SYM_IDENT, child cnt == 0
-        TSNode child = cnt ? ts_node_named_child(node, 0) : node;
+        // For cnt == 0 (identifiers) or cnt == 1 (simple string content)
+        if (cnt == 0) {
+            child = node;
+        } else {
+            child = ts_node_named_child(node, 0);
+        }
         int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        int len = end - start;
+        len = end - start;
         // copy the string
         str = (String*)pool_alloc(tp->pool, sizeof(String) + len + 1);
         str_type->string = (String*)str;
@@ -1096,6 +1130,12 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         // convert StringBuf to String
         str = stringbuf_to_string(str_buf);
         log_debug("final string: %.*s", str->len, str->chars);
+        
+        // Check if the processed string is empty - return null type
+        if (str->len == 0) {
+            log_debug("build_lit_string: empty string after escape processing, returning null type");
+            return &LIT_NULL;
+        }
         str_type->string = str;
     }
     // add to const list
