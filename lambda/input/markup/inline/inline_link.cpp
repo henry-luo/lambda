@@ -415,6 +415,142 @@ static bool try_parse_inline_link_syntax(const char* start, const char** out_end
 }
 
 /**
+ * has_complete_inner_link - Check if text contains a complete inner link
+ *
+ * According to CommonMark: "Links may not contain other links, at any level of nesting."
+ * If we find a complete link [text](url) or [text][ref] inside the bracket content,
+ * the outer bracket should become literal text.
+ *
+ * @param parser The markup parser (for checking reference definitions)
+ * @param start Start of text to check (inside outer brackets)
+ * @param end End of text to check
+ * @return true if a complete inner link exists
+ */
+static bool has_complete_inner_link(MarkupParser* parser, const char* start, const char* end) {
+    const char* pos = start;
+
+    while (pos < end) {
+        if (*pos == '\\' && pos + 1 < end) {
+            pos += 2;  // skip escaped character
+            continue;
+        }
+
+        if (*pos == '`') {
+            // skip code span
+            const char* backtick_start = pos;
+            int backtick_count = 0;
+            while (pos < end && *pos == '`') {
+                backtick_count++;
+                pos++;
+            }
+            // find matching backticks
+            while (pos < end) {
+                if (*pos == '`') {
+                    int close_count = 0;
+                    const char* close_start = pos;
+                    while (pos < end && *pos == '`') {
+                        close_count++;
+                        pos++;
+                    }
+                    if (close_count == backtick_count) {
+                        break;  // found matching close
+                    }
+                } else {
+                    pos++;
+                }
+            }
+            continue;
+        }
+
+        if (*pos == '[') {
+            // Check if this is an image (![) - images inside links are allowed
+            // We need to check the character BEFORE this [ in the original text
+            bool is_image = (pos > start && *(pos - 1) == '!');
+            if (is_image) {
+                pos++;
+                continue;  // skip images, they're allowed in links
+            }
+
+            // Found potential inner link opener
+            const char* inner_start = pos + 1;
+            const char* inner_pos = inner_start;
+            int depth = 1;
+
+            // Find matching ]
+            while (inner_pos < end && depth > 0) {
+                if (*inner_pos == '\\' && inner_pos + 1 < end) {
+                    inner_pos += 2;
+                    continue;
+                }
+                if (*inner_pos == '[') depth++;
+                else if (*inner_pos == ']') depth--;
+                if (depth > 0) inner_pos++;
+            }
+
+            if (depth == 0 && inner_pos < end) {
+                // Found closing ] at inner_pos
+                const char* after_bracket = inner_pos + 1;
+
+                // Check for (url) - inline link
+                if (after_bracket < end && *after_bracket == '(') {
+                    const char* paren_end = nullptr;
+                    const char* dummy1, *dummy2, *dummy3, *dummy4;
+                    if (try_parse_inline_link_syntax(after_bracket, &paren_end,
+                                                     &dummy1, &dummy2, &dummy3, &dummy4)) {
+                        // Complete inline link found inside
+                        return true;
+                    }
+                }
+
+                // Check for [ref] - full reference link
+                if (after_bracket < end && *after_bracket == '[') {
+                    const char* ref_start = after_bracket + 1;
+                    const char* ref_pos = ref_start;
+                    while (ref_pos < end && *ref_pos != ']' && *ref_pos != '\n') {
+                        if (*ref_pos == '\\' && ref_pos + 1 < end) {
+                            ref_pos += 2;
+                        } else {
+                            ref_pos++;
+                        }
+                    }
+                    if (ref_pos < end && *ref_pos == ']') {
+                        // Found [text][ref] or [text][]
+                        const char* lookup_start = ref_start;
+                        const char* lookup_end = ref_pos;
+                        if (lookup_end == lookup_start) {
+                            // Collapsed reference - use inner text
+                            lookup_start = inner_start;
+                            lookup_end = inner_pos;
+                        }
+                        const LinkDefinition* def = parser->getLinkDefinition(
+                            lookup_start, lookup_end - lookup_start);
+                        if (def) {
+                            return true;  // Complete reference link found
+                        }
+                    }
+                }
+
+                // Check for shortcut reference [text] - only if followed by non-bracket
+                // A shortcut reference needs the text to match a defined reference
+                if (after_bracket >= end || (*after_bracket != '(' && *after_bracket != '[')) {
+                    const LinkDefinition* def = parser->getLinkDefinition(
+                        inner_start, inner_pos - inner_start);
+                    if (def) {
+                        return true;  // Complete shortcut reference found
+                    }
+                }
+            }
+
+            pos++;  // move past the [ and continue scanning
+        } else {
+            pos++;
+        }
+    }
+
+    return false;
+}
+
+/**
  * parse_link - Parse inline links
  *
  * Handles: [text](url), [text](url "title"), [text][ref], [text][], [text]
@@ -434,6 +570,7 @@ Item parse_link(MarkupParser* parser, const char** text) {
     pos++; // Skip [
 
     // Find closing ]
+    // Code spans and autolinks take precedence, so we must skip them
     const char* text_start = pos;
     const char* text_end = nullptr;
     int bracket_depth = 1;
@@ -444,6 +581,97 @@ Item parse_link(MarkupParser* parser, const char** text) {
             pos += 2;
             continue;
         }
+
+        // Skip code spans - they take precedence over link brackets
+        if (*pos == '`') {
+            int backtick_count = 0;
+            const char* backtick_start = pos;
+            while (*pos == '`') {
+                backtick_count++;
+                pos++;
+            }
+            // Find matching closing backticks
+            bool found_close = false;
+            while (*pos) {
+                if (*pos == '`') {
+                    int close_count = 0;
+                    const char* close_start = pos;
+                    while (*pos == '`') {
+                        close_count++;
+                        pos++;
+                    }
+                    if (close_count == backtick_count) {
+                        found_close = true;
+                        break;
+                    }
+                } else {
+                    pos++;
+                }
+            }
+            if (!found_close) {
+                // No matching backticks - not a valid code span
+                // Reset and treat opening backticks as literal
+                pos = backtick_start + backtick_count;
+            }
+            continue;
+        }
+
+        // Skip raw HTML tags and autolinks - they take precedence over link brackets
+        // HTML tags can contain ] or ) in attribute values
+        if (*pos == '<') {
+            const char* angle_start = pos;
+            pos++;
+
+            // Skip leading / for closing tags
+            if (*pos == '/') pos++;
+
+            // Check if this looks like a tag name (letter or ?)
+            if ((*pos >= 'a' && *pos <= 'z') || (*pos >= 'A' && *pos <= 'Z') || *pos == '?') {
+                // Looks like a tag, skip until we find >
+                // Need to handle quoted attribute values that may contain > or ]
+                while (*pos && *pos != '>') {
+                    if (*pos == '"') {
+                        // Skip double-quoted attribute value
+                        pos++;
+                        while (*pos && *pos != '"') pos++;
+                        if (*pos == '"') pos++;
+                    } else if (*pos == '\'') {
+                        // Skip single-quoted attribute value
+                        pos++;
+                        while (*pos && *pos != '\'') pos++;
+                        if (*pos == '\'') pos++;
+                    } else if (*pos == '\n') {
+                        // Newline breaks HTML tag
+                        break;
+                    } else {
+                        pos++;
+                    }
+                }
+                if (*pos == '>') {
+                    pos++;
+                    continue;  // Successfully skipped HTML tag
+                }
+            }
+
+            // Check for autolink: starts with scheme: or contains @
+            bool has_at = false;
+            bool has_scheme = false;
+            const char* scan = angle_start + 1;
+            while (scan < pos && *scan != ' ' && *scan != '\n') {
+                if (*scan == '@') has_at = true;
+                if (*scan == ':' && scan > angle_start + 2) has_scheme = true;
+                scan++;
+            }
+            if (*pos == '>' && (has_at || has_scheme)) {
+                pos++;
+                continue;  // Autolink
+            }
+
+            // Not a valid HTML tag or autolink, backtrack
+            pos = angle_start + 1;
+            continue;
+        }
+
         if (*pos == '[') bracket_depth++;
         else if (*pos == ']') bracket_depth--;
 
@@ -455,6 +683,12 @@ Item parse_link(MarkupParser* parser, const char** text) {
 
     if (!text_end) {
         // No closing ]
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // CommonMark: "Links may not contain other links, at any level of nesting."
+    // If there's a complete inner link, this outer bracket becomes literal text.
+    if (has_complete_inner_link(parser, text_start, text_end)) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
