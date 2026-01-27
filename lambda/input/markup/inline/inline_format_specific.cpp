@@ -581,5 +581,283 @@ Item parse_man_font_escape(MarkupParser* parser, const char** text) {
     return Item{.item = (uint64_t)elem};
 }
 
+// ============================================================================
+// AsciiDoc Inline Parsing
+// ============================================================================
+
+/**
+ * parse_asciidoc_link - Parse AsciiDoc link:url[text] syntax
+ *
+ * Handles:
+ *   link:https://example.com[Example]
+ *   link:path/to/file.html[Link Text]
+ */
+Item parse_asciidoc_link(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    if (strncmp(pos, "link:", 5) != 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    pos += 5;  // skip "link:"
+    const char* url_start = pos;
+
+    // Find the [ that starts the text portion
+    while (*pos && *pos != '[' && *pos != ' ' && *pos != '\n') {
+        pos++;
+    }
+
+    if (*pos != '[') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* url_end = pos;
+    pos++;  // skip [
+
+    const char* text_start = pos;
+
+    // Find closing ]
+    int bracket_depth = 1;
+    while (*pos && bracket_depth > 0) {
+        if (*pos == '[') bracket_depth++;
+        else if (*pos == ']') bracket_depth--;
+        pos++;
+    }
+
+    if (bracket_depth != 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* text_end = pos - 1;  // before ]
+
+    // Create anchor element
+    Element* anchor = create_element(parser, "a");
+    if (!anchor) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add href attribute
+    size_t url_len = url_end - url_start;
+    char* url = (char*)malloc(url_len + 1);
+    if (url) {
+        memcpy(url, url_start, url_len);
+        url[url_len] = '\0';
+        add_attribute_to_element(parser, anchor, "href", url);
+        free(url);
+    }
+
+    // Add link text
+    size_t text_len = text_end - text_start;
+    if (text_len > 0) {
+        char* link_text = (char*)malloc(text_len + 1);
+        if (link_text) {
+            memcpy(link_text, text_start, text_len);
+            link_text[text_len] = '\0';
+
+            // Parse inline content within link text
+            Item inner = parse_inline_spans(parser, link_text);
+            if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+                list_push((List*)anchor, inner);
+                increment_element_content_length(anchor);
+            }
+            free(link_text);
+        }
+    }
+
+    *text = pos;
+    return Item{.item = (uint64_t)anchor};
+}
+
+/**
+ * parse_asciidoc_image - Parse AsciiDoc image:path[alt] syntax
+ *
+ * Handles:
+ *   image:logo.png[Company Logo]
+ *   image:images/photo.jpg[Photo, width=200]
+ */
+Item parse_asciidoc_image(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    if (strncmp(pos, "image:", 6) != 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    pos += 6;  // skip "image:"
+    const char* src_start = pos;
+
+    // Find the [ that starts the attributes
+    while (*pos && *pos != '[' && *pos != ' ' && *pos != '\n') {
+        pos++;
+    }
+
+    if (*pos != '[') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* src_end = pos;
+    pos++;  // skip [
+
+    const char* attr_start = pos;
+
+    // Find closing ]
+    int bracket_depth = 1;
+    while (*pos && bracket_depth > 0) {
+        if (*pos == '[') bracket_depth++;
+        else if (*pos == ']') bracket_depth--;
+        pos++;
+    }
+
+    if (bracket_depth != 0) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* attr_end = pos - 1;  // before ]
+
+    // Create img element
+    Element* img = create_element(parser, "img");
+    if (!img) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add src attribute
+    size_t src_len = src_end - src_start;
+    char* src = (char*)malloc(src_len + 1);
+    if (src) {
+        memcpy(src, src_start, src_len);
+        src[src_len] = '\0';
+        add_attribute_to_element(parser, img, "src", src);
+        free(src);
+    }
+
+    // Parse attributes - first attribute is alt text, rest are key=value pairs
+    size_t attr_len = attr_end - attr_start;
+    if (attr_len > 0) {
+        char* attrs = (char*)malloc(attr_len + 1);
+        if (attrs) {
+            memcpy(attrs, attr_start, attr_len);
+            attrs[attr_len] = '\0';
+
+            // Find first comma for alt text separation
+            char* comma = strchr(attrs, ',');
+            if (comma) {
+                *comma = '\0';
+                add_attribute_to_element(parser, img, "alt", attrs);
+                // TODO: Parse additional attributes like width, height
+            } else {
+                add_attribute_to_element(parser, img, "alt", attrs);
+            }
+            free(attrs);
+        }
+    }
+
+    *text = pos;
+    return Item{.item = (uint64_t)img};
+}
+
+/**
+ * parse_asciidoc_cross_reference - Parse AsciiDoc <<anchor>> or <<anchor,text>>
+ *
+ * Handles:
+ *   <<section_id>>
+ *   <<section_id,Section Title>>
+ */
+Item parse_asciidoc_cross_reference(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    if (pos[0] != '<' || pos[1] != '<') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    pos += 2;  // skip <<
+    const char* anchor_start = pos;
+
+    // Find end of anchor (> or ,)
+    while (*pos && *pos != '>' && *pos != ',') {
+        pos++;
+    }
+
+    if (*pos == '\0') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* anchor_end = pos;
+    const char* display_text_start = nullptr;
+    const char* display_text_end = nullptr;
+
+    if (*pos == ',') {
+        pos++;  // skip comma
+        display_text_start = pos;
+
+        // Find >>
+        while (*pos && !(*pos == '>' && *(pos+1) == '>')) {
+            pos++;
+        }
+
+        if (*pos != '>') {
+            return Item{.item = ITEM_UNDEFINED};
+        }
+
+        display_text_end = pos;
+    }
+
+    // Check for closing >>
+    if (*pos != '>' || *(pos+1) != '>') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    pos += 2;  // skip >>
+
+    // Create anchor element (link to internal reference)
+    Element* anchor = create_element(parser, "a");
+    if (!anchor) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add href attribute with # prefix for internal link
+    size_t anchor_len = anchor_end - anchor_start;
+    char* href = (char*)malloc(anchor_len + 2);  // +2 for # and \0
+    if (href) {
+        href[0] = '#';
+        memcpy(href + 1, anchor_start, anchor_len);
+        href[anchor_len + 1] = '\0';
+        add_attribute_to_element(parser, anchor, "href", href);
+        free(href);
+    }
+
+    // Add display text (use anchor ID if no explicit text)
+    if (display_text_start && display_text_end) {
+        size_t text_len = display_text_end - display_text_start;
+        char* link_text = (char*)malloc(text_len + 1);
+        if (link_text) {
+            memcpy(link_text, display_text_start, text_len);
+            link_text[text_len] = '\0';
+
+            Item inner = parse_inline_spans(parser, link_text);
+            if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+                list_push((List*)anchor, inner);
+                increment_element_content_length(anchor);
+            }
+            free(link_text);
+        }
+    } else {
+        // Use anchor ID as text
+        char* anchor_text = (char*)malloc(anchor_len + 1);
+        if (anchor_text) {
+            memcpy(anchor_text, anchor_start, anchor_len);
+            anchor_text[anchor_len] = '\0';
+
+            String* text_str = create_string(parser, anchor_text);
+            if (text_str) {
+                list_push((List*)anchor, Item{.item = s2it(text_str)});
+                increment_element_content_length(anchor);
+            }
+            free(anchor_text);
+        }
+    }
+
+    *text = pos;
+    return Item{.item = (uint64_t)anchor};
+}
+
 } // namespace markup
 } // namespace lambda

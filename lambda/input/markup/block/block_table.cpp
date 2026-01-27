@@ -170,9 +170,19 @@ Item parse_table_row(MarkupParser* parser, const char* line) {
 }
 
 /**
+ * is_asciidoc_table_delimiter - Check for |=== table delimiter
+ */
+static bool is_asciidoc_table_delimiter(const char* line) {
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    return strncmp(p, "|===", 4) == 0;
+}
+
+/**
  * parse_table - Parse a complete table structure
  *
  * Collects all consecutive table rows into a <table> element.
+ * Handles both GFM-style tables and AsciiDoc |=== delimited tables.
  */
 Item parse_table(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
@@ -184,6 +194,15 @@ Item parse_table(MarkupParser* parser, const char* line) {
         return Item{.item = ITEM_ERROR};
     }
 
+    // Check for AsciiDoc |=== delimiter
+    bool is_asciidoc_delimited = (parser->config.format == Format::ASCIIDOC &&
+                                   is_asciidoc_table_delimiter(line));
+
+    if (is_asciidoc_delimited) {
+        // Skip the opening |===
+        parser->current_line++;
+    }
+
     // Check for header row
     bool first_row = true;
     bool has_header = false;
@@ -192,17 +211,33 @@ Item parse_table(MarkupParser* parser, const char* line) {
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
-        // Empty line ends the table
-        if (is_empty_line(current)) {
+        // For AsciiDoc: |=== ends the table
+        if (is_asciidoc_delimited && is_asciidoc_table_delimiter(current)) {
+            parser->current_line++;  // Skip closing |===
             break;
+        }
+
+        // Empty line ends non-delimited tables
+        if (!is_asciidoc_delimited && is_empty_line(current)) {
+            break;
+        }
+
+        // Skip empty lines within AsciiDoc delimited tables
+        if (is_asciidoc_delimited && is_empty_line(current)) {
+            // Empty line in AsciiDoc table separates header from body
+            if (first_row && header_row) {
+                has_header = true;
+            }
+            parser->current_line++;
+            continue;
         }
 
         // Check if this is still a table row
         const char* pos = current;
         skip_whitespace(&pos);
 
-        // Check for separator row to detect header
-        if (first_row && is_separator_row(current)) {
+        // Check for separator row to detect header (GFM style)
+        if (!is_asciidoc_delimited && first_row && is_separator_row(current)) {
             // Previous row was header
             has_header = true;
             parser->current_line++;
@@ -212,7 +247,12 @@ Item parse_table(MarkupParser* parser, const char* line) {
         // Must have | to be a table row
         bool has_pipe = (strchr(current, '|') != nullptr);
         if (!has_pipe) {
-            break;
+            if (!is_asciidoc_delimited) {
+                break;
+            }
+            // In AsciiDoc tables, skip lines without pipes
+            parser->current_line++;
+            continue;
         }
 
         // Parse the row
@@ -231,8 +271,8 @@ Item parse_table(MarkupParser* parser, const char* line) {
         if (first_row) {
             header_row = row;
 
-            // Check if next line is separator
-            if (parser->current_line < parser->line_count) {
+            // Check if next line is separator (GFM style)
+            if (!is_asciidoc_delimited && parser->current_line < parser->line_count) {
                 const char* next = parser->lines[parser->current_line];
                 if (is_separator_row(next)) {
                     has_header = true;

@@ -24,7 +24,6 @@ Element* html5_parse(Input* input, const char* html);  // HTML5 compliant parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser (default)
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
-void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_eml(Input* input, const char* eml_string);
 void parse_vcf(Input* input, const char* vcf_string);
 void parse_ics(Input* input, const char* ics_string);
