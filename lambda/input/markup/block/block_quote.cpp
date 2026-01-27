@@ -16,6 +16,7 @@
 #include <vector>
 #include <cstdlib>
 #include <cctype>
+#include <cstring>
 
 namespace lambda {
 namespace markup {
@@ -28,6 +29,136 @@ extern Item parse_divider(MarkupParser* parser);
 extern Item parse_list_structure(MarkupParser* parser, int base_indent);
 extern Item parse_html_block(MarkupParser* parser, const char* line);
 extern Item parse_paragraph(MarkupParser* parser, const char* line);
+
+/**
+ * strip_quote_markers_with_tabs - Strip quote markers with proper tab expansion
+ *
+ * When the optional space after > is a tab, only one column is consumed
+ * and the remaining tab columns become content indentation.
+ *
+ * Returns a newly allocated string that must be freed.
+ */
+static char* strip_quote_markers_with_tabs(const char* line, int depth) {
+    if (!line) return strdup("");
+
+    const char* pos = line;
+    int removed = 0;
+    int col = 0;  // Track column position
+
+    // Skip up to 3 leading spaces
+    int spaces = 0;
+    while (*pos == ' ' && spaces < 3) {
+        spaces++;
+        col++;
+        pos++;
+    }
+
+    // Remove 'depth' number of > markers
+    while (removed < depth && *pos) {
+        while (*pos == ' ') {
+            col++;
+            pos++;
+        }
+
+        if (*pos == '>') {
+            pos++;
+            col++;
+            removed++;
+
+            // Skip optional single space OR one column from a tab
+            if (*pos == ' ') {
+                pos++;
+                col++;
+            } else if (*pos == '\t') {
+                // Tab after >: consume one column, expand rest as content indent
+                // Tab expands to next multiple of 4
+                int tab_end = (col + 4) & ~3;
+                int consumed_col = col;  // We consume one column from the tab
+                col = tab_end;  // Full tab position
+                pos++;  // Skip the tab character
+
+                // Now we need to output (tab_end - consumed_col - 1) virtual spaces
+                // for the remaining columns of this tab
+                int virtual_spaces = tab_end - consumed_col - 1;
+
+                // Calculate size for remaining content with tab expansion
+                size_t expanded_len = virtual_spaces;
+                int temp_col = col;
+                for (const char* p = pos; *p; p++) {
+                    if (*p == '\t') {
+                        int next = (temp_col + 4) & ~3;
+                        expanded_len += (next - temp_col);
+                        temp_col = next;
+                    } else {
+                        expanded_len++;
+                        temp_col++;
+                    }
+                }
+
+                // Allocate and build result
+                char* result = (char*)malloc(expanded_len + 1);
+                if (!result) return strdup(pos);
+
+                char* out = result;
+                for (int i = 0; i < virtual_spaces; i++) {
+                    *out++ = ' ';
+                }
+
+                int out_col = col;  // Current column in output
+                for (const char* p = pos; *p; p++) {
+                    if (*p == '\t') {
+                        int next = (out_col + 4) & ~3;
+                        for (int i = out_col; i < next; i++) {
+                            *out++ = ' ';
+                        }
+                        out_col = next;
+                    } else {
+                        *out++ = *p;
+                        out_col++;
+                    }
+                }
+                *out = '\0';
+                return result;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // No special tab handling needed - just expand any tabs in remaining content
+    size_t expanded_len = 0;
+    int temp_col = col;
+    for (const char* p = pos; *p; p++) {
+        if (*p == '\t') {
+            int next = (temp_col + 4) & ~3;
+            expanded_len += (next - temp_col);
+            temp_col = next;
+        } else {
+            expanded_len++;
+            temp_col++;
+        }
+    }
+
+    char* result = (char*)malloc(expanded_len + 1);
+    if (!result) return strdup(pos);
+
+    char* out = result;
+    int out_col = col;
+    for (const char* p = pos; *p; p++) {
+        if (*p == '\t') {
+            int next = (out_col + 4) & ~3;
+            for (int i = out_col; i < next; i++) {
+                *out++ = ' ';
+            }
+            out_col = next;
+        } else {
+            *out++ = *p;
+            out_col++;
+        }
+    }
+    *out = '\0';
+    return result;
+}
 
 /**
  * count_quote_depth - Count the nesting level of > markers
@@ -278,8 +409,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             break;
         }
 
-        // Extract content by stripping quote markers
-        const char* content = strip_quote_markers(current, base_depth);
+        // Extract content by stripping quote markers with proper tab expansion
+        char* content = strip_quote_markers_with_tabs(current, base_depth);
 
         // Check if this line is empty after stripping (just ">")
         const char* check = content;
@@ -320,7 +451,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             }
         }
 
-        content_lines.push_back(strdup(content));
+        // content is already allocated by strip_quote_markers_with_tabs
+        content_lines.push_back(content);
         is_lazy_line.push_back(false);  // Not a lazy continuation
         parser->current_line++;
     }
