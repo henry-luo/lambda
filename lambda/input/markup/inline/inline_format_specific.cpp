@@ -228,5 +228,245 @@ Item parse_asciidoc_inline(MarkupParser* parser, const char* text) {
     return Item{.item = (uint64_t)span};
 }
 
+/**
+ * Helper: check if character can be a word boundary for Org emphasis
+ *
+ * Org-mode emphasis requires markers to be bounded by whitespace or punctuation.
+ */
+static inline bool is_org_word_boundary(char c) {
+    return c == '\0' || isspace((unsigned char)c) ||
+           c == '(' || c == ')' || c == '[' || c == ']' ||
+           c == '{' || c == '}' || c == '<' || c == '>' ||
+           c == ',' || c == '.' || c == ';' || c == ':' ||
+           c == '!' || c == '?' || c == '\'' || c == '"' ||
+           c == '-' || c == '\n' || c == '\r';
+}
+
+/**
+ * is_preceded_by_org_boundary - Check if position is preceded by a word boundary
+ */
+static inline bool is_preceded_by_org_boundary(const char* text, const char* pos) {
+    if (pos <= text) return true;  // start of string is a boundary
+    return is_org_word_boundary(*(pos - 1));
+}
+
+/**
+ * parse_org_emphasis - Parse Org-mode emphasis
+ *
+ * Handles Org-mode inline emphasis:
+ * - /italic/ (slashes for italic)
+ * - =code= (equals for verbatim/code)
+ * - ~verbatim~ (tildes for verbatim)
+ * - +strikethrough+ (plus for strikethrough)
+ *
+ * Org emphasis rules:
+ * - Markers must be at word boundaries
+ * - Content cannot contain the marker character
+ * - Markers cannot be adjacent to whitespace on the inside
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @param text_start Start of the full text (for boundary context)
+ * @return Item containing formatted element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* text_start) {
+    const char* pos = *text;
+    const char* full_text = text_start ? text_start : pos;
+    char marker = *pos;
+
+    // Org emphasis markers: / = ~ +
+    if (marker != '/' && marker != '=' && marker != '~' && marker != '+') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Check that we're at a word boundary (start of text or after whitespace/punct)
+    if (!is_preceded_by_org_boundary(full_text, pos)) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Content starts after the marker
+    const char* content_start = pos + 1;
+
+    // Content cannot start with whitespace
+    if (*content_start == ' ' || *content_start == '\t' ||
+        *content_start == '\n' || *content_start == '\r') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Find closing marker
+    const char* search = content_start;
+    const char* close_pos = nullptr;
+
+    while (*search) {
+        if (*search == marker) {
+            // Check that we're at a word boundary (end of text or before whitespace/punct)
+            if (is_org_word_boundary(*(search + 1))) {
+                // Content cannot end with whitespace
+                if (search > content_start &&
+                    *(search - 1) != ' ' && *(search - 1) != '\t' &&
+                    *(search - 1) != '\n' && *(search - 1) != '\r') {
+                    close_pos = search;
+                    break;
+                }
+            }
+        }
+        // Org emphasis cannot span multiple lines
+        if (*search == '\n' || *search == '\r') {
+            return Item{.item = ITEM_UNDEFINED};
+        }
+        search++;
+    }
+
+    if (!close_pos) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Determine element type based on marker
+    const char* tag = nullptr;
+    switch (marker) {
+        case '/': tag = "em"; break;      // italic
+        case '=': tag = "code"; break;    // verbatim/code
+        case '~': tag = "code"; break;    // verbatim
+        case '+': tag = "del"; break;     // strikethrough
+        default: return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Create element
+    Element* elem = create_element(parser, tag);
+    if (!elem) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Extract content
+    size_t content_len = close_pos - content_start;
+
+    // For code/verbatim, don't parse inner content
+    if (marker == '=' || marker == '~') {
+        char* content = (char*)malloc(content_len + 1);
+        if (content) {
+            memcpy(content, content_start, content_len);
+            content[content_len] = '\0';
+            String* content_str = create_string(parser, content);
+            if (content_str) {
+                list_push((List*)elem, Item{.item = s2it(content_str)});
+                increment_element_content_length(elem);
+            }
+            free(content);
+        }
+    } else {
+        // For emphasis (italic, strikethrough), parse inner content recursively
+        char* content = (char*)malloc(content_len + 1);
+        if (content) {
+            memcpy(content, content_start, content_len);
+            content[content_len] = '\0';
+
+            Item inner = parse_inline_spans(parser, content);
+            if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+                list_push((List*)elem, inner);
+                increment_element_content_length(elem);
+            }
+            free(content);
+        }
+    }
+
+    // Advance position past the closing marker
+    *text = close_pos + 1;
+
+    return Item{.item = (uint64_t)elem};
+}
+
+/**
+ * parse_org_link - Parse Org-mode links
+ *
+ * Handles: [[url]] or [[url][description]]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing link element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_org_link(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    // Must start with [[
+    if (pos[0] != '[' || pos[1] != '[') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    pos += 2;  // skip [[
+    const char* url_start = pos;
+
+    // Find ][ or ]]
+    while (*pos && !(pos[0] == ']' && (pos[1] == ']' || pos[1] == '['))) {
+        pos++;
+    }
+
+    if (!*pos) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    const char* url_end = pos;
+    size_t url_len = url_end - url_start;
+
+    const char* text_start = nullptr;
+    const char* text_end = nullptr;
+
+    if (pos[1] == '[') {
+        // Has description: [[url][description]]
+        pos += 2;  // skip ][
+        text_start = pos;
+
+        // Find closing ]]
+        while (*pos && !(pos[0] == ']' && pos[1] == ']')) {
+            pos++;
+        }
+
+        if (pos[0] != ']' || pos[1] != ']') {
+            return Item{.item = ITEM_UNDEFINED};
+        }
+
+        text_end = pos;
+        pos += 2;  // skip ]]
+    } else {
+        // No description: [[url]]
+        text_start = url_start;
+        text_end = url_end;
+        pos += 2;  // skip ]]
+    }
+
+    // Create link element
+    Element* link = create_element(parser, "a");
+    if (!link) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Add href attribute
+    char* url = (char*)malloc(url_len + 1);
+    if (url) {
+        memcpy(url, url_start, url_len);
+        url[url_len] = '\0';
+        add_attribute_to_element(parser, link, "href", url);
+        free(url);
+    }
+
+    // Add link text
+    size_t text_len = text_end - text_start;
+    char* link_text = (char*)malloc(text_len + 1);
+    if (link_text) {
+        memcpy(link_text, text_start, text_len);
+        link_text[text_len] = '\0';
+
+        // Parse link text for inline formatting
+        Item inner = parse_inline_spans(parser, link_text);
+        if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+            list_push((List*)link, inner);
+            increment_element_content_length(link);
+        }
+        free(link_text);
+    }
+
+    *text = pos;
+    return Item{.item = (uint64_t)link};
+}
+
 } // namespace markup
 } // namespace lambda
