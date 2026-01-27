@@ -189,6 +189,73 @@ static int find_all_runs(const char* text, const char* full_text, DelimRun* runs
                 }
             }
             if (!found) pos = bt_start + backticks;
+        } else if (*pos == '[') {
+            // Skip potential link text - links take precedence over emphasis
+            // Find matching ] and check if followed by ( or [
+            const char* bracket_start = pos;
+            pos++;
+            int bracket_depth = 1;
+            while (*pos && bracket_depth > 0) {
+                if (*pos == '\\' && *(pos + 1)) {
+                    pos += 2;
+                } else if (*pos == '[') {
+                    bracket_depth++;
+                    pos++;
+                } else if (*pos == ']') {
+                    bracket_depth--;
+                    pos++;
+                } else {
+                    pos++;
+                }
+            }
+            // Check if this is actually a link (followed by ( or [)
+            if (bracket_depth == 0 && (*pos == '(' || *pos == '[')) {
+                // This is a link - skip the link destination/reference too
+                char close_char = (*pos == '(') ? ')' : ']';
+                pos++;
+                int paren_depth = 1;
+                while (*pos && paren_depth > 0) {
+                    if (*pos == '\\' && *(pos + 1)) {
+                        pos += 2;
+                    } else if (*pos == close_char) {
+                        paren_depth--;
+                        pos++;
+                    } else if (*pos == '(' && close_char == ')') {
+                        paren_depth++;
+                        pos++;
+                    } else {
+                        pos++;
+                    }
+                }
+            } else {
+                // Not a link, reset and just skip the [
+                pos = bracket_start + 1;
+            }
+        } else if (*pos == '<') {
+            // Skip HTML tags and autolinks - they take precedence over emphasis
+            const char* tag_start = pos;
+            pos++;
+            // Check for autolink first (starts with scheme: or is email-like)
+            bool is_autolink = false;
+            const char* scan = pos;
+            // Simple check: if we see `:` or `@` before `>`, treat as autolink
+            while (*scan && *scan != '>' && *scan != ' ' && *scan != '\t' && *scan != '\n') {
+                if (*scan == ':' || *scan == '@') {
+                    is_autolink = true;
+                    break;
+                }
+                scan++;
+            }
+            // Skip to closing >
+            while (*pos && *pos != '>') {
+                if (*pos == '\n') {
+                    // Newline breaks HTML tag (not valid inline)
+                    pos = tag_start + 1;
+                    break;
+                }
+                pos++;
+            }
+            if (*pos == '>') pos++;  // Skip the >
         } else {
             pos++;
         }
@@ -231,6 +298,10 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
 
     // Check if this can open emphasis
     if (!can_open(marker, full_text, start, open_end)) {
+        // CRITICAL: Skip past the entire run even when it can't open
+        // This prevents individual delimiters from being tried separately,
+        // which would incorrectly split intra-word runs like foo__bar__
+        *text = open_end;
         return Item{.item = ITEM_UNDEFINED};
     }
 
