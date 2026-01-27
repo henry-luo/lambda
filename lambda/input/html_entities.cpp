@@ -44,6 +44,17 @@ static const struct {
     {nullptr, 0}
 };
 
+// Multi-codepoint entities - pre-encoded as UTF-8 strings
+// These are entities that require multiple Unicode codepoints
+static const struct {
+    const char* name;
+    const char* decoded;
+} multi_codepoint_entities[] = {
+    // ngE = U+2267 GREATER-THAN OVER EQUAL TO + U+0338 COMBINING LONG SOLIDUS OVERLAY
+    {"ngE", "\xE2\x89\xA7\xCC\xB8"},  // ≧̸
+    {nullptr, nullptr}
+};
+
 // Named HTML entities with their Unicode codepoints
 // These are stored as Lambda Symbol and resolved at render time
 static const EntityEntry html_entity_table[] = {
@@ -80,6 +91,9 @@ static const EntityEntry html_entity_table[] = {
     {"divide", 0x00F7}, {"oslash", 0x00F8}, {"ugrave", 0x00F9}, {"uacute", 0x00FA},
     {"ucirc", 0x00FB}, {"uuml", 0x00FC}, {"yacute", 0x00FD}, {"thorn", 0x00FE},
     {"yuml", 0x00FF},
+
+    // Latin extended A - caron diacritics
+    {"Dcaron", 0x010E}, {"dcaron", 0x010F},
 
     // Latin extended B
     {"OElig", 0x0152}, {"oelig", 0x0153}, {"Scaron", 0x0160}, {"scaron", 0x0161},
@@ -123,6 +137,8 @@ static const EntityEntry html_entity_table[] = {
     // Letter-like symbols
     {"weierp", 0x2118}, {"image", 0x2111}, {"real", 0x211C}, {"trade", 0x2122},
     {"alefsym", 0x2135},
+    {"HilbertSpace", 0x210B},        // Script capital H
+    {"DifferentialD", 0x2146},        // Double-struck italic small d
 
     // Arrows
     {"larr", 0x2190}, {"uarr", 0x2191}, {"rarr", 0x2192}, {"darr", 0x2193},
@@ -135,9 +151,11 @@ static const EntityEntry html_entity_table[] = {
     {"prod", 0x220F}, {"sum", 0x2211}, {"minus", 0x2212}, {"lowast", 0x2217},
     {"radic", 0x221A}, {"prop", 0x221D}, {"infin", 0x221E}, {"ang", 0x2220},
     {"and", 0x2227}, {"or", 0x2228}, {"cap", 0x2229}, {"cup", 0x222A},
-    {"int", 0x222B}, {"there4", 0x2234}, {"sim", 0x223C}, {"cong", 0x2245},
+    {"int", 0x222B}, {"ClockwiseContourIntegral", 0x2232},  // ∲
+    {"there4", 0x2234}, {"sim", 0x223C}, {"cong", 0x2245},
     {"asymp", 0x2248}, {"ne", 0x2260}, {"equiv", 0x2261}, {"le", 0x2264},
-    {"ge", 0x2265}, {"sub", 0x2282}, {"sup", 0x2283}, {"nsub", 0x2284},
+    {"ge", 0x2265},
+    {"sub", 0x2282}, {"sup", 0x2283}, {"nsub", 0x2284},
     {"sube", 0x2286}, {"supe", 0x2287}, {"oplus", 0x2295}, {"otimes", 0x2297},
     {"perp", 0x22A5}, {"sdot", 0x22C5},
 
@@ -189,6 +207,16 @@ EntityResult html_entity_resolve(const char* name, size_t len) {
             strncmp(unicode_spaces[i].name, name, len) == 0) {
             result.type = ENTITY_UNICODE_SPACE;
             result.named.codepoint = unicode_spaces[i].codepoint;
+            return result;
+        }
+    }
+
+    // Then check multi-codepoint entities
+    for (int i = 0; multi_codepoint_entities[i].name; i++) {
+        if (strlen(multi_codepoint_entities[i].name) == len &&
+            strncmp(multi_codepoint_entities[i].name, name, len) == 0) {
+            result.type = ENTITY_UNICODE_MULTI;
+            result.decoded = multi_codepoint_entities[i].decoded;
             return result;
         }
     }

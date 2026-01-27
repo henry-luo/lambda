@@ -168,6 +168,8 @@ static bool is_table_row(const char* line);
 static int is_html_block_start(const char* line);  // Returns HTML block type 1-7, or 0 if not
 static Item parse_html_block(MarkupParser* parser, const char* line);
 static bool is_html_block_end(const char* line, int html_block_type);
+static int is_setext_underline(const char* line);  // Returns 1 for ===, 2 for ---, 0 if not
+static bool is_thematic_break(const char* line);   // Check for ---, ***, ___
 
 // Common utility functions
 #define is_whitespace_char input_is_whitespace_char
@@ -1213,12 +1215,7 @@ static Item parse_header(MarkupParser* parser, const char* line) {
 
 // Parse paragraph with enhanced inline parsing - Creates HTML-like <p> element
 static Item parse_paragraph(MarkupParser* parser, const char* line) {
-    Element* para = create_element(parser, "p");
-    if (!para) {
-        parser->current_line++;
-        return (Item){.item = ITEM_ERROR};
-    }
-
+    log_debug("parse_paragraph: start, current_line=%d, first_line='%s'", parser->current_line, line);
     // Use StrBuf to build content from potentially multiple lines
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
@@ -1242,8 +1239,41 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
                 break; // End of paragraph
             }
 
+            // Check if this line is a setext underline - if so, we need to convert to heading
+            int setext_level = is_setext_underline(current);
+            if (setext_level > 0 && parser->config.format == MARKUP_MARKDOWN) {
+                // This paragraph is actually a setext heading!
+                char tag[4];
+                snprintf(tag, sizeof(tag), "h%d", setext_level);
+                Element* header = create_element(parser, tag);
+                if (header) {
+                    Item content = parse_inline_spans(parser, sb->str->chars);
+                    if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
+                        list_push((List*)header, content);
+                        increment_element_content_length(header);
+                    }
+                    parser->current_line++; // Skip the underline
+                    return (Item){.item = (uint64_t)header};
+                }
+            }
+
             BlockType next_type = detect_block_type(parser, current);
             if (next_type != BLOCK_PARAGRAPH) {
+                // Special case: if this looks like a setext heading (text line followed by underline),
+                // we should continue collecting this line and the whole thing becomes a heading.
+                // Check if this is a setext candidate (not an ATX header like "# heading")
+                const char* check_pos = current;
+                skip_whitespace(&check_pos);
+                if (next_type == BLOCK_HEADER && *check_pos != '#') {
+                    // This is likely a setext heading candidate - include it
+                    // CommonMark soft line break: use newline, not space
+                    log_debug("setext: adding line '%s' to paragraph", check_pos);
+                    stringbuf_append_char(sb, '\n');
+                    stringbuf_append_str(sb, check_pos);
+                    parser->current_line++;
+                    // Continue to check if next line is the underline
+                    continue;
+                }
                 break; // Next line is different block type
             }
 
@@ -1260,6 +1290,35 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
             stringbuf_append_str(sb, content);
             parser->current_line++;
         }
+    }
+
+    log_debug("setext: after loop, current_line=%d, sb='%s'", parser->current_line, sb->str->chars);
+
+    // Check once more after the loop if the next line is a setext underline
+    if (parser->current_line < parser->line_count && parser->config.format == MARKUP_MARKDOWN) {
+        const char* next_line = parser->lines[parser->current_line];
+        int setext_level = is_setext_underline(next_line);
+        if (setext_level > 0) {
+            // This paragraph is actually a setext heading!
+            char tag[4];
+            snprintf(tag, sizeof(tag), "h%d", setext_level);
+            Element* header = create_element(parser, tag);
+            if (header) {
+                Item content = parse_inline_spans(parser, sb->str->chars);
+                if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
+                    list_push((List*)header, content);
+                    increment_element_content_length(header);
+                }
+                parser->current_line++; // Skip the underline
+                return (Item){.item = (uint64_t)header};
+            }
+        }
+    }
+
+    // Create paragraph element
+    Element* para = create_element(parser, "p");
+    if (!para) {
+        return (Item){.item = ITEM_ERROR};
     }
 
     // Parse inline content with enhancements and add as children
@@ -1446,8 +1505,17 @@ static Item parse_list_structure(MarkupParser* parser, int base_indent) {
             }
             skip_whitespace(&item_content);
 
-            // Parse immediate inline content
-            if (*item_content) {
+            // Check if the content after the marker is a thematic break
+            // For example: "- * * *" should have an <hr /> inside the list item
+            if (*item_content && is_thematic_break(item_content)) {
+                // Create and add a thematic break element
+                Element* hr = create_element(parser, "hr");
+                if (hr) {
+                    list_push((List*)item, (Item){.item = (uint64_t)hr});
+                    increment_element_content_length(item);
+                }
+            } else if (*item_content) {
+                // Parse immediate inline content
                 Item text_content = parse_inline_spans(parser, item_content);
                 if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
                     list_push((List*)item, text_content);
@@ -5206,6 +5274,8 @@ static BlockType detect_block_type(MarkupParser* parser, const char* line) {
 static int get_header_level(MarkupParser* parser, const char* line) {
     if (!line || !parser) return 0;
 
+    log_debug("get_header_level: line='%.20s...', current_line=%d", line, parser->current_line);
+
     const char* pos = line;
     skip_whitespace(&pos);
 
@@ -5269,6 +5339,7 @@ static int get_header_level(MarkupParser* parser, const char* line) {
 
             // Check for = or - underline
             char underline_char = *next_pos;
+            log_debug("get_header_level: checking next_line='%.20s', underline_char='%c'", next_line, underline_char);
             if (underline_char == '=' || underline_char == '-') {
                 int underline_count = 0;
                 while (*next_pos == underline_char) {
@@ -5281,6 +5352,7 @@ static int get_header_level(MarkupParser* parser, const char* line) {
                 }
                 // Must end with newline or end of string (at least 1 underline char)
                 if (underline_count >= 1 && (*next_pos == '\0' || *next_pos == '\n' || *next_pos == '\r')) {
+                    log_debug("get_header_level: detected setext heading level %d", (underline_char == '=') ? 1 : 2);
                     return (underline_char == '=') ? 1 : 2;
                 }
             }
@@ -5360,6 +5432,11 @@ static bool is_list_item(const char* line) {
 
     // Unordered list markers
     if (*pos == '-' || *pos == '*' || *pos == '+') {
+        // First check if this is actually a thematic break (---, ***, etc.)
+        // Thematic breaks take priority over list items
+        if (is_thematic_break(line)) {
+            return false;
+        }
         pos++;
         return (*pos == ' ' || *pos == '\t' || *pos == '\0');
     }
@@ -5443,6 +5520,86 @@ static bool is_table_row(const char* line) {
     }
 
     return false;
+}
+
+// Check if line is a setext heading underline (=== or ---)
+// Returns 1 for === (h1), 2 for --- (h2), 0 if not a setext underline
+static int is_setext_underline(const char* line) {
+    if (!line) return 0;
+
+    const char* pos = line;
+
+    // Skip up to 3 leading spaces
+    int leading_spaces = 0;
+    while (*pos == ' ' && leading_spaces < 3) {
+        leading_spaces++;
+        pos++;
+    }
+
+    // 4+ leading spaces means not a setext underline
+    if (*pos == ' ') return 0;
+
+    // Must be = or -
+    if (*pos != '=' && *pos != '-') return 0;
+
+    char underline_char = *pos;
+    int count = 0;
+
+    // Count the underline characters
+    while (*pos == underline_char) {
+        count++;
+        pos++;
+    }
+
+    // Must have at least 1 character
+    if (count < 1) return 0;
+
+    // Skip trailing whitespace
+    while (*pos == ' ' || *pos == '\t') {
+        pos++;
+    }
+
+    // Must end with newline or end of string
+    if (*pos != '\0' && *pos != '\n' && *pos != '\r') return 0;
+
+    return (underline_char == '=') ? 1 : 2;
+}
+
+// Check if line is a thematic break (---, ***, ___)
+static bool is_thematic_break(const char* line) {
+    if (!line) return false;
+
+    const char* pos = line;
+
+    // Skip up to 3 leading spaces
+    int leading_spaces = 0;
+    while (*pos == ' ' && leading_spaces < 3) {
+        leading_spaces++;
+        pos++;
+    }
+
+    // 4+ leading spaces means not a thematic break
+    if (*pos == ' ') return false;
+
+    // Must be -, *, or _
+    if (*pos != '-' && *pos != '*' && *pos != '_') return false;
+
+    char marker = *pos;
+    int count = 0;
+
+    // Count the marker characters, allowing spaces between them
+    while (*pos == marker || *pos == ' ') {
+        if (*pos == marker) count++;
+        pos++;
+    }
+
+    // Must have at least 3 marker characters
+    if (count < 3) return false;
+
+    // Must end with newline or end of string (no other content)
+    if (*pos != '\0' && *pos != '\n' && *pos != '\r') return false;
+
+    return true;
 }
 
 // Case-insensitive prefix match helper
