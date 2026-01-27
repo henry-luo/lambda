@@ -14,6 +14,61 @@ namespace markup {
 extern bool is_html_block_start(const char* line);
 
 /**
+ * is_asciidoc_admonition - Check if line is an AsciiDoc admonition
+ *
+ * Matches: NOTE:, TIP:, IMPORTANT:, WARNING:, CAUTION:
+ */
+static bool is_asciidoc_admonition(const char* line) {
+    if (!line) return false;
+
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+
+    return (strncmp(p, "NOTE:", 5) == 0 ||
+            strncmp(p, "TIP:", 4) == 0 ||
+            strncmp(p, "IMPORTANT:", 10) == 0 ||
+            strncmp(p, "WARNING:", 8) == 0 ||
+            strncmp(p, "CAUTION:", 8) == 0);
+}
+
+/**
+ * is_asciidoc_definition_list - Check if line is a definition list term
+ *
+ * Matches: term:: definition
+ */
+static bool is_asciidoc_definition_list(const char* line) {
+    if (!line) return false;
+
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+
+    // look for :: that's not at the start
+    while (*p && !(*p == ':' && *(p+1) == ':')) {
+        if (*p == '\n' || *p == '\r') return false;
+        p++;
+    }
+
+    return (*p == ':' && *(p+1) == ':');
+}
+
+/**
+ * is_asciidoc_attribute_block - Check if line is an attribute block [source,lang]
+ */
+static bool is_asciidoc_attribute_block(const char* line) {
+    if (!line) return false;
+
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+
+    if (*p != '[') return false;
+
+    // find closing ]
+    while (*p && *p != ']' && *p != '\n') p++;
+
+    return (*p == ']');
+}
+
+/**
  * is_blockquote_line - Check if a line starts a blockquote
  */
 static bool is_blockquote_line(const char* line) {
@@ -169,6 +224,35 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         }
         if (adapter->detectTable(line, table_next)) {
             return BlockType::TABLE;
+        }
+
+        // AsciiDoc-specific detection
+        if (parser->config.format == Format::ASCIIDOC) {
+            // Admonition blocks (NOTE:, TIP:, etc.) - treat as DIRECTIVE
+            if (is_asciidoc_admonition(line)) {
+                return BlockType::DIRECTIVE;
+            }
+
+            // Definition lists (term:: definition)
+            if (is_asciidoc_definition_list(line)) {
+                return BlockType::DEFINITION_LIST;
+            }
+
+            // Attribute blocks [source,lang] - next line determines type
+            if (is_asciidoc_attribute_block(line)) {
+                // Check what kind of block follows
+                const char* p = line;
+                while (*p == ' ' || *p == '\t') p++;
+                p++; // skip [
+
+                if (strncmp(p, "source", 6) == 0) {
+                    return BlockType::CODE_BLOCK;
+                } else if (strncmp(p, "quote", 5) == 0) {
+                    return BlockType::QUOTE;
+                } else {
+                    return BlockType::DIRECTIVE;
+                }
+            }
         }
 
         // Indented code block detection (only if not in list context)
