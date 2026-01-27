@@ -113,12 +113,24 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             }
 
             // Check if current line is a setext underline
+            // BUT: lazy continuation lines should NOT be treated as setext underlines
+            // (they were collected from outside the container and are just paragraph text)
             int underline_level = is_setext_underline(current);
             if (underline_level > 0) {
-                // This is a setext heading - consume the underline and stop
-                setext_level = underline_level;
-                parser->current_line++;
-                break;
+                // Check if this line is a lazy continuation
+                bool is_lazy = false;
+                if (parser->state.lazy_lines &&
+                    parser->current_line < parser->state.lazy_lines_count) {
+                    is_lazy = parser->state.lazy_lines[parser->current_line];
+                }
+
+                if (!is_lazy) {
+                    // This is a setext heading - consume the underline and stop
+                    setext_level = underline_level;
+                    parser->current_line++;
+                    break;
+                }
+                // Lazy continuation - treat as regular paragraph line, fall through
             }
 
             // Check if next line starts a different block type
