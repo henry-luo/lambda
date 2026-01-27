@@ -18,6 +18,21 @@ namespace lambda {
 namespace markup {
 
 /**
+ * is_escapable_char - Check if a character is escapable in CommonMark
+ *
+ * Only ASCII punctuation characters can be backslash-escaped.
+ */
+static inline bool is_escapable_char(char c) {
+    return c == '!' || c == '"' || c == '#' || c == '$' || c == '%' ||
+           c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' ||
+           c == '+' || c == ',' || c == '-' || c == '.' || c == '/' ||
+           c == ':' || c == ';' || c == '<' || c == '=' || c == '>' ||
+           c == '?' || c == '@' || c == '[' || c == '\\' || c == ']' ||
+           c == '^' || c == '_' || c == '`' || c == '{' || c == '|' ||
+           c == '}' || c == '~';
+}
+
+/**
  * is_link_definition_start - Check if a line might start a link definition
  *
  * Quick check for [label]: pattern. Full parsing done in parse_link_definition.
@@ -169,8 +184,14 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
         return false; // empty bare URL
     }
 
+    // Track position before skipping whitespace
+    const char* before_ws = p;
+
     // Skip whitespace before optional title
     while (*p == ' ' || *p == '\t') p++;
+
+    // Check if we had whitespace - needed for same-line title
+    bool had_whitespace_before_title = (p != before_ws);
 
     // Optional title on same line or next line
     const char* title_start = nullptr;
@@ -186,11 +207,18 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
             while (*np == ' ' || *np == '\t') np++;
 
             if (*np == '"' || *np == '\'' || *np == '(') {
-                // Title starts on next line
+                // Title starts on next line - whitespace is implicit (newline)
                 p = np;
                 lines_consumed++;
+                had_whitespace_before_title = true;  // Newline counts as whitespace
             }
         }
+    }
+
+    // CommonMark: Title must be separated from URL by whitespace
+    if ((*p == '"' || *p == '\'' || *p == '(') && !had_whitespace_before_title) {
+        // No whitespace between URL and potential title - this is NOT a valid definition
+        return false;
     }
 
     if (*p == '"' || *p == '\'' || *p == '(') {
@@ -211,9 +239,16 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
             // Check if we're at end of current line without finding close
             while (*p && *p != close_char && *p != '\n' && *p != '\r') {
                 if (*p == '\\' && *(p+1)) {
-                    // Include escaped character
-                    stringbuf_append_char(title_buf, *(p+1));
-                    p += 2;
+                    // Only escapable characters (ASCII punctuation) consume the backslash
+                    if (is_escapable_char(*(p+1))) {
+                        // Include just the escaped character
+                        stringbuf_append_char(title_buf, *(p+1));
+                        p += 2;
+                    } else {
+                        // Not escapable - include both backslash and character
+                        stringbuf_append_char(title_buf, *p);
+                        p++;
+                    }
                 } else {
                     stringbuf_append_char(title_buf, *p);
                     p++;

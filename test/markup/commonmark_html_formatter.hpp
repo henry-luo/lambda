@@ -262,28 +262,77 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
 
         // Check if li contains only text/inline or block elements
         bool has_block = false;
+        bool first_is_text = false;
+        int block_start_index = -1;
+
+        // Helper to check if a tag is a block-level element
+        auto is_block_tag = [](const char* tag) {
+            return tag && (strcmp(tag, "p") == 0 ||
+                          strcmp(tag, "ul") == 0 ||
+                          strcmp(tag, "ol") == 0 ||
+                          strcmp(tag, "blockquote") == 0 ||
+                          strcmp(tag, "hr") == 0 ||
+                          strcmp(tag, "thematic_break") == 0 ||
+                          strcmp(tag, "pre") == 0 ||
+                          strcmp(tag, "code") == 0 ||
+                          strcmp(tag, "h1") == 0 ||
+                          strcmp(tag, "h2") == 0 ||
+                          strcmp(tag, "h3") == 0 ||
+                          strcmp(tag, "h4") == 0 ||
+                          strcmp(tag, "h5") == 0 ||
+                          strcmp(tag, "h6") == 0);
+        };
+
         for (int i = 0; i < elem.childCount(); i++) {
             ItemReader child = elem.childAt(i);
             if (child.isElement()) {
                 ElementReader child_elem = child.asElement();
                 const char* child_tag = child_elem.tagName();
-                if (child_tag && (strcmp(child_tag, "p") == 0 ||
-                                  strcmp(child_tag, "ul") == 0 ||
-                                  strcmp(child_tag, "ol") == 0 ||
-                                  strcmp(child_tag, "blockquote") == 0 ||
-                                  strcmp(child_tag, "hr") == 0 ||
-                                  strcmp(child_tag, "thematic_break") == 0 ||
-                                  strcmp(child_tag, "pre") == 0 ||
-                                  strcmp(child_tag, "code") == 0)) {
+                if (is_block_tag(child_tag)) {
                     has_block = true;
-                    break;
+                    if (block_start_index < 0) block_start_index = i;
                 }
+            } else if (child.isString() && i == 0) {
+                first_is_text = true;
             }
         }
 
         if (has_block) {
-            stringbuf_append_char(sb, '\n');
-            format_cm_children(ctx, elem);
+            // CommonMark: For loose lists and mixed content, handle formatting carefully
+            bool previous_was_text = false;
+            bool first_child = true;
+
+            for (int i = 0; i < elem.childCount(); i++) {
+                ItemReader child = elem.childAt(i);
+                if (child.isElement()) {
+                    ElementReader child_elem = child.asElement();
+                    const char* child_tag = child_elem.tagName();
+                    bool is_block = is_block_tag(child_tag);
+
+                    // For tight lists with nested sublists: <li>foo\n<ul>
+                    // Add newline only if this block follows inline text
+                    if (is_block && previous_was_text) {
+                        stringbuf_append_char(sb, '\n');
+                    }
+                    // For first block element, just add newline (loose list case)
+                    else if (is_block && first_child) {
+                        stringbuf_append_char(sb, '\n');
+                    }
+
+                    format_cm_element(ctx, child_elem);
+                    previous_was_text = false;
+                } else if (child.isString()) {
+                    String* str = child.asString();
+                    if (has_valid_content(str)) {
+                        format_cm_text(ctx, str->chars, str->len);
+                        previous_was_text = true;
+                    }
+                } else {
+                    format_cm_item(ctx, child);
+                    previous_was_text = false;
+                }
+                first_child = false;
+            }
         } else {
             format_cm_text_children(ctx, elem);
         }
