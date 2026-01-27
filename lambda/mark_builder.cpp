@@ -140,15 +140,24 @@ Item MarkBuilder::createNameItem(const char* name) {
 }
 
 Item MarkBuilder::createSymbolItem(const char* symbol) {
-    return (Item){.item = y2it(createSymbol(symbol))};
+    String* sym = createSymbol(symbol);
+    // Empty symbol maps to null
+    if (sym == &EMPTY_STRING) return createNull();
+    return (Item){.item = y2it(sym)};
 }
 
 Item MarkBuilder::createStringItem(const char* str) {
-    return (Item){.item = s2it(createString(str))};
+    String* s = createString(str);
+    // Empty string maps to null
+    if (s == &EMPTY_STRING) return createNull();
+    return (Item){.item = s2it(s)};
 }
 
 Item MarkBuilder::createStringItem(const char* str, size_t len) {
-    return (Item){.item = s2it(createString(str, len))};
+    String* s = createString(str, len);
+    // Empty string maps to null
+    if (s == &EMPTY_STRING) return createNull();
+    return (Item){.item = s2it(s)};
 }
 
 //------------------------------------------------------------------------------
