@@ -51,6 +51,10 @@ enum EnumTypeId {
 
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
+    
+    // JavaScript-specific types (added at end to preserve existing type IDs)
+    LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
+    
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 };
 typedef uint8_t TypeId;
@@ -225,6 +229,7 @@ void* heap_calloc(size_t size, TypeId type_id);
 
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
+#define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 #define ITEM_TRUE           ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1
