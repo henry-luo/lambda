@@ -100,29 +100,38 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
     if (*p != ':') return false;
     p++;
 
-    // Skip optional whitespace (space, tab, up to one newline)
+    // Skip optional whitespace (space, tab)
     while (*p == ' ' || *p == '\t') p++;
 
-    bool had_newline = false;
-    if (*p == '\n' || *p == '\r') {
-        had_newline = true;
-        if (*p == '\r' && *(p+1) == '\n') p++;
-        p++;
-        // After newline, skip more whitespace
-        while (*p == ' ' || *p == '\t') p++;
+    // Track additional lines consumed beyond the first line
+    size_t lines_consumed = 0;
 
-        // If we're at another newline, the URL is missing
-        if (*p == '\n' || *p == '\r' || *p == '\0') {
-            return false;
+    // If at end of line/string, URL might be on next line
+    if (*p == '\n' || *p == '\r' || *p == '\0') {
+        // Check if URL is on next line
+        size_t next_line_idx = parser->current_line + 1;
+        if (next_line_idx >= parser->line_count) {
+            return false;  // no more lines
         }
+        const char* next_line = parser->lines[next_line_idx];
+        const char* np = next_line;
+        while (*np == ' ' || *np == '\t') np++;
+        if (*np == '\0' || *np == '\n' || *np == '\r') {
+            return false;  // next line is blank, no URL
+        }
+        // URL is on next line
+        p = np;
+        lines_consumed = 1;
     }
 
     // Parse URL
     const char* url_start = nullptr;
     const char* url_end = nullptr;
+    bool was_angle_bracketed = false;
 
     if (*p == '<') {
-        // URL in angle brackets
+        // URL in angle brackets - can be empty
+        was_angle_bracketed = true;
         p++;
         url_start = p;
         while (*p && *p != '>' && *p != '\n' && *p != '\r') {
@@ -155,8 +164,9 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
         url_end = p;
     }
 
-    if (url_start == url_end) {
-        return false; // empty URL
+    // Empty URL is only invalid for bare URLs, not angle-bracketed ones
+    if (url_start == url_end && !was_angle_bracketed) {
+        return false; // empty bare URL
     }
 
     // Skip whitespace before optional title
@@ -166,48 +176,132 @@ bool parse_link_definition(MarkupParser* parser, const char* line) {
     const char* title_start = nullptr;
     const char* title_end = nullptr;
 
-    // Check for title on same line
+    // Check for title on same line or next line
+    if (*p == '\n' || *p == '\r' || *p == '\0') {
+        // Title might be on next line
+        size_t next_line_idx = parser->current_line + lines_consumed + 1;
+        if (next_line_idx < parser->line_count) {
+            const char* next_line = parser->lines[next_line_idx];
+            const char* np = next_line;
+            while (*np == ' ' || *np == '\t') np++;
+
+            if (*np == '"' || *np == '\'' || *np == '(') {
+                // Title starts on next line
+                p = np;
+                lines_consumed++;
+            }
+        }
+    }
+
     if (*p == '"' || *p == '\'' || *p == '(') {
+        char open_char = *p;
         char close_char = (*p == '(') ? ')' : *p;
         p++;
         title_start = p;
 
-        while (*p && *p != close_char && *p != '\n' && *p != '\r') {
-            if (*p == '\\' && *(p+1)) {
-                p += 2;
-            } else {
+        // Title may span multiple lines
+        StringBuf* title_buf = parser->sb;
+        stringbuf_reset(title_buf);
+
+        size_t extra_lines = 0;
+        bool found_close = false;
+
+        // Collect title content, potentially across multiple lines
+        while (!found_close) {
+            // Check if we're at end of current line without finding close
+            while (*p && *p != close_char && *p != '\n' && *p != '\r') {
+                if (*p == '\\' && *(p+1)) {
+                    // Include escaped character
+                    stringbuf_append_char(title_buf, *(p+1));
+                    p += 2;
+                } else {
+                    stringbuf_append_char(title_buf, *p);
+                    p++;
+                }
+            }
+
+            if (*p == close_char) {
+                found_close = true;
+                title_end = (const char*)(intptr_t)title_buf->length;  // use length as marker
                 p++;
+            } else if (*p == '\n' || *p == '\r' || *p == '\0') {
+                // Line break or end of line - continue to next line if available
+                size_t check_line = parser->current_line + lines_consumed + extra_lines + 1;
+                if (check_line >= parser->line_count) {
+                    // No more lines, title not closed
+                    break;
+                }
+                const char* next_line = parser->lines[check_line];
+                // Check if next line is blank - blank line terminates title (invalid)
+                const char* check = next_line;
+                while (*check == ' ' || *check == '\t') check++;
+                if (*check == '\0' || *check == '\n' || *check == '\r') {
+                    // Blank line - title not valid
+                    break;
+                }
+                // Add newline to title content
+                stringbuf_append_char(title_buf, '\n');
+                extra_lines++;
+                p = next_line;
+                // Don't skip leading whitespace - include it in title
+            } else {
+                // Should not reach here
+                break;
             }
         }
 
-        if (*p != close_char) {
-            // Title not closed on this line - might span lines, ignore for now
-            title_start = nullptr;
+        if (found_close) {
+            // Rest of line should be whitespace only
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p != '\0' && *p != '\n' && *p != '\r') {
+                // Extra content after title - not a valid definition
+                return false;
+            }
+
+            // Update lines_consumed to include multi-line title
+            lines_consumed += extra_lines;
+
+            // Add the link definition with multi-line title
+            parser->addLinkDefinition(
+                label_start, label_end - label_start,
+                url_start, url_end - url_start,
+                title_buf->str->chars, title_buf->length
+            );
+
+            // Advance past consumed lines
+            parser->current_line += lines_consumed;
+
+            return true;
         } else {
-            title_end = p;
-            p++;
+            // Title was started but not properly closed - entire definition is invalid
+            return false;
         }
     }
 
     // Rest of line should be whitespace only
     while (*p == ' ' || *p == '\t') p++;
     if (*p != '\0' && *p != '\n' && *p != '\r') {
-        // Extra content after title - not a valid definition
+        // Extra content after URL - not a valid definition
         return false;
     }
 
     // Add the link definition to parser
-    bool added = parser->addLinkDefinition(
+    // Note: addLinkDefinition returns false for duplicates, but the syntax was valid
+    parser->addLinkDefinition(
         label_start, label_end - label_start,
         url_start, url_end - url_start,
         title_start, title_start ? (title_end - title_start) : 0
     );
 
-    if (added) {
-        parser->current_line++;
+    // Advance past consumed lines (caller will add 1 more for the first line)
+    // If lines_consumed > 0, we need to add those extra lines beyond what caller adds
+    if (lines_consumed > 0) {
+        parser->current_line += lines_consumed;
     }
 
-    return added;
+    // Return true to indicate this was a valid link definition (syntax-wise)
+    // even if it was a duplicate and not added to the collection
+    return true;
 }
 
 /**

@@ -74,13 +74,19 @@ public:
                         while (hash_start > info.text_start && *(hash_start - 1) == '#') {
                             hash_start--;
                         }
-                        // Must be preceded by whitespace to be closing sequence
-                        if (hash_start > info.text_start && (*(hash_start - 1) == ' ' || *(hash_start - 1) == '\t')) {
-                            info.text_end = hash_start - 1;
-                            // Trim trailing whitespace before the closing #s
-                            while (info.text_end > info.text_start &&
-                                   (*(info.text_end - 1) == ' ' || *(info.text_end - 1) == '\t')) {
-                                info.text_end--;
+                        // Must be preceded by whitespace OR be at start of content (entire content is closing #s)
+                        if (hash_start == info.text_start ||
+                            (hash_start > info.text_start && (*(hash_start - 1) == ' ' || *(hash_start - 1) == '\t'))) {
+                            if (hash_start == info.text_start) {
+                                // Entire content is just closing #s - result is empty
+                                info.text_end = info.text_start;
+                            } else {
+                                info.text_end = hash_start - 1;
+                                // Trim trailing whitespace before the closing #s
+                                while (info.text_end > info.text_start &&
+                                       (*(info.text_end - 1) == ' ' || *(info.text_end - 1) == '\t')) {
+                                    info.text_end--;
+                                }
                             }
                         }
                         break;
@@ -97,6 +103,29 @@ public:
             // (e.g., "***" followed by "---" should be hr + hr, not a setext heading)
             if (detectThematicBreak(line)) {
                 return info; // This line is a thematic break, not header text
+            }
+
+            // Setext heading content cannot start with block structure indicators
+            // (blockquotes, list items) - those take precedence
+            if (*p == '>') {
+                return info; // Blockquote marker, not setext heading content
+            }
+            // Check for list markers: -, +, *, or digits followed by . or )
+            if (*p == '-' || *p == '+' || *p == '*') {
+                const char* after = p + 1;
+                if (*after == ' ' || *after == '\t' || *after == '\0' || *after == '\r' || *after == '\n') {
+                    return info; // List marker, not setext heading content
+                }
+            }
+            if (isdigit((unsigned char)*p)) {
+                const char* d = p;
+                while (isdigit((unsigned char)*d)) d++;
+                if (*d == '.' || *d == ')') {
+                    const char* after = d + 1;
+                    if (*after == ' ' || *after == '\t' || *after == '\0' || *after == '\r' || *after == '\n') {
+                        return info; // Ordered list marker, not setext heading content
+                    }
+                }
             }
 
             // Check the underline (next_line)
