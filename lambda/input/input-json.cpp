@@ -321,8 +321,7 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
             return parse_array(ctx, json, depth);
         case '"': {
             String* str = parse_string(ctx, json);
-            if (!str) return ctx.builder.createNull();
-            if (str == &EMPTY_STRING) return ctx.builder.createNull();
+            if (!str) return ctx.builder.createNull();  // empty string maps to null
             return (Item){.item = s2it(str)};
         }
         case 't':

@@ -136,7 +136,7 @@ static String* parse_raw_value(InputContext& ctx, const char **ini) {
     if (sb->length > 0) {
         return builder.createString(sb->str->chars, sb->length);
     }
-    return &EMPTY_STRING;
+    return nullptr;  // empty string maps to null
 }
 
 static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
@@ -279,7 +279,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
         tracker.advance(1);
 
         String* value_str = parse_raw_value(ctx, ini);
-        Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(ctx, value_str)) : (Item){.item = 0};
+        Item value = value_str ? parse_typed_value(ctx, value_str) : (Item){.item = ITEM_NULL};
         ctx.builder.putToMap(section_map, key, value);
 
         skip_to_newline(ini, &tracker);

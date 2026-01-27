@@ -1219,14 +1219,7 @@ static void format_item(StringBuf* sb, Item item) {
     case LMD_TYPE_STRING: {
         String* str = item.get_string();
         if (str) {
-            // Check if this is the EMPTY_STRING and handle it specially
-            if (str == &EMPTY_STRING) {
-                // Don't output anything for empty string
-            } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-                // Don't output anything for lambda.nil content
-            } else {
-                format_text_with_escape(sb, str, &MARKDOWN_ESCAPE_CONFIG);
-            }
+            format_text_with_escape(sb, str, &MARKDOWN_ESCAPE_CONFIG);
         }
         break;
     }
@@ -1267,14 +1260,7 @@ static void format_item_reader(MarkdownContext& ctx, const ItemReader& item) {
     if (item.isString()) {
         String* str = item.asString();
         if (str) {
-            // check if this is the EMPTY_STRING and handle it specially
-            if (str == &EMPTY_STRING) {
-                // don't output anything for empty string
-            } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-                // don't output anything for lambda.nil content
-            } else {
-                format_text(ctx, str);
-            }
+            format_text(ctx, str);
         }
     }
     else if (item.isSymbol()) {
