@@ -425,6 +425,8 @@ static Item parse_indented_code_block(MarkupParser* parser, const char* line) {
  *
  * Creates a <code> element with type="block" attribute.
  * Optionally adds a language attribute for syntax highlighting.
+ *
+ * For AsciiDoc, also handles [source,lang] attribute blocks followed by ----
  */
 Item parse_code_block(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
@@ -432,6 +434,32 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
     }
 
     FormatAdapter* adapter = parser->adapter();
+    char asciidoc_lang[32] = {0};
+
+    // Check for AsciiDoc [source,lang] attribute block
+    if (parser->config.format == Format::ASCIIDOC && line[0] == '[') {
+        const char* p = line + 1;
+        if (strncmp(p, "source", 6) == 0) {
+            p += 6;
+            // Check for optional language
+            if (*p == ',') {
+                p++;
+                const char* lang_start = p;
+                while (*p && *p != ']' && *p != ',' && *p != '\n') p++;
+                size_t lang_len = p - lang_start;
+                if (lang_len > 0 && lang_len < sizeof(asciidoc_lang)) {
+                    memcpy(asciidoc_lang, lang_start, lang_len);
+                    asciidoc_lang[lang_len] = '\0';
+                }
+            }
+            // Skip to next line (should be ----)
+            parser->current_line++;
+            if (parser->current_line >= parser->line_count) {
+                return Item{.item = ITEM_UNDEFINED};
+            }
+            line = parser->lines[parser->current_line];
+        }
+    }
 
     // Check for indented code block first (4+ spaces)
     const char* indent_content = nullptr;
@@ -492,6 +520,12 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
         extract_language(line, lang, sizeof(lang));
         // Process backslash escapes and entity references
         process_escapes_and_entities(lang, strlen(lang));
+    }
+
+    // Use AsciiDoc [source,lang] language if present and no fence info
+    if (asciidoc_lang[0] && !lang[0]) {
+        strncpy(lang, asciidoc_lang, sizeof(lang) - 1);
+        lang[sizeof(lang) - 1] = '\0';
     }
 
     // Add language attribute if present
