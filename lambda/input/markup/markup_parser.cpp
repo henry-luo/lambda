@@ -460,7 +460,8 @@ void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size
 bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
                                       const char* url, size_t url_len,
                                       const char* title, size_t title_len) {
-    if (!label || label_len == 0 || !url || url_len == 0) {
+    // Label is required, URL can be empty (e.g., [foo]: <>)
+    if (!label || label_len == 0) {
         return false;
     }
 
@@ -488,7 +489,12 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
     def.label[sizeof(def.label) - 1] = '\0';
 
     // unescape backslash escapes in URL and title
-    unescape_to_buffer(url, url_len, def.url, sizeof(def.url));
+    // Handle empty URLs (e.g., [foo]: <>)
+    if (url && url_len > 0) {
+        unescape_to_buffer(url, url_len, def.url, sizeof(def.url));
+    } else {
+        def.url[0] = '\0';  // empty URL
+    }
 
     if (title && title_len > 0) {
         unescape_to_buffer(title, title_len, def.title, sizeof(def.title));
