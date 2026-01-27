@@ -34,14 +34,35 @@ void formatter_context_destroy(FormatterContext* ctx) {
 // Formatter Dispatcher Implementation
 // ==============================================================================
 
+// entry stored in the hashmap: type name + function pointer
+typedef struct {
+    const char* type_name;
+    ElementFormatterFunc handler;
+} HandlerEntry;
+
+// hash function for HandlerEntry - hashes the type name
+static uint64_t handler_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const HandlerEntry* entry = (const HandlerEntry*)item;
+    return hashmap_sip(entry->type_name, strlen(entry->type_name), seed0, seed1);
+}
+
+// compare function for HandlerEntry - compares type names
+static int handler_entry_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const HandlerEntry* ea = (const HandlerEntry*)a;
+    const HandlerEntry* eb = (const HandlerEntry*)b;
+    return strcmp(ea->type_name, eb->type_name);
+}
+
 FormatterDispatcher* dispatcher_create(Pool* pool) {
     if (!pool) return NULL;
     
     FormatterDispatcher* dispatcher = (FormatterDispatcher*)pool_alloc(pool, sizeof(FormatterDispatcher));
     if (!dispatcher) return NULL;
     
-    // use C++ new for the unordered_map
-    dispatcher->type_handlers = new std::unordered_map<std::string, ElementFormatterFunc>();
+    // create hashmap with initial capacity of 32
+    dispatcher->type_handlers = hashmap_new(sizeof(HandlerEntry), 32, 0, 0,
+        handler_entry_hash, handler_entry_compare, NULL, NULL);
     if (!dispatcher->type_handlers) {
         return NULL;
     }
@@ -55,8 +76,11 @@ FormatterDispatcher* dispatcher_create(Pool* pool) {
 void dispatcher_register(FormatterDispatcher* d, const char* type, ElementFormatterFunc fn) {
     if (!d || !type || !fn || !d->type_handlers) return;
     
-    // store function pointer in unordered_map
-    (*d->type_handlers)[std::string(type)] = fn;
+    // store function pointer in hashmap
+    HandlerEntry entry;
+    entry.type_name = type;  // assuming type is a static or pooled string
+    entry.handler = fn;
+    hashmap_set(d->type_handlers, &entry);
 }
 
 void dispatcher_set_default(FormatterDispatcher* d, ElementFormatterFunc fn) {
@@ -77,11 +101,14 @@ void dispatcher_format(FormatterDispatcher* d, StringBuf* sb, const ElementReade
     }
     
     // look up handler in map
-    auto it = d->type_handlers->find(std::string(tag_name));
+    HandlerEntry key;
+    key.type_name = tag_name;
+    key.handler = NULL;
+    const HandlerEntry* found = (const HandlerEntry*)hashmap_get(d->type_handlers, &key);
     
-    if (it != d->type_handlers->end()) {
+    if (found) {
         // found specific handler
-        it->second(sb, elem);
+        found->handler(sb, elem);
     } else if (d->default_handler) {
         // use default handler
         d->default_handler(sb, elem);
@@ -93,7 +120,7 @@ void dispatcher_destroy(FormatterDispatcher* d) {
     if (!d) return;
     
     if (d->type_handlers) {
-        delete d->type_handlers;
+        hashmap_free(d->type_handlers);
         d->type_handlers = NULL;
     }
     
