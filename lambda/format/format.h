@@ -28,31 +28,6 @@ String* format_jsx(Pool* pool, Item root_item);
 String* format_mdx(Pool* pool, Item root_item);
 String* format_latex(Pool* pool, Item root_item);
 
-// LaTeX to HTML formatter (v2) and full document formatter (v3.1)
-#ifdef __cplusplus
-namespace lambda {
-    // Generate HTML fragment from LaTeX input
-    Item format_latex_html_v2(struct Input* input, bool text_mode);
-    
-    // Generate complete HTML document with CSS and fonts
-    // doc_class: document class (e.g., "article", "book") - defaults to "article"
-    // asset_base_url: base URL for external CSS/font files, or NULL for embedded
-    // embed_css: if true and asset_base_url is NULL, embed CSS inline
-    std::string format_latex_html_v2_document(struct Input* input, const char* doc_class,
-                                               const char* asset_base_url, bool embed_css);
-}
-extern "C" {
-#endif
-
-// C API wrappers for LaTeX to HTML
-Item format_latex_html_v2_c(struct Input* input, int text_mode);
-const char* format_latex_html_v2_document_c(struct Input* input, const char* doc_class,
-                                             const char* asset_base_url, int embed_css);
-
-#ifdef __cplusplus
-}
-#endif
-
 void format_rst(StringBuf* sb, Item root_item);
 String* format_rst_string(Pool* pool, Item root_item);
 void format_org(StringBuf* sb, Item root_item);
