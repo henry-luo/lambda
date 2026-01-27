@@ -82,6 +82,15 @@ Item js_unary_minus(Item operand);  // -x (negate)
 Item js_typeof(Item value);         // typeof x
 
 // =============================================================================
+// Object Functions
+// =============================================================================
+
+Item js_new_object(void);
+Item js_property_get(Item object, Item key);
+Item js_property_set(Item object, Item key, Item value);
+Item js_property_access(Item object, Item key);
+
+// =============================================================================
 // Array Functions
 // =============================================================================
 
@@ -90,6 +99,13 @@ Item js_array_get(Item array, Item index);
 Item js_array_set(Item array, Item index, Item value);
 int js_array_length(Item array);
 Item js_array_push(Item array, Item value);
+
+// =============================================================================
+// Function Functions
+// =============================================================================
+
+Item js_new_function(void* func_ptr, int param_count);
+Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 
 // =============================================================================
 // Console Functions
