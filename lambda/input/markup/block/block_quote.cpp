@@ -157,6 +157,10 @@ static bool is_lazy_continuation(const char* line) {
         }
     }
 
+    // Note: Setext heading underlines (=== or ---) ARE allowed as lazy continuation
+    // because they can only form headings inside the same container, not across containers.
+    // A line of === following a lazy continued paragraph is just more paragraph text.
+
     // Cannot be fenced code
     if (*p == '`' || *p == '~') {
         int count = 0;
@@ -211,10 +215,14 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         const char* current = parser->lines[parser->current_line];
         int line_depth = count_quote_depth(current);
 
+        log_debug("blockquote collect: line=%d depth=%d base=%d last_empty=%d content='%s'",
+                  (int)parser->current_line, line_depth, base_depth, last_was_empty_quote, current);
+
         // Empty line (not even >) - ends the blockquote
         // CommonMark: A blank line (without >) separates blockquotes
         if (is_empty_line(current)) {
             // End of this blockquote
+            log_debug("blockquote: empty line, ending");
             break;
         }
 
@@ -222,15 +230,19 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         if (line_depth < base_depth) {
             // After an empty quote line, lazy continuation is NOT allowed
             if (last_was_empty_quote) {
+                log_debug("blockquote: after empty quote, no lazy continuation");
                 break;
             }
             // Check for lazy continuation (only for paragraph content)
-            if (!content_lines.empty() && is_lazy_continuation(current)) {
+            bool lazy = is_lazy_continuation(current);
+            log_debug("blockquote: lazy check = %d, content_lines.size = %zu", lazy, content_lines.size());
+            if (!content_lines.empty() && lazy) {
                 content_lines.push_back(strdup(current));
                 parser->current_line++;
                 continue;
             }
             // Not a lazy continuation, end the quote
+            log_debug("blockquote: not lazy, ending");
             break;
         }
 
