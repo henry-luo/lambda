@@ -377,6 +377,62 @@ TEST_F(JsonTests, SimpleJsonRoundtrip) {
     return;
 }
 
+// Test empty string handling in JSON
+// Per Lambda design: empty strings ("") map to null, empty keys ("") map to "''"
+TEST_F(JsonTests, JsonEmptyStringHandling) {
+    printf("\n=== Testing JSON empty string handling ===\n");
+
+    // JSON with empty string value and empty key
+    const char* json_with_empty = "{\n"
+        "  \"name\": \"test\",\n"
+        "  \"empty_value\": \"\",\n"
+        "  \"\": \"empty_key_value\"\n"
+        "}";
+
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("json");
+    String* flavor_str = NULL;
+
+    // Get current directory for URL resolution
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("empty_test.json", cwd);
+
+    // Make a mutable copy of the JSON string
+    char* json_copy = strdup(json_with_empty);
+
+    printf("Parsing JSON with empty strings...\n");
+
+    // Parse the JSON content
+    Input* parsed_input = input_from_source(json_copy, dummy_url, type_str, flavor_str);
+    ASSERT_NE(parsed_input, nullptr) << "Failed to parse JSON with empty strings";
+
+    // Get the root item from the parsed input
+    Item root_item = parsed_input->root;
+    
+    // Check that root is a map
+    EXPECT_EQ(get_type_id(root_item), LMD_TYPE_MAP);
+
+    printf("JSON with empty strings parsed successfully\n");
+
+    // Format back to JSON
+    String* formatted_json = format_data(root_item, type_str, flavor_str, parsed_input->pool);
+    ASSERT_NE(formatted_json, nullptr) << "Failed to format JSON data";
+
+    printf("Formatted JSON: %.*s\n", formatted_json->len, formatted_json->chars);
+
+    // Verify:
+    // 1. Empty string value should become null
+    // 2. Empty key "" should become "''"
+    EXPECT_TRUE(strstr(formatted_json->chars, "\"empty_value\":null") != nullptr ||
+                strstr(formatted_json->chars, "\"empty_value\": null") != nullptr)
+        << "Empty string value should be output as null";
+    EXPECT_TRUE(strstr(formatted_json->chars, "\"''\":") != nullptr)
+        << "Empty key should be transformed to \"''\"";
+
+    printf("JSON empty string handling test completed\n");
+    return;
+}
+
 // XML Tests
 class XmlTests : public InputRoundtripTest {};
 
