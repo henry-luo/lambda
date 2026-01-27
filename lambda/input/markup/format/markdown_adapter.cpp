@@ -290,9 +290,12 @@ public:
     bool isCodeFenceClose(const char* line, const CodeFenceInfo& open_info) override {
         const char* p = line;
 
-        // Skip up to 3 leading spaces
+        // Skip up to 3 leading spaces (CommonMark: 4+ spaces means not a closing fence)
         int indent = 0;
         while (*p == ' ' && indent < 4) { indent++; p++; }
+
+        // If line has 4+ leading spaces, it's code content, not a closing fence
+        if (indent >= 4) return false;
 
         // Must match fence character
         if (*p != open_info.fence_char) return false;

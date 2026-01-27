@@ -152,6 +152,53 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             continue;
         }
 
+        // Check for Org-mode emphasis markers (/ = ~ +)
+        if (format == Format::ORG && (*pos == '/' || *pos == '=' || *pos == '~' || *pos == '+')) {
+            // Save current buffer before trying emphasis parsing
+            char* saved_buffer = nullptr;
+            size_t saved_length = sb->length;
+            if (saved_length > 0) {
+                saved_buffer = (char*)malloc(saved_length + 1);
+                if (saved_buffer) {
+                    memcpy(saved_buffer, sb->str->chars, saved_length);
+                    saved_buffer[saved_length] = '\0';
+                }
+            }
+
+            // Try to parse Org emphasis
+            const char* try_pos = pos;
+            Item inline_item = parse_org_emphasis(parser, &try_pos, text_copy);
+
+            if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
+                // Success - flush saved buffer first, then add emphasis element
+                if (saved_buffer && saved_length > 0) {
+                    String* text_content = parser->builder.createString(saved_buffer, saved_length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                }
+                list_push((List*)span, inline_item);
+                increment_element_content_length(span);
+                pos = try_pos;  // Advance past the emphasis
+                stringbuf_reset(sb);  // Reset buffer for subsequent text
+                if (saved_buffer) free(saved_buffer);
+            } else {
+                // Emphasis parsing failed - restore saved buffer
+                stringbuf_reset(sb);
+                if (saved_buffer && saved_length > 0) {
+                    for (size_t i = 0; i < saved_length; i++) {
+                        stringbuf_append_char(sb, saved_buffer[i]);
+                    }
+                }
+                if (saved_buffer) free(saved_buffer);
+
+                // Treat marker as plain text
+                stringbuf_append_char(sb, *pos);
+                pos++;
+            }
+            continue;
+        }
+
         // Check for code span (`)
         if (*pos == '`') {
             // Flush text and parse code span
@@ -228,6 +275,16 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
                 stringbuf_reset(sb);
+            }
+
+            // Org-mode link parsing: [[url]] or [[url][description]]
+            if (format == Format::ORG && *(pos+1) == '[') {
+                Item org_link_item = parse_org_link(parser, &pos);
+                if (org_link_item.item != ITEM_ERROR && org_link_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, org_link_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
             }
 
             // MediaWiki-specific link parsing
