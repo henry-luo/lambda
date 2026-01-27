@@ -131,8 +131,7 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) 
     }
 
     if (tracker.atEnd() || tracker.current() != close_char) {
-        std::string msg = std::string("Expected closing character '") + close_char + "' for node shape";
-        ctx.addError(tracker.location(), msg);
+        ctx.addError(tracker.location(), "Expected closing character '%c' for node shape", close_char);
         return ctx.builder.createString(node_id);
     }
 
@@ -181,8 +180,7 @@ static String* parse_mermaid_label(InputContext& ctx) {
     }
 
     if (tracker.atEnd()) {
-        std::string msg = std::string("Unterminated label, expected closing '") + closing + "'";
-        ctx.addError(tracker.location(), msg);
+        ctx.addError(tracker.location(), "Unterminated label, expected closing '%c'", closing);
         return nullptr;
     }
 
@@ -263,8 +261,7 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
             }
         }
     } else {
-        std::string msg = "Invalid edge syntax, expected edge arrow like '-->', '--->', or '-.->'";;
-        ctx.addError(tracker.location(), msg);
+        ctx.addError(tracker.location(), "Invalid edge syntax, expected edge arrow like '-->', '--->', or '-.->'"  );
         return;
     }
 
