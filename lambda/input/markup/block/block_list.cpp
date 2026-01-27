@@ -13,6 +13,7 @@
  */
 #include "block_common.hpp"
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 
 namespace lambda {
@@ -78,6 +79,29 @@ char get_list_marker(const char* line) {
  */
 bool is_ordered_marker(char marker) {
     return marker == '.' || marker == ')';
+}
+
+/**
+ * get_ordered_list_start - Get the starting number of an ordered list item
+ *
+ * Returns the number before the delimiter (. or ))
+ * For example: "3. foo" returns 3
+ */
+static int get_ordered_list_start(const char* line) {
+    if (!line) return 1;
+
+    const char* pos = line;
+    skip_whitespace(&pos);
+
+    if (!isdigit(*pos)) return 1;
+
+    int number = 0;
+    while (isdigit(*pos)) {
+        number = number * 10 + (*pos - '0');
+        pos++;
+    }
+
+    return number;
 }
 
 /**
@@ -204,6 +228,18 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
         return Item{.item = ITEM_ERROR};
     }
 
+    // For ordered lists, set the start attribute if it's not 1
+    if (is_ordered) {
+        int start_num = get_ordered_list_start(first_line);
+        if (start_num != 1) {
+            char start_str[16];
+            snprintf(start_str, sizeof(start_str), "%d", start_num);
+            String* key = parser->builder.createName("start");
+            String* value = parser->builder.createString(start_str, strlen(start_str));
+            parser->builder.putToElement(list, key, Item{.item = s2it(value)});
+        }
+    }
+
     // Track list state for proper nesting
     if (parser->state.list_depth < MAX_LIST_DEPTH) {
         parser->state.list_markers[parser->state.list_depth] = marker;
@@ -245,6 +281,14 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             break;
         }
 
+        // Check if this line is a thematic break - thematic breaks end lists
+        // This must be checked before list item detection because "* * *" could be
+        // mistaken for a list item starting with *
+        FormatAdapter* adapter = parser->adapter();
+        if (adapter && adapter->detectThematicBreak(line)) {
+            break;  // Thematic break ends the list
+        }
+
         // If this is a list item at our level
         if (line_indent == base_indent && is_list_item(line)) {
             char line_marker = get_list_marker(line);
@@ -269,8 +313,18 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             // Get content after marker
             const char* item_content = get_list_item_content(line, line_is_ordered);
 
+            // Check if the content is a thematic break (e.g., "- * * *" -> list item containing <hr />)
+            // This must be checked BEFORE checking for nested list markers because "* * *" looks like a list marker
+            if (item_content && *item_content && adapter && adapter->detectThematicBreak(item_content)) {
+                // Create an <hr /> element as the list item content
+                Element* hr = create_element(parser, "hr");
+                if (hr) {
+                    list_push((List*)item, Item{.item = (uint64_t)hr});
+                    increment_element_content_length(item);
+                }
+            }
             // Check if the content itself starts with a list marker (nested list case: "- - foo")
-            if (item_content && *item_content && is_list_item(item_content)) {
+            else if (item_content && *item_content && is_list_item(item_content)) {
                 // The content is a nested list - recursively extract nested list content
                 // We directly create the nested list elements here instead of modifying parser state
 
@@ -280,6 +334,18 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
                 Element* nested_list = create_element(parser, nested_is_ordered ? "ol" : "ul");
                 if (nested_list) {
+                    // Set start attribute for nested ordered lists
+                    if (nested_is_ordered) {
+                        int start_num = get_ordered_list_start(item_content);
+                        if (start_num != 1) {
+                            char start_str[16];
+                            snprintf(start_str, sizeof(start_str), "%d", start_num);
+                            String* key = parser->builder.createName("start");
+                            String* value = parser->builder.createString(start_str, strlen(start_str));
+                            parser->builder.putToElement(nested_list, key, Item{.item = s2it(value)});
+                        }
+                    }
+
                     Element* nested_item = create_element(parser, "li");
                     if (nested_item) {
                         // Get the content after the nested marker
