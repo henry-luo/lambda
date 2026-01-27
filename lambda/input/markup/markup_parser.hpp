@@ -83,6 +83,10 @@ struct ParserState {
     bool in_quote;
     int quote_depth;
 
+    // Lazy continuation tracking (for blockquote reparsing)
+    bool* lazy_lines;  // Array marking which lines are lazy continuations
+    size_t lazy_lines_count;
+
     // Table state
     bool in_table;
     int table_columns;
@@ -107,6 +111,9 @@ struct ParserState {
 
         in_quote = false;
         quote_depth = 0;
+
+        lazy_lines = nullptr;
+        lazy_lines_count = 0;
 
         in_table = false;
         table_columns = 0;

@@ -113,8 +113,8 @@ static bool is_lazy_continuation(const char* line) {
     int leading_spaces = 0;
     while (*p == ' ') { leading_spaces++; p++; }
 
-    // Cannot be indented code block (4+ spaces)
-    if (leading_spaces >= 4) return false;
+    // NOTE: Indented code blocks (4+ spaces) DO NOT interrupt paragraphs
+    // So they ARE valid lazy continuation lines - don't reject them
 
     // Cannot be blank
     if (!*p || *p == '\n' || *p == '\r') return false;
@@ -122,27 +122,30 @@ static bool is_lazy_continuation(const char* line) {
     // Cannot start with >
     if (*p == '>') return false;
 
-    // Cannot start with # (header)
-    if (*p == '#') return false;
+    // Cannot start with # (header) - but only if within 3 spaces
+    if (leading_spaces < 4 && *p == '#') return false;
 
-    // Cannot start with < (HTML block)
-    if (*p == '<') return false;
+    // Cannot start with < (HTML block) - but only if within 3 spaces
+    if (leading_spaces < 4 && *p == '<') return false;
 
     // Cannot be list item (-, *, + followed by space, or digit followed by . or ))
-    if ((*p == '-' || *p == '*' || *p == '+') && (*(p+1) == ' ' || *(p+1) == '\t')) {
-        return false;  // unordered list item
-    }
-    // Ordered list check
-    if (isdigit(*p)) {
-        const char* dig = p;
-        while (isdigit(*dig)) dig++;
-        if ((*dig == '.' || *dig == ')') && (*(dig+1) == ' ' || *(dig+1) == '\t' || *(dig+1) == '\0')) {
-            return false;  // ordered list item
+    // But only if within 3 spaces indent
+    if (leading_spaces < 4) {
+        if ((*p == '-' || *p == '*' || *p == '+') && (*(p+1) == ' ' || *(p+1) == '\t')) {
+            return false;  // unordered list item
+        }
+        // Ordered list check
+        if (isdigit(*p)) {
+            const char* dig = p;
+            while (isdigit(*dig)) dig++;
+            if ((*dig == '.' || *dig == ')') && (*(dig+1) == ' ' || *(dig+1) == '\t' || *(dig+1) == '\0')) {
+                return false;  // ordered list item
+            }
         }
     }
 
-    // Cannot be thematic break (---, ***, ___)
-    if (*p == '-' || *p == '*' || *p == '_') {
+    // Cannot be thematic break (---, ***, ___) - but only if within 3 spaces
+    if (leading_spaces < 4 && (*p == '-' || *p == '*' || *p == '_')) {
         // check if it's a thematic break
         char marker = *p;
         int count = 0;
@@ -161,10 +164,11 @@ static bool is_lazy_continuation(const char* line) {
     // because they can only form headings inside the same container, not across containers.
     // A line of === following a lazy continued paragraph is just more paragraph text.
 
-    // Cannot be fenced code
-    if (*p == '`' || *p == '~') {
+    // Cannot be fenced code - but only if within 3 spaces
+    if (leading_spaces < 4 && (*p == '`' || *p == '~')) {
+        const char* fp = p;
         int count = 0;
-        while (*p == '`' || *p == '~') { count++; p++; }
+        while (*fp == '`' || *fp == '~') { count++; fp++; }
         if (count >= 3) return false;
     }
 
@@ -209,14 +213,23 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
 
     // Collect all content lines for this blockquote
     std::vector<char*> content_lines;
+    std::vector<bool> is_lazy_line;  // Track which lines were lazy continuations
     bool last_was_empty_quote = false;  // Tracks if previous line was just ">"
+
+    // Track if we're in a fenced code block - lazy continuation not allowed for code blocks
+    bool in_fenced_code = false;
+    char fence_char = 0;
+    int fence_length = 0;
+
+    // Track if last content was indented code - lazy with 4+ spaces not allowed after it
+    bool last_was_indented_code = false;
 
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
         int line_depth = count_quote_depth(current);
 
-        log_debug("blockquote collect: line=%d depth=%d base=%d last_empty=%d content='%s'",
-                  (int)parser->current_line, line_depth, base_depth, last_was_empty_quote, current);
+        log_debug("blockquote collect: line=%d depth=%d base=%d last_empty=%d in_fenced=%d content='%s'",
+                  (int)parser->current_line, line_depth, base_depth, last_was_empty_quote, in_fenced_code, current);
 
         // Empty line (not even >) - ends the blockquote
         // CommonMark: A blank line (without >) separates blockquotes
@@ -233,11 +246,30 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
                 log_debug("blockquote: after empty quote, no lazy continuation");
                 break;
             }
+            // Lazy continuation is NOT allowed if we're in a fenced code block
+            if (in_fenced_code) {
+                log_debug("blockquote: in fenced code, no lazy continuation");
+                break;
+            }
             // Check for lazy continuation (only for paragraph content)
             bool lazy = is_lazy_continuation(current);
+
+            // If last content was indented code, and this line has 4+ spaces,
+            // it's a separate indented code block, not lazy continuation
+            if (last_was_indented_code) {
+                const char* p = current;
+                int spaces = 0;
+                while (*p == ' ') { spaces++; p++; }
+                if (spaces >= 4) {
+                    log_debug("blockquote: after indented code, 4+ spaces is not lazy");
+                    lazy = false;
+                }
+            }
+
             log_debug("blockquote: lazy check = %d, content_lines.size = %zu", lazy, content_lines.size());
             if (!content_lines.empty() && lazy) {
                 content_lines.push_back(strdup(current));
+                is_lazy_line.push_back(true);  // Mark as lazy continuation
                 parser->current_line++;
                 continue;
             }
@@ -254,7 +286,42 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         while (*check == ' ' || *check == '\t') check++;
         last_was_empty_quote = (*check == '\0' || *check == '\n' || *check == '\r');
 
+        // Track fenced code blocks to prevent lazy continuation inside them
+        if (!last_was_empty_quote) {
+            const char* p = content;
+            int leading = 0;
+            while (*p == ' ' && leading < 4) { leading++; p++; }
+            if (leading < 4 && (*p == '`' || *p == '~')) {
+                char c = *p;
+                int count = 0;
+                while (*p == c) { count++; p++; }
+                if (count >= 3) {
+                    if (!in_fenced_code) {
+                        // Starting a fenced code block
+                        in_fenced_code = true;
+                        fence_char = c;
+                        fence_length = count;
+                    } else if (c == fence_char && count >= fence_length) {
+                        // Closing fence
+                        while (*p == ' ' || *p == '\t') p++;
+                        if (*p == '\0' || *p == '\n' || *p == '\r') {
+                            in_fenced_code = false;
+                        }
+                    }
+                }
+            }
+
+            // Track if this line is indented code (4+ leading spaces, not in fenced code)
+            // Reset tracking since we're processing a quote-prefixed line
+            if (!in_fenced_code && leading >= 4) {
+                last_was_indented_code = true;
+            } else {
+                last_was_indented_code = false;
+            }
+        }
+
         content_lines.push_back(strdup(content));
+        is_lazy_line.push_back(false);  // Not a lazy continuation
         parser->current_line++;
     }
 
@@ -263,19 +330,25 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         // Create a temporary array of line pointers
         size_t num_lines = content_lines.size();
         char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+        bool* lazy_array = (bool*)malloc(sizeof(bool) * num_lines);
         for (size_t i = 0; i < num_lines; i++) {
             lines_array[i] = content_lines[i];
+            lazy_array[i] = is_lazy_line[i];
         }
 
         // Save current parser state
         char** saved_lines = parser->lines;
         size_t saved_line_count = parser->line_count;
         size_t saved_current_line = parser->current_line;
+        bool* saved_lazy_lines = parser->state.lazy_lines;
+        size_t saved_lazy_count = parser->state.lazy_lines_count;
 
         // Set up parser to process the content lines
         parser->lines = lines_array;
         parser->line_count = num_lines;
         parser->current_line = 0;
+        parser->state.lazy_lines = lazy_array;
+        parser->state.lazy_lines_count = num_lines;
 
         // Parse block elements from the content
         while (parser->current_line < parser->line_count) {
@@ -285,6 +358,19 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
             if (is_empty_line(content_line)) {
                 parser->current_line++;
                 continue;
+            }
+
+            // Check for link definition first - these should be consumed silently
+            // (they were already added to the link map during pre-scan)
+            if (is_link_definition_start(content_line)) {
+                int saved = parser->current_line;
+                if (parse_link_definition(parser, content_line)) {
+                    // Link definition was successfully parsed - skip it
+                    // parse_link_definition already advanced current_line for multi-line defs
+                    parser->current_line++;
+                    continue;
+                }
+                parser->current_line = saved;
             }
 
             // Detect block type of the stripped content
@@ -335,12 +421,15 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         parser->lines = saved_lines;
         parser->line_count = saved_line_count;
         parser->current_line = saved_current_line;
+        parser->state.lazy_lines = saved_lazy_lines;
+        parser->state.lazy_lines_count = saved_lazy_count;
 
-        // Free the content lines and array
+        // Free the content lines and arrays
         for (size_t i = 0; i < num_lines; i++) {
             free(lines_array[i]);
         }
         free(lines_array);
+        free(lazy_array);
     }
 
     return Item{.item = (uint64_t)quote};
