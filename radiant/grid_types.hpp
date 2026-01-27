@@ -18,12 +18,16 @@
  *
  * The TrackCounts struct tracks implicit and explicit track counts,
  * enabling coordinate conversion between systems.
+ *
+ * TODO: std::* Migration Plan (Phase 5+)
+ * - <algorithm> include for std::min/std::max → MIN/MAX macros
+ * - Uses mostly C types already, minimal migration needed
  */
 
 #ifdef __cplusplus
 
 #include <cstdint>
-#include <algorithm>
+#include <algorithm>  // TODO: Replace with MIN/MAX macros
 #include <cassert>
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)

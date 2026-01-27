@@ -11,6 +11,15 @@
  * 1. Type conversion functions between old and new representations
  * 2. Integration helpers that use the new algorithms with existing data structures
  * 3. Migration path utilities for incremental adoption
+ *
+ * TODO: std::* Migration Plan (Phase 5+) - COMPLEX
+ * - std::vector<EnhancedGridTrack> → Pool-allocated arrays with count
+ * - std::vector<GridItemInfo> → ArrayList* or fixed arrays
+ * - std::vector<GridItemContribution> → ArrayList*
+ * - std::pair<int, int> → Simple struct { int first; int second; }
+ * - std::min/std::max → MIN_INT/MAX_INT macros
+ * - std::optional (if used) → Pointer + null check pattern
+ * Estimated effort: Major refactoring (~400+ lines)
  */
 
 // IMPORTANT: Include grid.hpp first, then undef macros, then include enhanced headers

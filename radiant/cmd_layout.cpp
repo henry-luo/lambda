@@ -20,9 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <chrono>       // timing - acceptable
-#include <string>       // TODO: migrate CSS rule indexing to use HashMap/ArrayList
-#include <algorithm>    // TODO: replace std::sort with custom sort
+#include <chrono>       // timing - acceptable for profiling
 #include <unistd.h>
 #include <limits.h>
 extern "C" {
@@ -34,6 +32,8 @@ extern "C" {
 #include "../lib/log.h"
 #include "../lib/image.h"
 #include "../lib/memtrack.h"
+#include "../lib/hashmap.h"
+#include "../lib/arraylist.h"
 }
 
 #include "../lambda/input/css/css_engine.hpp"
@@ -943,10 +943,8 @@ const char* extract_inline_css(Element* root) {
 // Selector Index for O(1) Rule Lookup
 // ============================================================================
 
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-#include <string>
+// Maximum classes per selector for fixed array
+#define MAX_SELECTOR_CLASSES 16
 
 // A rule entry in the index
 struct IndexedRule {
@@ -955,15 +953,93 @@ struct IndexedRule {
     int rule_index;         // Original position for source order
 };
 
+// Hash and compare functions for string-keyed hashmap
+static uint64_t string_key_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const char* key = *(const char**)item;
+    if (!key) return 0;
+    return hashmap_xxhash3(key, strlen(key), seed0, seed1);
+}
+
+static int string_key_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const char* ka = *(const char**)a;
+    const char* kb = *(const char**)b;
+    if (!ka && !kb) return 0;
+    if (!ka) return -1;
+    if (!kb) return 1;
+    return strcmp(ka, kb);
+}
+
+// Rule list entry for hashmap: key string + ArrayList of IndexedRule
+struct RuleListEntry {
+    const char* key;        // hash key (tag/class/id name)
+    ArrayList* rules;       // ArrayList of IndexedRule*
+};
+
+static uint64_t rule_list_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const RuleListEntry* entry = (const RuleListEntry*)item;
+    if (!entry || !entry->key) return 0;
+    return hashmap_xxhash3(entry->key, strlen(entry->key), seed0, seed1);
+}
+
+static int rule_list_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RuleListEntry* ea = (const RuleListEntry*)a;
+    const RuleListEntry* eb = (const RuleListEntry*)b;
+    if (!ea->key && !eb->key) return 0;
+    if (!ea->key) return -1;
+    if (!eb->key) return 1;
+    return strcmp(ea->key, eb->key);
+}
+
+// Hash function for CssRule pointers (for seen-set)
+static uint64_t rule_ptr_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const CssRule* ptr = *(const CssRule**)item;
+    return hashmap_xxhash3(&ptr, sizeof(ptr), seed0, seed1);
+}
+
+static int rule_ptr_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const CssRule* pa = *(const CssRule**)a;
+    const CssRule* pb = *(const CssRule**)b;
+    if (pa == pb) return 0;
+    return (pa < pb) ? -1 : 1;
+}
+
 // Selector index for fast rule lookup
 struct SelectorIndex {
-    std::unordered_map<std::string, std::vector<IndexedRule>> by_tag;      // rules indexed by tag name
-    std::unordered_map<std::string, std::vector<IndexedRule>> by_class;    // rules indexed by class
-    std::unordered_map<std::string, std::vector<IndexedRule>> by_id;       // rules indexed by id
-    std::vector<IndexedRule> universal;                                     // rules that match any element (*, etc.)
-    std::vector<CssRule*> media_rules;                                      // @media rules requiring runtime evaluation
+    HashMap* by_tag;        // RuleListEntry: rules indexed by tag name
+    HashMap* by_class;      // RuleListEntry: rules indexed by class
+    HashMap* by_id;         // RuleListEntry: rules indexed by id
+    ArrayList* universal;   // IndexedRule*: rules that match any element (*, etc.)
+    ArrayList* media_rules; // CssRule*: @media rules requiring runtime evaluation
     Pool* pool;
 };
+
+// Helper to add a rule to a hashmap bucket
+static void add_rule_to_map(HashMap* map, const char* key, IndexedRule* entry, Pool* pool) {
+    RuleListEntry search = { .key = key, .rules = nullptr };
+    RuleListEntry* existing = (RuleListEntry*)hashmap_get(map, &search);
+    
+    if (existing) {
+        // Add to existing list
+        arraylist_append(existing->rules, entry);
+    } else {
+        // Create new list
+        ArrayList* list = arraylist_new(8);
+        arraylist_append(list, entry);
+        RuleListEntry new_entry = { .key = key, .rules = list };
+        hashmap_set(map, &new_entry);
+    }
+}
+
+// Helper to get rules from a hashmap bucket
+static ArrayList* get_rules_from_map(HashMap* map, const char* key) {
+    if (!map || !key) return nullptr;
+    RuleListEntry search = { .key = key, .rules = nullptr };
+    RuleListEntry* entry = (RuleListEntry*)hashmap_get(map, &search);
+    return entry ? entry->rules : nullptr;
+}
 
 // Get the key selector (rightmost compound selector) from a selector
 static CssCompoundSelector* get_key_selector(CssSelector* selector) {
@@ -971,14 +1047,15 @@ static CssCompoundSelector* get_key_selector(CssSelector* selector) {
     return selector->compound_selectors[selector->compound_selector_count - 1];
 }
 
-// Extract indexing keys from a compound selector
+// Extract indexing keys from a compound selector (using fixed array for classes)
 static void extract_index_keys(CssCompoundSelector* compound,
                                const char** out_tag,
-                               std::vector<const char*>& out_classes,
+                               const char** out_classes,
+                               int* out_class_count,
                                const char** out_id) {
     *out_tag = nullptr;
     *out_id = nullptr;
-    out_classes.clear();
+    *out_class_count = 0;
 
     if (!compound) return;
 
@@ -993,8 +1070,8 @@ static void extract_index_keys(CssCompoundSelector* compound,
                 }
                 break;
             case CSS_SELECTOR_TYPE_CLASS:
-                if (simple->value) {
-                    out_classes.push_back(simple->value);
+                if (simple->value && *out_class_count < MAX_SELECTOR_CLASSES) {
+                    out_classes[(*out_class_count)++] = simple->value;
                 }
                 break;
             case CSS_SELECTOR_TYPE_ID:
@@ -1010,8 +1087,15 @@ static void extract_index_keys(CssCompoundSelector* compound,
 
 // Build selector index from a stylesheet
 static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool) {
-    SelectorIndex* index = new SelectorIndex();
+    SelectorIndex* index = (SelectorIndex*)mem_calloc(1, sizeof(SelectorIndex), MEM_CAT_LAYOUT);
+    if (!index) return nullptr;
+    
     index->pool = pool;
+    index->by_tag = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
+    index->by_class = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
+    index->by_id = hashmap_new(sizeof(RuleListEntry), 32, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
+    index->universal = arraylist_new(16);
+    index->media_rules = arraylist_new(8);
 
     for (size_t rule_idx = 0; rule_idx < stylesheet->rule_count; rule_idx++) {
         CssRule* rule = stylesheet->rules[rule_idx];
@@ -1019,7 +1103,7 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
 
         // Collect media rules separately for runtime evaluation
         if (rule->type == CSS_RULE_MEDIA) {
-            index->media_rules.push_back(rule);
+            arraylist_append(index->media_rules, rule);
             continue;
         }
 
@@ -1029,50 +1113,59 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
         CssSelector* single = rule->data.style_rule.selector;
 
-        std::vector<CssSelector*> selectors_to_index;
+        // Collect selectors to index (use fixed array instead of std::vector)
+        CssSelector* selectors_to_index[64];
+        int selector_count = 0;
+        
         if (group && group->selector_count > 0) {
-            for (size_t i = 0; i < group->selector_count; i++) {
+            for (size_t i = 0; i < group->selector_count && selector_count < 64; i++) {
                 if (group->selectors[i]) {
-                    selectors_to_index.push_back(group->selectors[i]);
+                    selectors_to_index[selector_count++] = group->selectors[i];
                 }
             }
         } else if (single) {
-            selectors_to_index.push_back(single);
+            selectors_to_index[selector_count++] = single;
         }
 
-        for (CssSelector* selector : selectors_to_index) {
+        for (int si = 0; si < selector_count; si++) {
+            CssSelector* selector = selectors_to_index[si];
             CssCompoundSelector* key_compound = get_key_selector(selector);
             if (!key_compound) continue;
 
             const char* tag = nullptr;
             const char* id = nullptr;
-            std::vector<const char*> classes;
-            extract_index_keys(key_compound, &tag, classes, &id);
+            const char* classes[MAX_SELECTOR_CLASSES];
+            int class_count = 0;
+            extract_index_keys(key_compound, &tag, classes, &class_count, &id);
 
-            IndexedRule entry = { rule, selector, (int)rule_idx };
+            // Allocate IndexedRule in pool
+            IndexedRule* entry = (IndexedRule*)pool_calloc(pool, sizeof(IndexedRule));
+            entry->rule = rule;
+            entry->selector = selector;
+            entry->rule_index = (int)rule_idx;
 
             // Index by most specific key first (ID > class > tag)
             bool indexed = false;
 
             if (id) {
-                index->by_id[id].push_back(entry);
+                add_rule_to_map(index->by_id, id, entry, pool);
                 indexed = true;
             }
 
-            if (!classes.empty()) {
+            if (class_count > 0) {
                 // Index by first class (could index by all, but one is usually enough)
-                index->by_class[classes[0]].push_back(entry);
+                add_rule_to_map(index->by_class, classes[0], entry, pool);
                 indexed = true;
             }
 
             if (tag) {
-                index->by_tag[tag].push_back(entry);
+                add_rule_to_map(index->by_tag, tag, entry, pool);
                 indexed = true;
             }
 
             // If no specific key, it's a universal rule
             if (!indexed) {
-                index->universal.push_back(entry);
+                arraylist_append(index->universal, entry);
             }
         }
     }
@@ -1080,33 +1173,72 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
     return index;
 }
 
+// Callback for freeing rule lists in hashmap
+static bool free_rule_list_cb(const void* item, void* udata) {
+    (void)udata;
+    const RuleListEntry* entry = (const RuleListEntry*)item;
+    if (entry && entry->rules) {
+        arraylist_free(entry->rules);
+    }
+    return true;
+}
+
 // Free selector index
 static void free_selector_index(SelectorIndex* index) {
-    delete index;
+    if (!index) return;
+    
+    if (index->by_tag) {
+        hashmap_scan(index->by_tag, free_rule_list_cb, nullptr);
+        hashmap_free(index->by_tag);
+    }
+    if (index->by_class) {
+        hashmap_scan(index->by_class, free_rule_list_cb, nullptr);
+        hashmap_free(index->by_class);
+    }
+    if (index->by_id) {
+        hashmap_scan(index->by_id, free_rule_list_cb, nullptr);
+        hashmap_free(index->by_id);
+    }
+    if (index->universal) arraylist_free(index->universal);
+    if (index->media_rules) arraylist_free(index->media_rules);
+    
+    mem_free(index);
+}
+
+// Comparison function for qsort on IndexedRule pointers (by rule_index)
+static int compare_indexed_rules(const void* a, const void* b) {
+    const IndexedRule* ra = *(const IndexedRule**)a;
+    const IndexedRule* rb = *(const IndexedRule**)b;
+    return ra->rule_index - rb->rule_index;
 }
 
 // Get candidate rules for an element from the index
 static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
-                                std::vector<IndexedRule>& candidates) {
-    candidates.clear();
-    std::unordered_set<CssRule*> seen;  // Avoid duplicates
+                                ArrayList* candidates) {
+    // Clear candidates
+    candidates->length = 0;
+    
+    // Use hashmap for seen rules (deduplication)
+    HashMap* seen = hashmap_new(sizeof(CssRule*), 64, 0, 0, rule_ptr_hash, rule_ptr_compare, nullptr, nullptr);
 
     // Add universal rules
-    for (const auto& entry : index->universal) {
-        if (seen.find(entry.rule) == seen.end()) {
-            candidates.push_back(entry);
-            seen.insert(entry.rule);
+    for (unsigned int i = 0; i < index->universal->length; i++) {
+        IndexedRule* entry = (IndexedRule*)index->universal->data[i];
+        if (!hashmap_get(seen, &entry->rule)) {
+            arraylist_append(candidates, entry);
+            hashmap_set(seen, &entry->rule);
         }
     }
 
     // Add rules by tag
     if (elem->tag_name) {
-        auto it = index->by_tag.find(elem->tag_name);
-        if (it != index->by_tag.end()) {
-            for (const auto& entry : it->second) {
-                if (seen.find(entry.rule) == seen.end()) {
-                    candidates.push_back(entry);
-                    seen.insert(entry.rule);
+        ArrayList* tag_rules = get_rules_from_map(index->by_tag, elem->tag_name);
+        if (tag_rules) {
+            for (unsigned int i = 0; i < tag_rules->length; i++) {
+                IndexedRule* entry = (IndexedRule*)tag_rules->data[i];
+                if (!hashmap_get(seen, &entry->rule)) {
+                    arraylist_append(candidates, entry);
+                    hashmap_set(seen, &entry->rule);
                 }
             }
         }
@@ -1114,12 +1246,13 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
 
     // Add rules by ID
     if (elem->id) {
-        auto it = index->by_id.find(elem->id);
-        if (it != index->by_id.end()) {
-            for (const auto& entry : it->second) {
-                if (seen.find(entry.rule) == seen.end()) {
-                    candidates.push_back(entry);
-                    seen.insert(entry.rule);
+        ArrayList* id_rules = get_rules_from_map(index->by_id, elem->id);
+        if (id_rules) {
+            for (unsigned int i = 0; i < id_rules->length; i++) {
+                IndexedRule* entry = (IndexedRule*)id_rules->data[i];
+                if (!hashmap_get(seen, &entry->rule)) {
+                    arraylist_append(candidates, entry);
+                    hashmap_set(seen, &entry->rule);
                 }
             }
         }
@@ -1129,12 +1262,13 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
     if (elem->class_count > 0 && elem->class_names) {
         for (int i = 0; i < elem->class_count; i++) {
             if (elem->class_names[i]) {
-                auto it = index->by_class.find(elem->class_names[i]);
-                if (it != index->by_class.end()) {
-                    for (const auto& entry : it->second) {
-                        if (seen.find(entry.rule) == seen.end()) {
-                            candidates.push_back(entry);
-                            seen.insert(entry.rule);
+                ArrayList* class_rules = get_rules_from_map(index->by_class, elem->class_names[i]);
+                if (class_rules) {
+                    for (unsigned int j = 0; j < class_rules->length; j++) {
+                        IndexedRule* entry = (IndexedRule*)class_rules->data[j];
+                        if (!hashmap_get(seen, &entry->rule)) {
+                            arraylist_append(candidates, entry);
+                            hashmap_set(seen, &entry->rule);
                         }
                     }
                 }
@@ -1142,11 +1276,12 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
         }
     }
 
+    hashmap_free(seen);
+
     // Sort by rule_index to maintain source order
-    std::sort(candidates.begin(), candidates.end(),
-              [](const IndexedRule& a, const IndexedRule& b) {
-                  return a.rule_index < b.rule_index;
-              });
+    if (candidates->length > 1) {
+        qsort(candidates->data, candidates->length, sizeof(void*), compare_indexed_rules);
+    }
 }
 
 // ============================================================================
@@ -1356,17 +1491,20 @@ static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex
     g_element_count++;
 
     // Get candidate rules for this element from the index
-    std::vector<IndexedRule> candidates;
+    ArrayList* candidates = arraylist_new(32);
     get_candidate_rules(index, root, candidates);
-    g_candidate_rule_count += candidates.size();
+    g_candidate_rule_count += candidates->length;
 
     // Only check candidate rules (much fewer than all rules)
-    for (const auto& entry : candidates) {
-        apply_rule_to_dom_element(root, entry.rule, matcher, pool, engine);
+    for (unsigned int i = 0; i < candidates->length; i++) {
+        IndexedRule* entry = (IndexedRule*)candidates->data[i];
+        apply_rule_to_dom_element(root, entry->rule, matcher, pool, engine);
     }
+    arraylist_free(candidates);
 
     // Also process media rules (need runtime evaluation for each element)
-    for (CssRule* media_rule : index->media_rules) {
+    for (unsigned int i = 0; i < index->media_rules->length; i++) {
+        CssRule* media_rule = (CssRule*)index->media_rules->data[i];
         apply_rule_to_dom_element(root, media_rule, matcher, pool, engine);
     }
 
