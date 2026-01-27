@@ -470,33 +470,29 @@ TEST_F(MarkBuilderTest, AutoStringMerge) {
 //==============================================================================
 
 // Test null/empty string handling
+// Empty strings and null inputs now map to null Item (not EMPTY_STRING)
 TEST_F(MarkBuilderTest, NullAndEmptyStrings) {
     MarkBuilder builder(input);
 
-    // Null string should return EMPTY_STRING sentinel (not actually empty)
+    // Null string input should return null Item
     Item null_str = builder.createStringItem(nullptr);
-    EXPECT_EQ(get_type_id(null_str), LMD_TYPE_STRING);
-    String* str = null_str.get_string();
-    ASSERT_NE(str, nullptr);
-    // EMPTY_STRING is actually "lambda.nil" with length 10
-    EXPECT_EQ(str->len, 10);
-    EXPECT_STREQ(str->chars, "lambda.nil");
+    EXPECT_EQ(get_type_id(null_str), LMD_TYPE_NULL);
 
-    // Empty string should also return EMPTY_STRING sentinel
+    // Empty string ("") should also return null Item
     Item empty_str = builder.createStringItem("");
-    EXPECT_EQ(get_type_id(empty_str), LMD_TYPE_STRING);
-    String* str2 = empty_str.get_string();
-    ASSERT_NE(str2, nullptr);
-    EXPECT_EQ(str2->len, 10);
-    EXPECT_STREQ(str2->chars, "lambda.nil");
+    EXPECT_EQ(get_type_id(empty_str), LMD_TYPE_NULL);
 
-    // Zero-length string should also return EMPTY_STRING sentinel
+    // Zero-length string should also return null Item
     Item zero_len = builder.createStringItem("test", 0);
-    EXPECT_EQ(get_type_id(zero_len), LMD_TYPE_STRING);
-    String* str3 = zero_len.get_string();
-    ASSERT_NE(str3, nullptr);
-    EXPECT_EQ(str3->len, 10);
-    EXPECT_STREQ(str3->chars, "lambda.nil");
+    EXPECT_EQ(get_type_id(zero_len), LMD_TYPE_NULL);
+    
+    // Non-empty string should return a proper string
+    Item normal_str = builder.createStringItem("hello");
+    EXPECT_EQ(get_type_id(normal_str), LMD_TYPE_STRING);
+    String* str = normal_str.get_string();
+    ASSERT_NE(str, nullptr);
+    EXPECT_EQ(str->len, 5);
+    EXPECT_STREQ(str->chars, "hello");
 }
 
 // Test element with null tag name

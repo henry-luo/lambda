@@ -139,8 +139,16 @@
           "value": "\""
         },
         {
-          "type": "SYMBOL",
-          "name": "_string_content"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_string_content"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         },
         {
           "type": "STRING",
@@ -179,8 +187,16 @@
           "value": "'"
         },
         {
-          "type": "SYMBOL",
-          "name": "_symbol_content"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_symbol_content"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         },
         {
           "type": "STRING",
