@@ -53,16 +53,24 @@ char get_list_marker(const char* line) {
 
     // Check for unordered markers
     if (*pos == '-' || *pos == '*' || *pos == '+') {
-        // Must be followed by space
-        if (*(pos + 1) == ' ' || *(pos + 1) == '\t') {
+        // Must be followed by space, tab, or end of line (for empty items)
+        char next = *(pos + 1);
+        if (next == ' ' || next == '\t' || next == '\0' || next == '\r' || next == '\n') {
             return *pos;
         }
         return 0;
     }
 
     // Check for ordered markers (1., 2., 1), 2), etc.)
+    // CommonMark: ordered list numbers must be at most 9 digits
     if (isdigit(*pos)) {
-        while (isdigit(*pos)) pos++;
+        int digit_count = 0;
+        while (isdigit(*pos)) {
+            pos++;
+            digit_count++;
+        }
+        // Must be 1-9 digits to be a valid ordered list marker
+        if (digit_count > 9) return 0;
         if (*pos == '.' || *pos == ')') {
             char delim = *pos;
             if (*(pos + 1) == ' ' || *(pos + 1) == '\t' || *(pos + 1) == '\0') {
@@ -143,6 +151,62 @@ static const char* get_list_item_content(const char* line, bool is_ordered) {
     skip_whitespace(&pos);
 
     return pos;
+}
+
+/**
+ * build_nested_list_from_content - Recursively build nested list from inline content
+ *
+ * For cases like "- - 2. foo", builds the full nested list structure:
+ * ul > li > ol(start=2) > li > "foo"
+ */
+static Item build_nested_list_from_content(MarkupParser* parser, const char* content) {
+    if (!content || !*content) return Item{.item = ITEM_UNDEFINED};
+
+    // Check if this is a list item marker
+    char marker = get_list_marker(content);
+    if (!marker) {
+        // Not a list item, parse as inline spans
+        return parse_inline_spans(parser, content);
+    }
+
+    bool is_ordered = is_ordered_marker(marker);
+
+    // Create the list container
+    Element* list = create_element(parser, is_ordered ? "ol" : "ul");
+    if (!list) return Item{.item = ITEM_ERROR};
+
+    // Set start attribute for ordered lists
+    if (is_ordered) {
+        int start_num = get_ordered_list_start(content);
+        if (start_num != 1) {
+            char start_str[16];
+            snprintf(start_str, sizeof(start_str), "%d", start_num);
+            String* key = parser->builder.createName("start");
+            String* value = parser->builder.createString(start_str, strlen(start_str));
+            parser->builder.putToElement(list, key, Item{.item = s2it(value)});
+        }
+    }
+
+    // Create the list item
+    Element* item = create_element(parser, "li");
+    if (!item) return Item{.item = (uint64_t)list};
+
+    // Get content after the marker
+    const char* item_content = get_list_item_content(content, is_ordered);
+
+    if (item_content && *item_content) {
+        // Recursively build any further nested lists
+        Item nested = build_nested_list_from_content(parser, item_content);
+        if (nested.item != ITEM_ERROR && nested.item != ITEM_UNDEFINED) {
+            list_push((List*)item, nested);
+            increment_element_content_length(item);
+        }
+    }
+
+    list_push((List*)list, Item{.item = (uint64_t)item});
+    increment_element_content_length(list);
+
+    return Item{.item = (uint64_t)list};
 }
 
 /**
@@ -325,53 +389,10 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             }
             // Check if the content itself starts with a list marker (nested list case: "- - foo")
             else if (item_content && *item_content && is_list_item(item_content)) {
-                // The content is a nested list - recursively extract nested list content
-                // We directly create the nested list elements here instead of modifying parser state
-
-                // Create the nested list by parsing the content as a list item line
-                char nested_marker = get_list_marker(item_content);
-                bool nested_is_ordered = is_ordered_marker(nested_marker);
-
-                Element* nested_list = create_element(parser, nested_is_ordered ? "ol" : "ul");
-                if (nested_list) {
-                    // Set start attribute for nested ordered lists
-                    if (nested_is_ordered) {
-                        int start_num = get_ordered_list_start(item_content);
-                        if (start_num != 1) {
-                            char start_str[16];
-                            snprintf(start_str, sizeof(start_str), "%d", start_num);
-                            String* key = parser->builder.createName("start");
-                            String* value = parser->builder.createString(start_str, strlen(start_str));
-                            parser->builder.putToElement(nested_list, key, Item{.item = s2it(value)});
-                        }
-                    }
-
-                    Element* nested_item = create_element(parser, "li");
-                    if (nested_item) {
-                        // Get the content after the nested marker
-                        const char* nested_content = get_list_item_content(item_content, nested_is_ordered);
-
-                        // Check for further nesting
-                        if (nested_content && *nested_content && is_list_item(nested_content)) {
-                            // Triple nesting: recursively handle (limit to simple case)
-                            Item inner_text = parse_inline_spans(parser, nested_content);
-                            if (inner_text.item != ITEM_ERROR && inner_text.item != ITEM_UNDEFINED) {
-                                list_push((List*)nested_item, inner_text);
-                                increment_element_content_length(nested_item);
-                            }
-                        } else if (nested_content && *nested_content) {
-                            Item inner_text = parse_inline_spans(parser, nested_content);
-                            if (inner_text.item != ITEM_ERROR && inner_text.item != ITEM_UNDEFINED) {
-                                list_push((List*)nested_item, inner_text);
-                                increment_element_content_length(nested_item);
-                            }
-                        }
-
-                        list_push((List*)nested_list, Item{.item = (uint64_t)nested_item});
-                        increment_element_content_length(nested_list);
-                    }
-
-                    list_push((List*)item, Item{.item = (uint64_t)nested_list});
+                // The content is a nested list - recursively build nested list structure
+                Item nested_list = build_nested_list_from_content(parser, item_content);
+                if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
+                    list_push((List*)item, nested_list);
                     increment_element_content_length(item);
                 }
             } else if (item_content && *item_content) {
