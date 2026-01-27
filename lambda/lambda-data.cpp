@@ -258,11 +258,6 @@ String* it2s(Item itm) {
     }
     // For other types, we'd need to convert to string
     // For now, return a default string
-    // static String* null_str = nullptr;
-    // if (!null_str) {
-    //     null_str = heap_strcpy("null", 4);
-    // }
-    // return null_str;
     return nullptr;
 }
 
