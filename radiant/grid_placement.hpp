@@ -13,6 +13,12 @@
  * 4. Place remaining items with indefinite positions
  *
  * Based on Taffy's implementation with adaptations for Radiant's architecture.
+ *
+ * TODO: std::* Migration Plan (Phase 5+)
+ * - std::pair<OriginZeroLine, OriginZeroLine> → struct GridLinePair { OriginZeroLine first, second; }
+ * - std::vector<GridItemInfo>& → ArrayList* or pool-allocated array
+ * - std::make_pair → Direct struct initialization
+ * Estimated effort: Moderate refactoring (~200 lines)
  */
 
 #ifndef RADIANT_GRID_PLACEMENT_HPP

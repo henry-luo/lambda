@@ -12,6 +12,13 @@
  * - Maintains TrackCounts for both rows and columns
  * - Provides coordinate conversion between OriginZero and matrix indices
  * - Supports collision detection for auto-placement algorithm
+ *
+ * TODO: std::* Migration Plan (Phase 5+)
+ * - std::vector<CellOccupancyState> data_ → Fixed-size array with dynamic expansion
+ *   or custom DynamicArray<T> implementation using lib/arraylist.h patterns
+ * - std::move → Manual memory management with mem_alloc/mem_free
+ * - Requires careful design due to 2D matrix dynamic sizing requirements
+ * - Consider max grid size limits (e.g., 1000x1000) for fixed allocation
  */
 
 #ifdef __cplusplus
