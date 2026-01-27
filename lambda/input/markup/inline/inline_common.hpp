@@ -237,6 +237,29 @@ Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text);
  */
 Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text);
 
+/**
+ * parse_org_emphasis - Parse Org-mode emphasis
+ *
+ * Handles: /italic/, =code=, ~verbatim~, +strikethrough+
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @param text_start Start of the full text (for boundary context)
+ * @return Item containing formatted element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* text_start = nullptr);
+
+/**
+ * parse_org_link - Parse Org-mode links
+ *
+ * Handles: [[url]] or [[url][description]]
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing link element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_org_link(MarkupParser* parser, const char** text);
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

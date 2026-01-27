@@ -553,11 +553,25 @@ Item parse_code_block(MarkupParser* parser, const char* line) {
 
     bool has_content = false;  // Track if we've added any lines (including blank)
 
+    // Store open fence info for adapter-based closing detection
+    CodeFenceInfo open_fence_info;
+    open_fence_info.fence_char = fence_char;
+    open_fence_info.fence_length = fence_len;
+    open_fence_info.indent = fence_indent;
+    open_fence_info.valid = true;
+
     bool found_close = false;
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
-        // Check for closing fence (same type, at least same length)
+        // Check for closing fence using format adapter (for Org, RST, etc.)
+        if (adapter && adapter->isCodeFenceClose(current, open_fence_info)) {
+            parser->current_line++; // Skip closing fence
+            found_close = true;
+            break;
+        }
+
+        // Fallback: CommonMark-style closing fence (same type, at least same length)
         // CommonMark: closing fence can be indented 0-3 spaces (not 4+)
         const char* pos = current;
         int close_indent = 0;
