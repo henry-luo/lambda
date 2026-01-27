@@ -227,19 +227,19 @@ module.exports = grammar({
 
     // Literal Values
 
-    // no empty strings under Mark/Lambda
-    string: $ => seq('"', $._string_content, '"'),
+    // Empty strings ("") are allowed - they map to null at the data level
+    string: $ => seq('"', optional($._string_content), '"'),
 
     _string_content: $ => repeat1(choice(
       $.string_content,
       $.escape_sequence,
     )),
 
-    // no empty string, and string can span multiple lines
+    // String content: can span multiple lines
     string_content: _ => token.immediate(/[^\\"]+/),
 
-    // no empty symbol under Mark/Lambda
-    symbol: $ => seq("'", $._symbol_content, "'"),
+    // Empty symbols ('') are allowed - they map to null at the data level
+    symbol: $ => seq("'", optional($._symbol_content), "'"),
 
     _symbol_content: $ => repeat1(choice(
       $.symbol_content,
