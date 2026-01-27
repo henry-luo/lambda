@@ -234,6 +234,71 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             continue;
         }
 
+        // AsciiDoc-specific inline elements
+        if (format == Format::ASCIIDOC) {
+            // Check for link:url[text]
+            if (strncmp(pos, "link:", 5) == 0) {
+                // Flush text first
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                Item link_item = parse_asciidoc_link(parser, &pos);
+                if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, link_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+            }
+
+            // Check for image:path[alt]
+            if (strncmp(pos, "image:", 6) == 0) {
+                // Flush text first
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                Item image_item = parse_asciidoc_image(parser, &pos);
+                if (image_item.item != ITEM_ERROR && image_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, image_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+            }
+
+            // Check for cross-reference <<anchor>>
+            if (*pos == '<' && *(pos+1) == '<') {
+                // Flush text first
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                Item xref_item = parse_asciidoc_cross_reference(parser, &pos);
+                if (xref_item.item != ITEM_ERROR && xref_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, xref_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+
+                // Not a valid cross-reference, add < to buffer and continue
+                stringbuf_append_char(sb, *pos);
+                pos++;
+                continue;
+            }
+        }
+
         // Check for raw HTML (<) - Markdown only
         if (*pos == '<' && format == Format::MARKDOWN) {
             // Flush text first
@@ -517,6 +582,29 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (*pos == '\\') {
             char next = *(pos+1);
             log_debug("escape: found backslash, next char='%c' (0x%02x)", next, (unsigned char)next);
+
+            // Man page font escapes: \fB, \fI, \fR, \fP
+            if (format == Format::MAN && next == 'f') {
+                // Flush text first
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                Item font_item = parse_man_font_escape(parser, &pos);
+                if (font_item.item != ITEM_ERROR && font_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, font_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+                // Font escape failed, treat as literal
+                stringbuf_append_char(sb, *pos);
+                pos++;
+                continue;
+            }
 
             // Hard line break: backslash at end of line
             if (next == '\n' || next == '\r') {
