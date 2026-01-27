@@ -260,6 +260,21 @@ Item parse_org_emphasis(MarkupParser* parser, const char** text, const char* tex
  */
 Item parse_org_link(MarkupParser* parser, const char** text);
 
+/**
+ * parse_man_font_escape - Parse man page font escapes
+ *
+ * Handles: \fB (bold), \fI (italic), \fR/\fP (roman/previous)
+ *
+ * Man pages use troff font escapes for inline formatting:
+ * - \fBbold text\fR → <strong>bold text</strong>
+ * - \fIitalic text\fR → <em>italic text</em>
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing formatted element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_man_font_escape(MarkupParser* parser, const char** text);
+
 // ============================================================================
 // Helper Functions
 // ============================================================================

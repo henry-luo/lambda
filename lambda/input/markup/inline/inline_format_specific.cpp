@@ -468,5 +468,118 @@ Item parse_org_link(MarkupParser* parser, const char** text) {
     return Item{.item = (uint64_t)link};
 }
 
+/**
+ * parse_man_font_escape - Parse man page font escapes
+ *
+ * Handles: \fB (bold), \fI (italic), \fR/\fP (roman/previous)
+ *
+ * Man pages use troff font escapes for inline formatting:
+ * - \fBbold text\fR → <strong>bold text</strong>
+ * - \fIitalic text\fR → <em>italic text</em>
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing formatted element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_man_font_escape(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+
+    // Must start with \f followed by font code
+    if (pos[0] != '\\' || pos[1] != 'f') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    char font_code = pos[2];
+
+    // Determine element type
+    const char* tag = nullptr;
+    switch (font_code) {
+        case 'B': tag = "strong"; break;  // bold
+        case 'I': tag = "em"; break;      // italic
+        case 'R':  // roman (normal) - closing only
+        case 'P':  // previous font - closing only
+            // these are closers, not openers
+            return Item{.item = ITEM_UNDEFINED};
+        default:
+            return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Skip past the \fX opener
+    pos += 3;
+    const char* content_start = pos;
+
+    // Find closing \fR or \fP (or end of text)
+    const char* close_pos = nullptr;
+    while (*pos) {
+        if (pos[0] == '\\' && pos[1] == 'f') {
+            char close_code = pos[2];
+            if (close_code == 'R' || close_code == 'P') {
+                close_pos = pos;
+                break;
+            }
+            // nested font change - for simplicity, treat as end
+            if (close_code == 'B' || close_code == 'I') {
+                close_pos = pos;
+                break;
+            }
+        }
+        // don't span newlines
+        if (*pos == '\n' || *pos == '\r') {
+            close_pos = pos;
+            break;
+        }
+        pos++;
+    }
+
+    // if no closer found, use end of string
+    if (!close_pos) {
+        close_pos = pos;
+    }
+
+    size_t content_len = close_pos - content_start;
+    if (content_len == 0) {
+        // empty content, skip the closing marker and return undefined
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Create element
+    Element* elem = create_element(parser, tag);
+    if (!elem) {
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Extract and add content
+    char* content = (char*)malloc(content_len + 1);
+    if (content) {
+        memcpy(content, content_start, content_len);
+        content[content_len] = '\0';
+
+        // Recursively parse content (may have nested font changes or other content)
+        Item inner = parse_inline_spans(parser, content);
+        if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+            list_push((List*)elem, inner);
+            increment_element_content_length(elem);
+        } else {
+            // Fallback: just add as text
+            String* content_str = create_string(parser, content);
+            if (content_str) {
+                list_push((List*)elem, Item{.item = s2it(content_str)});
+                increment_element_content_length(elem);
+            }
+        }
+        free(content);
+    }
+
+    // Skip past closing marker if present
+    if (*close_pos == '\\' && *(close_pos + 1) == 'f') {
+        pos = close_pos + 3;  // skip \fR or \fP
+    } else {
+        pos = close_pos;
+    }
+
+    *text = pos;
+    return Item{.item = (uint64_t)elem};
+}
+
 } // namespace markup
 } // namespace lambda
