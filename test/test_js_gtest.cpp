@@ -214,6 +214,18 @@ TEST(JavaScriptTests, test_simple_test) {
     test_js_script_against_file("test/js/simple_test.js", "test/js/simple_test.txt");
 }
 
+TEST(JavaScriptTests, test_arithmetic) {
+    test_js_script_against_file("test/js/arithmetic.js", "test/js/arithmetic.txt");
+}
+
+TEST(JavaScriptTests, test_console_log) {
+    test_js_script_against_file("test/js/console_log.js", "test/js/console_log.txt");
+}
+
+TEST(JavaScriptTests, test_variables) {
+    test_js_script_against_file("test/js/variables.js", "test/js/variables.txt");
+}
+
 TEST(JavaScriptTests, DISABLED_test_basic_expressions) {
     test_js_script_against_file("test/js/basic_expressions.js", "test/js/basic_expressions.txt");
 }

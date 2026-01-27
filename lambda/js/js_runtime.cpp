@@ -1,776 +1,578 @@
-#include "js_transpiler.hpp"
+/**
+ * JavaScript Runtime Functions for Lambda v2
+ * 
+ * Implements JavaScript semantics on top of Lambda's type system.
+ * All functions are callable from MIR JIT compiled code.
+ */
+#include "js_runtime.h"
 #include "../lambda-data.hpp"
+#include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstring>
 #include <cmath>
 #include <cstdlib>
-#include <math.h>
-#include <string.h>
+#include <cstdio>
 
-// JavaScript global object
-static Item js_global_object = {.item = ITEM_NULL};
+// =============================================================================
+// Type Conversion Functions
+// =============================================================================
 
-// Type conversion functions
-
-Item js_to_primitive(Item value, const char* hint) {
-    TypeId type = value.type_id();
-
-    // Already primitive
-    if (type == LMD_TYPE_NULL || type == LMD_TYPE_BOOL ||
-        type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ||
-        type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+extern "C" Item js_to_number(Item value) {
+    TypeId type = get_type_id(value);
+    
+    switch (type) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_UNDEFINED:
+        // null -> 0, undefined -> NaN
+        if (type == LMD_TYPE_UNDEFINED) {
+            double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *nan_ptr = NAN;
+            return (Item){.item = d2it(nan_ptr)};
+        }
+        return (Item){.item = i2it(0)};
+        
+    case LMD_TYPE_BOOL: {
+        int val = it2b(value) ? 1 : 0;
+        return (Item){.item = i2it(val)};
+    }
+    
+    case LMD_TYPE_INT:
+        // Already a number (int), convert to float for consistency
         return value;
+        
+    case LMD_TYPE_FLOAT:
+        return value;
+        
+    case LMD_TYPE_STRING: {
+        String* str = it2s(value);
+        if (!str || str->len == 0) {
+            return (Item){.item = i2it(0)};  // Empty string -> 0
+        }
+        char* endptr;
+        double num = strtod(str->chars, &endptr);
+        if (endptr == str->chars) {
+            // No valid conversion
+            double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *nan_ptr = NAN;
+            return (Item){.item = d2it(nan_ptr)};
+        }
+        double* result = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *result = num;
+        return (Item){.item = d2it(result)};
     }
-
-    // For objects, try valueOf() then toString()
-    if (type == LMD_TYPE_MAP) {
-        // TODO: Implement proper object to primitive conversion
-        // For now, just return string representation
-        return (Item){.item = s2it("[object Object]")};
+    
+    default:
+        // Objects, arrays, etc. -> NaN
+        double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *nan_ptr = NAN;
+        return (Item){.item = d2it(nan_ptr)};
     }
-
-    return value;
 }
 
-Item js_to_number(Item value) {
-    TypeId type = value.type_id();
-
+extern "C" Item js_to_string(Item value) {
+    TypeId type = get_type_id(value);
+    
     switch (type) {
-        case LMD_TYPE_NULL:
-            return (Item){.item = d2it(0.0)}; // null -> 0
-        case LMD_TYPE_BOOL:
-            return (Item){.item = d2it(it2b(value) ? 1.0 : 0.0)};
-        case LMD_TYPE_INT:
-            return (Item){.item = d2it((double)it2i(value))};
-        case LMD_TYPE_FLOAT:
-            return value; // Already a number
-        case LMD_TYPE_STRING: {
-            String* str = it2s(value);
-            if (str->len == 0) {
-                return (Item){.item = d2it(0.0)}; // Empty string -> 0
-            }
-            // TODO: Proper string to number conversion
-            char* endptr;
-            double num = strtod(str->chars, &endptr);
-            if (endptr == str->chars + str->len) {
-                return (Item){.item = d2it(num)};
-            } else {
-                return (Item){.item = d2it(NAN)}; // Invalid number
-            }
+    case LMD_TYPE_NULL:
+        return (Item){.item = s2it(heap_create_name("null"))};
+        
+    case LMD_TYPE_UNDEFINED:
+        return (Item){.item = s2it(heap_create_name("undefined"))};
+        
+    case LMD_TYPE_BOOL:
+        return (Item){.item = s2it(heap_create_name(it2b(value) ? "true" : "false"))};
+        
+    case LMD_TYPE_INT: {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d", it2i(value));
+        return (Item){.item = s2it(heap_create_name(buffer))};
+    }
+    
+    case LMD_TYPE_FLOAT: {
+        double d = it2d(value);
+        if (isnan(d)) {
+            return (Item){.item = s2it(heap_create_name("NaN"))};
+        } else if (isinf(d)) {
+            return (Item){.item = s2it(heap_create_name(d > 0 ? "Infinity" : "-Infinity"))};
+        } else {
+            char buffer[64];
+            // Use %g for more natural number representation
+            snprintf(buffer, sizeof(buffer), "%.15g", d);
+            return (Item){.item = s2it(heap_create_name(buffer))};
         }
-        default:
-            return (Item){.item = d2it(NAN)};
+    }
+    
+    case LMD_TYPE_STRING:
+        return value;
+        
+    case LMD_TYPE_ARRAY:
+        // TODO: Implement array toString
+        return (Item){.item = s2it(heap_create_name("[object Array]"))};
+        
+    case LMD_TYPE_MAP:
+        return (Item){.item = s2it(heap_create_name("[object Object]"))};
+        
+    case LMD_TYPE_FUNC:
+        return (Item){.item = s2it(heap_create_name("[object Function]"))};
+        
+    default:
+        return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
 }
 
-Item js_to_string(Item value) {
-    TypeId type = value.type_id();
-
-    switch (type) {
-        case LMD_TYPE_NULL:
-            return (Item){.item = s2it("null")};
-        case LMD_TYPE_BOOL:
-            return (Item){.item = s2it(it2b(value) ? "true" : "false")};
-        case LMD_TYPE_INT: {
-            char buffer[32];
-            snprintf(buffer, sizeof(buffer), "%d", it2i(value));
-            return (Item){.item = s2it(buffer)};
-        }
-        case LMD_TYPE_FLOAT: {
-            double d = it2d(value);
-            if (isnan(d)) {
-                return (Item){.item = s2it("NaN")};
-            } else if (isinf(d)) {
-                return (Item){.item = s2it(d > 0 ? "Infinity" : "-Infinity")};
-            } else {
-                char buffer[32];
-                snprintf(buffer, sizeof(buffer), "%.17g", d);
-                return (Item){.item = s2it(buffer)};
-            }
-        }
-        case LMD_TYPE_STRING:
-            return value; // Already a string
-        default:
-            return (Item){.item = s2it("[object Object]")};
-    }
-}
-
-Item js_to_boolean(Item value) {
+extern "C" Item js_to_boolean(Item value) {
     return (Item){.item = b2it(js_is_truthy(value))};
 }
 
-bool js_is_truthy(Item value) {
-    TypeId type = value.type_id();
-
+extern "C" bool js_is_truthy(Item value) {
+    TypeId type = get_type_id(value);
+    
     switch (type) {
-        case LMD_TYPE_NULL:
-            return false;
-        case LMD_TYPE_BOOL:
-            return it2b(value);
-        case LMD_TYPE_INT:
-            return it2i(value) != 0;
-        case LMD_TYPE_FLOAT: {
-            double d = it2d(value);
-            return !isnan(d) && d != 0.0;
-        }
-        case LMD_TYPE_STRING: {
-            String* str = it2s(value);
-            return str->len > 0;
-        }
-        default:
-            return true; // Objects are truthy
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_UNDEFINED:
+        return false;
+        
+    case LMD_TYPE_BOOL:
+        return it2b(value);
+        
+    case LMD_TYPE_INT:
+        return it2i(value) != 0;
+        
+    case LMD_TYPE_FLOAT: {
+        double d = it2d(value);
+        return !isnan(d) && d != 0.0;
+    }
+    
+    case LMD_TYPE_STRING: {
+        String* str = it2s(value);
+        return str && str->len > 0;
+    }
+    
+    default:
+        // Objects, arrays, functions are all truthy
+        return value.item != 0;
     }
 }
 
-// Arithmetic operators
+// =============================================================================
+// Helper: Get numeric value as double
+// =============================================================================
 
-Item js_add(Item left, Item right) {
-    // JavaScript addition: string concatenation or numeric addition
-    Item left_prim = js_to_primitive(left, "default");
-    Item right_prim = js_to_primitive(right, "default");
+static double js_get_number(Item value) {
+    TypeId type = get_type_id(value);
+    
+    switch (type) {
+    case LMD_TYPE_INT:
+        return (double)it2i(value);
+    case LMD_TYPE_FLOAT:
+        return it2d(value);
+    case LMD_TYPE_BOOL:
+        return it2b(value) ? 1.0 : 0.0;
+    case LMD_TYPE_NULL:
+        return 0.0;
+    case LMD_TYPE_UNDEFINED:
+        return NAN;
+    case LMD_TYPE_STRING: {
+        String* str = it2s(value);
+        if (!str || str->len == 0) return 0.0;
+        char* endptr;
+        double num = strtod(str->chars, &endptr);
+        if (endptr == str->chars) return NAN;
+        return num;
+    }
+    default:
+        return NAN;
+    }
+}
 
-    if (left_prim.type_id() == LMD_TYPE_STRING || right_prim.type_id() == LMD_TYPE_STRING) {
-        // String concatenation
-        Item left_str = js_to_string(left_prim);
-        Item right_str = js_to_string(right_prim);
+static Item js_make_number(double d) {
+    // Check if it can be represented as an integer
+    if (d == (double)(int)d && d >= INT56_MIN && d <= INT56_MAX) {
+        return (Item){.item = i2it((int)d)};
+    }
+    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *ptr = d;
+    return (Item){.item = d2it(ptr)};
+}
+
+// =============================================================================
+// Arithmetic Operators
+// =============================================================================
+
+extern "C" Item js_add(Item left, Item right) {
+    TypeId left_type = get_type_id(left);
+    TypeId right_type = get_type_id(right);
+    
+    // String concatenation if either operand is a string
+    if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
+        Item left_str = js_to_string(left);
+        Item right_str = js_to_string(right);
         return fn_join(left_str, right_str);
-    } else {
-        // Numeric addition
-        Item left_num = js_to_number(left_prim);
-        Item right_num = js_to_number(right_prim);
-        return (Item){.item = d2it(it2d(left_num) + it2d(right_num))};
     }
+    
+    // Numeric addition
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l + r);
 }
 
-Item js_subtract(Item left, Item right) {
-    Item left_num = js_to_number(left);
-    Item right_num = js_to_number(right);
-    return (Item){.item = d2it(it2d(left_num) - it2d(right_num))};
+extern "C" Item js_subtract(Item left, Item right) {
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l - r);
 }
 
-Item js_multiply(Item left, Item right) {
-    Item left_num = js_to_number(left);
-    Item right_num = js_to_number(right);
-    return (Item){.item = d2it(it2d(left_num) * it2d(right_num))};
+extern "C" Item js_multiply(Item left, Item right) {
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l * r);
 }
 
-Item js_divide(Item left, Item right) {
-    Item left_num = js_to_number(left);
-    Item right_num = js_to_number(right);
-    return (Item){.item = d2it(it2d(left_num) / it2d(right_num))};
+extern "C" Item js_divide(Item left, Item right) {
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l / r);  // JS division always produces float
 }
 
-Item js_modulo(Item left, Item right) {
-    Item left_num = js_to_number(left);
-    Item right_num = js_to_number(right);
-    return (Item){.item = d2it(fmod(it2d(left_num), it2d(right_num)))};
+extern "C" Item js_modulo(Item left, Item right) {
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(fmod(l, r));
 }
 
-Item js_power(Item left, Item right) {
-    Item left_num = js_to_number(left);
-    Item right_num = js_to_number(right);
-    return (Item){.item = d2it(pow(it2d(left_num), it2d(right_num)))};
+extern "C" Item js_power(Item left, Item right) {
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(pow(l, r));
 }
 
-// Comparison operators
+// =============================================================================
+// Comparison Operators
+// =============================================================================
 
-Item js_equal(Item left, Item right) {
-    // JavaScript == operator with type coercion
-    TypeId left_type = left.type_id();
-    TypeId right_type = right.type_id();
-
+extern "C" Item js_equal(Item left, Item right) {
+    TypeId left_type = get_type_id(left);
+    TypeId right_type = get_type_id(right);
+    
+    // Same type: use strict equality
     if (left_type == right_type) {
         return js_strict_equal(left, right);
     }
-
+    
     // null == undefined
-    if ((left_type == LMD_TYPE_NULL && right_type == LMD_TYPE_NULL)) {
+    if ((left_type == LMD_TYPE_NULL && right_type == LMD_TYPE_UNDEFINED) ||
+        (left_type == LMD_TYPE_UNDEFINED && right_type == LMD_TYPE_NULL)) {
         return (Item){.item = b2it(true)};
     }
-
-    // Number and string comparison
-    if ((left_type == LMD_TYPE_FLOAT && right_type == LMD_TYPE_STRING) ||
-        (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_FLOAT)) {
-        Item left_num = js_to_number(left);
-        Item right_num = js_to_number(right);
-        return (Item){.item = b2it(it2d(left_num) == it2d(right_num))};
+    
+    // Number comparisons
+    if ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) {
+        double l = js_get_number(left);
+        double r = js_get_number(right);
+        return (Item){.item = b2it(l == r)};
     }
-
-    // Boolean to number conversion
+    
+    // String to number
+    if ((left_type == LMD_TYPE_STRING && (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT)) ||
+        ((left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) && right_type == LMD_TYPE_STRING)) {
+        double l = js_get_number(left);
+        double r = js_get_number(right);
+        return (Item){.item = b2it(l == r)};
+    }
+    
+    // Boolean to number
     if (left_type == LMD_TYPE_BOOL) {
         return js_equal(js_to_number(left), right);
     }
     if (right_type == LMD_TYPE_BOOL) {
         return js_equal(left, js_to_number(right));
     }
-
+    
     return (Item){.item = b2it(false)};
 }
 
-Item js_not_equal(Item left, Item right) {
-    return (Item){.item = b2it(!it2b(js_equal(left, right)))};
+extern "C" Item js_not_equal(Item left, Item right) {
+    Item eq = js_equal(left, right);
+    return (Item){.item = b2it(!it2b(eq))};
 }
 
-Item js_strict_equal(Item left, Item right) {
-    TypeId left_type = left.type_id();
-    TypeId right_type = right.type_id();
-
+extern "C" Item js_strict_equal(Item left, Item right) {
+    TypeId left_type = get_type_id(left);
+    TypeId right_type = get_type_id(right);
+    
+    // Different types are never strictly equal
     if (left_type != right_type) {
         return (Item){.item = b2it(false)};
     }
-
+    
     switch (left_type) {
-        case LMD_TYPE_NULL:
-            return (Item){.item = b2it(true)};
-        case LMD_TYPE_BOOL:
-            return (Item){.item = b2it(it2b(left) == it2b(right))};
-        case LMD_TYPE_INT:
-            return (Item){.item = b2it(it2i(left) == it2i(right))};
-        case LMD_TYPE_FLOAT: {
-            double l = it2d(left);
-            double r = it2d(right);
-            // NaN !== NaN
-            if (isnan(l) || isnan(r)) {
-                return (Item){.item = b2it(false)};
-            }
-            return (Item){.item = b2it(l == r)};
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_UNDEFINED:
+        return (Item){.item = b2it(true)};
+        
+    case LMD_TYPE_BOOL:
+        return (Item){.item = b2it(it2b(left) == it2b(right))};
+        
+    case LMD_TYPE_INT:
+        return (Item){.item = b2it(it2i(left) == it2i(right))};
+        
+    case LMD_TYPE_FLOAT: {
+        double l = it2d(left);
+        double r = it2d(right);
+        // NaN !== NaN
+        if (isnan(l) || isnan(r)) {
+            return (Item){.item = b2it(false)};
         }
-        case LMD_TYPE_STRING: {
-            String* l_str = it2s(left);
-            String* r_str = it2s(right);
-            return (Item){.item = b2it(l_str->len == r_str->len &&
-                       memcmp(l_str->chars, r_str->chars, l_str->len) == 0)};
+        return (Item){.item = b2it(l == r)};
+    }
+    
+    case LMD_TYPE_STRING: {
+        String* l_str = it2s(left);
+        String* r_str = it2s(right);
+        if (l_str->len != r_str->len) {
+            return (Item){.item = b2it(false)};
         }
-        default:
-            // Object identity comparison
-            return (Item){.item = b2it(left.item == right.item)};
+        return (Item){.item = b2it(memcmp(l_str->chars, r_str->chars, l_str->len) == 0)};
+    }
+    
+    default:
+        // Object identity comparison
+        return (Item){.item = b2it(left.item == right.item)};
     }
 }
 
-Item js_strict_not_equal(Item left, Item right) {
-    return (Item){.item = b2it(!it2b(js_strict_equal(left, right)))};
+extern "C" Item js_strict_not_equal(Item left, Item right) {
+    Item eq = js_strict_equal(left, right);
+    return (Item){.item = b2it(!it2b(eq))};
 }
 
-Item js_less_than(Item left, Item right) {
-    Item left_prim = js_to_primitive(left, "number");
-    Item right_prim = js_to_primitive(right, "number");
-
-    if (left_prim.type_id() == LMD_TYPE_STRING && right_prim.type_id() == LMD_TYPE_STRING) {
-        // String comparison
-        String* l_str = it2s(left_prim);
-        String* r_str = it2s(right_prim);
-        int cmp = memcmp(l_str->chars, r_str->chars,
+extern "C" Item js_less_than(Item left, Item right) {
+    TypeId left_type = get_type_id(left);
+    TypeId right_type = get_type_id(right);
+    
+    // String comparison
+    if (left_type == LMD_TYPE_STRING && right_type == LMD_TYPE_STRING) {
+        String* l_str = it2s(left);
+        String* r_str = it2s(right);
+        int cmp = memcmp(l_str->chars, r_str->chars, 
                         l_str->len < r_str->len ? l_str->len : r_str->len);
         if (cmp == 0) {
             return (Item){.item = b2it(l_str->len < r_str->len)};
         }
         return (Item){.item = b2it(cmp < 0)};
-    } else {
-        // Numeric comparison
-        Item left_num = js_to_number(left_prim);
-        Item right_num = js_to_number(right_prim);
-        double l = it2d(left_num);
-        double r = it2d(right_num);
-        if (isnan(l) || isnan(r)) {
-            return (Item){.item = b2it(false)};
-        }
-        return (Item){.item = b2it(l < r)};
     }
+    
+    // Numeric comparison
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    if (isnan(l) || isnan(r)) {
+        return (Item){.item = b2it(false)};
+    }
+    return (Item){.item = b2it(l < r)};
 }
 
-Item js_less_equal(Item left, Item right) {
+extern "C" Item js_less_equal(Item left, Item right) {
     Item gt = js_greater_than(left, right);
     return (Item){.item = b2it(!it2b(gt))};
 }
 
-Item js_greater_than(Item left, Item right) {
+extern "C" Item js_greater_than(Item left, Item right) {
     return js_less_than(right, left);
 }
 
-Item js_greater_equal(Item left, Item right) {
+extern "C" Item js_greater_equal(Item left, Item right) {
     Item lt = js_less_than(left, right);
     return (Item){.item = b2it(!it2b(lt))};
 }
 
-// Logical operators
+// =============================================================================
+// Logical Operators
+// =============================================================================
 
-Item js_logical_and(Item left, Item right) {
-    if (js_is_truthy(left)) {
-        return right;
-    } else {
+extern "C" Item js_logical_and(Item left, Item right) {
+    // Returns left if falsy, otherwise right
+    if (!js_is_truthy(left)) {
         return left;
     }
+    return right;
 }
 
-Item js_logical_or(Item left, Item right) {
+extern "C" Item js_logical_or(Item left, Item right) {
+    // Returns left if truthy, otherwise right
     if (js_is_truthy(left)) {
         return left;
-    } else {
-        return right;
     }
+    return right;
 }
 
-Item js_logical_not(Item operand) {
+extern "C" Item js_logical_not(Item operand) {
     return (Item){.item = b2it(!js_is_truthy(operand))};
 }
 
-// Bitwise operators
+// =============================================================================
+// Bitwise Operators
+// =============================================================================
 
-Item js_bitwise_and(Item left, Item right) {
-    int32_t l = (int32_t)it2d(js_to_number(left));
-    int32_t r = (int32_t)it2d(js_to_number(right));
+extern "C" Item js_bitwise_and(Item left, Item right) {
+    int32_t l = (int32_t)js_get_number(left);
+    int32_t r = (int32_t)js_get_number(right);
     return (Item){.item = i2it(l & r)};
 }
 
-Item js_bitwise_or(Item left, Item right) {
-    int32_t l = (int32_t)it2d(js_to_number(left));
-    int32_t r = (int32_t)it2d(js_to_number(right));
+extern "C" Item js_bitwise_or(Item left, Item right) {
+    int32_t l = (int32_t)js_get_number(left);
+    int32_t r = (int32_t)js_get_number(right);
     return (Item){.item = i2it(l | r)};
 }
 
-Item js_bitwise_xor(Item left, Item right) {
-    int32_t l = (int32_t)it2d(js_to_number(left));
-    int32_t r = (int32_t)it2d(js_to_number(right));
+extern "C" Item js_bitwise_xor(Item left, Item right) {
+    int32_t l = (int32_t)js_get_number(left);
+    int32_t r = (int32_t)js_get_number(right);
     return (Item){.item = i2it(l ^ r)};
 }
 
-Item js_bitwise_not(Item operand) {
-    int32_t val = (int32_t)it2d(js_to_number(operand));
+extern "C" Item js_bitwise_not(Item operand) {
+    int32_t val = (int32_t)js_get_number(operand);
     return (Item){.item = i2it(~val)};
 }
 
-Item js_left_shift(Item left, Item right) {
-    int32_t l = (int32_t)it2d(js_to_number(left));
-    uint32_t r = (uint32_t)it2d(js_to_number(right)) & 0x1F;
+extern "C" Item js_left_shift(Item left, Item right) {
+    int32_t l = (int32_t)js_get_number(left);
+    uint32_t r = (uint32_t)js_get_number(right) & 0x1F;
     return (Item){.item = i2it(l << r)};
 }
 
-Item js_right_shift(Item left, Item right) {
-    int32_t l = (int32_t)it2d(js_to_number(left));
-    uint32_t r = (uint32_t)it2d(js_to_number(right)) & 0x1F;
+extern "C" Item js_right_shift(Item left, Item right) {
+    int32_t l = (int32_t)js_get_number(left);
+    uint32_t r = (uint32_t)js_get_number(right) & 0x1F;
     return (Item){.item = i2it(l >> r)};
 }
 
-Item js_unsigned_right_shift(Item left, Item right) {
-    uint32_t l = (uint32_t)it2d(js_to_number(left));
-    uint32_t r = (uint32_t)it2d(js_to_number(right)) & 0x1F;
+extern "C" Item js_unsigned_right_shift(Item left, Item right) {
+    uint32_t l = (uint32_t)js_get_number(left);
+    uint32_t r = (uint32_t)js_get_number(right) & 0x1F;
     return (Item){.item = i2it((int32_t)(l >> r))};
 }
 
-// Unary operators
+// =============================================================================
+// Unary Operators
+// =============================================================================
 
-Item js_unary_plus(Item operand) {
+extern "C" Item js_unary_plus(Item operand) {
     return js_to_number(operand);
 }
 
-Item js_unary_minus(Item operand) {
-    Item num = js_to_number(operand);
-    return (Item){.item = d2it(-it2d(num))};
+extern "C" Item js_unary_minus(Item operand) {
+    double val = js_get_number(operand);
+    return js_make_number(-val);
 }
 
-Item js_increment(Item operand, bool prefix) {
-    // TODO: Implement proper lvalue increment
-    Item num = js_to_number(operand);
-    return (Item){.item = d2it(it2d(num) + 1.0)};
-}
-
-Item js_decrement(Item operand, bool prefix) {
-    // TODO: Implement proper lvalue decrement
-    Item num = js_to_number(operand);
-    return (Item){.item = d2it(it2d(num) - 1.0)};
-}
-
-Item js_typeof(Item value) {
-    TypeId type = value.type_id();
-
+extern "C" Item js_typeof(Item value) {
+    TypeId type = get_type_id(value);
+    
+    const char* result;
     switch (type) {
-        case LMD_TYPE_NULL:
-            return (Item){.item = s2it("undefined")}; // Both null and undefined
-        case LMD_TYPE_BOOL:
-            return (Item){.item = s2it("boolean")};
-        case LMD_TYPE_INT:
-        case LMD_TYPE_FLOAT:
-            return (Item){.item = s2it("number")};
-        case LMD_TYPE_STRING:
-            return (Item){.item = s2it("string")};
-        case LMD_TYPE_SYMBOL:
-            return (Item){.item = s2it("symbol")};
-        case LMD_TYPE_FUNC:
-            return (Item){.item = s2it("function")};
-        default:
-            return (Item){.item = s2it("object")};
+    case LMD_TYPE_UNDEFINED:
+        result = "undefined";
+        break;
+    case LMD_TYPE_NULL:
+        result = "object";  // typeof null === "object" (JS quirk)
+        break;
+    case LMD_TYPE_BOOL:
+        result = "boolean";
+        break;
+    case LMD_TYPE_INT:
+    case LMD_TYPE_FLOAT:
+        result = "number";
+        break;
+    case LMD_TYPE_STRING:
+        result = "string";
+        break;
+    case LMD_TYPE_SYMBOL:
+        result = "symbol";
+        break;
+    case LMD_TYPE_FUNC:
+        result = "function";
+        break;
+    default:
+        result = "object";
+        break;
     }
+    
+    return (Item){.item = s2it(heap_create_name(result))};
 }
 
-// Object and property functions
+// =============================================================================
+// Array Functions
+// =============================================================================
 
-Item js_new_object() {
-    Map* obj = map(0); // Create empty map
-    return (Item){.map = obj};
-}
-
-Item js_new_array(int length) {
+extern "C" Item js_array_new(int length) {
     Array* arr = array();
-    // TODO: Initialize array with specified length
+    // Pre-allocate capacity if needed
+    Item null_item = {.item = ITEM_NULL};
+    for (int i = 0; i < length; i++) {
+        list_push(arr, null_item);
+    }
     return (Item){.array = arr};
 }
 
-Item js_property_access(Item object, Item key) {
-    if (object.type_id() != LMD_TYPE_MAP) {
-        // TODO: Handle property access on primitives
-        return (Item){.item = ITEM_NULL};
+extern "C" Item js_array_get(Item array, Item index) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        return ItemNull;
     }
-
-    Map* obj = object.map;
-    Item key_str = js_to_string(key);
-
-    return map_get(obj, key_str);
-}
-
-Item js_property_set(Item object, Item key, Item value) {
-    if (object.type_id() != LMD_TYPE_MAP) {
-        // TODO: Handle property setting on primitives
-        return value;
-    }
-
-    Map* obj = object.map;
-    Item key_str = js_to_string(key);
-
-    // TODO: Implement proper map setting
-    // map_set(obj, key_str, value);
-    return value;
-}
-
-Item js_property_delete(Item object, Item key) {
-    if (object.type_id() != LMD_TYPE_MAP) {
-        return (Item){.item = b2it(true)};
-    }
-
-    Map* obj = object.map;
-    Item key_str = js_to_string(key);
-
-    // TODO: Implement map_delete
-    return (Item){.item = b2it(true)};
-}
-
-bool js_property_has(Item object, Item key) {
-    if (object.type_id() != LMD_TYPE_MAP) {
-        return false;
-    }
-
-    Map* obj = object.map;
-    Item key_str = js_to_string(key);
-    Item value = map_get(obj, key_str);
-
-    return value.item != ITEM_NULL;
-}
-
-// JavaScript function object structure
-typedef struct JsFunction {
-    void* func_ptr;                 // C function pointer
-    int param_count;                // Number of parameters
-    Item* closure_vars;             // Closure variables (TODO)
-    int closure_count;              // Number of closure variables
-} JsFunction;
-
-// Function call functions
-
-Item js_call_function(Item func, Item this_binding, Item* args, int arg_count) {
-    if (func.type_id() != LMD_TYPE_FUNC) {
-        // TODO: Throw TypeError
-        log_error("Attempted to call non-function value");
-        return (Item){.item = ITEM_NULL};
-    }
-
-    JsFunction* js_func = (JsFunction*)func.function;
-
-    // For now, call the function with up to 5 parameters
-    // TODO: Implement proper variadic function calling
-    typedef Item (*JsFuncPtr0)();
-    typedef Item (*JsFuncPtr1)(Item);
-    typedef Item (*JsFuncPtr2)(Item, Item);
-    typedef Item (*JsFuncPtr3)(Item, Item, Item);
-    typedef Item (*JsFuncPtr4)(Item, Item, Item, Item);
-    typedef Item (*JsFuncPtr5)(Item, Item, Item, Item, Item);
-
-    switch (js_func->param_count) {
-        case 0: {
-            JsFuncPtr0 f = (JsFuncPtr0)js_func->func_ptr;
-            return f();
-        }
-        case 1: {
-            JsFuncPtr1 f = (JsFuncPtr1)js_func->func_ptr;
-            Item arg0 = (arg_count > 0) ? args[0] : (Item){.item = ITEM_NULL};
-            return f(arg0);
-        }
-        case 2: {
-            JsFuncPtr2 f = (JsFuncPtr2)js_func->func_ptr;
-            Item arg0 = (arg_count > 0) ? args[0] : (Item){.item = ITEM_NULL};
-            Item arg1 = (arg_count > 1) ? args[1] : (Item){.item = ITEM_NULL};
-            return f(arg0, arg1);
-        }
-        case 3: {
-            JsFuncPtr3 f = (JsFuncPtr3)js_func->func_ptr;
-            Item arg0 = (arg_count > 0) ? args[0] : (Item){.item = ITEM_NULL};
-            Item arg1 = (arg_count > 1) ? args[1] : (Item){.item = ITEM_NULL};
-            Item arg2 = (arg_count > 2) ? args[2] : (Item){.item = ITEM_NULL};
-            return f(arg0, arg1, arg2);
-        }
-        case 4: {
-            JsFuncPtr4 f = (JsFuncPtr4)js_func->func_ptr;
-            Item arg0 = (arg_count > 0) ? args[0] : (Item){.item = ITEM_NULL};
-            Item arg1 = (arg_count > 1) ? args[1] : (Item){.item = ITEM_NULL};
-            Item arg2 = (arg_count > 2) ? args[2] : (Item){.item = ITEM_NULL};
-            Item arg3 = (arg_count > 3) ? args[3] : (Item){.item = ITEM_NULL};
-            return f(arg0, arg1, arg2, arg3);
-        }
-        case 5: {
-            JsFuncPtr5 f = (JsFuncPtr5)js_func->func_ptr;
-            Item arg0 = (arg_count > 0) ? args[0] : (Item){.item = ITEM_NULL};
-            Item arg1 = (arg_count > 1) ? args[1] : (Item){.item = ITEM_NULL};
-            Item arg2 = (arg_count > 2) ? args[2] : (Item){.item = ITEM_NULL};
-            Item arg3 = (arg_count > 3) ? args[3] : (Item){.item = ITEM_NULL};
-            Item arg4 = (arg_count > 4) ? args[4] : (Item){.item = ITEM_NULL};
-            return f(arg0, arg1, arg2, arg3, arg4);
-        }
-        default:
-            log_error("Function with %d parameters not supported yet", js_func->param_count);
-            return (Item){.item = ITEM_NULL};
-    }
-}
-
-Item js_new_function(void* func_ptr, int param_count) {
-    JsFunction* js_func = (JsFunction*)heap_alloc(sizeof(JsFunction), LMD_TYPE_FUNC);
-    js_func->func_ptr = func_ptr;
-    js_func->param_count = param_count;
-    js_func->closure_vars = NULL;
-    js_func->closure_count = 0;
-
-    return (Item){.function = (Function*)js_func};
-}
-
-// Array functions
-
-Item js_array_get(Item array, Item index) {
-    if (array.type_id() != LMD_TYPE_ARRAY) {
-        return (Item){.item = ITEM_NULL};
-    }
-
+    
+    int idx = (int)js_get_number(index);
     Array* arr = array.array;
-    int idx = it2i(js_to_number(index));
-
+    
     if (idx >= 0 && idx < arr->length) {
         return arr->items[idx];
     }
-
-    return (Item){.item = ITEM_NULL};
+    
+    return ItemNull;
 }
 
-Item js_array_set(Item array, Item index, Item value) {
-    if (array.type_id() != LMD_TYPE_ARRAY) {
+extern "C" Item js_array_set(Item array, Item index, Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return value;
     }
-
+    
+    int idx = (int)js_get_number(index);
     Array* arr = array.array;
-    int idx = it2i(js_to_number(index));
-
-    if (idx >= 0) {
-        // TODO: Expand array if necessary
-        if (idx < arr->length) {
-            arr->items[idx] = value;
-        }
+    
+    if (idx >= 0 && idx < arr->length) {
+        arr->items[idx] = value;
     }
-
+    // TODO: Expand array if idx >= length
+    
     return value;
 }
 
-int js_array_length(Item array) {
-    if (array.type_id() != LMD_TYPE_ARRAY) {
+extern "C" int js_array_length(Item array) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return 0;
     }
-
-    Array* arr = array.array;
-    return arr->length;
+    return array.array->length;
 }
 
-Item js_array_push(Item array, Item value) {
-    if (array.type_id() != LMD_TYPE_ARRAY) {
+extern "C" Item js_array_push(Item array, Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) {
         return (Item){.item = i2it(0)};
     }
-
+    
     Array* arr = array.array;
-    // TODO: Implement array push
+    list_push(arr, value);
     return (Item){.item = i2it(arr->length)};
 }
 
-Item js_array_pop(Item array) {
-    if (array.type_id() != LMD_TYPE_ARRAY) {
-        return (Item){.item = ITEM_NULL};
-    }
+// =============================================================================
+// Console Functions
+// =============================================================================
 
-    Array* arr = array.array;
-    if (arr->length > 0) {
-        Item value = arr->items[arr->length - 1];
-        arr->length--;
-        return value;
-    }
-
-    return (Item){.item = ITEM_NULL};
-}
-
-// Forward declarations for global functions
-Item js_parse_int(Item value);
-Item js_parse_float(Item value);
-Item js_is_nan(Item value);
-Item js_is_finite(Item value);
-
-// Global object functions
-
-Item js_get_global() {
-    return js_global_object;
-}
-
-// Built-in array methods
-Item js_array_map(Item array, Item callback) {
-    if (array.type_id() != LMD_TYPE_ARRAY || callback.type_id() != LMD_TYPE_FUNC) {
-        return (Item){.item = ITEM_NULL};
-    }
-
-    Array* arr = array.array;
-    Item result = js_new_array(arr->length);
-    Array* result_arr = result.array;
-
-    for (int i = 0; i < arr->length; i++) {
-        Item args[3] = { arr->items[i], (Item){.item = i2it(i)}, array };
-        Item mapped_value = js_call_function(callback, (Item){.item = ITEM_NULL}, args, 3);
-        result_arr->items[i] = mapped_value;
-    }
-
-    return result;
-}
-
-Item js_array_filter(Item array, Item predicate) {
-    if (array.type_id() != LMD_TYPE_ARRAY || predicate.type_id() != LMD_TYPE_FUNC) {
-        return (Item){.item = ITEM_NULL};
-    }
-
-    Array* arr = array.array;
-    Item result = js_new_array(0);
-    Array* result_arr = result.array;
-    int result_index = 0;
-
-    for (int i = 0; i < arr->length; i++) {
-        Item args[3] = { arr->items[i], (Item){.item = i2it(i)}, array };
-        Item test_result = js_call_function(predicate, (Item){.item = ITEM_NULL}, args, 3);
-
-        if (js_is_truthy(test_result)) {
-            // TODO: Expand array if necessary
-            if (result_index < result_arr->length) {
-                result_arr->items[result_index] = arr->items[i];
-            }
-            result_index++;
-        }
-    }
-
-    return result;
-}
-
-Item js_array_reduce(Item array, Item reducer, Item initial_value) {
-    if (array.type_id() != LMD_TYPE_ARRAY || reducer.type_id() != LMD_TYPE_FUNC) {
-        return (Item){.item = ITEM_NULL};
-    }
-
-    Array* arr = array.array;
-    Item accumulator = initial_value;
-    int start_index = 0;
-
-    // If no initial value provided, use first element
-    if (initial_value.item == ITEM_NULL && arr->length > 0) {
-        accumulator = arr->items[0];
-        start_index = 1;
-    }
-
-    for (int i = start_index; i < arr->length; i++) {
-        Item args[4] = { accumulator, arr->items[i], (Item){.item = i2it(i)}, array };
-        accumulator = js_call_function(reducer, (Item){.item = ITEM_NULL}, args, 4);
-    }
-
-    return accumulator;
-}
-
-Item js_array_foreach(Item array, Item callback) {
-    if (array.type_id() != LMD_TYPE_ARRAY || callback.type_id() != LMD_TYPE_FUNC) {
-        return (Item){.item = ITEM_NULL};
-    }
-
-    Array* arr = array.array;
-
-    for (int i = 0; i < arr->length; i++) {
-        Item args[3] = { arr->items[i], (Item){.item = i2it(i)}, array };
-        js_call_function(callback, (Item){.item = ITEM_NULL}, args, 3);
-    }
-
-    return (Item){.item = ITEM_NULL}; // forEach returns undefined
-}
-
-void js_init_global_object() {
-    if (js_global_object.item == ITEM_NULL) {
-        js_global_object = js_new_object();
-
-        // Add global properties
-        js_property_set(js_global_object, (Item){.item = s2it("undefined")}, (Item){.item = ITEM_NULL});
-        js_property_set(js_global_object, (Item){.item = s2it("NaN")}, (Item){.item = d2it(NAN)});
-        js_property_set(js_global_object, (Item){.item = s2it("Infinity")}, (Item){.item = d2it(INFINITY)});
-
-        // Add global functions
-        js_property_set(js_global_object, (Item){.item = s2it("parseInt")},
-                       js_new_function((void*)js_parse_int, 1));
-        js_property_set(js_global_object, (Item){.item = s2it("parseFloat")},
-                       js_new_function((void*)js_parse_float, 1));
-        js_property_set(js_global_object, (Item){.item = s2it("isNaN")},
-                       js_new_function((void*)js_is_nan, 1));
-        js_property_set(js_global_object, (Item){.item = s2it("isFinite")},
-                       js_new_function((void*)js_is_finite, 1));
-    }
-}
-
-// Global utility functions
-Item js_parse_int(Item value) {
+extern "C" void js_console_log(Item value) {
     Item str = js_to_string(value);
-    String* s = it2s(str);
-
-    // Simple integer parsing
-    char* endptr;
-    long result = strtol(s->chars, &endptr, 10);
-
-    if (endptr == s->chars) {
-        return (Item){.item = d2it(NAN)}; // No valid conversion
+    if (get_type_id(str) == LMD_TYPE_STRING) {
+        String* s = it2s(str);
+        printf("%.*s\n", (int)s->len, s->chars);
     }
-
-    return (Item){.item = i2it((int)result)};
-}
-
-Item js_parse_float(Item value) {
-    Item str = js_to_string(value);
-    String* s = it2s(str);
-
-    char* endptr;
-    double result = strtod(s->chars, &endptr);
-
-    if (endptr == s->chars) {
-        return (Item){.item = d2it(NAN)}; // No valid conversion
-    }
-
-    return (Item){.item = d2it(result)};
-}
-
-Item js_is_nan(Item value) {
-    Item num = js_to_number(value);
-    return (Item){.item = b2it(isnan(it2d(num)))};
-}
-
-Item js_is_finite(Item value) {
-    Item num = js_to_number(value);
-    double d = it2d(num);
-    return (Item){.item = b2it(!isnan(d) && !isinf(d))};
 }
