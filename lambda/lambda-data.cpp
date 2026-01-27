@@ -4,6 +4,7 @@
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
+Type TYPE_UNDEFINED = {.type_id = LMD_TYPE_UNDEFINED};  // JavaScript undefined
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 Type TYPE_INT = {.type_id = LMD_TYPE_INT};
 Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
@@ -116,6 +117,7 @@ TypeInfo type_info[32];
 void init_type_info() {
     type_info[LMD_TYPE_RAW_POINTER] = {sizeof(void*), "pointer", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
     type_info[LMD_TYPE_NULL] = {sizeof(bool), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
+    type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
     type_info[LMD_TYPE_INT] = {sizeof(int), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
