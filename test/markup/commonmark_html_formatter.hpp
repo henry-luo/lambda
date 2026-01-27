@@ -270,7 +270,11 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                 if (child_tag && (strcmp(child_tag, "p") == 0 ||
                                   strcmp(child_tag, "ul") == 0 ||
                                   strcmp(child_tag, "ol") == 0 ||
-                                  strcmp(child_tag, "blockquote") == 0)) {
+                                  strcmp(child_tag, "blockquote") == 0 ||
+                                  strcmp(child_tag, "hr") == 0 ||
+                                  strcmp(child_tag, "thematic_break") == 0 ||
+                                  strcmp(child_tag, "pre") == 0 ||
+                                  strcmp(child_tag, "code") == 0)) {
                     has_block = true;
                     break;
                 }

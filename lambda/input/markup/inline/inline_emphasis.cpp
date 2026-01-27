@@ -41,10 +41,137 @@ static inline void increment_element_content_length(Element* elem) {
 }
 
 /**
- * is_punctuation - Check if character is Unicode punctuation
+ * is_ascii_punct - Check if character is ASCII punctuation
  */
-static inline bool is_punctuation(char c) {
+static inline bool is_ascii_punct(char c) {
     return is_ascii_punctuation(c);
+}
+
+/**
+ * is_unicode_punctuation - Check if position starts with Unicode punctuation
+ *
+ * CommonMark punctuation includes:
+ * - ASCII punctuation (!@#$%^&*... etc)
+ * - Unicode categories: Pc, Pd, Pe, Pf, Pi, Po, Ps (punctuation)
+ * - Unicode categories: Sc, Sk, Sm, So (symbols)
+ *
+ * This function checks common currency symbols and other Unicode punctuation.
+ */
+static bool is_unicode_punctuation(const char* p) {
+    if (!p || !*p) return false;
+
+    unsigned char c0 = (unsigned char)p[0];
+
+    // ASCII punctuation (single byte)
+    if (c0 < 0x80) {
+        return is_ascii_punct((char)c0);
+    }
+
+    // 2-byte UTF-8 sequences (0xC0-0xDF lead byte)
+    if (c0 >= 0xC2 && c0 <= 0xDF) {
+        unsigned char c1 = (unsigned char)p[1];
+        if (!c1) return false;
+
+        // Common Latin-1 Supplement punctuation/symbols (U+00A0-U+00FF)
+        // U+00A1 (¡), U+00A2-U+00A5 (¢£¤¥), U+00A6-U+00BF (various), etc.
+        if (c0 == 0xC2) {
+            // U+00A1-U+00BF: ¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿
+            if (c1 >= 0xA1 && c1 <= 0xBF) return true;
+        }
+        // Currency symbols and other common punctuation in 2-byte range
+        if (c0 == 0xC3) {
+            // U+00D7 (×) and U+00F7 (÷) are Sm (math symbols)
+            if (c1 == 0x97 || c1 == 0xB7) return true;
+        }
+    }
+
+    // 3-byte UTF-8 sequences (0xE0-0xEF lead byte)
+    if (c0 >= 0xE0 && c0 <= 0xEF) {
+        unsigned char c1 = (unsigned char)p[1];
+        unsigned char c2 = (unsigned char)p[2];
+        if (!c1 || !c2) return false;
+
+        // Decode the codepoint
+        uint32_t cp;
+        if (c0 == 0xE0) {
+            cp = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+        } else {
+            cp = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+        }
+
+        // General Punctuation (U+2000-U+206F)
+        if (cp >= 0x2000 && cp <= 0x206F) return true;
+
+        // Currency Symbols (U+20A0-U+20CF) - includes €
+        if (cp >= 0x20A0 && cp <= 0x20CF) return true;
+
+        // Letterlike Symbols (U+2100-U+214F) - some are Sm/So
+        if (cp >= 0x2100 && cp <= 0x214F) return true;
+
+        // Number Forms (U+2150-U+218F)
+        if (cp >= 0x2150 && cp <= 0x218F) return true;
+
+        // Arrows, Math Operators, Misc Technical, etc.
+        if (cp >= 0x2190 && cp <= 0x27FF) return true;
+
+        // Supplemental Punctuation (U+2E00-U+2E7F)
+        if (cp >= 0x2E00 && cp <= 0x2E7F) return true;
+
+        // CJK Symbols and Punctuation (U+3000-U+303F)
+        if (cp >= 0x3000 && cp <= 0x303F) return true;
+    }
+
+    // 4-byte UTF-8 sequences (0xF0-0xF4 lead byte)
+    if (c0 >= 0xF0 && c0 <= 0xF4) {
+        unsigned char c1 = (unsigned char)p[1];
+        unsigned char c2 = (unsigned char)p[2];
+        unsigned char c3 = (unsigned char)p[3];
+        if (!c1 || !c2 || !c3) return false;
+
+        // Decode the codepoint
+        uint32_t cp = ((c0 & 0x07) << 18) | ((c1 & 0x3F) << 12) |
+                      ((c2 & 0x3F) << 6) | (c3 & 0x3F);
+
+        // Mathematical Alphanumeric Symbols (U+1D400-U+1D7FF)
+        if (cp >= 0x1D400 && cp <= 0x1D7FF) return true;
+
+        // Musical Symbols (U+1D100-U+1D1FF)
+        if (cp >= 0x1D100 && cp <= 0x1D1FF) return true;
+
+        // Ancient Symbols (U+10190-U+101CF)
+        if (cp >= 0x10190 && cp <= 0x101CF) return true;
+
+        // Adlam supplement (U+1E2C0-U+1E2FF) - includes 𞋿 (U+1E2FF)
+        if (cp >= 0x1E2C0 && cp <= 0x1E2FF) return true;
+
+        // Emoji and other symbols (U+1F000-U+1FFFF)
+        if (cp >= 0x1F000 && cp <= 0x1FFFF) return true;
+    }
+
+    return false;
+}
+
+/**
+ * is_preceded_by_unicode_punctuation - Check if preceding char is Unicode punctuation
+ */
+static bool is_preceded_by_unicode_punctuation(const char* text, const char* pos) {
+    if (pos <= text) return false;
+
+    // Walk back to find start of previous UTF-8 character
+    const char* prev = pos - 1;
+
+    // ASCII - simple case
+    if (((unsigned char)*prev & 0x80) == 0) {
+        return is_ascii_punct(*prev);
+    }
+
+    // UTF-8 continuation bytes start with 10xxxxxx
+    // Walk back to find lead byte
+    while (prev > text && ((unsigned char)*prev & 0xC0) == 0x80) {
+        prev--;
+    }
+
+    return is_unicode_punctuation(prev);
 }
 
 /**
@@ -74,13 +201,14 @@ static inline bool is_preceded_by_unicode_whitespace(const char* text, const cha
  */
 static bool is_left_flanking(const char* text, const char* run_start, const char* run_end) {
     if (is_unicode_whitespace(run_end)) return false;
-    char after = *run_end;
     bool preceded_by_ws = is_preceded_by_unicode_whitespace(text, run_start);
-    char before = (run_start > text) ? *(run_start - 1) : ' ';
-    if (!is_punctuation(after)) {
+    bool after_is_punct = is_unicode_punctuation(run_end);
+    bool before_is_punct = is_preceded_by_unicode_punctuation(text, run_start);
+
+    if (!after_is_punct) {
         return true;
     }
-    return preceded_by_ws || is_punctuation(before);
+    return preceded_by_ws || before_is_punct;
 }
 
 /**
@@ -88,13 +216,14 @@ static bool is_left_flanking(const char* text, const char* run_start, const char
  */
 static bool is_right_flanking(const char* text, const char* run_start, const char* run_end) {
     if (is_preceded_by_unicode_whitespace(text, run_start)) return false;
-    char before = (run_start > text) ? *(run_start - 1) : ' ';
-    if (!is_punctuation(before)) {
+    bool before_is_punct = is_preceded_by_unicode_punctuation(text, run_start);
+
+    if (!before_is_punct) {
         return true;
     }
-    char after = *run_end;
     bool followed_by_ws = is_unicode_whitespace(run_end);
-    return followed_by_ws || is_punctuation(after);
+    bool after_is_punct = is_unicode_punctuation(run_end);
+    return followed_by_ws || after_is_punct;
 }
 
 /**
@@ -106,8 +235,8 @@ static bool can_open(char marker, const char* text, const char* run_start, const
     if (marker == '*') return true;
     bool right = is_right_flanking(text, run_start, run_end);
     if (!right) return true;
-    char before = (run_start > text) ? *(run_start - 1) : ' ';
-    return is_punctuation(before);
+    bool before_is_punct = is_preceded_by_unicode_punctuation(text, run_start);
+    return before_is_punct;
 }
 
 /**
@@ -119,8 +248,8 @@ static bool can_close(char marker, const char* text, const char* run_start, cons
     if (marker == '*') return true;
     bool left = is_left_flanking(text, run_start, run_end);
     if (!left) return true;
-    char after = *run_end;
-    return is_punctuation(after);
+    bool after_is_punct = is_unicode_punctuation(run_end);
+    return after_is_punct;
 }
 
 // maximum delimiter runs we track
@@ -144,8 +273,15 @@ struct DelimRun {
 
 /**
  * find_all_runs - Collect all delimiter runs in text
+ *
+ * @param text The text to scan for delimiter runs
+ * @param full_text The full text (for flanking context)
+ * @param runs Array to store found runs
+ * @param max_runs Maximum number of runs to find
+ * @param parser Optional parser pointer for checking link references (for shortcut links)
  */
-static int find_all_runs(const char* text, const char* full_text, DelimRun* runs, int max_runs) {
+static int find_all_runs(const char* text, const char* full_text, DelimRun* runs, int max_runs,
+                         MarkupParser* parser = nullptr) {
     int count = 0;
     const char* pos = text;
 
@@ -193,6 +329,7 @@ static int find_all_runs(const char* text, const char* full_text, DelimRun* runs
             // Skip potential link text - links take precedence over emphasis
             // Find matching ] and check if followed by ( or [
             const char* bracket_start = pos;
+            const char* text_start = pos + 1;
             pos++;
             int bracket_depth = 1;
             while (*pos && bracket_depth > 0) {
@@ -208,6 +345,7 @@ static int find_all_runs(const char* text, const char* full_text, DelimRun* runs
                     pos++;
                 }
             }
+            const char* text_end = pos - 1;  // points to the ]
             // Check if this is actually a link (followed by ( or [)
             if (bracket_depth == 0 && (*pos == '(' || *pos == '[')) {
                 // This is a link - skip the link destination/reference too
@@ -226,6 +364,19 @@ static int find_all_runs(const char* text, const char* full_text, DelimRun* runs
                     } else {
                         pos++;
                     }
+                }
+            } else if (bracket_depth == 0 && parser) {
+                // Check for shortcut reference link [text] where text matches a link definition
+                // text_start points after [, text_end points to ]
+                const LinkDefinition* def = parser->getLinkDefinition(text_start, text_end - text_start);
+                if (def) {
+                    // This is a valid shortcut reference link - skip the entire bracket
+                    // pos is already past the ], so we're done
+                    log_debug("find_all_runs: skipping shortcut ref [%.*s]",
+                              (int)(text_end - text_start), text_start);
+                } else {
+                    // Not a link reference, reset and just skip the [
+                    pos = bracket_start + 1;
                 }
             } else {
                 // Not a link, reset and just skip the [
@@ -306,8 +457,9 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
     }
 
     // Collect all delimiter runs starting from our position
+    // Pass parser to enable shortcut reference link detection
     DelimRun runs[MAX_RUNS];
-    int num_runs = find_all_runs(start, full_text, runs, MAX_RUNS);
+    int num_runs = find_all_runs(start, full_text, runs, MAX_RUNS, parser);
 
     if (num_runs < 2) {
         return Item{.item = ITEM_UNDEFINED};  // need at least opener and closer
