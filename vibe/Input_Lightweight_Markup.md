@@ -70,10 +70,39 @@ The parser supports six lightweight markup language families:
 - **Flavor**: `standard`
 - **Features**: `h1.` headings, block quotes (`bq.`), pre blocks, inline formatting
 
-### AsciiDoc
+### AsciiDoc ✓ (Unified)
 - **Extensions**: `.adoc`, `.asciidoc`, `.asc`
 - **Flavor**: `standard`
-- **Features**: `= Headings`, listing blocks (`----`), admonitions (NOTE:, TIP:, etc.), tables (`|===`)
+- **Status**: Fully integrated into modular parser (January 2026)
+- **Features**: `= Headings`, listing blocks (`----`), admonitions (NOTE:, TIP:, WARNING:, CAUTION:, IMPORTANT:), definition lists (`term:: definition`), tables (`|===`), inline links (`link:url[text]`), inline images (`image:path[alt]`), cross-references (`<<anchor>>`), `[source,lang]` code blocks
+
+#### AsciiDoc Integration Details (Completed January 2026)
+
+The legacy `input-adoc.cpp` parser (~580 lines) was fully merged into the modular markup parser architecture. Key implementation files:
+
+| File | Purpose |
+|------|---------|
+| `markup/format/asciidoc_adapter.cpp` | Format-specific detection rules |
+| `markup/block/block_asciidoc.cpp` | AsciiDoc block parsers (admonitions, definition lists) |
+| `markup/block/block_table.cpp` | Extended for `\|===` delimited tables |
+| `markup/block/block_code.cpp` | Extended for `[source,lang]` attributes |
+| `markup/inline/inline_format_specific.cpp` | AsciiDoc inline parsers |
+
+**AsciiDoc Adapter Methods**:
+- `detectAdmonition()` - Detects NOTE:, TIP:, WARNING:, CAUTION:, IMPORTANT: labels
+- `detectDefinitionList()` - Detects `term:: definition` syntax
+- `detectAttributeBlock()` - Detects `[source,lang]`, `[quote]`, etc.
+- `detectCrossReference()` - Detects `<<anchor>>` and `<<anchor,text>>` syntax
+- `isDelimitedBlockStart()` - Detects `====`, `----`, `****` delimiters
+
+**Block Parsers**:
+- `parse_asciidoc_admonition()` → `<div class="admonition {type}">` with nested paragraphs
+- `parse_asciidoc_definition_list()` → `<dl><dt>term</dt><dd>definition</dd></dl>`
+
+**Inline Parsers**:
+- `parse_asciidoc_link()` - `link:url[text]` → `<a href="url">text</a>`
+- `parse_asciidoc_image()` - `image:path[alt]` → `<img src="path" alt="alt">`
+- `parse_asciidoc_cross_reference()` - `<<anchor,text>>` → `<a href="#anchor">text</a>`
 
 ### Other Similar Markup Languages
 
@@ -152,10 +181,44 @@ Unix man pages (`input-man.cpp`) can be unified into the markup parser. Analysis
 
 ### Core Components
 
+The modular markup parser uses a clean separation between format detection, block parsing, and inline parsing:
+
+```
+lambda/input/markup/
+├── markup_common.hpp        # Shared types, Format enum, ParseContext
+├── markup_parser.cpp        # Main entry point and orchestration
+├── format/                  # Format-specific adapters
+│   ├── format_adapter.hpp   # FormatAdapter interface
+│   ├── markdown_adapter.cpp
+│   ├── rst_adapter.cpp
+│   ├── wiki_adapter.cpp
+│   ├── org_adapter.cpp
+│   ├── textile_adapter.cpp
+│   ├── asciidoc_adapter.cpp # ✓ Full AsciiDoc detection
+│   └── man_adapter.cpp
+├── block/                   # Block-level parsers
+│   ├── block_common.hpp     # Block types and shared utilities
+│   ├── block_detection.cpp  # Block type detection
+│   ├── block_document.cpp   # Document structure parsing
+│   ├── block_header.cpp
+│   ├── block_list.cpp
+│   ├── block_code.cpp       # Extended for [source,lang]
+│   ├── block_table.cpp      # Extended for |=== tables
+│   ├── block_quote.cpp
+│   └── block_asciidoc.cpp   # ✓ AsciiDoc-specific blocks
+└── inline/                  # Inline-level parsers
+    ├── inline_common.hpp
+    ├── inline_spans.cpp
+    ├── inline_emphasis.cpp
+    ├── inline_links.cpp
+    └── inline_format_specific.cpp  # ✓ AsciiDoc link/image/xref
+```
+
+### Legacy Components (to be migrated)
+
 ```
 lambda/input/
-├── markup-parser.h          # Header: enums, ParseConfig, MarkupParser class
-├── input-markup.cpp         # Implementation (~6200 lines)
+├── input-markup.cpp         # Legacy monolithic implementation (~6200 lines)
 ├── input-context.hpp        # Base class: InputContext with error tracking
 ├── parse_error.hpp          # Error structures: SourceLocation, ParseError, ParseErrorList
 └── source_tracker.hpp       # Position tracking: SourceTracker
@@ -240,12 +303,14 @@ static int get_header_level(MarkupParser* parser, const char* line) {
 
 All formats use common inline parsing with format-specific delimiters:
 
-| Feature | Markdown | Wiki | RST | Textile | Man |
-|---------|----------|------|-----|---------|-----|
-| Bold | `**text**` | `'''text'''` | `**text**` | `*text*` | `\fBtext\fR` |
-| Italic | `*text*` | `''text''` | `*text*` | `_text_` | `\fItext\fR` |
-| Code | `` `text` `` | `<code>` | ``` ``text`` ``` | `@text@` | - |
-| Link | `[t](url)` | `[[url|t]]` | `` `t <url>`_ `` | `"t":url` | - |
+| Feature | Markdown | Wiki | RST | Textile | AsciiDoc | Man |
+|---------|----------|------|-----|---------|----------|-----|
+| Bold | `**text**` | `'''text'''` | `**text**` | `*text*` | `*text*` | `\fBtext\fR` |
+| Italic | `*text*` | `''text''` | `*text*` | `_text_` | `_text_` | `\fItext\fR` |
+| Code | `` `text` `` | `<code>` | ``` ``text`` ``` | `@text@` | `` `text` `` | - |
+| Link | `[t](url)` | `[[url|t]]` | `` `t <url>`_ `` | `"t":url` | `link:url[t]` | - |
+| Image | `![alt](src)` | `[[File:...]]` | `.. image::` | `!src!` | `image:src[alt]` | - |
+| Cross-ref | - | `[[#anchor]]` | `:ref:` | - | `<<anchor>>` | - |
 
 **Implementation**: One `parse_emphasis()` function handles all, with format-specific delimiter detection.
 
@@ -406,25 +471,37 @@ Metadata fields follow the unified schema with compatibility across formats (see
 5. **Incomplete Format Support**:
    - RST grid tables: Basic implementation only
    - RST reference resolution: Not fully implemented
-   - AsciiDoc inline formatting: Placeholder implementation
+   - ~~AsciiDoc inline formatting: Placeholder implementation~~ ✓ **Completed** (January 2026)
    - Textile: Some block types not fully parsed
 
 ### Recommended Code Structure Improvements
 
+The modular parser structure is now in place under `lambda/input/markup/`. The recommended structure has been partially implemented:
+
 ```
+lambda/input/markup/              # ✓ IMPLEMENTED
+├── markup_common.hpp             # ✓ Core types and ParseContext
+├── markup_parser.cpp             # ✓ Main orchestration
+├── format/                       # ✓ Format adapters
+│   ├── format_adapter.hpp        # ✓ Adapter interface
+│   ├── markdown_adapter.cpp      # ✓ Markdown rules
+│   ├── asciidoc_adapter.cpp      # ✓ Full AsciiDoc detection
+│   └── ...                       # Other format adapters
+├── block/                        # ✓ Block parsers
+│   ├── block_asciidoc.cpp        # ✓ NEW: AsciiDoc blocks
+│   └── ...                       # Other block parsers
+└── inline/                       # ✓ Inline parsers
+    ├── inline_format_specific.cpp # ✓ Extended with AsciiDoc
+    └── ...                       # Other inline parsers
+
+# Legacy (to be migrated):
 lambda/input/
-├── markup/
-│   ├── markup-parser.hpp       # Core parser class
-│   ├── markup-common.cpp       # Shared utilities
-│   ├── markup-markdown.cpp     # Markdown-specific parsing
-│   ├── markup-rst.cpp          # RST-specific parsing
-│   ├── markup-wiki.cpp         # Wiki-specific parsing
-│   ├── markup-org.cpp          # Org-mode-specific parsing
-│   ├── markup-textile.cpp      # Textile-specific parsing
-│   ├── markup-asciidoc.cpp     # AsciiDoc-specific parsing
-│   └── emoji-map.cpp           # Emoji shortcode table
-└── input-markup.cpp            # Entry point and format detection
+└── input-markup.cpp              # Legacy monolithic (~6200 lines)
 ```
+
+**Migration Status**:
+- [x] AsciiDoc fully migrated to modular parser (January 2026)
+- [ ] Remaining formats to migrate from legacy `input-markup.cpp`
 
 ---
 
@@ -721,14 +798,16 @@ test-markup-baseline: test-markup-md test-markup-wiki test-markup-rst
    - Report location for syntax errors
    - Provide recovery hints
 
-2. **Modularize Code**
-   - Split 6200-line file into format-specific modules
-   - Create shared base for block/inline parsers
+2. ~~**Modularize Code**~~ ✓ **In Progress**
+   - ~~Split 6200-line file into format-specific modules~~ Modular structure implemented
+   - ~~Create shared base for block/inline parsers~~ FormatAdapter pattern in place
+   - [x] AsciiDoc fully modularized (January 2026)
+   - [ ] Migrate remaining formats from legacy `input-markup.cpp`
 
-3. **Add CommonMark Spec Tests**
-   - Download and integrate spec.txt
-   - Track compliance percentage
-   - Fix failing cases
+3. ~~**Add CommonMark Spec Tests**~~ ✓ **Completed**
+   - [x] CommonMark spec.txt integrated (662 tests)
+   - [x] 100% compliance achieved
+   - [x] GfmTables extension tests passing
 
 ### Medium-term (Feature Completeness)
 
@@ -767,7 +846,8 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
 
 4. **Cleanup Checklist**
    - [ ] All format tests pass with unified parser
-   - [ ] Legacy parser files removed
+   - [x] AsciiDoc legacy parser (`input-adoc.cpp`) removed and unified (January 2026)
+   - [ ] Legacy parser files removed (remaining: `input-org.cpp`, `input-man.cpp`)
    - [ ] No duplicate implementations of common features
    - [ ] Documentation updated
 
@@ -793,11 +873,21 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
 
 ## Summary
 
-The Lambda lightweight markup parser provides a solid foundation for parsing multiple markup formats into a unified schema. Key strengths include comprehensive format support and proper schema output. Priority improvements should focus on:
+The Lambda lightweight markup parser provides a solid foundation for parsing multiple markup formats into a unified schema. Key strengths include comprehensive format support and proper schema output.
 
-1. **Testing**: Integrate CommonMark spec tests for compliance verification
+### Recent Achievements
+
+- ✅ **CommonMark Compliance**: 662/662 tests passing (100%)
+- ✅ **Modular Architecture**: FormatAdapter pattern with separate block/inline parsers
+- ✅ **AsciiDoc Integration**: Full unification completed (January 2026)
+  - Legacy `input-adoc.cpp` removed
+  - Admonitions, definition lists, tables, inline links/images/cross-refs supported
+
+### Remaining Work
+
+1. **Format Migration**: Move remaining formats from legacy `input-markup.cpp` to modular parser
 2. **Error Reporting**: Leverage existing infrastructure for structured errors
-3. **Code Organization**: Modularize for maintainability
+3. **Man Page Unification**: Migrate `input-man.cpp` to modular parser
 
 The parser successfully balances flexibility (multiple formats) with consistency (unified output schema), making it suitable for document processing, transformation, and validation workflows.
 
