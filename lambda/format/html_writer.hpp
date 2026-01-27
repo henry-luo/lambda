@@ -7,8 +7,10 @@
 #include "../../lib/strbuf.h"
 #include "../mark_builder.hpp"
 #include "../lambda-data.hpp"
-#include <vector>
-#include <string>
+#include <vector>  // TODO: migrate NodeHtmlWriter to avoid std::vector
+
+// Maximum nesting depth for HTML tags
+#define HTML_TAG_STACK_MAX 128
 
 namespace lambda {
 
@@ -66,7 +68,8 @@ private:
     bool pretty_print_;
     Pool* pool_;
     bool in_tag_;  // Track if we're inside a tag (for attribute writing)
-    std::vector<std::string> tag_stack_;  // Track open tags for proper closing
+    const char* tag_stack_[HTML_TAG_STACK_MAX];  // Track open tags for proper closing
+    int tag_stack_top_;  // Index of top element (-1 = empty)
     
 public:
     explicit TextHtmlWriter(Pool* pool, bool pretty_print = false);
@@ -102,6 +105,7 @@ private:
 };
 
 // Node mode implementation: generates Lambda Element tree using MarkBuilder
+// TODO: migrate to avoid std::vector - NodeHtmlWriter is not currently used
 class NodeHtmlWriter : public HtmlWriter {
 private:
     MarkBuilder* builder_;

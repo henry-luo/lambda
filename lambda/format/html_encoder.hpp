@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
-#include <string_view>
+#include "../../lib/strbuf.h"
+#include <stddef.h>  // for size_t
 
 namespace html {
 
@@ -19,29 +19,34 @@ class HtmlEncoder {
 public:
     /**
      * Escape HTML special characters in text
+     * Writes result to the provided StrBuf
      * 
+     * @param sb Output buffer (must not be NULL)
      * @param text Raw text that may contain special chars
-     * @return HTML-safe string with entities
+     * @param len Length of text (0 means use strlen)
      */
-    static std::string escape(std::string_view text);
+    static void escape(StrBuf* sb, const char* text, size_t len = 0);
     
     /**
      * Escape text for use in HTML attributes
      * Includes quote escaping
+     * Writes result to the provided StrBuf
      * 
+     * @param sb Output buffer (must not be NULL)
      * @param text Raw attribute value
-     * @return Attribute-safe string with entities
+     * @param len Length of text (0 means use strlen)
      */
-    static std::string escape_attribute(std::string_view text);
+    static void escape_attribute(StrBuf* sb, const char* text, size_t len = 0);
     
     /**
      * Check if text needs escaping
      * Fast pre-check to avoid unnecessary string copies
      * 
      * @param text Text to check
+     * @param len Length of text (0 means use strlen)
      * @return true if contains characters needing escape
      */
-    static bool needs_escaping(std::string_view text);
+    static bool needs_escaping(const char* text, size_t len = 0);
     
     // Common HTML entities
     static constexpr const char* NBSP = "&nbsp;";     // Non-breaking space

@@ -2,10 +2,9 @@
 #define FORMAT_UTILS_H
 
 #include "../../lib/stringbuf.h"
+#include "../../lib/hashmap.h"
 #include "../lambda-data.hpp"
 #include "../mark_reader.hpp"
-#include <unordered_map>
-#include <string>
 
 // text escaping configuration
 typedef struct {
@@ -52,7 +51,7 @@ void formatter_context_destroy(FormatterContext* ctx);
 // ==============================================================================
 
 typedef struct FormatterDispatcher {
-    std::unordered_map<std::string, ElementFormatterFunc>* type_handlers;
+    HashMap* type_handlers;  // HashMap storing HandlerEntry (type name → function)
     ElementFormatterFunc default_handler;
     Pool* pool;
 } FormatterDispatcher;
