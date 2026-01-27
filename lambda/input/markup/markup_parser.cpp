@@ -364,7 +364,7 @@ void MarkupParser::addMarkupError(MarkupErrorCategory category,
     }
 
     // Create and add error
-    ParseError err(loc, severity, message, context, hint);
+    ParseError err(loc, severity, message.c_str(), context.c_str(), hint.c_str());
     errors().addError(err);
 
     // Log for debugging

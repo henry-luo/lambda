@@ -3,9 +3,9 @@
 #define LAMBDA_SOURCE_TRACKER_HPP
 
 #include "parse_error.hpp"
-#include <string>
-#include <vector>
+#include "../../lib/strbuf.h"
 #include <cstdint>
+#include <cstddef>
 
 namespace lambda {
 
@@ -13,6 +13,8 @@ namespace lambda {
 // Handles UTF-8 multi-byte characters correctly
 class SourceTracker {
 private:
+    static const size_t MAX_LINE_STARTS = 10000;  // Max tracked lines
+
     const char* source_;        // Source text (not owned)
     size_t source_len_;         // Total length of source
     const char* current_;       // Current position
@@ -20,10 +22,14 @@ private:
     SourceLocation location_;   // Current location
 
     // Line start positions for fast context extraction
-    std::vector<size_t> line_starts_;
+    size_t line_starts_[MAX_LINE_STARTS];
+    size_t line_count_;         // Number of lines tracked
 
     // Track if we've built the line index
     bool line_index_built_;
+
+    // Reusable buffer for extract operations
+    StrBuf* extract_buf_;
 
     // Build line index lazily
     void buildLineIndex();
@@ -35,7 +41,11 @@ private:
 
 public:
     SourceTracker(const char* source, size_t len);
-    SourceTracker(const std::string& source);
+    ~SourceTracker();
+
+    // Non-copyable
+    SourceTracker(const SourceTracker&) = delete;
+    SourceTracker& operator=(const SourceTracker&) = delete;
 
     // Current position info
     const SourceLocation& location() const { return location_; }
@@ -60,10 +70,10 @@ public:
     bool match(const char* str);  // Check if current position matches string
     bool match(char c);           // Check if current char matches
 
-    // Extract text
-    std::string extract(size_t start_offset, size_t end_offset) const;
-    std::string extractLine(size_t line_num) const;
-    std::string getContextLine() const;  // Get current line
+    // Extract text - returns internal buffer, valid until next extract call
+    const char* extract(size_t start_offset, size_t end_offset);
+    const char* extractLine(size_t line_num);
+    const char* getContextLine();  // Get current line
 
     // Get substring from current position
     const char* rest() const { return current_; }

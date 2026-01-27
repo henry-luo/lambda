@@ -12,39 +12,27 @@ void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    std::string message(buffer);
-    std::string context_line;
-
-    if (!owned_source_.empty()) {
+    const char* context_line = nullptr;
+    if (owned_source_) {
         context_line = tracker.extractLine(loc.line);
     }
 
-    if (context_line.empty()) {
-        errors_.addError(loc, message);
+    // Copy message to msg_buf_ for persistence
+    strbuf_reset(msg_buf_);
+    strbuf_append_str(msg_buf_, buffer);
+    const char* msg = msg_buf_->str;
+
+    if (context_line && context_line[0] != '\0') {
+        errors_.addError(loc, msg, context_line);
     } else {
-        errors_.addError(loc, message, context_line);
+        errors_.addError(loc, msg);
     }
 }
 
-void InputContext::addError(const SourceLocation& loc, const std::string& message) {
-    std::string context_line;
-
-    if (!owned_source_.empty()) {
-        context_line = tracker.extractLine(loc.line);
-    }
-
-    if (context_line.empty()) {
-        errors_.addError(loc, message);
-    } else {
-        errors_.addError(loc, message, context_line);
-    }
-}
-
-void InputContext::addError(const SourceLocation& loc, const std::string& message,
-                             const std::string& hint) {
-    std::string context_line;
-
-    if (!owned_source_.empty()) {
+void InputContext::addError(const SourceLocation& loc, const char* message,
+                             const char* hint) {
+    const char* context_line = nullptr;
+    if (owned_source_) {
         context_line = tracker.extractLine(loc.line);
     }
 
@@ -59,20 +47,20 @@ void InputContext::addWarning(const SourceLocation& loc, const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    addWarning(loc, std::string(buffer));
-}
-
-void InputContext::addWarning(const SourceLocation& loc, const std::string& message) {
-    std::string context_line;
-
-    if (!owned_source_.empty()) {
+    const char* context_line = nullptr;
+    if (owned_source_) {
         context_line = tracker.extractLine(loc.line);
     }
 
-    if (context_line.empty()) {
-        errors_.addWarning(loc, message);
+    // Copy message to msg_buf_ for persistence
+    strbuf_reset(msg_buf_);
+    strbuf_append_str(msg_buf_, buffer);
+    const char* msg = msg_buf_->str;
+
+    if (context_line && context_line[0] != '\0') {
+        errors_.addWarning(loc, msg, context_line);
     } else {
-        errors_.addWarning(loc, message, context_line);
+        errors_.addWarning(loc, msg);
     }
 }
 
@@ -83,11 +71,11 @@ void InputContext::addNote(const SourceLocation& loc, const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    addNote(loc, std::string(buffer));
-}
+    // Copy message to msg_buf_ for persistence
+    strbuf_reset(msg_buf_);
+    strbuf_append_str(msg_buf_, buffer);
 
-void InputContext::addNote(const SourceLocation& loc, const std::string& message) {
-    errors_.addNote(loc, message);
+    errors_.addNote(loc, msg_buf_->str);
 }
 
 void InputContext::addError(const char* fmt, ...) {
@@ -97,19 +85,20 @@ void InputContext::addError(const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    if (!owned_source_.empty()) {
-        addError(tracker.location(), std::string(buffer));
-    } else {
-        // No source tracking, add error without location
-        errors_.addError(SourceLocation(0, 1, 1), std::string(buffer));
-    }
-}
+    // Copy message to msg_buf_ for persistence
+    strbuf_reset(msg_buf_);
+    strbuf_append_str(msg_buf_, buffer);
+    const char* msg = msg_buf_->str;
 
-void InputContext::addError(const std::string& message) {
-    if (!owned_source_.empty()) {
-        addError(tracker.location(), message);
+    if (owned_source_) {
+        const char* context_line = tracker.extractLine(tracker.location().line);
+        if (context_line && context_line[0] != '\0') {
+            errors_.addError(tracker.location(), msg, context_line);
+        } else {
+            errors_.addError(tracker.location(), msg);
+        }
     } else {
-        errors_.addError(SourceLocation(0, 1, 1), message);
+        errors_.addError(SourceLocation(0, 1, 1), msg);
     }
 }
 
@@ -120,18 +109,20 @@ void InputContext::addWarning(const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    if (!owned_source_.empty()) {
-        addWarning(tracker.location(), std::string(buffer));
-    } else {
-        errors_.addWarning(SourceLocation(0, 1, 1), std::string(buffer));
-    }
-}
+    // Copy message to msg_buf_ for persistence
+    strbuf_reset(msg_buf_);
+    strbuf_append_str(msg_buf_, buffer);
+    const char* msg = msg_buf_->str;
 
-void InputContext::addWarning(const std::string& message) {
-    if (!owned_source_.empty()) {
-        addWarning(tracker.location(), message);
+    if (owned_source_) {
+        const char* context_line = tracker.extractLine(tracker.location().line);
+        if (context_line && context_line[0] != '\0') {
+            errors_.addWarning(tracker.location(), msg, context_line);
+        } else {
+            errors_.addWarning(tracker.location(), msg);
+        }
     } else {
-        errors_.addWarning(SourceLocation(0, 1, 1), message);
+        errors_.addWarning(SourceLocation(0, 1, 1), msg);
     }
 }
 
@@ -142,18 +133,14 @@ void InputContext::addNote(const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    if (!owned_source_.empty()) {
-        addNote(tracker.location(), std::string(buffer));
-    } else {
-        errors_.addNote(SourceLocation(0, 1, 1), std::string(buffer));
-    }
-}
+    // Copy message to msg_buf_ for persistence
+    strbuf_reset(msg_buf_);
+    strbuf_append_str(msg_buf_, buffer);
 
-void InputContext::addNote(const std::string& message) {
-    if (!owned_source_.empty()) {
-        addNote(tracker.location(), message);
+    if (owned_source_) {
+        errors_.addNote(tracker.location(), msg_buf_->str);
     } else {
-        errors_.addNote(SourceLocation(0, 1, 1), message);
+        errors_.addNote(SourceLocation(0, 1, 1), msg_buf_->str);
     }
 }
 
@@ -162,8 +149,8 @@ void InputContext::logErrors() const {
         return;
     }
 
-    std::string formatted = errors_.formatErrors();
-    log_error("%s", formatted.c_str());
+    const char* formatted = const_cast<ParseErrorList&>(errors_).formatErrors();
+    log_error("%s", formatted);
 }
 
 } // namespace lambda

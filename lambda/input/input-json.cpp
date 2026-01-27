@@ -71,7 +71,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
                 } break;
                 default:
                     ctx.addWarning(tracker.location(),
-                                   std::string("Invalid escape sequence: \\") + **json);
+                                   "Invalid escape sequence: \\%c", **json);
                     break;
             }
         } else {
@@ -347,7 +347,7 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
                 return parse_number(ctx, json);
             }
             ctx.addError(tracker.location(),
-                        std::string("Unexpected character: '") + **json + "'");
+                        "Unexpected character: '%c'", **json);
             return ctx.builder.createNull();
     }
 }
