@@ -38,14 +38,6 @@ void TextHtmlWriter::writeText(const char* text, size_t len) {
         len = strlen(text);
     }
     
-    // Skip EMPTY_STRING sentinel ("lambda.nil")
-    if (len == 10 && strncmp(text, "lambda.nil", 10) == 0) {
-        // Output a marker instead to verify this path is taken
-        closeTagStart();
-        strbuf_append_str(buf_, "[SKIPPED]");
-        return;
-    }
-    
     closeTagStart();  // Close tag if we're in one
     
     escapeHtml(text, len);
@@ -335,19 +327,6 @@ Item TextHtmlWriter::getResult() {
     
     // Convert strbuf to Lambda String (allocate from pool)
     size_t len = buf_->length;
-    
-    // Remove any <p>lambda.nil</p> artifacts from the output
-    // These can occur when empty strings end up in the document structure
-    const char* search = "<p>lambda.nil</p>";
-    size_t search_len = strlen(search);
-    char* pos;
-    while ((pos = strstr(buf_->str, search)) != nullptr) {
-        // Shift the rest of the string left
-        size_t remaining = buf_->length - (pos - buf_->str) - search_len;
-        memmove(pos, pos + search_len, remaining + 1);  // +1 for null terminator
-        buf_->length -= search_len;
-    }
-    len = buf_->length;
     
     String* str = (String*)pool_calloc(pool_, sizeof(String) + len + 1);
     str->len = len;

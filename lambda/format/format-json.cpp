@@ -54,14 +54,8 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
 }
 
 static void format_string(JsonContext& ctx, String* str) {
-    // Handle EMPTY_STRING specially - output as null since empty strings map to null in Lambda
-    if (str == &EMPTY_STRING) {
-        ctx.write_text("null");
-        return;
-    }
-
-    // Handle literal "lambda.nil" content as null
-    if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+    // Handle null string pointer as null (empty strings map to null in Lambda)
+    if (!str) {
         ctx.write_text("null");
         return;
     }
