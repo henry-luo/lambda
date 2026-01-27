@@ -374,6 +374,10 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/ics") == 0) return "ics";
     if (strcmp(mime_type, "text/textile") == 0) return "textile";
     if (strcmp(mime_type, "application/textile") == 0) return "textile";
+    if (strcmp(mime_type, "text/x-org") == 0) return "org";
+    if (strcmp(mime_type, "text/x-asciidoc") == 0) return "asciidoc";
+    if (strcmp(mime_type, "text/x-wiki") == 0) return "wiki";
+    if (strcmp(mime_type, "text/troff") == 0) return "man";
     if (strcmp(mime_type, "text/x-mark") == 0) return "mark";
     if (strcmp(mime_type, "application/x-mark") == 0) return "mark";
     if (strcmp(mime_type, "text/css") == 0) return "css";
