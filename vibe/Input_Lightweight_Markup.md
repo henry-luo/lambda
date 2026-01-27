@@ -8,13 +8,16 @@ This document describes the design and implementation of Lambda's unified lightw
 2. [Supported Markup Languages](#supported-markup-languages)
 3. [Man Page Integration](#man-page-integration)
 4. [Architecture](#architecture)
-5. [Code Reuse Principle](#code-reuse-principle)
-6. [Mark Doc Schema Compliance](#mark-doc-schema-compliance)
-7. [Implementation Analysis](#implementation-analysis)
-8. [Structured Error Reporting](#structured-error-reporting)
-9. [Testing Strategy](#testing-strategy)
-10. [Post-Compliance Cleanup Phase](#post-compliance-cleanup-phase)
-11. [Future Improvements](#future-improvements)
+5. [Core Classes](#core-classes)
+6. [Code Reuse Principle](#code-reuse-principle)
+7. [HTML5 Integration](#html5-integration)
+8. [Mark Doc Schema Compliance](#mark-doc-schema-compliance)
+9. [Implementation Analysis](#implementation-analysis)
+10. [Structured Error Reporting](#structured-error-reporting)
+11. [Testing Strategy](#testing-strategy)
+12. [Adding a New Format](#adding-a-new-format)
+13. [Post-Compliance Cleanup Phase](#post-compliance-cleanup-phase)
+14. [Future Improvements](#future-improvements)
 
 ---
 
@@ -224,6 +227,61 @@ lambda/input/
 └── source_tracker.hpp       # Position tracking: SourceTracker
 ```
 
+---
+
+## Core Classes
+
+### MarkupParser
+
+The central class that coordinates parsing. Extends `InputContext` to inherit MarkBuilder, error tracking, and source tracking.
+
+```cpp
+class MarkupParser : public InputContext {
+public:
+    Item parse(const char* content, size_t length, ParseConfig config = ParseConfig());
+    FormatAdapter* adapter;      // Current format adapter
+    ParserState state;           // Parser state
+    const char* current_line;    // Line-based iteration
+    int current_line_number;
+    bool advance_line();
+
+    // Error reporting
+    void warnUnclosed(const char* delimiter, int start_line);
+    void warnInvalidSyntax(const char* element, const char* expected);
+};
+```
+
+### FormatAdapter
+
+Abstract interface for format-specific behavior. Each format implements its own adapter.
+
+```cpp
+class FormatAdapter {
+public:
+    virtual Format get_format() const = 0;
+    virtual const char* get_name() const = 0;
+    virtual bool detect_header(const char* line, int* level, HeaderStyle* style) = 0;
+    virtual bool detect_emphasis(const char* text, EmphasisType* type, int* length) = 0;
+    virtual bool detect_code_fence(const char* line, CodeFenceInfo* info) = 0;
+    virtual bool detect_list_item(const char* line, ListMarkerInfo* info) = 0;
+    virtual bool detect_table_row(const char* line, TableRowInfo* info) = 0;
+    virtual Item parse_directive(MarkupParser* parser, const char* line);  // RST
+    virtual Item parse_wiki_link(MarkupParser* parser, const char* text);  // Wiki
+};
+```
+
+### ParseConfig
+
+```cpp
+struct ParseConfig {
+    Format format;           // Target format (or AUTO_DETECT)
+    Flavor flavor;           // Format variant (e.g., GFM, CommonMark)
+    bool strict_mode;        // Strict vs lenient parsing
+    bool collect_metadata;   // Parse frontmatter/properties
+    bool resolve_refs;       // Resolve link/footnote references
+};
+```
+
 ### Class Hierarchy
 
 ```cpp
@@ -361,6 +419,48 @@ input_markup(input, content)
                     ├── BLOCK_DIVIDER → parse_divider()
                     └── BLOCK_PARAGRAPH → parse_paragraph()
 ```
+
+---
+
+## HTML5 Integration
+
+Markdown documents can contain raw HTML that passes through without markdown processing. The parser integrates with Lambda's HTML5 parser to build a proper DOM tree from HTML fragments.
+
+### Architecture
+
+```
+Markdown Document
+      │
+      ▼
+┌─────────────────────┐
+│   MarkupParser      │
+│  html5_parser_ ─────┼──► Html5Parser (fragment mode)
+└─────────────────────┘         │
+      │                         ▼
+      ▼                   Accumulates all HTML
+┌─────────────────────────────────────┐
+│            Output Document          │
+│  doc                                │
+│  ├── body (markdown content)        │
+│  │   ├── html-block (raw HTML)      │
+│  │   └── p → raw-html (inline HTML) │
+│  └── html-dom (parsed HTML5 DOM)    │
+│      └── table, div, etc...         │
+└─────────────────────────────────────┘
+```
+
+### Key Methods
+
+- **`getOrCreateHtml5Parser()`** - Lazily creates HTML5 parser on first HTML encounter
+- **`parseHtmlFragment(const char* html)`** - Feeds HTML to shared parser
+- **`getHtmlBody()`** - Retrieves parsed HTML body after document parsing
+
+### Benefits
+
+- **Single DOM tree** - All HTML fragments parsed into one coherent DOM
+- **Proper nesting** - HTML5 parser handles implicit elements and nesting rules
+- **Dual output** - Raw HTML in `html-block`/`raw-html`, parsed DOM in `html-dom`
+- **Lazy initialization** - HTML5 parser only created when HTML content is encountered
 
 ---
 
@@ -789,6 +889,39 @@ test-markup-baseline: test-markup-md test-markup-wiki test-markup-rst
 
 ---
 
+## Adding a New Format
+
+To add support for a new markup format:
+
+1. **Define format enum** in `markup_common.hpp`:
+   ```cpp
+   enum class Format { /* existing... */ NEW_FORMAT };
+   ```
+
+2. **Create format adapter** in `format/newformat_adapter.cpp`:
+   ```cpp
+   class NewFormatAdapter : public FormatAdapter {
+       Format get_format() const override { return Format::NEW_FORMAT; }
+       bool detect_header(const char* line, int* level, HeaderStyle* style) override;
+       bool detect_emphasis(const char* text, EmphasisType* type, int* len) override;
+       // ... implement all virtual methods
+   };
+   ```
+
+3. **Register adapter** in `format_registry.cpp`:
+   ```cpp
+   static NewFormatAdapter new_format_adapter;
+   adapters[Format::NEW_FORMAT] = &new_format_adapter;
+   ```
+
+4. **Add file extension mapping** in `detect_format_from_extension()`.
+
+5. **Add format-specific block parsers** (if needed) in `block/block_newformat.cpp`.
+
+6. **Add format-specific inline parsers** (if needed) in `inline/inline_format_specific.cpp`.
+
+---
+
 ## Future Improvements
 
 ### Short-term (Implementation Quality)
@@ -868,6 +1001,14 @@ After passing official test suites (CommonMark, MediaWiki, RST), consolidate leg
    - Diagnostics for editor integration
    - Completion suggestions
    - Hover information
+
+### Performance & Memory Notes
+
+- **Single pass parsing** - Forward-only processing, no backtracking
+- **Arena allocation** - Uses MarkBuilder's arena for minimal allocations
+- **Deterministic detection** - Block type detection is O(1)
+- **Lazy HTML5 parser** - Only created when HTML content encountered
+- **Memory cleanup** - Automatic cleanup when `Input` is released
 
 ---
 
