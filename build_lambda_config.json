@@ -157,18 +157,28 @@
         },
         {
             "name": "woff2dec",
-            "description": "WOFF2 font decompression library",
-            "include": "/opt/homebrew/include/woff2",
-            "lib": "-lwoff2dec",
-            "libpath": "/opt/homebrew/lib",
-            "link": "dynamic"
+            "description": "WOFF2 font decompression library (built from source)",
+            "include": "mac-deps/woff2/include",
+            "lib": "mac-deps/woff2/out/libwoff2dec.a",
+            "link": "static"
         },
         {
             "name": "woff2common",
-            "description": "WOFF2 common library",
-            "lib": "-lwoff2common",
-            "libpath": "/opt/homebrew/lib",
-            "link": "dynamic"
+            "description": "WOFF2 common library (built from source)",
+            "lib": "mac-deps/woff2/out/libwoff2common.a",
+            "link": "static"
+        },
+        {
+            "name": "brotlidec",
+            "description": "Brotli decompression (WOFF2 dependency, built from source)",
+            "lib": "mac-deps/brotli/out/libbrotlidec.a",
+            "link": "static"
+        },
+        {
+            "name": "brotlicommon",
+            "description": "Brotli common (WOFF2 dependency, built from source)",
+            "lib": "mac-deps/brotli/out/libbrotlicommon.a",
+            "link": "static"
         },
         {
             "name": "ThorVG",
