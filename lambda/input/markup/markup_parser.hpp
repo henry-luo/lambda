@@ -15,7 +15,6 @@
 #include "format_adapter.hpp"
 #include "../input-context.hpp"
 #include "../../mark_builder.hpp"
-#include <string>
 
 // Forward declaration for HTML5 parser
 struct Html5Parser;
@@ -230,8 +229,8 @@ public:
      * Add a structured markup parsing error
      */
     void addMarkupError(MarkupErrorCategory category,
-                        const std::string& message,
-                        const std::string& hint = "");
+                        const char* message,
+                        const char* hint = nullptr);
 
     /**
      * Convenience: warn about unclosed delimiter

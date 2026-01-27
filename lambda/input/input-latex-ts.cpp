@@ -15,8 +15,6 @@ extern "C" {
 }
 #include "input-context.hpp"
 #include "source_tracker.hpp"
-#include <unordered_map>
-#include <string>
 #include <cstring>
 
 // Windows doesn't have memmem - provide portable implementation
@@ -54,89 +52,82 @@ enum NodeCategory {
     NODE_TEXT         // Text content -> String
 };
 
-// Hybrid grammar (50 rules) node classification
-// Matches LaTeX.js structure: generic commands, section hierarchy, environment types
-static const std::unordered_map<std::string, NodeCategory> node_classification = {
-    // Document structure
-    {"source_file", NODE_CONTAINER},
-    {"preamble", NODE_CONTAINER},
-    {"document", NODE_CONTAINER},
-    {"begin_document", NODE_LEAF},
-    {"end_document", NODE_LEAF},
-
-    // Block-level content
-    {"paragraph", NODE_CONTAINER},
-    {"paragraph_break", NODE_LEAF},
-    {"section", NODE_CONTAINER},
-    {"section_command", NODE_LEAF},
-
-    // Commands (generic pattern)
-    {"command", NODE_CONTAINER},
-    {"verb_command", NODE_CONTAINER},  // \verb|text| inline verbatim (handled specially)
-    {"char_command", NODE_CONTAINER},  // \char<number> TeX character code (handled specially)
-    {"caret_char", NODE_CONTAINER},    // ^^XX or ^^^^XXXX TeX caret notation (handled specially)
-    {"controlspace_command", NODE_CONTAINER},  // \<space>, \<tab>, \<newline> control space
-    {"command_name", NODE_LEAF},
-    {"star", NODE_LEAF},
-
-    // Groups
-    {"curly_group", NODE_CONTAINER},
-    {"brack_group", NODE_CONTAINER},
-
-    // Math
-    {"math", NODE_CONTAINER},
-    {"inline_math", NODE_CONTAINER},
-    {"display_math", NODE_CONTAINER},
-    {"math_text", NODE_TEXT},
-    {"math_single_char", NODE_TEXT},  // Single char in sub/superscript
-    {"subscript", NODE_CONTAINER},
-    {"superscript", NODE_CONTAINER},
-
-    // Environments
-    {"environment", NODE_CONTAINER},
-    {"generic_environment", NODE_CONTAINER},
-    {"verbatim_environment", NODE_CONTAINER},
-    {"comment_environment", NODE_CONTAINER},
-    {"math_environment", NODE_CONTAINER},
-    {"begin_env", NODE_CONTAINER},
-    {"end_env", NODE_CONTAINER},
-    {"env_name", NODE_LEAF},
-    {"verbatim", NODE_TEXT},
-
-    // Text content
-    {"text", NODE_TEXT},
-    {"space", NODE_LEAF},
-    {"line_comment", NODE_LEAF},
-    {"ligature", NODE_LEAF},
-    {"control_symbol", NODE_CONTAINER},
-    {"linebreak_command", NODE_CONTAINER},  // \\ with optional [<length>]
-
-    // Primitive dimension commands (e.g., \hskip 10pt, \kern-3pt)
-    {"primitive_dimen", NODE_CONTAINER},
-    {"primitive_dimen_name", NODE_LEAF},
-    {"dimension", NODE_TEXT},  // Dimension text is captured as TEXT to extract the value
-
-    // Special tokens
-    {"nbsp", NODE_LEAF},
-    {"alignment_tab", NODE_LEAF},
-
-    // Punctuation (skip these)
-    {"{", NODE_LEAF},
-    {"}", NODE_LEAF},
-    {"[", NODE_LEAF},
-    {"]", NODE_LEAF},
-    {"$", NODE_LEAF},
-
-    // Error recovery
-    {"ERROR", NODE_TEXT},
+// Node classification entry for binary search (sorted alphabetically by name)
+struct NodeClassEntry {
+    const char* name;
+    NodeCategory category;
 };
 
-static NodeCategory classify_node_type(const char* node_type) {
-    auto it = node_classification.find(node_type);
-    if (it != node_classification.end()) {
-        return it->second;
-    }
+// Hybrid grammar node classification - MUST BE SORTED ALPHABETICALLY
+// Matches LaTeX.js structure: generic commands, section hierarchy, environment types
+static const NodeClassEntry NODE_CLASSIFICATION[] = {
+    {"$", NODE_LEAF},
+    {"ERROR", NODE_TEXT},
+    {"[", NODE_LEAF},
+    {"]", NODE_LEAF},
+    {"alignment_tab", NODE_LEAF},
+    {"begin_document", NODE_LEAF},
+    {"begin_env", NODE_CONTAINER},
+    {"brack_group", NODE_CONTAINER},
+    {"caret_char", NODE_CONTAINER},
+    {"char_command", NODE_CONTAINER},
+    {"command", NODE_CONTAINER},
+    {"command_name", NODE_LEAF},
+    {"comment_environment", NODE_CONTAINER},
+    {"control_symbol", NODE_CONTAINER},
+    {"controlspace_command", NODE_CONTAINER},
+    {"curly_group", NODE_CONTAINER},
+    {"dimension", NODE_TEXT},
+    {"display_math", NODE_CONTAINER},
+    {"document", NODE_CONTAINER},
+    {"end_document", NODE_LEAF},
+    {"end_env", NODE_CONTAINER},
+    {"env_name", NODE_LEAF},
+    {"environment", NODE_CONTAINER},
+    {"generic_environment", NODE_CONTAINER},
+    {"inline_math", NODE_CONTAINER},
+    {"ligature", NODE_LEAF},
+    {"line_comment", NODE_LEAF},
+    {"linebreak_command", NODE_CONTAINER},
+    {"math", NODE_CONTAINER},
+    {"math_environment", NODE_CONTAINER},
+    {"math_single_char", NODE_TEXT},
+    {"math_text", NODE_TEXT},
+    {"nbsp", NODE_LEAF},
+    {"paragraph", NODE_CONTAINER},
+    {"paragraph_break", NODE_LEAF},
+    {"preamble", NODE_CONTAINER},
+    {"primitive_dimen", NODE_CONTAINER},
+    {"primitive_dimen_name", NODE_LEAF},
+    {"section", NODE_CONTAINER},
+    {"section_command", NODE_LEAF},
+    {"source_file", NODE_CONTAINER},
+    {"space", NODE_LEAF},
+    {"star", NODE_LEAF},
+    {"subscript", NODE_CONTAINER},
+    {"superscript", NODE_CONTAINER},
+    {"text", NODE_TEXT},
+    {"verb_command", NODE_CONTAINER},
+    {"verbatim", NODE_TEXT},
+    {"verbatim_environment", NODE_CONTAINER},
+    {"{", NODE_LEAF},
+    {"}", NODE_LEAF},
+};
+static const size_t NODE_CLASSIFICATION_COUNT = sizeof(NODE_CLASSIFICATION) / sizeof(NODE_CLASSIFICATION[0]);
 
+static int node_class_compare(const void* a, const void* b) {
+    const char* key = (const char*)a;
+    const NodeClassEntry* entry = (const NodeClassEntry*)b;
+    return strcmp(key, entry->name);
+}
+
+static NodeCategory classify_node_type(const char* node_type) {
+    const NodeClassEntry* found = (const NodeClassEntry*)bsearch(
+        node_type, NODE_CLASSIFICATION, NODE_CLASSIFICATION_COUNT,
+        sizeof(NodeClassEntry), node_class_compare);
+    if (found) {
+        return found->category;
+    }
     // Default: assume container (safer, can hold children)
     log_debug("Unknown node type classification: %s, defaulting to NODE_CONTAINER", node_type);
     return NODE_CONTAINER;
@@ -1222,8 +1213,7 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
 
             if (has_comment_content) {
                 // Build processed text by stripping comments
-                std::string result;
-                result.reserve(len);
+                StrBuf* result = strbuf_new_cap(len);
 
                 size_t i = 0;
                 while (i < len) {
@@ -1259,13 +1249,16 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                     }
 
                     // Copy regular character
-                    result += text[i];
+                    strbuf_append_char(result, text[i]);
                     i++;
                 }
 
-                if (!result.empty()) {
-                    return ctx.builder.createStringItem(result.c_str(), result.size());
+                if (result->length > 0) {
+                    Item item = ctx.builder.createStringItem(result->str, result->length);
+                    strbuf_free(result);
+                    return item;
                 }
+                strbuf_free(result);
             }
         }
         return {.item = ITEM_NULL};
@@ -2260,8 +2253,7 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
                 // 2. The remaining content (which needs to be processed)
 
                 // Process the remaining content by stripping comments
-                std::string processed;
-                processed.reserve(remaining_len);
+                StrBuf* processed = strbuf_new_cap(remaining_len);
 
                 size_t i = 0;
                 while (i < remaining_len) {
@@ -2296,17 +2288,19 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
                     }
 
                     // Copy regular character
-                    processed += real_end[i];
+                    strbuf_append_char(processed, real_end[i]);
                     i++;
                 }
 
-                if (!processed.empty()) {
+                if (processed->length > 0) {
                     // Create a _seq element with comment + remaining text
                     ElementBuilder seq = ctx.builder.element("_seq");
                     seq.child(ctx.builder.element("comment").final());
-                    seq.child(ctx.builder.createStringItem(processed.c_str(), processed.size()));
+                    seq.child(ctx.builder.createStringItem(processed->str, processed->length));
+                    strbuf_free(processed);
                     return seq.final();
                 }
+                strbuf_free(processed);
             }
         }
 
