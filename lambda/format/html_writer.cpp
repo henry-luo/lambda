@@ -5,7 +5,6 @@
 #include "../input/input.hpp"
 #include "../../lib/log.h"
 #include <cstring>
-#include <string>  // TODO: remove when NodeHtmlWriter is migrated
 
 namespace lambda {
 
@@ -411,7 +410,12 @@ void TextHtmlWriter::closeTagStart() {
 // =============================================================================
 
 NodeHtmlWriter::NodeHtmlWriter(Input* input)
-    : builder_(nullptr), pool_(nullptr), input_(input), pending_attributes_(nullptr) {
+    : builder_(nullptr), stack_top_(-1), pool_(nullptr), input_(input), pending_attributes_(nullptr) {
+    // Initialize stack to nullptr
+    for (int i = 0; i < NODE_ELEMENT_STACK_MAX; i++) {
+        stack_[i] = nullptr;
+    }
+    
     if (!input) {
         log_error("NodeHtmlWriter: Input* is null");
         return;
@@ -421,6 +425,12 @@ NodeHtmlWriter::NodeHtmlWriter(Input* input)
 }
 
 NodeHtmlWriter::~NodeHtmlWriter() {
+    // Clean up any remaining element builders on the stack
+    while (stack_top_ >= 0) {
+        delete stack_[stack_top_];
+        stack_[stack_top_] = nullptr;
+        stack_top_--;
+    }
     delete builder_;
 }
 
@@ -461,7 +471,14 @@ void NodeHtmlWriter::openTag(const char* tag, const char* classes,
                             const char* id, const char* style) {
     if (!tag || !builder_) return;
     
-    ElementBuilder elem = builder_->element(tag);
+    // Check stack overflow
+    if (stack_top_ >= NODE_ELEMENT_STACK_MAX - 1) {
+        log_error("NodeHtmlWriter: element stack overflow (max %d)", NODE_ELEMENT_STACK_MAX);
+        return;
+    }
+    
+    // Create new ElementBuilder on heap and push to stack
+    ElementBuilder* elem = new ElementBuilder(builder_->element(tag));
     
     // Add attributes directly to element (ElementBuilder supports attr(key, value))
     if (classes && classes[0]) {
@@ -472,7 +489,7 @@ void NodeHtmlWriter::openTag(const char* tag, const char* classes,
         
         Item class_item;
         class_item.item = s2it(class_str);
-        elem.attr("class", class_item);
+        elem->attr("class", class_item);
     }
     if (id && id[0]) {
         String* id_str = (String*)pool_calloc(pool_, sizeof(String) + strlen(id) + 1);
@@ -482,7 +499,7 @@ void NodeHtmlWriter::openTag(const char* tag, const char* classes,
         
         Item id_item;
         id_item.item = s2it(id_str);
-        elem.attr("id", id_item);
+        elem->attr("id", id_item);
     }
     if (style && style[0]) {
         String* style_str = (String*)pool_calloc(pool_, sizeof(String) + strlen(style) + 1);
@@ -492,64 +509,84 @@ void NodeHtmlWriter::openTag(const char* tag, const char* classes,
         
         Item style_item;
         style_item.item = s2it(style_str);
-        elem.attr("style", style_item);
+        elem->attr("style", style_item);
     }
     
-    stack_.push_back(std::move(elem));
+    stack_[++stack_top_] = elem;
 }
 
 void NodeHtmlWriter::openTagRaw(const char* tag, const char* raw_attrs) {
     if (!tag || !builder_) return;
     
-    ElementBuilder elem = builder_->element(tag);
+    if (stack_top_ >= NODE_ELEMENT_STACK_MAX - 1) {
+        log_error("NodeHtmlWriter: stack overflow in openTagRaw");
+        return;
+    }
+    
+    ElementBuilder* elem = new ElementBuilder(builder_->element(tag));
     
     // Parse raw attributes string (e.g., "id=\"foo\" class=\"bar\"")
     // Simple parser for id="...", class="...", style="..." patterns
     if (raw_attrs && raw_attrs[0]) {
-        std::string attrs_str(raw_attrs);
+        const char* p = raw_attrs;
+        size_t attrs_len = strlen(raw_attrs);
         size_t pos = 0;
-        while (pos < attrs_str.size()) {
+        
+        // Temp buffers for name and value
+        char name_buf[256];
+        char value_buf[1024];
+        
+        while (pos < attrs_len) {
             // Skip whitespace
-            while (pos < attrs_str.size() && isspace(attrs_str[pos])) pos++;
-            if (pos >= attrs_str.size()) break;
+            while (pos < attrs_len && isspace(p[pos])) pos++;
+            if (pos >= attrs_len) break;
             
             // Find attr name
             size_t name_start = pos;
-            while (pos < attrs_str.size() && attrs_str[pos] != '=' && !isspace(attrs_str[pos])) pos++;
-            std::string name = attrs_str.substr(name_start, pos - name_start);
+            while (pos < attrs_len && p[pos] != '=' && !isspace(p[pos])) pos++;
+            size_t name_len = pos - name_start;
+            if (name_len >= sizeof(name_buf)) name_len = sizeof(name_buf) - 1;
+            memcpy(name_buf, p + name_start, name_len);
+            name_buf[name_len] = '\0';
             
             // Skip whitespace and =
-            while (pos < attrs_str.size() && (isspace(attrs_str[pos]) || attrs_str[pos] == '=')) pos++;
+            while (pos < attrs_len && (isspace(p[pos]) || p[pos] == '=')) pos++;
             
             // Get value (handle quoted values)
-            std::string value;
-            if (pos < attrs_str.size() && attrs_str[pos] == '"') {
+            size_t value_len = 0;
+            if (pos < attrs_len && p[pos] == '"') {
                 pos++;  // Skip opening quote
                 size_t value_start = pos;
-                while (pos < attrs_str.size() && attrs_str[pos] != '"') pos++;
-                value = attrs_str.substr(value_start, pos - value_start);
-                if (pos < attrs_str.size()) pos++;  // Skip closing quote
+                while (pos < attrs_len && p[pos] != '"') pos++;
+                value_len = pos - value_start;
+                if (value_len >= sizeof(value_buf)) value_len = sizeof(value_buf) - 1;
+                memcpy(value_buf, p + value_start, value_len);
+                value_buf[value_len] = '\0';
+                if (pos < attrs_len) pos++;  // Skip closing quote
             } else {
                 size_t value_start = pos;
-                while (pos < attrs_str.size() && !isspace(attrs_str[pos])) pos++;
-                value = attrs_str.substr(value_start, pos - value_start);
+                while (pos < attrs_len && !isspace(p[pos])) pos++;
+                value_len = pos - value_start;
+                if (value_len >= sizeof(value_buf)) value_len = sizeof(value_buf) - 1;
+                memcpy(value_buf, p + value_start, value_len);
+                value_buf[value_len] = '\0';
             }
             
             // Set attribute
-            if (!name.empty() && !value.empty()) {
-                String* str = (String*)pool_calloc(pool_, sizeof(String) + value.size() + 1);
-                str->len = value.size();
+            if (name_len > 0 && value_len > 0) {
+                String* str = (String*)pool_calloc(pool_, sizeof(String) + value_len + 1);
+                str->len = value_len;
                 str->ref_cnt = 0;
-                strcpy(str->chars, value.c_str());
+                strcpy(str->chars, value_buf);
                 
                 Item item;
                 item.item = s2it(str);
-                elem.attr(name.c_str(), item);
+                elem->attr(name_buf, item);
             }
         }
     }
     
-    stack_.push_back(std::move(elem));
+    stack_[++stack_top_] = elem;
 }
 
 void NodeHtmlWriter::closeTag(const char* tag) {
@@ -558,10 +595,11 @@ void NodeHtmlWriter::closeTag(const char* tag) {
         return;
     }
     
-    ElementBuilder elem = std::move(stack_.back());
-    stack_.pop_back();
+    ElementBuilder* elem = stack_[stack_top_];
+    stack_[stack_top_--] = nullptr;
     
-    Item result = elem.final();
+    Item result = elem->final();
+    delete elem;
     
     if (hasOpenElements()) {
         // Add to parent
@@ -603,10 +641,11 @@ void NodeHtmlWriter::writeAttribute(const char* name, const char* value) {
 Item NodeHtmlWriter::getResult() {
     // If we have elements on the stack, finalize them
     while (hasOpenElements()) {
-        ElementBuilder elem = std::move(stack_.back());
-        stack_.pop_back();
+        ElementBuilder* elem = stack_[stack_top_];
+        stack_[stack_top_--] = nullptr;
         
-        Item result = elem.final();
+        Item result = elem->final();
+        delete elem;
         
         if (hasOpenElements()) {
             current().child(result);
@@ -628,7 +667,7 @@ ElementBuilder& NodeHtmlWriter::current() {
         static ElementBuilder dummy = builder_->element("error");
         return dummy;
     }
-    return stack_.back();
+    return *stack_[stack_top_];
 }
 
 } // namespace lambda
