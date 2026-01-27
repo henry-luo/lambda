@@ -21,6 +21,10 @@ extern Item parse_math_block(MarkupParser* parser, const char* line);
 extern Item parse_divider(MarkupParser* parser);
 extern Item parse_html_block(MarkupParser* parser, const char* line);
 
+// AsciiDoc-specific block parsers
+extern Item parse_asciidoc_admonition(MarkupParser* parser, const char* line);
+extern Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line);
+
 // Forward declarations for link reference parsing
 extern bool try_parse_link_definition(MarkupParser* parser, const char* line);
 
@@ -82,6 +86,20 @@ Item parse_block_element(MarkupParser* parser) {
 
         case BlockType::RAW_HTML:
             return parse_html_block(parser, line);
+
+        case BlockType::DIRECTIVE:
+            // AsciiDoc admonitions and other directives
+            if (parser->config.format == Format::ASCIIDOC) {
+                return parse_asciidoc_admonition(parser, line);
+            }
+            return parse_paragraph(parser, line);
+
+        case BlockType::DEFINITION_LIST:
+            // AsciiDoc definition lists
+            if (parser->config.format == Format::ASCIIDOC) {
+                return parse_asciidoc_definition_list(parser, line);
+            }
+            return parse_paragraph(parser, line);
 
         case BlockType::PARAGRAPH:
         default:
