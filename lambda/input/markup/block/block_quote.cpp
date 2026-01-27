@@ -125,6 +125,9 @@ static bool is_lazy_continuation(const char* line) {
     // Cannot start with # (header)
     if (*p == '#') return false;
 
+    // Cannot start with < (HTML block)
+    if (*p == '<') return false;
+
     // Cannot be list item (-, *, + followed by space, or digit followed by . or ))
     if ((*p == '-' || *p == '*' || *p == '+') && (*(p+1) == ' ' || *(p+1) == '\t')) {
         return false;  // unordered list item
@@ -190,11 +193,15 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
     }
 
     // Get the quote depth of this line
-    int base_depth = count_quote_depth(line);
-    if (base_depth == 0) {
+    int line_depth = count_quote_depth(line);
+    if (line_depth == 0) {
         parser->current_line++;
         return Item{.item = ITEM_ERROR};
     }
+
+    // IMPORTANT: Only strip ONE level of quote marker
+    // Let recursive parsing handle deeper nesting (> > > foo becomes nested blockquotes)
+    const int base_depth = 1;
 
     // Collect all content lines for this blockquote
     std::vector<char*> content_lines;
@@ -204,22 +211,10 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         const char* current = parser->lines[parser->current_line];
         int line_depth = count_quote_depth(current);
 
-        // Empty line (not even >)
+        // Empty line (not even >) - ends the blockquote
+        // CommonMark: A blank line (without >) separates blockquotes
         if (is_empty_line(current)) {
-            // Empty line ends the blockquote
-            // Check if next line continues the quote
-            if (parser->current_line + 1 < parser->line_count) {
-                const char* next = parser->lines[parser->current_line + 1];
-                int next_depth = count_quote_depth(next);
-                if (next_depth >= base_depth) {
-                    // Quote continues after blank - add blank line to content
-                    content_lines.push_back(strdup(""));
-                    parser->current_line++;
-                    last_was_empty_quote = true;
-                    continue;
-                }
-            }
-            // End of quote
+            // End of this blockquote
             break;
         }
 
