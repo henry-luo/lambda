@@ -42,6 +42,7 @@ typedef struct JsTranspiler {
     Pool* ast_pool;                 // AST memory pool
     NamePool* name_pool;            // String interning pool
     StrBuf* code_buf;               // Generated C code buffer
+    StrBuf* func_buf;               // Buffer for function definitions (for nested/expression functions)
     const char* source;             // JavaScript source code
     size_t source_length;           // Source code length
     
@@ -54,6 +55,7 @@ typedef struct JsTranspiler {
     int function_counter;           // Counter for anonymous functions
     int temp_var_counter;           // Counter for temporary variables
     int label_counter;              // Counter for labels
+    bool in_expression;             // True when transpiling inside an expression (for function expressions)
     
     // Error handling
     bool has_errors;                // Error flag
