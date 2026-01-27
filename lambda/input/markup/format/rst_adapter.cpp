@@ -27,6 +27,9 @@ public:
     HeaderInfo detectHeader(const char* line, const char* next_line) override {
         HeaderInfo info;
 
+        // Safety check for line parameter
+        if (!line) return info;
+
         // RST headers use underlines (and optionally overlines) with characters like = - ` : . ' " ~ ^ _ * + #
         // The character used determines the level based on first occurrence
 
@@ -36,7 +39,9 @@ public:
         const char* ul = next_line;
         while (*ul == ' ') ul++;
 
-        // RST underline characters
+        // RST underline characters - must have at least one character
+        if (!*ul) return info;  // Empty line is not a valid underline
+
         static const char* ul_chars = "=-`:.\'\"~^_*+#";
         if (!strchr(ul_chars, *ul)) return info;
 
