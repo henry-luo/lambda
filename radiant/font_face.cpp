@@ -11,7 +11,7 @@ extern "C" {
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
-#include <string>
+#include <string>  // TODO: Required by WOFF2 library API (WOFF2StringOut)
 
 // WOFF2 decompression support
 #include <woff2/decode.h>
