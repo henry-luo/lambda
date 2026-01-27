@@ -64,8 +64,11 @@ static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t l
     StringBuf* sb = ctx.output();
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
-        // Percent-encode spaces and other unsafe characters
-        if (c == ' ') {
+        // Percent-encode spaces, special chars, and non-ASCII bytes
+        // Also HTML-escape & since it appears in an HTML attribute
+        if (c == '&') {
+            stringbuf_append_str(sb, "&amp;");
+        } else if (c == ' ') {
             stringbuf_append_str(sb, "%20");
         } else if (c == '"') {
             stringbuf_append_str(sb, "%22");
@@ -81,6 +84,11 @@ static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t l
             stringbuf_append_str(sb, "%5D");
         } else if (c == '\\') {
             stringbuf_append_str(sb, "%5C");
+        } else if (c > 127) {
+            // Percent-encode non-ASCII bytes (UTF-8 bytes)
+            char hex[4];
+            snprintf(hex, sizeof(hex), "%%%02X", c);
+            stringbuf_append_str(sb, hex);
         } else {
             stringbuf_append_char(sb, c);
         }
@@ -192,6 +200,9 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
 
         if (is_block) {
             String* info = elem.get_string_attr("info");
+            if (!info || info->len == 0) {
+                info = elem.get_string_attr("language");
+            }
             if (info && info->len > 0) {
                 stringbuf_append_str(sb, "<pre><code class=\"language-");
                 format_cm_text(ctx, info->chars, info->len);

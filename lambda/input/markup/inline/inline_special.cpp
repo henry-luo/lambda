@@ -567,8 +567,8 @@ Item parse_entity_reference(MarkupParser* parser, const char** text) {
             size_t name_len = pos - name_start;
             EntityResult result = html_entity_resolve(name_start, name_len);
 
-            if (result.type == ENTITY_ASCII_ESCAPE) {
-                // Direct decode for lt, gt, amp, quot, apos
+            if (result.type == ENTITY_ASCII_ESCAPE || result.type == ENTITY_UNICODE_MULTI) {
+                // Direct decode for lt, gt, amp, quot, apos and multi-codepoint entities
                 strncpy(decoded, result.decoded, sizeof(decoded) - 1);
                 valid = true;
                 pos++; // Skip ;

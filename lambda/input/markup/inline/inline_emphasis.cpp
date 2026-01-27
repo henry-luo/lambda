@@ -10,6 +10,9 @@
  * Uses flanking delimiter run rules for proper parsing.
  */
 #include "inline_common.hpp"
+extern "C" {
+#include "../../../../lib/log.h"
+}
 #include <cstdlib>
 #include <cstring>
 #include <cctype>
@@ -43,10 +46,39 @@ static inline bool is_punctuation(char c) {
 }
 
 /**
- * is_whitespace - Check if character is Unicode whitespace
+ * is_whitespace - Check if character is ASCII whitespace
  */
 static inline bool is_whitespace(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+/**
+ * is_unicode_whitespace - Check if position starts with Unicode whitespace
+ * Handles both ASCII whitespace and UTF-8 encoded non-breaking space (U+00A0)
+ */
+static inline bool is_unicode_whitespace(const char* p) {
+    if (!p || !*p) return true;  // treat end of string as whitespace per CommonMark
+    char c = *p;
+    // ASCII whitespace
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') return true;
+    // UTF-8 non-breaking space U+00A0 = 0xC2 0xA0
+    if ((unsigned char)p[0] == 0xC2 && (unsigned char)p[1] == 0xA0) return true;
+    return false;
+}
+
+/**
+ * is_preceded_by_unicode_whitespace - Check if position is preceded by Unicode whitespace
+ * Also returns true if at start of string (no preceding character)
+ */
+static inline bool is_preceded_by_unicode_whitespace(const char* text, const char* pos) {
+    if (pos <= text) return true;  // at start of string counts as whitespace
+    // Check for ASCII whitespace at pos-1
+    char before = *(pos - 1);
+    if (before == ' ' || before == '\t' || before == '\n' || before == '\r' || before == '\f' || before == '\v') return true;
+    // Check for UTF-8 NBSP (0xC2 0xA0) ending at pos-1
+    // If pos-1 is 0xA0 and pos-2 is 0xC2, then NBSP precedes pos
+    if (pos > text + 1 && (unsigned char)*(pos - 2) == 0xC2 && (unsigned char)*(pos - 1) == 0xA0) return true;
+    return false;
 }
 
 /**
@@ -59,17 +91,19 @@ static inline bool is_whitespace(char c) {
  *      Unicode whitespace or a Unicode punctuation character.
  */
 static bool is_left_flanking(const char* text, const char* run_start, const char* run_end) {
-    char after = *run_end;
-    if (!after || is_whitespace(after)) return false;
+    // (1) not followed by Unicode whitespace
+    if (is_unicode_whitespace(run_end)) return false;
 
+    char after = *run_end;
     char before = (run_start > text) ? *(run_start - 1) : ' ';
+    bool preceded_by_ws = is_preceded_by_unicode_whitespace(text, run_start);
 
     if (!is_punctuation(after)) {
         return true; // (2a)
     }
 
     // (2b) followed by punctuation, check if preceded by whitespace or punctuation
-    return is_whitespace(before) || is_punctuation(before);
+    return preceded_by_ws || is_punctuation(before);
 }
 
 /**
@@ -82,18 +116,19 @@ static bool is_left_flanking(const char* text, const char* run_start, const char
  *      Unicode whitespace or a Unicode punctuation character.
  */
 static bool is_right_flanking(const char* text, const char* run_start, const char* run_end) {
-    char before = (run_start > text) ? *(run_start - 1) : ' ';
-    if (is_whitespace(before)) return false;
+    // (1) not preceded by Unicode whitespace
+    if (is_preceded_by_unicode_whitespace(text, run_start)) return false;
 
-    char after = *run_end;
-    if (!after) after = ' '; // treat end of string as space
+    char before = (run_start > text) ? *(run_start - 1) : ' ';
 
     if (!is_punctuation(before)) {
         return true; // (2a)
     }
 
     // (2b) preceded by punctuation, check if followed by whitespace or punctuation
-    return is_whitespace(after) || is_punctuation(after);
+    char after = *run_end;
+    bool followed_by_ws = is_unicode_whitespace(run_end);
+    return followed_by_ws || is_punctuation(after);
 }
 
 /**
@@ -146,11 +181,13 @@ static bool can_close(char marker, const char* text, const char* run_start, cons
  *
  * @param parser The markup parser
  * @param text Pointer to current position (updated on success)
+ * @param text_start Start of the full text (for flanking context), or nullptr
  * @return Item containing emphasis element, or ITEM_UNDEFINED if not matched
  */
-Item parse_emphasis(MarkupParser* parser, const char** text) {
-    const char* full_text = *text; // for flanking checks (we need preceding context)
+Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_start) {
     const char* start = *text;
+    // Use text_start if provided, otherwise use start (less context for flanking)
+    const char* full_text = text_start ? text_start : start;
     char marker = *start;  // * or _
 
     // Must be * or _
@@ -171,7 +208,8 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
     }
 
     // Check if this can open emphasis
-    if (!can_open(marker, full_text, start, content_start)) {
+    bool opens = can_open(marker, full_text, start, content_start);
+    if (!opens) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
@@ -191,9 +229,21 @@ Item parse_emphasis(MarkupParser* parser, const char** text) {
 
             // Check if this run can close
             if (can_close(marker, full_text, run_start, pos)) {
-                // CommonMark rule: if opener and closer have different run lengths,
-                // they can still match but consume the minimum
-                if (run_len >= open_count || (run_len >= 1 && open_count >= 1)) {
+                // For proper emphasis matching, we need closers that match the opener length
+                // or can consume part of it (for ***bold italic*** patterns)
+                // Simple rule: prefer exact match, or if sum is not multiple of 3
+                bool sum_multiple_of_3 = ((open_count + run_len) % 3 == 0);
+
+                // If both are multiples of 3, sum is multiple of 3 - needs special handling
+                // For now, require exact match or compatible lengths
+                if (run_len == open_count) {
+                    close_start = run_start;
+                    close_count = run_len;
+                    break;
+                }
+                // For mismatched lengths: if sum isn't multiple of 3, they can match
+                // This handles cases like ***foo* where ** opens and * closes one level
+                if (!sum_multiple_of_3 && run_len >= 1 && open_count >= 1) {
                     close_start = run_start;
                     close_count = run_len;
                     break;
