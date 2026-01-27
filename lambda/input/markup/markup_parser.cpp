@@ -13,6 +13,7 @@
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
 #include "../html_entities.h"
+#include "../../utf_string.h"
 #include "lib/log.h"
 #include <cstring>
 #include <cstdlib>
@@ -186,17 +187,131 @@ Item MarkupParser::parseContent(const char* content) {
     // Reset state
     resetState();
 
-    // Pre-scan for link reference definitions (CommonMark: they can appear anywhere)
-    // This ensures forward references work correctly
+    // Pre-scan for link reference definitions at document level only
+    // We need this for forward references (links before their definitions)
+    // BUT we must skip code blocks and respect paragraph boundaries
     if (config.format == Format::MARKDOWN) {
+        bool in_fenced_code = false;
+        char fence_char = 0;
+        int fence_length = 0;
+        bool in_paragraph = false;
+
         for (int i = 0; i < line_count; i++) {
             const char* line = lines[i];
-            if (line && is_link_definition_start(line)) {
-                // Try to parse the link definition
+            if (!line) continue;
+
+            // Skip leading whitespace for block detection
+            const char* pos = line;
+            int leading_spaces = 0;
+            while (*pos == ' ' && leading_spaces < 4) { leading_spaces++; pos++; }
+
+            // Check for fenced code block start/end
+            if (!in_fenced_code && leading_spaces < 4 && (*pos == '`' || *pos == '~')) {
+                char c = *pos;
+                int count = 0;
+                while (*pos == c) { count++; pos++; }
+                if (count >= 3) {
+                    in_fenced_code = true;
+                    fence_char = c;
+                    fence_length = count;
+                    continue;
+                }
+            } else if (in_fenced_code) {
+                // Check for closing fence
+                if (leading_spaces < 4 && *pos == fence_char) {
+                    int count = 0;
+                    while (*pos == fence_char) { count++; pos++; }
+                    // Skip trailing whitespace
+                    while (*pos == ' ' || *pos == '\t') pos++;
+                    if (count >= fence_length && (*pos == '\0' || *pos == '\n' || *pos == '\r')) {
+                        in_fenced_code = false;
+                    }
+                }
+                continue; // Skip everything inside fenced code
+            }
+
+            // Check for blank line (resets paragraph state)
+            bool is_blank = true;
+            for (const char* check = line; *check; check++) {
+                if (*check != ' ' && *check != '\t' && *check != '\n' && *check != '\r') {
+                    is_blank = false;
+                    break;
+                }
+            }
+            if (is_blank) {
+                in_paragraph = false;
+                continue;
+            }
+
+            // If we're in a paragraph continuation, link definitions cannot appear
+            if (in_paragraph) {
+                // This line continues the paragraph - not a valid link definition position
+                continue;
+            }
+
+            // Check for indented code block (4+ spaces) - skip these
+            if (leading_spaces >= 4) {
+                continue;
+            }
+
+            // Check for blockquote - strip > marker and check for link def inside
+            if (*pos == '>') {
+                // Strip blockquote markers
+                const char* content = pos;
+                while (*content == '>') {
+                    content++;
+                    if (*content == ' ') content++;
+                }
+                // Skip leading spaces in content
+                while (*content == ' ' && (content - pos) < 4) content++;
+
+                // Check if this is a link definition inside blockquote
+                if (is_link_definition_start(content)) {
+                    int saved_line = current_line;
+                    current_line = i;
+                    // Create temporary adjusted line for parsing
+                    // Note: parse_link_definition will handle it at blockquote-stripped level
+                    // We need to pass the content after > marker
+                    if (parse_link_definition(this, content)) {
+                        i = current_line;
+                    }
+                    current_line = saved_line;
+                }
+                // Blockquotes don't start paragraphs at document level
+                continue;
+            }
+
+            // Try to parse link definition at document level
+            if (is_link_definition_start(line)) {
                 int saved_line = current_line;
                 current_line = i;
-                parse_link_definition(this, line);
+                if (parse_link_definition(this, line)) {
+                    // Successfully parsed - skip any additional lines consumed
+                    // The parser advances current_line, so we update i
+                    i = current_line;
+                } else {
+                    // Not a valid link definition - treat as start of paragraph
+                    in_paragraph = true;
+                }
                 current_line = saved_line;
+            } else {
+                // Start of a non-link-definition block - check if it's a paragraph
+                // Paragraph: anything that isn't another block type
+                pos = line;
+                while (*pos == ' ' && leading_spaces < 4) pos++;
+
+                // Check for block types that are NOT paragraphs
+                bool is_paragraph = true;
+                if (*pos == '#') is_paragraph = false;  // ATX header
+                // Blockquote already handled above
+                if (*pos == '-' || *pos == '*' || *pos == '+') {
+                    if (*(pos+1) == ' ' || *(pos+1) == '\t') is_paragraph = false;  // List
+                }
+                // Add more block type checks as needed...
+
+                if (is_paragraph) {
+                    in_paragraph = true;
+                }
             }
         }
         log_debug("markup_parser: pre-scanned %d link definitions", link_def_count_);
@@ -424,37 +539,58 @@ static void unescape_to_buffer(const char* src, size_t src_len, char* dst, size_
 void MarkupParser::normalizeLabel(const char* label, size_t len, char* out, size_t out_size) {
     if (!label || !out || out_size == 0) return;
 
-    size_t out_pos = 0;
+    // First, collapse whitespace and trim
+    // We need to do this before Unicode case folding
+    char* temp = (char*)malloc(len + 1);
+    if (!temp) {
+        out[0] = '\0';
+        return;
+    }
+
+    size_t temp_pos = 0;
     bool in_whitespace = true; // start true to skip leading whitespace
 
-    for (size_t i = 0; i < len && out_pos < out_size - 1; i++) {
+    for (size_t i = 0; i < len; i++) {
         char c = label[i];
 
         // Check for whitespace (space, tab, newline)
         bool is_ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
 
         if (is_ws) {
-            if (!in_whitespace && out_pos < out_size - 1) {
+            if (!in_whitespace) {
                 // collapse whitespace to single space
-                out[out_pos++] = ' ';
+                temp[temp_pos++] = ' ';
             }
             in_whitespace = true;
         } else {
-            // convert to lowercase
-            if (c >= 'A' && c <= 'Z') {
-                c = c - 'A' + 'a';
-            }
-            out[out_pos++] = c;
+            temp[temp_pos++] = c;
             in_whitespace = false;
         }
     }
 
     // trim trailing space
-    if (out_pos > 0 && out[out_pos - 1] == ' ') {
-        out_pos--;
+    if (temp_pos > 0 && temp[temp_pos - 1] == ' ') {
+        temp_pos--;
     }
 
-    out[out_pos] = '\0';
+    temp[temp_pos] = '\0';
+
+    // Now apply Unicode case folding using utf8proc
+    int folded_len = 0;
+    char* folded = normalize_utf8proc_casefold(temp, (int)temp_pos, &folded_len);
+    free(temp);
+
+    if (folded && folded_len > 0) {
+        // Copy the folded result to output
+        size_t copy_len = (size_t)folded_len < out_size - 1 ? (size_t)folded_len : out_size - 1;
+        memcpy(out, folded, copy_len);
+        out[copy_len] = '\0';
+        free(folded);
+    } else {
+        // Fallback: if case folding fails, do simple ASCII lowercase
+        if (folded) free(folded);
+        out[0] = '\0';
+    }
 }
 
 bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
@@ -509,8 +645,36 @@ bool MarkupParser::addLinkDefinition(const char* label, size_t label_len,
     return true;
 }
 
+/**
+ * label_contains_unescaped_brackets - Check if label has unescaped [ or ]
+ *
+ * CommonMark: "Link labels cannot contain brackets, unless they are backslash-escaped"
+ */
+static bool label_contains_unescaped_brackets(const char* label, size_t label_len) {
+    const char* pos = label;
+    const char* end = label + label_len;
+
+    while (pos < end) {
+        if (*pos == '\\' && pos + 1 < end) {
+            // Skip escaped character
+            pos += 2;
+            continue;
+        }
+        if (*pos == '[' || *pos == ']') {
+            return true;  // Unescaped bracket found
+        }
+        pos++;
+    }
+    return false;
+}
+
 const LinkDefinition* MarkupParser::getLinkDefinition(const char* label, size_t label_len) const {
     if (!label || label_len == 0) {
+        return nullptr;
+    }
+
+    // CommonMark: Link labels cannot contain unescaped brackets
+    if (label_contains_unescaped_brackets(label, label_len)) {
         return nullptr;
     }
 

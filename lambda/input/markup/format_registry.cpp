@@ -180,9 +180,27 @@ Format FormatRegistry::detectFromContent(const char* content) {
         return Format::RST;
     }
 
-    // Check for MediaWiki: starts with [[
-    if (content[0] == '[' && content[1] == '[') {
-        return Format::WIKI;
+    // Check for MediaWiki: starts with [[ followed by identifier (not another [)
+    // MediaWiki page names typically start with a letter and don't contain Markdown emphasis chars
+    // This distinguishes [[Page]] from [[[nested]]] or [[*foo* bar]] which is Markdown
+    if (content[0] == '[' && content[1] == '[' && content[2] != '[') {
+        // Additional check: first char after [[ should be alphanumeric (wiki page name)
+        // Skip if it starts with Markdown emphasis (* or _)
+        char first = content[2];
+        if ((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z') ||
+            (first >= '0' && first <= '9') || first == ':') {
+            // Looks like a wiki page name - verify we have closing ]]
+            const char* p = content + 2;
+            while (*p && *p != '\n') {
+                if (*p == ']' && *(p+1) == ']') {
+                    return Format::WIKI;  // Confirmed MediaWiki link
+                }
+                if (*p == '|') {
+                    return Format::WIKI;  // Has pipe separator
+                }
+                p++;
+            }
+        }
     }
 
     // Check for MediaWiki heading: == or ===
