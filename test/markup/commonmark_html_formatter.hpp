@@ -280,7 +280,8 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                           strcmp(tag, "h3") == 0 ||
                           strcmp(tag, "h4") == 0 ||
                           strcmp(tag, "h5") == 0 ||
-                          strcmp(tag, "h6") == 0);
+                          strcmp(tag, "h6") == 0 ||
+                          strcmp(tag, "html-block") == 0);
         };
 
         for (int i = 0; i < elem.childCount(); i++) {
