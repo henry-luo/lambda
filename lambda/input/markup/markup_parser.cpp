@@ -13,6 +13,7 @@
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
 #include "../html_entities.h"
+#include "../markup-format.h"
 #include "../../utf_string.h"
 #include "lib/log.h"
 #include <cstring>
@@ -725,6 +726,61 @@ extern "C" Item input_markup_modular(Input* input, const char* content) {
 
     if (result.item == ITEM_ERROR) {
         log_error("input_markup_modular: parsing failed");
+    }
+
+    return result;
+}
+
+// Helper to convert MarkupFormat (C enum) to Format (C++ enum class)
+static Format markup_format_to_format(MarkupFormat mf) {
+    switch (mf) {
+        case MARKUP_MARKDOWN:    return Format::MARKDOWN;
+        case MARKUP_RST:         return Format::RST;
+        case MARKUP_TEXTILE:     return Format::TEXTILE;
+        case MARKUP_WIKI:        return Format::WIKI;
+        case MARKUP_ORG:         return Format::ORG;
+        case MARKUP_ASCIIDOC:    return Format::ASCIIDOC;
+        case MARKUP_MAN:         return Format::MAN;
+        case MARKUP_AUTO_DETECT:
+        default:                 return Format::AUTO_DETECT;
+    }
+}
+
+/**
+ * input_markup - Main entry point for unified markup parsing
+ *
+ * This function provides a bridge from the input system to the modular
+ * parser architecture. Format is auto-detected from content.
+ */
+extern "C" Item input_markup(Input* input, const char* content) {
+    return input_markup_modular(input, content);
+}
+
+/**
+ * input_markup_with_format - Parse markup with explicit format
+ *
+ * This function allows specifying the markup format explicitly instead
+ * of auto-detecting from content.
+ */
+extern "C" Item input_markup_with_format(Input* input, const char* content, MarkupFormat format) {
+    if (!input || !content) {
+        log_error("input_markup_with_format: null input or content");
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Create parser config with specified format
+    ParseConfig cfg;
+    cfg.format = markup_format_to_format(format);
+    cfg.strict_mode = false;
+    cfg.collect_metadata = true;
+    cfg.resolve_refs = true;
+
+    // Create and run parser
+    MarkupParser parser(input, cfg);
+    Item result = parser.parseContent(content);
+
+    if (result.item == ITEM_ERROR) {
+        log_error("input_markup_with_format: parsing failed");
     }
 
     return result;
