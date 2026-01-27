@@ -349,6 +349,21 @@ bool is_html_block_start(const char* line) {
     return type != HtmlBlockType::NONE;
 }
 
+/**
+ * html_block_can_interrupt_paragraph - Check if line starts an HTML block that can interrupt a paragraph
+ *
+ * Per CommonMark spec, only HTML block types 1-6 can interrupt a paragraph.
+ * Type 7 (complete open/closing tag on single line) cannot interrupt paragraphs.
+ *
+ * @param line The line to check
+ * @return true if this line starts an HTML block that can interrupt a paragraph
+ */
+bool html_block_can_interrupt_paragraph(const char* line) {
+    HtmlBlockType type = detect_html_block_type(line);
+    // Types 1-6 can interrupt paragraphs, type 7 cannot
+    return type >= HtmlBlockType::TYPE_1 && type <= HtmlBlockType::TYPE_6;
+}
+
 // ============================================================================
 // HTML Block End Condition Checking
 // ============================================================================
