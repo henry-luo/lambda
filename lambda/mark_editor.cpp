@@ -2,7 +2,9 @@
 #include "../lib/log.h"
 #include <string.h>
 #include <stdlib.h>
-#include <vector>
+
+// Maximum number of batch updates supported
+#define MAX_BATCH_UPDATES 64
 
 // Forward declarations of helper functions from input.cpp
 extern void map_put(Map* mp, String* key, Item value, Input *input);
@@ -651,8 +653,14 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
         Item value;
         TypeId value_type;
     };
-    std::vector<UpdateEntry> updates;
-    updates.reserve(count);
+
+    // Use stack-allocated array for batch updates
+    if (count > MAX_BATCH_UPDATES) {
+        log_error("map_update_batch: count %d exceeds max %d", count, MAX_BATCH_UPDATES);
+        return ItemError;
+    }
+    UpdateEntry updates[MAX_BATCH_UPDATES];
+    int update_count = 0;
 
     va_list args;
     va_start(args, count);
@@ -669,7 +677,7 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
         }
 
         entry.value_type = get_type_id(entry.value);
-        updates.push_back(entry);
+        updates[update_count++] = entry;
     }
 
     va_end(args);
@@ -1161,8 +1169,14 @@ Item MarkEditor::elmt_update_attr_batch(Item element, int count, ...) {
         Item value;
         TypeId value_type;
     };
-    std::vector<AttrUpdate> updates;
-    updates.reserve(count);
+
+    // Use stack-allocated array for batch updates
+    if (count > MAX_BATCH_UPDATES) {
+        log_error("elmt_update_attr_batch: count %d exceeds max %d", count, MAX_BATCH_UPDATES);
+        return ItemError;
+    }
+    AttrUpdate updates[MAX_BATCH_UPDATES];
+    int update_count = 0;
 
     va_list args;
     va_start(args, count);
@@ -1179,9 +1193,9 @@ Item MarkEditor::elmt_update_attr_batch(Item element, int count, ...) {
         }
 
         update.value_type = get_type_id(update.value);
-        updates.push_back(update);
+        updates[update_count++] = update;
 
-        if (shape_builder_has_field(&builder, update.attr_name)) {
+        if (shape_builder_has_field(&builder, updates[update_count-1].attr_name)) {
             shape_builder_remove_field(&builder, update.attr_name);
         }
         shape_builder_add_field(&builder, update.attr_name, update.value_type);

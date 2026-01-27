@@ -13,10 +13,8 @@
 #ifndef SAFETY_ANALYZER_HPP
 #define SAFETY_ANALYZER_HPP
 
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-#include <string>
+#include <stddef.h>
+#include <stdbool.h>
 
 // Forward declare AstNode to avoid pulling in all AST headers
 struct AstNode;
@@ -31,13 +29,13 @@ enum class FunctionSafety {
     UNSAFE      // May recurse - stack check required
 };
 
+// Note: FunctionCallInfo is not currently used in conservative mode.
+// When full analysis is implemented, this can use ArrayList and char* instead.
 struct FunctionCallInfo {
-    std::string name;
-    std::vector<std::string> callees;  // Functions this function calls
-    std::vector<std::string> callback_args;  // Functions passed as arguments to HOFs
-    FunctionSafety safety = FunctionSafety::UNKNOWN;
-    bool is_tail_recursive = false;  // Can be optimized with TCO
-    AstNode* node = nullptr;
+    const char* name;
+    FunctionSafety safety;
+    bool is_tail_recursive;
+    AstNode* node;
 };
 
 /**
@@ -103,21 +101,21 @@ public:
      * @param name Function name
      * @return Safety classification
      */
-    FunctionSafety get_safety(const std::string& name) const;
+    FunctionSafety get_safety(const char* name) const;
     
     /**
      * Check if a function is safe (no stack check needed).
      * @param name Function name
      * @return true if safe, false if unsafe or unknown
      */
-    bool is_safe(const std::string& name) const;
+    bool is_safe(const char* name) const;
     
     /**
      * Check if a function is tail-recursive and can be optimized.
      * @param name Function name
      * @return true if tail-recursive
      */
-    bool is_tail_recursive(const std::string& name) const;
+    bool is_tail_recursive(const char* name) const;
     
     /**
      * Dump analysis results for debugging.
@@ -125,9 +123,10 @@ public:
     void dump() const;
 
 private:
-    std::unordered_map<std::string, FunctionCallInfo> functions_;
-    std::unordered_set<std::string> safe_sys_funcs_;
-    std::unordered_set<std::string> callback_sys_funcs_;
+    // Note: In conservative mode, these are not used.
+    // When full analysis is implemented, use HashMap from lib/hashmap.h
+    // For now, we just track callback system functions as a simple array.
+    static const char* callback_sys_funcs_[];
     
     void init_system_functions();
 };

@@ -11,7 +11,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string>
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
@@ -616,7 +615,7 @@ int exec_convert(int argc, char* argv[]) {
         printf("Converting to format: %s\n", to_format);
 
         String* formatted_output = NULL;
-        std::string full_doc_output;  // For full document mode
+        StrBuf* full_doc_output = NULL;  // For full document mode
 
         // Use the existing format functions based on target format
         if (strcmp(to_format, "json") == 0) {
@@ -667,7 +666,7 @@ int exec_convert(int argc, char* argv[]) {
                     bool success = tex::doc_model_to_html(doc, html_buf, opts);
 
                     if (success && html_buf->length > 0) {
-                        full_doc_output = std::string(html_buf->str, html_buf->length);
+                        full_doc_output = strbuf_dup(html_buf);
                     } else {
                         printf("Error: Unified pipeline - HTML rendering failed\n");
                     }
@@ -730,7 +729,7 @@ int exec_convert(int argc, char* argv[]) {
             return 1;
         }
 
-        if (!formatted_output && full_doc_output.empty()) {
+        if (!formatted_output && !full_doc_output) {
             printf("Error: Failed to format output\n");
             pool_destroy(temp_pool);
             return 1;
@@ -738,8 +737,9 @@ int exec_convert(int argc, char* argv[]) {
 
         // Step 3: Write the output to file
         printf("Writing output to: %s\n", output_file);
-        if (!full_doc_output.empty()) {
-            write_text_file(output_file, full_doc_output.c_str());
+        if (full_doc_output) {
+            write_text_file(output_file, full_doc_output->str);
+            strbuf_free(full_doc_output);
         } else {
             write_text_file(output_file, formatted_output->chars);
         }
