@@ -162,6 +162,12 @@ bool is_link_definition_start(const char* line);
  */
 bool parse_link_definition(MarkupParser* parser, const char* line);
 
+/**
+ * Check if a line starts an HTML block that can interrupt a paragraph
+ * Only HTML block types 1-6 can interrupt paragraphs (type 7 cannot)
+ */
+bool html_block_can_interrupt_paragraph(const char* line);
+
 // ============================================================================
 // Element Creation Utilities
 // ============================================================================
