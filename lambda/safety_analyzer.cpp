@@ -405,36 +405,39 @@ bool is_tco_function_safe(AstFuncNode* func_node) {
 }
 
 void SafetyAnalyzer::init_system_functions() {
-    // System functions that accept user callbacks - callers should check
-    const char* callback_funcs[] = {
-        "map", "filter", "reduce", "fold", "foldl", "foldr",
-        "find", "find_index", "any", "all", "none",
-        "sort_by", "group_by", "partition",
-        "foreach", "transform", "scan",
-        "take_while", "drop_while",
-        nullptr
-    };
-    
-    for (int i = 0; callback_funcs[i]; i++) {
-        callback_sys_funcs_.insert(callback_funcs[i]);
-    }
+    // In conservative mode, we don't need to track system functions
+    // The callback_sys_funcs_ static array is defined below
+    log_debug("Safety analyzer: using conservative approach (all functions get stack checks)");
 }
+
+// System functions that accept user callbacks - for future use
+const char* SafetyAnalyzer::callback_sys_funcs_[] = {
+    "map", "filter", "reduce", "fold", "foldl", "foldr",
+    "find", "find_index", "any", "all", "none",
+    "sort_by", "group_by", "partition",
+    "foreach", "transform", "scan",
+    "take_while", "drop_while",
+    nullptr
+};
 
 void SafetyAnalyzer::analyze_module(AstNode* module) {
     // Simplified: no analysis needed with conservative approach
     log_debug("Safety analysis complete (conservative mode)");
 }
 
-FunctionSafety SafetyAnalyzer::get_safety(const std::string& name) const {
+FunctionSafety SafetyAnalyzer::get_safety(const char* name) const {
     // Conservative: all user functions are unsafe (may recurse)
+    (void)name;  // unused in conservative mode
     return FunctionSafety::UNSAFE;
 }
 
-bool SafetyAnalyzer::is_safe(const std::string& name) const {
+bool SafetyAnalyzer::is_safe(const char* name) const {
+    (void)name;  // unused in conservative mode
     return false;  // Conservative: no function is provably safe
 }
 
-bool SafetyAnalyzer::is_tail_recursive(const std::string& name) const {
+bool SafetyAnalyzer::is_tail_recursive(const char* name) const {
+    (void)name;  // unused in conservative mode
     return false;  // TCO not yet implemented
 }
 

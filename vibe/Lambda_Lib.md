@@ -29,12 +29,14 @@ These core Lambda runtime files are already free of std::* dependencies:
 
 ### Files Requiring Migration
 
-#### Phase 1: Lambda Script Core (Low Impact)
+#### Phase 1: Lambda Script Core (Low Impact) ✅ COMPLETED
 | File | std::* Usage | Replacement Strategy |
 |------|--------------|---------------------|
-| `lambda/safety_analyzer.cpp` | `std::string`, `std::vector`, `std::unordered_map`, `std::unordered_set` | Use `StrView`, `ArrayList`, `HashMap` |
-| `lambda/mark_editor.cpp` | `std::vector` (2 uses) | Use `ArrayList` |
-| `lambda/main.cpp` | `std::string` (2 uses) | Use `StrBuf` |
+| `lambda/safety_analyzer.cpp` | `std::string`, `std::vector`, `std::unordered_map`, `std::unordered_set` | ✅ Static const array, `const char*` |
+| `lambda/mark_editor.cpp` | `std::vector` (2 uses) | ✅ Stack arrays (`MAX_BATCH_UPDATES=64`) |
+| `lambda/main.cpp` | `std::string` (2 uses) | ✅ `StrBuf*` |
+
+**Test Results:** All 154 Lambda baseline tests pass
 
 #### Phase 2: Input Parsers (Medium Impact)
 | File | std::* Usage | Replacement Strategy |
