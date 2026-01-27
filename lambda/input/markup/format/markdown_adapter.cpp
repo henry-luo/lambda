@@ -179,6 +179,12 @@ public:
             p++;
         }
 
+        // CommonMark: A list item cannot start with 4 or more spaces of indentation
+        // (that would be an indented code block)
+        if (info.indent >= 4) {
+            return info;  // Not a valid list item, return invalid info
+        }
+
         // Unordered list markers: -, *, +
         if ((*p == '-' || *p == '*' || *p == '+') &&
             (*(p+1) == ' ' || *(p+1) == '\t' || *(p+1) == '\0' || *(p+1) == '\r' || *(p+1) == '\n')) {

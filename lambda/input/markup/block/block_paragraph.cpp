@@ -140,23 +140,38 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                 // Otherwise this line is detected as setext due to next line being underline
                 // But we should include this line and check for underline on next iteration
             } else if (next_type == BlockType::LIST_ITEM) {
-                // CommonMark: List items can only interrupt paragraphs in specific cases:
-                // - Ordered list starting with 1 can interrupt
-                // - Unordered list items cannot interrupt
-                // - Ordered lists not starting with 1 cannot interrupt
-                // - Empty list items (no content after marker) cannot interrupt
+                // When parsing list item content, list items ALWAYS interrupt paragraphs
+                // This allows nested lists to work properly
+                if (parser->state.parsing_list_content) {
+                    break;  // Allow list items to interrupt within list content
+                }
+
+                // CommonMark rules for list items interrupting paragraphs:
+                // - Empty list items (no content after marker) CANNOT interrupt
+                // - Unordered list items (-, *, +) with content CAN interrupt
+                // - Ordered list items starting with 1 (1., 1)) with content CAN interrupt
+                // - Ordered list items NOT starting with 1 CANNOT interrupt
                 FormatAdapter* adapter = parser->adapter();
                 if (adapter) {
                     ListItemInfo list_info = adapter->detectListItem(current);
-                    // Only ordered list starting with 1 AND with non-empty content can interrupt
-                    if (list_info.valid && list_info.is_ordered && list_info.number == 1) {
+                    if (!list_info.valid) {
+                        // Not a valid list item, continue collecting paragraph
+                    } else {
                         // Check if there's actual content after the marker
-                        if (list_info.text_start && *list_info.text_start &&
-                            *list_info.text_start != '\r' && *list_info.text_start != '\n') {
-                            break;  // Ordered list starting with 1 with content interrupts
+                        bool has_content = list_info.text_start && *list_info.text_start &&
+                            *list_info.text_start != '\r' && *list_info.text_start != '\n';
+
+                        if (!has_content) {
+                            // Empty list item cannot interrupt paragraph
+                        } else if (!list_info.is_ordered) {
+                            // Unordered list with content CAN interrupt
+                            break;
+                        } else if (list_info.number == 1) {
+                            // Ordered list starting with 1 and content CAN interrupt
+                            break;
                         }
+                        // Ordered list not starting with 1 cannot interrupt - continue
                     }
-                    // Other list items do NOT interrupt paragraphs - continue collecting
                 } else {
                     // Fallback: don't interrupt (safer default)
                 }
