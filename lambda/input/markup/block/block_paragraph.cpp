@@ -139,8 +139,28 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
                 }
                 // Otherwise this line is detected as setext due to next line being underline
                 // But we should include this line and check for underline on next iteration
-            } else if (next_type == BlockType::LIST_ITEM ||
-                       next_type == BlockType::QUOTE ||
+            } else if (next_type == BlockType::LIST_ITEM) {
+                // CommonMark: List items can only interrupt paragraphs in specific cases:
+                // - Ordered list starting with 1 can interrupt
+                // - Unordered list items cannot interrupt
+                // - Ordered lists not starting with 1 cannot interrupt
+                // - Empty list items (no content after marker) cannot interrupt
+                FormatAdapter* adapter = parser->adapter();
+                if (adapter) {
+                    ListItemInfo list_info = adapter->detectListItem(current);
+                    // Only ordered list starting with 1 AND with non-empty content can interrupt
+                    if (list_info.valid && list_info.is_ordered && list_info.number == 1) {
+                        // Check if there's actual content after the marker
+                        if (list_info.text_start && *list_info.text_start &&
+                            *list_info.text_start != '\r' && *list_info.text_start != '\n') {
+                            break;  // Ordered list starting with 1 with content interrupts
+                        }
+                    }
+                    // Other list items do NOT interrupt paragraphs - continue collecting
+                } else {
+                    // Fallback: don't interrupt (safer default)
+                }
+            } else if (next_type == BlockType::QUOTE ||
                        next_type == BlockType::DIVIDER ||
                        next_type == BlockType::TABLE ||
                        next_type == BlockType::MATH) {

@@ -203,11 +203,14 @@ public:
             info.valid = true;
         }
 
-        // Ordered list markers: 1. or 1) (number can be up to 9 digits)
+        // Ordered list markers: 1. or 1) (number must be at most 9 digits per CommonMark)
         if (!info.valid && isdigit((unsigned char)*p)) {
             const char* num_start = p;
             int digits = 0;
-            while (isdigit((unsigned char)*p) && digits < 10) { digits++; p++; }
+            while (isdigit((unsigned char)*p)) { digits++; p++; }
+
+            // CommonMark: ordered list numbers must be at most 9 digits
+            if (digits > 9) return info;  // Too many digits, not a valid list item
 
             if ((*p == '.' || *p == ')') &&
                 (*(p+1) == ' ' || *(p+1) == '\t' || *(p+1) == '\0' || *(p+1) == '\r' || *(p+1) == '\n')) {
