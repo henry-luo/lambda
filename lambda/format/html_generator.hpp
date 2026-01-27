@@ -1,5 +1,23 @@
 // html_generator.hpp - HTML generator for LaTeX documents
 // Translates latex.js html-generator.ls to C++
+//
+// TODO: Migration to lib/ data structures needed (remove std::*)
+// Current std::* usages:
+// - std::string: 20+ occurrences in method parameters/returns (use const char* or StrBuf*)
+// - std::vector<CaptureState>: capture_stack_ (use fixed array with max depth ~16)
+// - std::vector<TableState>: table_stack_ (use fixed array with max depth ~8)
+// - std::vector<ListState>: list_stack_ (use fixed array with max depth ~8)
+// - std::vector<FloatState>: float_stack_ (use fixed array with max depth ~4)
+// - std::vector<TocEntry>: toc_entries_ (use ArrayList)
+// - std::vector<std::string> in TableState::column_specs (use fixed array of char*)
+// - std::map: None currently
+//
+// Migration strategy:
+// 1. Replace std::string params/returns with const char* (most are already C-strings)
+// 2. Replace std::vector<T> stacks with fixed arrays: T stack_[MAX]; int stack_top_;
+// 3. Replace std::vector<TocEntry> with ArrayList (variable-size collection)
+// 4. Update methods like length(), getFontClass(), getFontStyle() to return StrBuf* or write to buffer
+// 5. Update startCapture()/endCapture() to work with StrBuf* capture buffers
 
 #pragma once
 

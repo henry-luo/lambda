@@ -17,6 +17,10 @@ ParseErrorList::~ParseErrorList() {
     // Free ParseError copies stored in the list
     for (int i = 0; i < errors_->length; i++) {
         ParseError* err = (ParseError*)errors_->data[i];
+        // Free the duplicated strings
+        if (err->message) free((void*)err->message);
+        if (err->context_line) free((void*)err->context_line);
+        if (err->hint) free((void*)err->hint);
         free(err);
     }
     arraylist_free(errors_);
@@ -32,6 +36,20 @@ bool ParseErrorList::addError(const ParseError& error) {
     // Allocate a copy of the error
     ParseError* err_copy = (ParseError*)malloc(sizeof(ParseError));
     *err_copy = error;
+
+    // Deep copy the message string since it may be in a reused buffer
+    if (error.message) {
+        err_copy->message = strdup(error.message);
+    }
+    // Deep copy context_line if present
+    if (error.context_line) {
+        err_copy->context_line = strdup(error.context_line);
+    }
+    // Deep copy hint if present
+    if (error.hint) {
+        err_copy->hint = strdup(error.hint);
+    }
+
     arraylist_append(errors_, err_copy);
 
     // Update counters
@@ -147,9 +165,12 @@ const char* ParseErrorList::formatErrors() {
 }
 
 void ParseErrorList::clear() {
-    // Free ParseError copies
+    // Free ParseError copies and their duplicated strings
     for (int i = 0; i < errors_->length; i++) {
         ParseError* err = (ParseError*)errors_->data[i];
+        if (err->message) free((void*)err->message);
+        if (err->context_line) free((void*)err->context_line);
+        if (err->hint) free((void*)err->hint);
         free(err);
     }
     arraylist_clear(errors_);
