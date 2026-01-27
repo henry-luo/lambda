@@ -15,12 +15,16 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 
 namespace lambda {
 namespace markup {
 
 // Forward declaration for inline parsing
 extern Item parse_inline_spans(MarkupParser* parser, const char* text);
+
+// Forward declaration for HTML block parsing
+extern Item parse_html_block(MarkupParser* parser, const char* line);
 
 /**
  * get_list_indentation - Count leading whitespace as indentation level
@@ -80,6 +84,233 @@ char get_list_marker(const char* line) {
     }
 
     return 0;
+}
+
+/**
+ * get_list_item_content_column - Get the column where list item content begins
+ *
+ * According to CommonMark:
+ * - The content column is marker width + up to 4 spaces (but not more than 4)
+ * - If there are 5+ spaces after the marker, the content column is marker + 1 space
+ *   and the remaining 4+ spaces create an indented code block
+ * - If the line is blank after the marker, content column is marker + 1 space
+ *
+ * Examples:
+ *   "- foo"      -> 2 (marker + 1 space, content at 2)
+ *   "-  foo"     -> 3 (marker + 2 spaces, content at 3)
+ *   "-    foo"   -> 5 (marker + 4 spaces, content at 5)
+ *   "-     foo"  -> 2 (5+ spaces, so marker + 1 space = 2, rest is code indent)
+ *   "1. foo"     -> 3 (marker + 1 space, content at 3)
+ *   "1.     foo" -> 3 (5+ spaces, so marker + 1 space = 3, rest is code indent)
+ *   "10. foo"    -> 5 (marker + 1 space, content at 5)
+ *
+ * Returns -1 if not a valid list item
+ */
+static int get_list_item_content_column(const char* line) {
+    if (!line) return -1;
+
+    int col = 0;
+    const char* pos = line;
+
+    // Skip leading indentation
+    while (*pos == ' ' || *pos == '\t') {
+        if (*pos == ' ') col++;
+        else col += 4;  // Tab as 4 spaces
+        pos++;
+    }
+
+    int marker_end_col = col;
+
+    // Check for unordered marker
+    if (*pos == '-' || *pos == '*' || *pos == '+') {
+        pos++;
+        col++;
+        marker_end_col = col;
+    }
+    // Check for ordered marker
+    else if (isdigit(*pos)) {
+        int digit_count = 0;
+        while (isdigit(*pos)) {
+            pos++;
+            col++;
+            digit_count++;
+        }
+        if (digit_count > 9) return -1;  // Too many digits
+
+        if (*pos == '.' || *pos == ')') {
+            pos++;
+            col++;
+            marker_end_col = col;
+        } else {
+            return -1;  // Not a valid marker
+        }
+    } else {
+        return -1;  // Not a list marker
+    }
+
+    // Must have at least one space after marker (or end of line for blank item)
+    if (*pos != ' ' && *pos != '\t' && *pos != '\0' && *pos != '\n' && *pos != '\r') {
+        return -1;  // No space after marker
+    }
+
+    // Count whitespace after marker
+    int space_count = 0;
+    while (*pos == ' ' || *pos == '\t') {
+        if (*pos == ' ') {
+            space_count++;
+            col++;
+        } else {
+            // Tab: round up to next multiple of 4
+            int tab_spaces = 4 - (col % 4);
+            space_count += tab_spaces;
+            col += tab_spaces;
+        }
+        pos++;
+    }
+
+    // If blank line after marker, content column is marker + 1 space
+    if (*pos == '\0' || *pos == '\n' || *pos == '\r') {
+        return marker_end_col + 1;
+    }
+
+    // If 5+ spaces after marker, it's an indented code block situation
+    // Content column is marker + 1 space (the rest creates code indentation)
+    if (space_count >= 5) {
+        return marker_end_col + 1;
+    }
+
+    // Otherwise, content column is where actual content starts
+    return col;
+}
+
+/**
+ * is_lazy_continuation - Check if a line is a lazy continuation
+ *
+ * CommonMark: A paragraph inside a list item can continue on a line without
+ * proper indentation if that line would be a paragraph continuation.
+ *
+ * Lazy continuation is NOT allowed for lines that start block-level elements.
+ */
+static bool is_lazy_continuation(const char* line) {
+    if (!line || !*line) return false;
+
+    const char* p = line;
+
+    // Skip leading spaces (but don't limit - lazy continuations can have any amount)
+    while (*p == ' ') { p++; }
+
+    // Cannot be blank
+    if (!*p || *p == '\n' || *p == '\r') return false;
+
+    // Cannot start with > (blockquote)
+    if (*p == '>') return false;
+
+    // Cannot start with # (header)
+    if (*p == '#') return false;
+
+    // Cannot start with < (HTML block)
+    if (*p == '<') return false;
+
+    // Cannot be list item (-, *, + followed by space, or digit followed by . or ))
+    if ((*p == '-' || *p == '*' || *p == '+') && (*(p+1) == ' ' || *(p+1) == '\t')) {
+        return false;
+    }
+    if (isdigit(*p)) {
+        const char* dig = p;
+        while (isdigit(*dig)) dig++;
+        if ((*dig == '.' || *dig == ')') && (*(dig+1) == ' ' || *(dig+1) == '\t' || *(dig+1) == '\0')) {
+            return false;
+        }
+    }
+
+    // Cannot be thematic break (---, ***, ___)
+    if (*p == '-' || *p == '*' || *p == '_') {
+        char marker = *p;
+        int count = 0;
+        const char* check = p;
+        while (*check) {
+            if (*check == marker) count++;
+            else if (*check != ' ' && *check != '\t') break;
+            check++;
+        }
+        if (count >= 3 && (*check == '\0' || *check == '\n' || *check == '\r')) {
+            return false;
+        }
+    }
+
+    // Cannot be fenced code
+    if (*p == '`' || *p == '~') {
+        int count = 0;
+        char fence_char = *p;
+        while (*p == fence_char) { count++; p++; }
+        if (count >= 3) return false;
+    }
+
+    // It's a lazy continuation
+    return true;
+}
+
+/**
+ * strip_indentation - Strip up to 'n' columns of indentation from a line
+ *
+ * Returns a pointer into the line at the stripped position.
+ * Handles tabs as variable-width (to next column multiple of 4).
+ */
+static const char* strip_indentation(const char* line, int n) {
+    if (!line) return nullptr;
+
+    const char* pos = line;
+    int col = 0;
+
+    while (*pos && col < n) {
+        if (*pos == ' ') {
+            col++;
+            pos++;
+        } else if (*pos == '\t') {
+            // Tab advances to next multiple of 4
+            int next_col = (col + 4) & ~3;
+            if (next_col > n) break;  // Tab would go past n
+            col = next_col;
+            pos++;
+        } else {
+            break;  // Non-whitespace
+        }
+    }
+
+    return pos;
+}
+
+/**
+ * strip_to_column - Strip line content to reach a specific column
+ *
+ * Unlike strip_indentation which only strips whitespace, this function
+ * skips characters (including non-whitespace) until we reach the target column.
+ * Used to strip list markers from the first line.
+ *
+ * Example: strip_to_column("1.     code", 3) -> "    code" (4 spaces + code)
+ * - col 0-1: "1." (2 chars)
+ * - col 2: first space
+ * - col 3+: remaining "    code"
+ */
+static const char* strip_to_column(const char* line, int target_col) {
+    if (!line) return nullptr;
+
+    const char* pos = line;
+    int col = 0;
+
+    while (*pos && col < target_col) {
+        if (*pos == '\t') {
+            // Tab advances to next multiple of 4
+            int next_col = (col + 4) & ~3;
+            if (next_col > target_col) break;  // Tab would go past target
+            col = next_col;
+        } else {
+            col++;
+        }
+        pos++;
+    }
+
+    return pos;
 }
 
 /**
@@ -211,64 +442,182 @@ static Item build_nested_list_from_content(MarkupParser* parser, const char* con
 
 /**
  * parse_nested_list_content - Parse content inside a list item (nested blocks)
+ *
+ * This function collects all lines belonging to a list item (after the first line),
+ * strips the list indentation, and parses them as block-level content.
+ *
+ * Similar pattern to blockquote parsing - we create a temporary line array
+ * with stripped content and parse it recursively.
+ *
+ * @param content_column The column where content starts (after marker + spaces)
  */
-Item parse_nested_list_content(MarkupParser* parser, int base_indent) {
+Item parse_nested_list_content(MarkupParser* parser, int content_column) {
     if (!parser) return Item{.item = ITEM_ERROR};
 
-    Element* content_container = create_element(parser, "div");
-    if (!content_container) return Item{.item = ITEM_ERROR};
+    // Collect all lines belonging to this list item
+    std::vector<char*> content_lines;
+    bool had_blank_line = false;
+    bool ends_with_blank = false;
 
     while (parser->current_line < parser->line_count) {
         const char* line = parser->lines[parser->current_line];
 
-        // Skip empty lines but track them
+        // Handle empty lines
         if (is_empty_line(line)) {
+            // Empty line within list item content
+            // Need to look ahead to see if list continues
+            int next_line_idx = parser->current_line + 1;
+            if (next_line_idx >= parser->line_count) {
+                ends_with_blank = true;
+                break;  // End of document
+            }
+
+            const char* next = parser->lines[next_line_idx];
+            int next_indent = get_list_indentation(next);
+
+            // Check if next line is part of this list item or starts new item/list
+            if (is_empty_line(next)) {
+                // Multiple blank lines - end the item content
+                ends_with_blank = true;
+                break;
+            }
+
+            // If next line is at list indentation and starts a new list item
+            if (is_list_item(next) && next_indent < content_column) {
+                ends_with_blank = true;
+                break;  // New sibling/parent list item
+            }
+
+            // If next line is indented less than content column, end item
+            if (next_indent < content_column && !is_lazy_continuation(next)) {
+                ends_with_blank = true;
+                break;
+            }
+
+            // Continue with empty line as part of content
+            content_lines.push_back(strdup(""));
+            had_blank_line = true;
             parser->current_line++;
             continue;
         }
 
         int line_indent = get_list_indentation(line);
 
-        // If line is at or before base indentation and is a list item, we're done
-        if (line_indent <= base_indent && is_list_item(line)) {
+        // If this line starts a new list item at parent/same level, end content
+        if (is_list_item(line) && line_indent < content_column) {
             break;
         }
 
-        // If line is less indented than expected, we're done with this content
-        if (line_indent < base_indent + 2) {
-            break;
+        // If line is less indented than content column
+        if (line_indent < content_column) {
+            // Check for lazy continuation (paragraph continuation)
+            if (!had_blank_line && is_lazy_continuation(line)) {
+                // Lazy continuation is allowed for paragraphs
+                content_lines.push_back(strdup(line));
+                parser->current_line++;
+                continue;
+            }
+            break;  // End of list item content
         }
 
-        // Check if this starts a nested list
-        if (is_list_item(line)) {
-            Item nested_list = parse_list_structure(parser, line_indent);
-            if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
-                list_push((List*)content_container, nested_list);
-                increment_element_content_length(content_container);
-            }
-        } else {
-            // Check what type of block this is
-            BlockType block_type = detect_block_type(parser, line);
+        // Line is properly indented - strip the indentation and add
+        const char* stripped = strip_indentation(line, content_column);
+        content_lines.push_back(strdup(stripped));
+        parser->current_line++;
+    }
 
-            if (block_type == BlockType::CODE_BLOCK) {
-                Item code_content = parse_code_block(parser, line);
-                if (code_content.item != ITEM_ERROR && code_content.item != ITEM_UNDEFINED) {
-                    list_push((List*)content_container, code_content);
-                    increment_element_content_length(content_container);
-                }
-            } else {
-                // Parse as paragraph content
-                Item para_content = parse_paragraph(parser, line);
-                if (para_content.item != ITEM_ERROR && para_content.item != ITEM_UNDEFINED) {
-                    list_push((List*)content_container, para_content);
-                    increment_element_content_length(content_container);
-                } else {
-                    // If paragraph parsing failed and didn't advance, advance manually
-                    parser->current_line++;
-                }
-            }
+    // If no content lines, return empty
+    if (content_lines.empty()) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Now parse the collected content lines as block elements
+    size_t num_lines = content_lines.size();
+    char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+    for (size_t i = 0; i < num_lines; i++) {
+        lines_array[i] = content_lines[i];
+    }
+
+    // Save current parser state
+    char** saved_lines = parser->lines;
+    size_t saved_line_count = parser->line_count;
+    size_t saved_current_line = parser->current_line;
+
+    // Save and temporarily reset list depth
+    // This allows indented code blocks to be detected inside list items
+    int saved_list_depth = parser->state.list_depth;
+    parser->state.list_depth = 0;
+
+    // Set up parser to process the content lines
+    parser->lines = lines_array;
+    parser->line_count = num_lines;
+    parser->current_line = 0;
+
+    // Create container for parsed blocks
+    Element* content_container = create_element(parser, "div");
+
+    // Parse block elements from the content
+    while (parser->current_line < parser->line_count) {
+        const char* content_line = parser->lines[parser->current_line];
+
+        // Skip empty lines
+        if (is_empty_line(content_line)) {
+            parser->current_line++;
+            continue;
+        }
+
+        // Detect block type of the stripped content
+        BlockType block_type = detect_block_type(parser, content_line);
+
+        Item block_item = {.item = ITEM_UNDEFINED};
+
+        switch (block_type) {
+            case BlockType::HEADER:
+                block_item = parse_header(parser, content_line);
+                break;
+            case BlockType::CODE_BLOCK:
+                block_item = parse_code_block(parser, content_line);
+                break;
+            case BlockType::QUOTE:
+                block_item = parse_blockquote(parser, content_line);
+                break;
+            case BlockType::LIST_ITEM:
+                block_item = parse_list_item(parser, content_line);
+                break;
+            case BlockType::DIVIDER:
+                block_item = parse_divider(parser);
+                break;
+            case BlockType::TABLE:
+                block_item = parse_table_row(parser, content_line);
+                break;
+            case BlockType::RAW_HTML:
+                block_item = parse_html_block(parser, content_line);
+                break;
+            case BlockType::PARAGRAPH:
+            default:
+                block_item = parse_paragraph(parser, content_line);
+                break;
+        }
+
+        if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
+            list_push((List*)content_container, block_item);
+            increment_element_content_length(content_container);
+        } else if (parser->current_line < parser->line_count) {
+            parser->current_line++;  // Prevent infinite loop
         }
     }
+
+    // Restore parser state
+    parser->lines = saved_lines;
+    parser->line_count = saved_line_count;
+    parser->current_line = saved_current_line;
+    parser->state.list_depth = saved_list_depth;
+
+    // Free allocated lines and array
+    for (size_t i = 0; i < num_lines; i++) {
+        free(lines_array[i]);
+    }
+    free(lines_array);
 
     return Item{.item = (uint64_t)content_container};
 }
@@ -315,13 +664,25 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
     bool is_loose = false;
     bool had_blank_before_item = false;
 
+    // Track content column for the most recent item - used to determine nesting
+    // For "- foo", content_column is 2 (marker takes 2 chars: "- ")
+    // This gets updated whenever we process a sibling at different indent
+    int current_item_content_column = get_list_item_content_column(first_line);
+    if (current_item_content_column < 0) {
+        current_item_content_column = base_indent + 2;
+    }
+
     while (parser->current_line < parser->line_count) {
         const char* line = parser->lines[parser->current_line];
 
         // Handle empty lines
         if (is_empty_line(line)) {
-            // Check if list continues after empty line
+            // Check if list continues after empty line(s)
+            // Look ahead past any consecutive blank lines to find the next content line
             int next_line = parser->current_line + 1;
+            while (next_line < parser->line_count && is_empty_line(parser->lines[next_line])) {
+                next_line++;
+            }
             if (next_line >= parser->line_count) break;
 
             const char* next = parser->lines[next_line];
@@ -374,8 +735,17 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             Element* item = create_element(parser, "li");
             if (!item) break;
 
-            // Get content after marker
+            // Calculate content column first - needed for proper stripping
+            int content_column = get_list_item_content_column(line);
+            if (content_column < 0) {
+                content_column = base_indent + 2;  // Fallback: marker + 1 space minimum
+            }
+
+            // Get content after marker (for checking thematic break and nested lists)
             const char* item_content = get_list_item_content(line, line_is_ordered);
+
+            // Get properly stripped first line content (preserves indentation for code blocks)
+            const char* first_line_stripped = strip_to_column(line, content_column);
 
             // Check if the content is a thematic break (e.g., "- * * *" -> list item containing <hr />)
             // This must be checked BEFORE checking for nested list markers because "* * *" looks like a list marker
@@ -386,6 +756,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     list_push((List*)item, Item{.item = (uint64_t)hr});
                     increment_element_content_length(item);
                 }
+                parser->current_line++;
             }
             // Check if the content itself starts with a list marker (nested list case: "- - foo")
             else if (item_content && *item_content && is_list_item(item_content)) {
@@ -395,30 +766,220 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     list_push((List*)item, nested_list);
                     increment_element_content_length(item);
                 }
-            } else if (item_content && *item_content) {
-                // Parse as inline content
-                Item text_content = parse_inline_spans(parser, item_content);
-                if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
-                    list_push((List*)item, text_content);
-                    increment_element_content_length(item);
+                parser->current_line++;
+            } else {
+                // Collect first line content and all continuation lines,
+                // then parse as block content.
+                // This ensures "A paragraph\nwith two lines." becomes one paragraph.
+
+                std::vector<char*> content_lines;
+
+                // Add first line content (properly stripped to preserve code block indentation)
+                bool first_line_empty = !first_line_stripped || !*first_line_stripped;
+                if (!first_line_empty) {
+                    content_lines.push_back(strdup(first_line_stripped));
                 }
-            }
 
-            parser->current_line++;
+                parser->current_line++;
 
-            // Look for continued content (nested lists, paragraphs)
-            Item nested_content = parse_nested_list_content(parser, base_indent);
-            if (nested_content.item != ITEM_ERROR && nested_content.item != ITEM_UNDEFINED) {
-                Element* content_div = (Element*)nested_content.item;
-                if (content_div && ((List*)content_div)->length > 0) {
-                    // If item has continued content after blank lines, list is loose
-                    is_loose = true;
+                // CommonMark: A list item can begin with at most one blank line.
+                // If the marker line has no content AND is immediately followed by a blank line,
+                // the list item is empty and ends here.
+                if (first_line_empty && parser->current_line < parser->line_count) {
+                    const char* next_line = parser->lines[parser->current_line];
+                    if (is_empty_line(next_line)) {
+                        // Empty list item - add to list and continue to next line processing
+                        list_push((List*)list, Item{.item = (uint64_t)item});
+                        increment_element_content_length(list);
+                        had_blank_before_item = true;
+                        continue;  // Don't collect any content, process next line
+                    }
+                }
 
-                    // Move contents from div to list item
-                    List* div_list = (List*)content_div;
-                    for (long i = 0; i < div_list->length; i++) {
-                        list_push((List*)item, div_list->items[i]);
-                        increment_element_content_length(item);
+                // Collect continuation lines
+                bool had_blank = false;
+                while (parser->current_line < parser->line_count) {
+                    const char* cont_line = parser->lines[parser->current_line];
+
+                    // Handle empty lines
+                    if (is_empty_line(cont_line)) {
+                        // Count consecutive blank lines and find next non-blank
+                        int blank_count = 1;
+                        int next_idx = parser->current_line + 1;
+
+                        // Skip over consecutive blank lines
+                        while (next_idx < parser->line_count &&
+                               is_empty_line(parser->lines[next_idx])) {
+                            blank_count++;
+                            next_idx++;
+                        }
+
+                        // End of document
+                        if (next_idx >= parser->line_count) {
+                            break;
+                        }
+
+                        const char* next_nonblank = parser->lines[next_idx];
+                        int next_indent = get_list_indentation(next_nonblank);
+
+                        // New list item at same/lower level ends item
+                        if (is_list_item(next_nonblank) && next_indent <= base_indent) {
+                            break;
+                        }
+
+                        // If next non-blank line is properly indented, continue
+                        // (even after multiple blank lines)
+                        if (next_indent >= content_column) {
+                            // Add all the blank lines we skipped
+                            for (int b = 0; b < blank_count; b++) {
+                                content_lines.push_back(strdup(""));
+                            }
+                            had_blank = true;
+                            parser->current_line = next_idx;
+                            continue;
+                        }
+
+                        // Not properly indented after blank - list item ends here
+                        // (Lazy continuation cannot cross a blank line)
+                        break;
+                    }
+
+                    int cont_indent = get_list_indentation(cont_line);
+
+                    // New list item at same/lower level ends this item
+                    if (is_list_item(cont_line) && cont_indent <= base_indent) {
+                        break;
+                    }
+
+                    // Less indented than content column
+                    if (cont_indent < content_column) {
+                        // Check for lazy continuation (paragraph continuation)
+                        if (!had_blank && is_lazy_continuation(cont_line)) {
+                            // For lazy continuation, strip whatever indentation exists
+                            // (it's paragraph text, not indented code)
+                            const char* lazy_stripped = strip_indentation(cont_line, cont_indent);
+                            content_lines.push_back(strdup(lazy_stripped));
+                            parser->current_line++;
+                            continue;
+                        }
+                        break;
+                    }
+
+                    // Properly indented - strip and add
+                    const char* stripped = strip_indentation(cont_line, content_column);
+                    content_lines.push_back(strdup(stripped));
+                    parser->current_line++;
+                }
+
+                // Now parse collected content as blocks
+                if (!content_lines.empty()) {
+                    size_t num_lines = content_lines.size();
+                    char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+                    for (size_t i = 0; i < num_lines; i++) {
+                        lines_array[i] = content_lines[i];
+                    }
+
+                    // Save and replace parser state
+                    char** saved_lines = parser->lines;
+                    size_t saved_line_count = parser->line_count;
+                    size_t saved_current_line = parser->current_line;
+
+                    // Save and temporarily reset list depth
+                    // This allows indented code blocks to be detected inside list items
+                    int saved_list_depth = parser->state.list_depth;
+                    parser->state.list_depth = 0;
+
+                    // Set flag indicating we're parsing list item content
+                    // This allows list items to interrupt paragraphs within list content
+                    bool saved_parsing_list_content = parser->state.parsing_list_content;
+                    parser->state.parsing_list_content = true;
+
+                    parser->lines = lines_array;
+                    parser->line_count = num_lines;
+                    parser->current_line = 0;
+
+                    // Track for loose list detection:
+                    // We need to detect if there's a blank line between top-level blocks
+                    int direct_block_count = 0;
+                    bool had_blank_before_block = false;
+                    bool found_blank_between_direct_blocks = false;
+
+                    // Parse blocks
+                    while (parser->current_line < parser->line_count) {
+                        const char* content_line = parser->lines[parser->current_line];
+
+                        if (is_empty_line(content_line)) {
+                            // Mark that we have a blank before the next block
+                            if (direct_block_count > 0) {
+                                had_blank_before_block = true;
+                            }
+                            parser->current_line++;
+                            continue;
+                        }
+
+                        BlockType block_type = detect_block_type(parser, content_line);
+                        Item block_item = {.item = ITEM_UNDEFINED};
+
+                        switch (block_type) {
+                            case BlockType::HEADER:
+                                block_item = parse_header(parser, content_line);
+                                break;
+                            case BlockType::CODE_BLOCK:
+                                block_item = parse_code_block(parser, content_line);
+                                break;
+                            case BlockType::QUOTE:
+                                block_item = parse_blockquote(parser, content_line);
+                                break;
+                            case BlockType::LIST_ITEM:
+                                block_item = parse_list_item(parser, content_line);
+                                break;
+                            case BlockType::DIVIDER:
+                                block_item = parse_divider(parser);
+                                break;
+                            case BlockType::TABLE:
+                                block_item = parse_table_row(parser, content_line);
+                                break;
+                            case BlockType::RAW_HTML:
+                                block_item = parse_html_block(parser, content_line);
+                                break;
+                            case BlockType::PARAGRAPH:
+                            default:
+                                block_item = parse_paragraph(parser, content_line);
+                                break;
+                        }
+
+                        if (block_item.item != ITEM_ERROR && block_item.item != ITEM_UNDEFINED) {
+                            // Check if we had a blank line between this and the previous direct block
+                            if (had_blank_before_block && direct_block_count > 0) {
+                                found_blank_between_direct_blocks = true;
+                            }
+                            direct_block_count++;
+                            had_blank_before_block = false;
+
+                            list_push((List*)item, block_item);
+                            increment_element_content_length(item);
+                        } else if (parser->current_line < parser->line_count) {
+                            parser->current_line++;
+                        }
+                    }
+
+                    // Restore parser state
+                    parser->lines = saved_lines;
+                    parser->line_count = saved_line_count;
+                    parser->current_line = saved_current_line;
+                    parser->state.list_depth = saved_list_depth;
+                    parser->state.parsing_list_content = saved_parsing_list_content;
+
+                    // Free allocated lines and array
+                    for (size_t i = 0; i < num_lines; i++) {
+                        free(lines_array[i]);
+                    }
+                    free(lines_array);
+
+                    // Check for loose list: If we found a blank line between two
+                    // direct top-level blocks, this list is loose
+                    if (found_blank_between_direct_blocks) {
+                        is_loose = true;
                     }
                 }
             }
@@ -427,8 +988,9 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             list_push((List*)list, Item{.item = (uint64_t)item});
             increment_element_content_length(list);
 
-        } else if (line_indent > base_indent && is_list_item(line)) {
-            // This is a nested list - parse it recursively
+        } else if (line_indent >= current_item_content_column && is_list_item(line)) {
+            // This is a properly nested list - parse it recursively
+            // Only items at current_item_content_column or greater are considered nested
             Item nested_list = parse_list_structure(parser, line_indent);
             if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
                 // Add nested list to the last list item if it exists
@@ -439,6 +1001,56 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     increment_element_content_length(last_item);
                 }
             }
+        } else if (line_indent > base_indent && line_indent < current_item_content_column &&
+                   line_indent - base_indent < 4 && is_list_item(line)) {
+            // List item between base_indent and current_item_content_column
+            // CommonMark: Items with 0-3 spaces of indent (relative to base) are siblings
+            // Items with 4+ spaces of indent are content of the previous item, not siblings
+            // Process as if at base_indent
+            char line_marker = get_list_marker(line);
+            bool line_is_ordered = is_ordered_marker(line_marker);
+
+            // If there was a blank line before this item, the list is loose
+            if (had_blank_before_item && ((List*)list)->length > 0) {
+                is_loose = true;
+            }
+            had_blank_before_item = false;
+
+            // Check if markers are compatible
+            if (!markers_compatible(marker, line_marker)) {
+                break;  // Different marker type, end current list
+            }
+
+            // Create new list item
+            Element* item = create_element(parser, "li");
+            if (!item) break;
+
+            // Calculate content column for this item's content
+            int item_content_column = get_list_item_content_column(line);
+            if (item_content_column < 0) {
+                item_content_column = line_indent + 2;
+            }
+
+            // Update the current content column for future nesting decisions
+            current_item_content_column = item_content_column;
+
+            // Get content after marker
+            const char* item_content = get_list_item_content(line, line_is_ordered);
+            const char* first_line_stripped = strip_to_column(line, item_content_column);
+
+            // Add content if any
+            if (first_line_stripped && *first_line_stripped) {
+                // Parse as inline content for now
+                Item inline_content = parse_inline_spans(parser, first_line_stripped);
+                if (inline_content.item != ITEM_ERROR && inline_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)item, inline_content);
+                    increment_element_content_length(item);
+                }
+            }
+
+            parser->current_line++;
+            list_push((List*)list, Item{.item = (uint64_t)item});
+            increment_element_content_length(list);
         } else {
             // Not a list item and not properly indented, end list
             break;
@@ -452,8 +1064,59 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
         parser->state.list_levels[parser->state.list_depth] = 0;
     }
 
-    // If the list is loose, wrap each item's direct text content in <p> tags
-    if (is_loose) {
+    // Handle tight vs loose list formatting
+    if (!is_loose) {
+        // For tight lists, unwrap paragraphs to inline content
+        // This converts <li><p>foo</p><ul>...</ul></li> to <li>foo<ul>...</ul></li>
+        List* list_items = (List*)list;
+        for (long li = 0; li < list_items->length; li++) {
+            Element* item = (Element*)list_items->items[li].item;
+            if (!item) continue;
+
+            List* item_children = (List*)item;
+            if (item_children->length < 1) continue;
+
+            // Check if first child is a paragraph
+            Item first_child = item_children->items[0];
+            TypeId first_type = get_type_id(first_child);
+
+            if (first_type == LMD_TYPE_ELEMENT) {
+                Element* first_elem = (Element*)first_child.item;
+                if (first_elem && first_elem->type) {
+                    TypeElmt* elmt_type = (TypeElmt*)first_elem->type;
+                    const char* tag = elmt_type->name.str;
+
+                    // If it's a paragraph, unwrap its contents
+                    if (tag && strcmp(tag, "p") == 0) {
+                        List* p_children = (List*)first_elem;
+                        if (p_children->length > 0) {
+                            // Save siblings (items after the paragraph)
+                            std::vector<Item> siblings;
+                            for (long si = 1; si < item_children->length; si++) {
+                                siblings.push_back(item_children->items[si]);
+                            }
+
+                            // Clear the list item's children
+                            item_children->length = 0;
+
+                            // Add paragraph's children directly to list item
+                            for (long pi = 0; pi < p_children->length; pi++) {
+                                list_push((List*)item, p_children->items[pi]);
+                                increment_element_content_length(item);
+                            }
+
+                            // Add back the siblings
+                            for (size_t si = 0; si < siblings.size(); si++) {
+                                list_push((List*)item, siblings[si]);
+                                increment_element_content_length(item);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Loose list - mark it and ensure paragraphs are wrapped
         add_attribute_to_element(parser, list, "loose", "true");
 
         // Iterate through list items and wrap text content in <p>
