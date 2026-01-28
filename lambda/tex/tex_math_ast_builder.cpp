@@ -526,12 +526,19 @@ private:
     MathASTNode* build_fraction(TSNode node);
     MathASTNode* build_radical(TSNode node);
     MathASTNode* build_delimiter_group(TSNode node);
+    MathASTNode* build_sized_delimiter(TSNode node);
     MathASTNode* build_brack_group(TSNode node);
     MathASTNode* build_accent(TSNode node);
+    MathASTNode* build_box_command(TSNode node);
+    MathASTNode* build_rule_command(TSNode node);
+    MathASTNode* build_phantom_command(TSNode node);
     MathASTNode* build_big_operator(TSNode node);
+    MathASTNode* build_overunder_command(TSNode node);
+    MathASTNode* build_extensible_arrow(TSNode node);
     MathASTNode* build_environment(TSNode node);
     MathASTNode* build_text_command(TSNode node);
     MathASTNode* build_space_command(TSNode node);
+    MathASTNode* build_style_command(TSNode node);
 
     // Helpers
     const char* node_text(TSNode node, int* out_len);
@@ -612,11 +619,18 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "fraction") == 0) return build_fraction(node);
     if (strcmp(type, "radical") == 0) return build_radical(node);
     if (strcmp(type, "delimiter_group") == 0) return build_delimiter_group(node);
+    if (strcmp(type, "sized_delimiter") == 0) return build_sized_delimiter(node);
+    if (strcmp(type, "overunder_command") == 0) return build_overunder_command(node);
+    if (strcmp(type, "extensible_arrow") == 0) return build_extensible_arrow(node);
     if (strcmp(type, "accent") == 0) return build_accent(node);
+    if (strcmp(type, "box_command") == 0) return build_box_command(node);
+    if (strcmp(type, "rule_command") == 0) return build_rule_command(node);
+    if (strcmp(type, "phantom_command") == 0) return build_phantom_command(node);
     if (strcmp(type, "big_operator") == 0) return build_big_operator(node);
     if (strcmp(type, "environment") == 0) return build_environment(node);
     if (strcmp(type, "text_command") == 0) return build_text_command(node);
     if (strcmp(type, "space_command") == 0) return build_space_command(node);
+    if (strcmp(type, "style_command") == 0) return build_style_command(node);
     if (strcmp(type, "brack_group") == 0) return build_brack_group(node);
 
     // Unknown - try children
@@ -1057,6 +1071,165 @@ MathASTNode* MathASTBuilder::build_brack_group(TSNode node) {
     return make_math_delimited(arena, '[', content, ']');
 }
 
+MathASTNode* MathASTBuilder::build_sized_delimiter(TSNode node) {
+    // sized_delimiter has fields: size, delim
+    TSNode size_node = ts_node_child_by_field_name(node, "size", 4);
+    TSNode delim_node = ts_node_child_by_field_name(node, "delim", 5);
+
+    int len;
+    const char* size_text = ts_node_is_null(size_node) ? nullptr : node_text(size_node, &len);
+    const char* delim_text = ts_node_is_null(delim_node) ? nullptr : node_text(delim_node, &len);
+
+    // Determine delimiter character
+    int32_t delim_cp = '(';  // default
+    if (delim_text) {
+        if (delim_text[0] == '\\') {
+            // Handle \{ \} etc.
+            if (len >= 2) {
+                if (delim_text[1] == '{') delim_cp = '{';
+                else if (delim_text[1] == '}') delim_cp = '}';
+                else if (delim_text[1] == '|') delim_cp = 0x2225;  // double bar
+                else if (strncmp(delim_text + 1, "langle", 6) == 0) delim_cp = 0x27E8;
+                else if (strncmp(delim_text + 1, "rangle", 6) == 0) delim_cp = 0x27E9;
+                else if (strncmp(delim_text + 1, "lfloor", 6) == 0) delim_cp = 0x230A;
+                else if (strncmp(delim_text + 1, "rfloor", 6) == 0) delim_cp = 0x230B;
+                else if (strncmp(delim_text + 1, "lceil", 5) == 0) delim_cp = 0x2308;
+                else if (strncmp(delim_text + 1, "rceil", 5) == 0) delim_cp = 0x2309;
+            }
+        } else {
+            delim_cp = delim_text[0];
+        }
+    }
+
+    // Determine size level (0 = normal, 1-4 = big to Bigg)
+    uint8_t size_level = 1;  // default to \big
+    if (size_text && size_text[0] == '\\') {
+        const char* s = size_text + 1;
+        if (strncmp(s, "Bigg", 4) == 0) size_level = 4;
+        else if (strncmp(s, "bigg", 4) == 0) size_level = 3;
+        else if (strncmp(s, "Big", 3) == 0) size_level = 2;
+        else if (strncmp(s, "big", 3) == 0) size_level = 1;
+    }
+
+    // Determine if opening or closing based on delimiter or command suffix
+    AtomType atom_type = AtomType::Ord;
+    if (size_text && strchr(size_text, 'l')) atom_type = AtomType::Open;
+    else if (size_text && strchr(size_text, 'r')) atom_type = AtomType::Close;
+    else if (delim_cp == '(' || delim_cp == '[' || delim_cp == '{' ||
+             delim_cp == 0x27E8 || delim_cp == 0x230A || delim_cp == 0x2308) {
+        atom_type = AtomType::Open;
+    } else if (delim_cp == ')' || delim_cp == ']' || delim_cp == '}' ||
+               delim_cp == 0x27E9 || delim_cp == 0x230B || delim_cp == 0x2309) {
+        atom_type = AtomType::Close;
+    }
+
+    log_debug("tex_math_ast_builder: sized_delimiter size=%d delim=%d atom=%d",
+              size_level, delim_cp, (int)atom_type);
+
+    // Create a DELIMITED node with fixed size (not extensible)
+    MathASTNode* result;
+    if (atom_type == AtomType::Open) {
+        result = make_math_open(arena, delim_cp);
+    } else if (atom_type == AtomType::Close) {
+        result = make_math_close(arena, delim_cp);
+    } else {
+        result = make_math_ord(arena, delim_cp, nullptr);
+    }
+
+    // Store size level in flags for typesetting
+    result->flags = size_level;
+
+    return result;
+}
+
+MathASTNode* MathASTBuilder::build_overunder_command(TSNode node) {
+    // overunder_command has fields: cmd, annotation, base
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    TSNode annotation_node = ts_node_child_by_field_name(node, "annotation", 10);
+    TSNode base_node = ts_node_child_by_field_name(node, "base", 4);
+
+    log_debug("tex_math_ast_builder: build_overunder_command cmd=%d annotation=%d base=%d",
+              !ts_node_is_null(cmd_node), !ts_node_is_null(annotation_node), !ts_node_is_null(base_node));
+
+    // Get command name
+    const char* cmd_name = nullptr;
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text[0] == '\\' && len > 1) {
+            cmd_name = arena_copy_str(text + 1, len - 1);
+        }
+    }
+
+    // Build annotation and base
+    MathASTNode* annotation = ts_node_is_null(annotation_node) ? nullptr : build_ts_node(annotation_node);
+    MathASTNode* base = ts_node_is_null(base_node) ? nullptr : build_ts_node(base_node);
+
+    if (!base) {
+        base = make_math_row(arena);
+    }
+
+    // Determine if over or under based on command
+    MathASTNode* over = nullptr;
+    MathASTNode* under = nullptr;
+
+    if (cmd_name) {
+        if (strncmp(cmd_name, "overset", 7) == 0 || strncmp(cmd_name, "stackrel", 8) == 0) {
+            over = annotation;
+        } else if (strncmp(cmd_name, "underset", 8) == 0) {
+            under = annotation;
+        }
+    }
+
+    log_debug("tex_math_ast_builder: overunder cmd='%s' over=%p under=%p base=%p",
+              cmd_name ? cmd_name : "(null)", (void*)over, (void*)under, (void*)base);
+
+    return make_math_overunder(arena, base, over, under, cmd_name);
+}
+
+MathASTNode* MathASTBuilder::build_extensible_arrow(TSNode node) {
+    // extensible_arrow has fields: cmd, below (optional), above
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    TSNode below_node = ts_node_child_by_field_name(node, "below", 5);
+    TSNode above_node = ts_node_child_by_field_name(node, "above", 5);
+
+    log_debug("tex_math_ast_builder: build_extensible_arrow cmd=%d below=%d above=%d",
+              !ts_node_is_null(cmd_node), !ts_node_is_null(below_node), !ts_node_is_null(above_node));
+
+    // Get command name
+    const char* cmd_name = nullptr;
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text[0] == '\\' && len > 1) {
+            cmd_name = arena_copy_str(text + 1, len - 1);
+        }
+    }
+
+    // Build above and below annotations
+    MathASTNode* above = ts_node_is_null(above_node) ? nullptr : build_ts_node(above_node);
+    MathASTNode* below = ts_node_is_null(below_node) ? nullptr : build_ts_node(below_node);
+
+    // Determine arrow symbol based on command
+    int32_t arrow_cp = 0x2192;  // → default rightarrow
+    if (cmd_name) {
+        if (strncmp(cmd_name, "xleftarrow", 10) == 0) arrow_cp = 0x2190;
+        else if (strncmp(cmd_name, "xLeftarrow", 10) == 0) arrow_cp = 0x21D0;
+        else if (strncmp(cmd_name, "xRightarrow", 11) == 0) arrow_cp = 0x21D2;
+        else if (strncmp(cmd_name, "xleftrightarrow", 15) == 0) arrow_cp = 0x2194;
+        else if (strncmp(cmd_name, "xLeftrightarrow", 15) == 0) arrow_cp = 0x21D4;
+        else if (strncmp(cmd_name, "xhookleftarrow", 14) == 0) arrow_cp = 0x21A9;
+        else if (strncmp(cmd_name, "xhookrightarrow", 15) == 0) arrow_cp = 0x21AA;
+        else if (strncmp(cmd_name, "xmapsto", 7) == 0) arrow_cp = 0x21A6;
+    }
+
+    // Create an arrow as the nucleus with overunder annotation
+    MathASTNode* arrow = make_math_rel(arena, arrow_cp, cmd_name);
+    arrow->flags |= MathASTNode::FLAG_LARGE;  // Mark as extensible
+
+    return make_math_overunder(arena, arrow, above, below, cmd_name);
+}
+
 MathASTNode* MathASTBuilder::build_accent(TSNode node) {
     int len;
     const char* text = node_text(node, &len);
@@ -1090,6 +1263,103 @@ MathASTNode* MathASTBuilder::build_accent(TSNode node) {
     return make_math_accent(arena, accent_char,
                             cmd ? arena_copy_str(cmd, cmd_len) : nullptr,
                             base);
+}
+
+MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
+    // box_command: \bbox, \fbox, \boxed with content
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+
+    // Get command name
+    const char* cmd = "box";
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text[0] == '\\') {
+            cmd = arena_copy_str(text + 1, len - 1);
+        }
+    }
+
+    // Build content
+    MathASTNode* content = nullptr;
+    if (!ts_node_is_null(content_node)) {
+        content = build_ts_node(content_node);
+    }
+
+    // Create an INNER node (boxes are like delimited subformulas)
+    MathASTNode* box = alloc_math_node(arena, MathNodeType::INNER);
+    box->body = content;
+    // Store command name in atom union for reference
+    box->atom.command = cmd;
+
+    log_debug("tex_math_ast_builder: build_box_command cmd=%s", cmd);
+
+    return box;
+}
+
+MathASTNode* MathASTBuilder::build_rule_command(TSNode node) {
+    // rule_command: \rule[raise]{width}{height}
+    TSNode width_node = ts_node_child_by_field_name(node, "width", 5);
+    TSNode height_node = ts_node_child_by_field_name(node, "height", 6);
+
+    // Parse dimensions (simplified - just store as text for now)
+    const char* width_str = "1em";
+    const char* height_str = "1em";
+
+    if (!ts_node_is_null(width_node)) {
+        int len;
+        const char* text = node_text(width_node, &len);
+        // Strip braces
+        if (len >= 2 && text[0] == '{') {
+            width_str = arena_copy_str(text + 1, len - 2);
+        }
+    }
+    if (!ts_node_is_null(height_node)) {
+        int len;
+        const char* text = node_text(height_node, &len);
+        if (len >= 2 && text[0] == '{') {
+            height_str = arena_copy_str(text + 1, len - 2);
+        }
+    }
+
+    // Create an ORD node representing the rule
+    MathASTNode* rule = alloc_math_node(arena, MathNodeType::ORD);
+    rule->atom.codepoint = 0x2588;  // Unicode full block as placeholder
+    rule->atom.command = "rule";
+
+    log_debug("tex_math_ast_builder: build_rule_command width=%s height=%s", width_str, height_str);
+
+    return rule;
+}
+
+MathASTNode* MathASTBuilder::build_phantom_command(TSNode node) {
+    // phantom_command: \phantom, \hphantom, \vphantom, \smash
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+
+    // Determine phantom type
+    uint8_t phantom_type = 0;  // default: full phantom
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (strstr(text, "hphantom")) {
+            phantom_type = 1;  // horizontal phantom
+        } else if (strstr(text, "vphantom")) {
+            phantom_type = 2;  // vertical phantom
+        } else if (strstr(text, "smash")) {
+            phantom_type = 3;  // smash
+        }
+    }
+
+    // Build content
+    MathASTNode* content = nullptr;
+    if (!ts_node_is_null(content_node)) {
+        content = build_ts_node(content_node);
+    }
+
+    log_debug("tex_math_ast_builder: build_phantom_command type=%d", phantom_type);
+
+    return make_math_phantom(arena, content, phantom_type);
 }
 
 // Check if a big operator command uses limits by default (above/below scripts)
@@ -1346,6 +1616,75 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
     }
 
     return make_math_space(arena, width_mu);
+}
+
+MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
+    // Get the command name (first child or by examining text)
+    int cmd_len;
+    const char* full_text = node_text(node, &cmd_len);
+
+    // Find the command name - starts with \ and ends before the {
+    const char* cmd = nullptr;
+    int name_len = 0;
+    if (full_text && full_text[0] == '\\') {
+        cmd = full_text + 1;  // skip backslash
+        for (int i = 1; i < cmd_len; i++) {
+            if (!((full_text[i] >= 'a' && full_text[i] <= 'z') ||
+                  (full_text[i] >= 'A' && full_text[i] <= 'Z'))) {
+                name_len = i - 1;
+                break;
+            }
+        }
+    }
+
+    log_debug("tex_math_ast_builder: build_style_command cmd='%.*s'", name_len, cmd ? cmd : "");
+
+    // Get the argument (the group)
+    TSNode arg_node = ts_node_child_by_field_name(node, "arg", 3);
+    MathASTNode* body = nullptr;
+    if (!ts_node_is_null(arg_node)) {
+        body = build_group(arg_node);
+    }
+
+    // For math variants (\mathbf, \mathrm, etc.), we need to change the font
+    // for each character in the body. For now, just mark it with a text node
+    // that the typesetter can recognize.
+    if (cmd && name_len > 0) {
+        // Check for style commands that should change rendering
+        if (name_len == 6 && strncmp(cmd, "mathrm", 6) == 0) {
+            // Roman text - wrap in TEXT node
+            if (body && body->type == MathNodeType::ROW) {
+                // Collect all letters in the body
+                MathASTNode* text = make_math_text(arena, "", 0, true);
+                // For now, just return the body as-is since we need font support
+                return body;
+            }
+            return body;
+        }
+        if (name_len == 12 && strncmp(cmd, "displaystyle", 12) == 0) {
+            // Display style - just return the body
+            return body;
+        }
+        if (name_len == 9 && strncmp(cmd, "textstyle", 9) == 0) {
+            return body;
+        }
+        if (name_len == 11 && strncmp(cmd, "scriptstyle", 11) == 0) {
+            return body;
+        }
+        if (name_len == 17 && strncmp(cmd, "scriptscriptstyle", 17) == 0) {
+            return body;
+        }
+        if (name_len == 12 && strncmp(cmd, "operatorname", 12) == 0) {
+            // Operator name - convert to OP
+            if (body) {
+                body->type = MathNodeType::OP;
+            }
+            return body;
+        }
+    }
+
+    // Default: just return the body
+    return body;
 }
 
 // ============================================================================
