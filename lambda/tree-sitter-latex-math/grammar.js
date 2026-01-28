@@ -113,13 +113,14 @@ module.exports = grammar({
 
     // Punctuation (including standalone delimiters)
     // Lower precedence than brack_group so optional args parse correctly
+    // Note: \lbrace and \rbrace are NOT included here - they should be treated
+    // as delimiters via the command fallback, not punctuation
     punctuation: $ => prec(-1, choice(
       ',', ';', ':', '.', '?',
       '(', ')',                    // Parentheses
       '[', ']',                    // Square brackets
       '|',                         // Vertical bar (absolute value, divides)
       '\\{', '\\}',                // Escaped braces
-      '\\lbrace', '\\rbrace',      // Alternative brace commands
       '\'',                        // Prime (for derivatives like f')
     )),
 
@@ -216,6 +217,7 @@ module.exports = grammar({
       field('delim', $.delimiter),
     ),
 
+    // Delimiter token: command delimiters are keywords via the word setting
     delimiter: $ => choice(
       '(', ')', '[', ']',
       '\\{', '\\}',
@@ -230,7 +232,8 @@ module.exports = grammar({
       '\\lVert', '\\rVert',
       '\\lgroup', '\\rgroup',
       '\\lmoustache', '\\rmoustache',
-      '\\backslash', '\\uparrow', '\\downarrow', '\\updownarrow',
+      '\\backslash',
+      '\\uparrow', '\\downarrow', '\\updownarrow',
       '\\Uparrow', '\\Downarrow', '\\Updownarrow',
       '.',  // Null delimiter
     ),
