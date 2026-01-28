@@ -2,6 +2,7 @@
 #include "lambda-error.h"
 #include "../lib/log.h"
 #include "utf_string.h"
+#include "re2_wrapper.hpp"
 
 #include <stdarg.h>
 #include <time.h>
@@ -510,8 +511,22 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
 Bool fn_is(Item a, Item b) {
     log_debug("fn_is");
     TypeId b_type_id = get_type_id(b);
+    
+    // Handle pattern matching: "str" is pattern
+    if (b_type_id == LMD_TYPE_PATTERN) {
+        TypeId a_type_id = get_type_id(a);
+        if (a_type_id != LMD_TYPE_STRING && a_type_id != LMD_TYPE_SYMBOL) {
+            log_error("pattern matching requires string or symbol, got type: %d", a_type_id);
+            return BOOL_ERROR;
+        }
+        TypePattern* pattern = (TypePattern*)b.type;  // pattern is stored as Type*
+        String* str = a_type_id == LMD_TYPE_STRING ? a.get_string() : a.get_symbol();
+        log_debug("fn_is pattern matching: str=%.*s", (int)str->len, str->chars);
+        return pattern_full_match(pattern, str) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    
     if (b_type_id != LMD_TYPE_TYPE) {
-        log_error("2nd argument must be a type, got type: %d", b_type_id);
+        log_error("2nd argument must be a type or pattern, got type: %d", b_type_id);
         return BOOL_ERROR;
     }
     TypeType *type_b = (TypeType *)b.type;
@@ -967,6 +982,21 @@ Type* const_type(int type_index) {
     Type* type = (Type*)(type_list->data[type_index]);
         log_debug("const_type %d, %d, %p", type_index, type->type_id, type);
     return type;
+}
+
+TypePattern* const_pattern(int pattern_index) {
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    if (pattern_index < 0 || pattern_index >= type_list->length) {
+        log_error("const_pattern: invalid index %d", pattern_index);
+        return nullptr;
+    }
+    Type* type = (Type*)(type_list->data[pattern_index]);
+    if (type->type_id != LMD_TYPE_PATTERN) {
+        log_error("const_pattern: index %d is not a pattern, got type_id=%d", pattern_index, type->type_id);
+        return nullptr;
+    }
+    log_debug("const_pattern %d -> %p", pattern_index, type);
+    return (TypePattern*)type;
 }
 
 Type* fn_type(Item item) {
