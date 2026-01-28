@@ -3,7 +3,6 @@
   "latex": "{a^{n+1} \\over b^m} \\over {c^n \\over d^m}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.545Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

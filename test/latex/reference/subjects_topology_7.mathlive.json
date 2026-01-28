@@ -3,7 +3,6 @@
   "latex": "X \\text{ compact} \\iff \\text{every open cover has a finite subcover}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.173Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

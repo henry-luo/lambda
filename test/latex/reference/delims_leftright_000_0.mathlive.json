@@ -3,7 +3,6 @@
   "latex": "\\left\\lbrace a \\middle\\mid \\frac12 \\right \\rbrace",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.931Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.485Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

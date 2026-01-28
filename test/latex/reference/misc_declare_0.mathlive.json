@@ -3,7 +3,6 @@
   "latex": "x, x', x_1, x_n, x_{2n-1}, \\hat{x}, \\widehat{x}, \\mathbf{x}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.007Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

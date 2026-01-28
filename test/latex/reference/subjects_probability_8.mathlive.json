@@ -3,7 +3,6 @@
   "latex": "M_X(t) = E[e^{tX}] = \\sum_{n=0}^{\\infty} \\frac{E[X^n]}{n!} t^n",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.157Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

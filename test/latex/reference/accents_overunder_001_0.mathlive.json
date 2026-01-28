@@ -3,7 +3,6 @@
   "latex": "\\overline{xyz}\\overline{1+\\frac34}\\underline{abc}\\underline{\\frac57}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.608Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

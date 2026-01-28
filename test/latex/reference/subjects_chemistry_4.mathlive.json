@@ -3,7 +3,6 @@
   "latex": "\\text{Ag}^+ + \\text{Cl}^- \\to \\text{AgCl} \\downarrow",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.101Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

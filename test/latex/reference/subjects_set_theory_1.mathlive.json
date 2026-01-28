@@ -3,7 +3,6 @@
   "latex": "A \\cap B = \\{x : x \\in A \\text{ and } x \\in B\\}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.162Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

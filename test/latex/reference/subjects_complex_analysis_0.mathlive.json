@@ -3,7 +3,6 @@
   "latex": "z = x + iy = r e^{i\\theta} = r(\\cos\\theta + i\\sin\\theta)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.114Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

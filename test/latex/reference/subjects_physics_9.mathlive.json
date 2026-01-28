@@ -3,7 +3,6 @@
   "latex": "\\mathcal{L} = T - V = \\frac{1}{2}m\\dot{x}^2 - V(x)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.147Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

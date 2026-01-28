@@ -3,7 +3,6 @@
   "latex": "\\power{x}{2}+\\power{y}{3}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:41.006Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

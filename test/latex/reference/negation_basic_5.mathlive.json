@@ -3,7 +3,6 @@
   "latex": "\\not\\operatorname{R}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.036Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

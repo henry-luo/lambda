@@ -3,7 +3,6 @@
   "latex": "\\oint_C f(z) \\, dz = 2\\pi i \\sum_{k} \\text{Res}(f, z_k)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.117Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
