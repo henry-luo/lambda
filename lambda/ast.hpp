@@ -79,6 +79,7 @@ extern "C" {
 #define SYM_SYMBOL_PATTERN sym_symbol_pattern
 #define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
 #define SYM_PATTERN_ANY sym_pattern_any
+#define SYM_PATTERN_ANY_STAR sym_pattern_any_star
 #define SYM_PATTERN_COUNT sym_pattern_count
 #define SYM_PRIMARY_PATTERN sym_primary_pattern
 #define SYM_PATTERN_OCCURRENCE sym_pattern_occurrence

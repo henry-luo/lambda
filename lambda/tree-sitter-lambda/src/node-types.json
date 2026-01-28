@@ -2044,7 +2044,7 @@
     }
   },
   {
-    "type": "pattern_any",
+    "type": "pattern_any_star",
     "named": true,
     "fields": {}
   },
@@ -2315,6 +2315,10 @@
         },
         {
           "type": "pattern_any",
+          "named": true
+        },
+        {
+          "type": "pattern_any_star",
           "named": true
         },
         {
@@ -2963,11 +2967,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -3007,11 +3011,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -3106,6 +3110,10 @@
     "named": false
   },
   {
+    "type": "pattern_any",
+    "named": true
+  },
+  {
     "type": "pattern_char_class",
     "named": true
   },
@@ -3143,11 +3151,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
