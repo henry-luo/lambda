@@ -310,6 +310,54 @@
     }
   },
   {
+    "type": "box_command",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\bbox",
+            "named": false
+          },
+          {
+            "type": "\\boxed",
+            "named": false
+          },
+          {
+            "type": "\\colorbox",
+            "named": false
+          },
+          {
+            "type": "\\fbox",
+            "named": false
+          }
+        ]
+      },
+      "content": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "options": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "brack_group",
     "named": true,
     "fields": {},
@@ -327,6 +375,10 @@
         },
         {
           "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "box_command",
           "named": true
         },
         {
@@ -366,6 +418,10 @@
           "named": true
         },
         {
+          "type": "phantom_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -375,6 +431,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "rule_command",
           "named": true
         },
         {
@@ -485,6 +545,10 @@
           "named": true
         },
         {
+          "type": "box_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -509,6 +573,10 @@
           "named": true
         },
         {
+          "type": "middle_delim",
+          "named": true
+        },
+        {
           "type": "number",
           "named": true
         },
@@ -521,6 +589,10 @@
           "named": true
         },
         {
+          "type": "phantom_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -530,6 +602,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "rule_command",
           "named": true
         },
         {
@@ -584,6 +660,10 @@
           "named": true
         },
         {
+          "type": "box_command",
+          "named": true
+        },
+        {
           "type": "col_sep",
           "named": true
         },
@@ -624,6 +704,10 @@
           "named": true
         },
         {
+          "type": "phantom_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -637,6 +721,10 @@
         },
         {
           "type": "row_sep",
+          "named": true
+        },
+        {
+          "type": "rule_command",
           "named": true
         },
         {
@@ -877,6 +965,10 @@
           "named": true
         },
         {
+          "type": "box_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -913,6 +1005,10 @@
           "named": true
         },
         {
+          "type": "phantom_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -922,6 +1018,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "rule_command",
           "named": true
         },
         {
@@ -977,6 +1077,10 @@
           "named": true
         },
         {
+          "type": "box_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -1013,6 +1117,10 @@
           "named": true
         },
         {
+          "type": "phantom_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -1022,6 +1130,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "rule_command",
           "named": true
         },
         {
@@ -1053,6 +1165,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "middle_delim",
+    "named": true,
+    "fields": {
+      "delim": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "delimiter",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1105,6 +1233,54 @@
     }
   },
   {
+    "type": "phantom_command",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\hphantom",
+            "named": false
+          },
+          {
+            "type": "\\phantom",
+            "named": false
+          },
+          {
+            "type": "\\smash",
+            "named": false
+          },
+          {
+            "type": "\\vphantom",
+            "named": false
+          }
+        ]
+      },
+      "content": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "options": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "punctuation",
     "named": true,
     "fields": {}
@@ -1139,6 +1315,42 @@
     "type": "relation",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "rule_command",
+    "named": true,
+    "fields": {
+      "height": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "raise": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          }
+        ]
+      },
+      "width": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "sized_delimiter",
@@ -1330,6 +1542,10 @@
             "named": true
           },
           {
+            "type": "box_command",
+            "named": true
+          },
+          {
             "type": "command",
             "named": true
           },
@@ -1362,6 +1578,10 @@
             "named": true
           },
           {
+            "type": "phantom_command",
+            "named": true
+          },
+          {
             "type": "punctuation",
             "named": true
           },
@@ -1371,6 +1591,10 @@
           },
           {
             "type": "relation",
+            "named": true
+          },
+          {
+            "type": "rule_command",
             "named": true
           },
           {
@@ -1644,7 +1868,23 @@
     "named": false
   },
   {
+    "type": "\\Downarrow",
+    "named": false
+  },
+  {
     "type": "\\Pr",
+    "named": false
+  },
+  {
+    "type": "\\Uparrow",
+    "named": false
+  },
+  {
+    "type": "\\Updownarrow",
+    "named": false
+  },
+  {
+    "type": "\\Vert",
     "named": false
   },
   {
@@ -1664,7 +1904,15 @@
     "named": false
   },
   {
+    "type": "\\backslash",
+    "named": false
+  },
+  {
     "type": "\\bar",
+    "named": false
+  },
+  {
+    "type": "\\bbox",
     "named": false
   },
   {
@@ -1732,6 +1980,10 @@
     "named": false
   },
   {
+    "type": "\\boxed",
+    "named": false
+  },
+  {
     "type": "\\breve",
     "named": false
   },
@@ -1761,6 +2013,10 @@
   },
   {
     "type": "\\circ",
+    "named": false
+  },
+  {
+    "type": "\\colorbox",
     "named": false
   },
   {
@@ -1816,7 +2072,15 @@
     "named": false
   },
   {
+    "type": "\\downarrow",
+    "named": false
+  },
+  {
     "type": "\\equiv",
+    "named": false
+  },
+  {
+    "type": "\\fbox",
     "named": false
   },
   {
@@ -1904,6 +2168,10 @@
     "named": false
   },
   {
+    "type": "\\lbrack",
+    "named": false
+  },
+  {
     "type": "\\lceil",
     "named": false
   },
@@ -1924,6 +2192,10 @@
     "named": false
   },
   {
+    "type": "\\lgroup",
+    "named": false
+  },
+  {
     "type": "\\lim",
     "named": false
   },
@@ -1937,6 +2209,10 @@
   },
   {
     "type": "\\ll",
+    "named": false
+  },
+  {
+    "type": "\\lmoustache",
     "named": false
   },
   {
@@ -1989,6 +2265,10 @@
   },
   {
     "type": "\\mid",
+    "named": false
+  },
+  {
+    "type": "\\middle",
     "named": false
   },
   {
@@ -2124,6 +2404,10 @@
     "named": false
   },
   {
+    "type": "\\rbrack",
+    "named": false
+  },
+  {
     "type": "\\rceil",
     "named": false
   },
@@ -2132,7 +2416,19 @@
     "named": false
   },
   {
+    "type": "\\rgroup",
+    "named": false
+  },
+  {
     "type": "\\right",
+    "named": false
+  },
+  {
+    "type": "\\rmoustache",
+    "named": false
+  },
+  {
+    "type": "\\rule",
     "named": false
   },
   {
@@ -2157,6 +2453,10 @@
   },
   {
     "type": "\\simeq",
+    "named": false
+  },
+  {
+    "type": "\\smash",
     "named": false
   },
   {
@@ -2268,6 +2568,14 @@
     "named": false
   },
   {
+    "type": "\\uparrow",
+    "named": false
+  },
+  {
+    "type": "\\updownarrow",
+    "named": false
+  },
+  {
     "type": "\\vdash",
     "named": false
   },
@@ -2277,6 +2585,10 @@
   },
   {
     "type": "\\vee",
+    "named": false
+  },
+  {
+    "type": "\\vert",
     "named": false
   },
   {
