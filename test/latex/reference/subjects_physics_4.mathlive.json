@@ -1,0 +1,78 @@
+{
+  "format": "mathlive-ast",
+  "latex": "E^2 = (pc)^2 + (m_0 c^2)^2",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.145Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "E^2 = (pc)^2 + (m_0 c^2)^2",
+    "body": [
+      "E",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "p",
+      "c",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "m",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      },
+      "c",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

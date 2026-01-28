@@ -1,0 +1,31 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathfrak{\\sin}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.943Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathfrak{\\sin}",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\sin",
+        "value": "sin",
+        "style": {
+          "variant": "fraktur",
+          "variantStyle": "up"
+        },
+        "verbatimLatex": "\\sin",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sin"
+      }
+    ]
+  }
+}

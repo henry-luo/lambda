@@ -1,0 +1,43 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\weird{\\WildCard}{\\WildCard}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.026Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\weird{\\WildCard}{\\WildCard}",
+    "body": [
+      {
+        "type": "error",
+        "value": "\\weird",
+        "verbatimLatex": "\\weird"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{\\WildCard}",
+        "skipBoundary": true,
+        "body": [
+          {
+            "type": "error",
+            "value": "\\WildCard",
+            "verbatimLatex": "\\WildCard"
+          }
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{\\WildCard}",
+        "skipBoundary": true,
+        "body": [
+          {
+            "type": "error",
+            "value": "\\WildCard",
+            "verbatimLatex": "\\WildCard"
+          }
+        ]
+      }
+    ]
+  }
+}

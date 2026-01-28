@@ -1,0 +1,115 @@
+{
+  "format": "mathlive-ast",
+  "latex": "D_n = n! \\sum_{k=0}^{n} \\frac{(-1)^k}{k!}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.112Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "D_n = n! \\sum_{k=0}^{n} \\frac{(-1)^k}{k!}",
+    "body": [
+      "D",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "n",
+      "!",
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "k",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{(-1)^k}{k!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "k"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "k",
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "k"
+            ]
+          }
+        ],
+        "below": [
+          "k",
+          "!"
+        ]
+      }
+    ]
+  }
+}

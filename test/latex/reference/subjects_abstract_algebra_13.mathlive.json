@@ -1,0 +1,104 @@
+{
+  "format": "mathlive-ast",
+  "latex": "T: V \\to W, \\quad T(\\alpha v + \\beta w) = \\alpha T(v) + \\beta T(w)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.090Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "T: V \\to W, \\quad T(\\alpha v + \\beta w) = \\alpha T(v) + \\beta T(w)",
+    "body": [
+      "T",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "V",
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      "W",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "T",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "mord",
+        "command": "\\alpha",
+        "value": "α",
+        "verbatimLatex": "\\alpha"
+      },
+      "v",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mord",
+        "command": "\\beta",
+        "value": "β",
+        "verbatimLatex": "\\beta"
+      },
+      "w",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\alpha",
+        "value": "α",
+        "verbatimLatex": "\\alpha"
+      },
+      "T",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "v",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mord",
+        "command": "\\beta",
+        "value": "β",
+        "verbatimLatex": "\\beta"
+      },
+      "T",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "w",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

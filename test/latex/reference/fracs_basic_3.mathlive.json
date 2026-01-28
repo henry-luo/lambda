@@ -1,0 +1,66 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{a^n}{b^n}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.540Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{a^n}{b^n}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{a^n}{b^n}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          }
+        ],
+        "below": [
+          "b",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x_{n+1}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.071Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x_{n+1}",
+    "body": [
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1"
+        ]
+      }
+    ]
+  }
+}

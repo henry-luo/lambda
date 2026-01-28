@@ -1,0 +1,62 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\weird{a}{j}; \\weird{abc}{j}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.013Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\weird{a}{j}; \\weird{abc}{j}",
+    "body": [
+      {
+        "type": "error",
+        "value": "\\weird",
+        "verbatimLatex": "\\weird"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{a}",
+        "skipBoundary": true,
+        "body": [
+          "a"
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{j}",
+        "skipBoundary": true,
+        "body": [
+          "j"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ";"
+      },
+      {
+        "type": "error",
+        "value": "\\weird",
+        "verbatimLatex": "\\weird"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{abc}",
+        "skipBoundary": true,
+        "body": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{j}",
+        "skipBoundary": true,
+        "body": [
+          "j"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac {\\frac57} {\\frac37}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.946Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac {\\frac57} {\\frac37}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\frac57} {\\frac37}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac57",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "5"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "7"
+                    ]
+                  }
+                ],
+                "above": [
+                  "5"
+                ],
+                "below": [
+                  "7"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac37",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "3"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "7"
+                    ]
+                  }
+                ],
+                "above": [
+                  "3"
+                ],
+                "below": [
+                  "7"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac57",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "5"
+                ]
+              },
+              {
+                "atoms": [
+                  "7"
+                ]
+              }
+            ],
+            "above": [
+              "5"
+            ],
+            "below": [
+              "7"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac37",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "3"
+                ]
+              },
+              {
+                "atoms": [
+                  "7"
+                ]
+              }
+            ],
+            "above": [
+              "3"
+            ],
+            "below": [
+              "7"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

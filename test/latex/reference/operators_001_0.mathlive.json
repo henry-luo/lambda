@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f(a)+f(b)",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.965Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f(a)+f(b)",
+    "body": [
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

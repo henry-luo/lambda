@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "rgb(3, 5, 7",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.993Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "rgb(3, 5, 7",
+    "body": [
+      "r",
+      "g",
+      "b",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "3",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "5",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "7"
+    ]
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\int_{-\\infty}^{\\infty} |\\Psi(x,t)|^2 \\, dx = 1",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.150Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\int_{-\\infty}^{\\infty} |\\Psi(x,t)|^2 \\, dx = 1",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mord",
+        "command": "\\Psi",
+        "value": "Ψ",
+        "verbatimLatex": "\\Psi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "t",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "x",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "1"
+    ]
+  }
+}

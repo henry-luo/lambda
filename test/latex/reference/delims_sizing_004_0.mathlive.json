@@ -1,0 +1,26 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\Bigl",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.936Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\Bigl",
+    "body": [
+      {
+        "type": "sizeddelim",
+        "command": "\\Bigl",
+        "value": ".",
+        "verbatimLatex": "\\Bigl",
+        "args": [
+          "."
+        ],
+        "delim": ".",
+        "size": 2,
+        "delimType": "mopen"
+      }
+    ]
+  }
+}

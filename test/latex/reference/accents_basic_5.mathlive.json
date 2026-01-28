@@ -1,0 +1,68 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\overline{a+b} \\quad \\underline{x+y}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.484Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\overline{a+b} \\quad \\underline{x+y}",
+    "body": [
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{a+b}",
+        "args": [
+          {
+            "group": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "b"
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "command": "\\underline",
+        "verbatimLatex": "\\underline{x+y}",
+        "args": [
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y"
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{H}_2 + \\text{O}_2 \\to \\text{H}_2\\text{O}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.099Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{H}_2 + \\text{O}_2 \\to \\text{H}_2\\text{O}",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "H",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "O",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "H",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "O",
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

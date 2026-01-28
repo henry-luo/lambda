@@ -1,0 +1,66 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left[ \\begin{array}{c} a \\\\ b \\\\ c \\end{array} \\right]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.513Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left[ \\begin{array}{c} a \\\\ b \\\\ c \\end{array} \\right]",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "array",
+            "environmentName": "array",
+            "array": [
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "a"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "b"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "c"
+                ]
+              ]
+            ],
+            "rowGaps": [
+              {
+                "dimension": 0
+              },
+              {
+                "dimension": 0
+              }
+            ],
+            "columns": [
+              {
+                "align": "c"
+              }
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "[",
+        "rightDelim": "]"
+      }
+    ]
+  }
+}

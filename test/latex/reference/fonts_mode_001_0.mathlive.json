@@ -1,0 +1,19 @@
+{
+  "format": "mathlive-ast",
+  "latex": "1+\\textcolor{blue}{",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.945Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "1+\\textcolor{blue}{",
+    "body": [
+      "1",
+      {
+        "type": "mbin",
+        "value": "+"
+      }
+    ]
+  }
+}

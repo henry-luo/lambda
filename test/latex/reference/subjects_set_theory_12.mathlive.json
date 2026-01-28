@@ -1,0 +1,68 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|\\mathbb{R}| = 2^{\\aleph_0} = \\mathfrak{c}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.166Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|\\mathbb{R}| = 2^{\\aleph_0} = \\mathfrak{c}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "2",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\aleph",
+            "value": "ℵ",
+            "verbatimLatex": "\\aleph"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "0"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "value": "c",
+        "style": {
+          "variant": "fraktur",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

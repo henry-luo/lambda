@@ -352,7 +352,7 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     // Check if the result is an error
     if (output_input->root.type_id() == LMD_TYPE_ERROR) {
         log_debug("Script returned ItemError");
-        
+
         // Print detailed error with stack trace if available
         // Use persistent error since context may have gone out of scope
         LambdaError* last_error = get_persistent_last_error();
@@ -362,7 +362,7 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
         } else {
             fprintf(stderr, "Error: Script execution failed: %s\n", script_path);
         }
-        
+
         // Clean up the error output (it has its own pool)
         // The Input struct was allocated from its own pool, so we just destroy the pool
         if (output_input->pool) {
@@ -1037,10 +1037,14 @@ int main(int argc, char *argv[]) {
             printf("\nDescription:\n");
             printf("  Quickly test and debug individual LaTeX math formulas without creating\n");
             printf("  a full .tex file. Useful for development and debugging the math typesetter.\n");
-            printf("\nOptions:\n");
-            printf("  -o, --output FILE    Output file (default: /tmp/lambda_math.dvi)\n");
-            printf("  --html               Output HTML instead of DVI\n");
-            printf("  --standalone         Include full HTML document with CSS (requires --html)\n");
+            printf("\nOutput Options (can be combined):\n");
+            printf("  -o, --output FILE    Default output file (DVI unless --html specified)\n");
+            printf("  --output-ast FILE    Output AST as JSON file\n");
+            printf("  --output-html FILE   Output HTML to file\n");
+            printf("  --output-dvi FILE    Output DVI to file\n");
+            printf("  --html               Use HTML as default format for -o\n");
+            printf("  --standalone         Include full HTML document with CSS (for HTML output)\n");
+            printf("\nDebug Options:\n");
             printf("  --dump-ast           Dump Math AST to stderr (Phase A output)\n");
             printf("  --dump-boxes         Dump TexNode box structure to stderr (Phase B output)\n");
             printf("  -h, --help           Show this help message\n");
@@ -1051,6 +1055,11 @@ int main(int argc, char *argv[]) {
             printf("  %s math \"\\\\sum_{i=1}^n x_i\" --dump-ast  # Show AST structure\n", argv[0]);
             printf("  %s math \"\\\\sqrt{x^2+y^2}\" --dump-boxes  # Show box layout\n", argv[0]);
             printf("  %s math \"\\\\int_0^1 f(x) dx\" -o out.dvi  # Custom output file\n", argv[0]);
+            printf("\nMulti-Output Mode (for testing framework):\n");
+            printf("  %s math \"\\\\frac{a}{b}\" \\\n", argv[0]);
+            printf("      --output-ast out.json \\\n");
+            printf("      --output-html out.html \\\n");
+            printf("      --output-dvi out.dvi\n");
             printf("\nNotes:\n");
             printf("  - Formulas are rendered in display math style\n");
             printf("  - Use double backslashes (\\\\\\\\) on command line for LaTeX commands\n");
@@ -1062,6 +1071,9 @@ int main(int argc, char *argv[]) {
         // Parse arguments
         const char* formula = NULL;
         const char* output_file = NULL;
+        const char* ast_file = NULL;      // explicit AST output
+        const char* html_file = NULL;     // explicit HTML output
+        const char* dvi_file = NULL;      // explicit DVI output
         bool dump_ast = false;
         bool dump_boxes = false;
         bool output_html = false;
@@ -1073,6 +1085,30 @@ int main(int argc, char *argv[]) {
                     output_file = argv[++i];
                 } else {
                     printf("Error: -o option requires an output file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--output-ast") == 0) {
+                if (i + 1 < argc) {
+                    ast_file = argv[++i];
+                } else {
+                    printf("Error: --output-ast option requires a file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--output-html") == 0) {
+                if (i + 1 < argc) {
+                    html_file = argv[++i];
+                } else {
+                    printf("Error: --output-html option requires a file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--output-dvi") == 0) {
+                if (i + 1 < argc) {
+                    dvi_file = argv[++i];
+                } else {
+                    printf("Error: --output-dvi option requires a file argument\n");
                     log_finish();
                     return 1;
                 }
@@ -1104,15 +1140,49 @@ int main(int argc, char *argv[]) {
 
         int exit_code = 0;
 
-        if (output_html) {
-            // HTML output mode
+        // Check if explicit output options are used (multi-output mode)
+        bool explicit_outputs = (ast_file || html_file || dvi_file);
+
+        if (explicit_outputs) {
+            // Multi-output mode: generate only the explicitly requested outputs
+            // 1. AST output
+            if (ast_file) {
+                exit_code = render_math_to_ast_json(formula, ast_file);
+                if (exit_code != 0) {
+                    fprintf(stderr, "Error: Failed to generate AST JSON\n");
+                    log_finish();
+                    return exit_code;
+                }
+            }
+
+            // 2. HTML output
+            if (html_file) {
+                exit_code = render_math_to_html(formula, html_file, standalone_html);
+                if (exit_code != 0) {
+                    fprintf(stderr, "Error: Failed to generate HTML\n");
+                    log_finish();
+                    return exit_code;
+                }
+            }
+
+            // 3. DVI output
+            if (dvi_file) {
+                exit_code = render_math_to_dvi(formula, dvi_file, false, false);
+                if (exit_code != 0) {
+                    fprintf(stderr, "Error: Failed to generate DVI\n");
+                    log_finish();
+                    return exit_code;
+                }
+            }
+        } else if (output_html) {
+            // Legacy HTML output mode
             const char* html_out = output_file ? output_file : "/tmp/lambda_math.html";
             exit_code = render_math_to_html(formula, html_out, standalone_html);
             if (exit_code == 0) {
                 fprintf(stderr, "Math formula rendered to: %s\n", html_out);
             }
         } else {
-            // DVI output mode (original behavior)
+            // Legacy DVI output mode (original behavior)
             const char* default_dvi = "/tmp/lambda_math.dvi";
 
             // If only dumping and no output file specified, pass NULL
@@ -1130,128 +1200,6 @@ int main(int argc, char *argv[]) {
         log_debug("math command completed with result: %d", exit_code);
         log_finish();
         return exit_code;
-    }
-
-    // Handle typeset-math command - comprehensive math typesetting for testing framework
-    log_debug("Checking for typeset-math command");
-    if (argc >= 2 && strcmp(argv[1], "typeset-math") == 0) {
-        log_debug("Entering typeset-math command handler");
-
-        // Check for help first
-        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
-            printf("Lambda Math Typesetter v1.0\n\n");
-            printf("Usage: %s typeset-math \"<formula>\" [options]\n", argv[0]);
-            printf("\nDescription:\n");
-            printf("  Typesets a LaTeX math formula and outputs AST, HTML, and DVI formats.\n");
-            printf("  This command is designed for the LaTeX math test framework and produces\n");
-            printf("  all three outputs simultaneously for comparison testing.\n");
-            printf("\nOptions:\n");
-            printf("  --output-ast FILE    Output AST as JSON (required for testing)\n");
-            printf("  --output-html FILE   Output HTML snippet (required for testing)\n");
-            printf("  --output-dvi FILE    Output DVI file (required for testing)\n");
-            printf("  -h, --help           Show this help message\n");
-            printf("\nExamples:\n");
-            printf("  %s typeset-math \"\\\\frac{a}{b}\" \\\\\n", argv[0]);
-            printf("      --output-ast /tmp/test.ast.json \\\\\n");
-            printf("      --output-html /tmp/test.html \\\\\n");
-            printf("      --output-dvi /tmp/test.dvi\n");
-            printf("\nOutput Formats:\n");
-            printf("  AST (JSON):  MathLive-compatible abstract syntax tree\n");
-            printf("  HTML:        Semantic HTML with math structure classes\n");
-            printf("  DVI:         TeX Device Independent format for precise comparison\n");
-            printf("\nNotes:\n");
-            printf("  - Formulas are rendered in display math style\n");
-            printf("  - All three outputs are generated from the same parse\n");
-            printf("  - Check log.txt for detailed [MATH] tracing output\n");
-            log_finish();
-            return 0;
-        }
-
-        // Parse arguments
-        const char* formula = NULL;
-        const char* ast_file = NULL;
-        const char* html_file = NULL;
-        const char* dvi_file = NULL;
-
-        for (int i = 2; i < argc; i++) {
-            if (strcmp(argv[i], "--output-ast") == 0) {
-                if (i + 1 < argc) {
-                    ast_file = argv[++i];
-                } else {
-                    printf("Error: --output-ast option requires a file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--output-html") == 0) {
-                if (i + 1 < argc) {
-                    html_file = argv[++i];
-                } else {
-                    printf("Error: --output-html option requires a file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (strcmp(argv[i], "--output-dvi") == 0) {
-                if (i + 1 < argc) {
-                    dvi_file = argv[++i];
-                } else {
-                    printf("Error: --output-dvi option requires a file argument\n");
-                    log_finish();
-                    return 1;
-                }
-            } else if (argv[i][0] != '-') {
-                // Positional argument is the formula
-                formula = argv[i];
-            } else {
-                printf("Error: Unknown option '%s'\n", argv[i]);
-                log_finish();
-                return 1;
-            }
-        }
-
-        if (!formula) {
-            printf("Error: No math formula provided\n");
-            printf("Usage: %s typeset-math \"<formula>\" --output-ast FILE --output-html FILE --output-dvi FILE\n", argv[0]);
-            printf("Try '%s typeset-math --help' for more information.\n", argv[0]);
-            log_finish();
-            return 1;
-        }
-
-        int exit_code = 0;
-
-        // Generate all three outputs
-        // 1. AST output
-        if (ast_file) {
-            exit_code = render_math_to_ast_json(formula, ast_file);
-            if (exit_code != 0) {
-                fprintf(stderr, "Error: Failed to generate AST JSON\n");
-                log_finish();
-                return exit_code;
-            }
-        }
-
-        // 2. HTML output
-        if (html_file) {
-            exit_code = render_math_to_html(formula, html_file, false);  // false = snippet, not standalone
-            if (exit_code != 0) {
-                fprintf(stderr, "Error: Failed to generate HTML\n");
-                log_finish();
-                return exit_code;
-            }
-        }
-
-        // 3. DVI output
-        if (dvi_file) {
-            exit_code = render_math_to_dvi(formula, dvi_file, false, false);
-            if (exit_code != 0) {
-                fprintf(stderr, "Error: Failed to generate DVI\n");
-                log_finish();
-                return exit_code;
-            }
-        }
-
-        log_debug("typeset-math command completed successfully");
-        log_finish();
-        return 0;
     }
 
     // Handle render command

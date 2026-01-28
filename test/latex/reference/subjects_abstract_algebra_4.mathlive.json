@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|G| = |H| \\cdot [G:H]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.085Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|G| = |H| \\cdot [G:H]",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "G",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "H",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mbin",
+        "command": "\\cdot",
+        "value": "⋅",
+        "verbatimLatex": "\\cdot"
+      },
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "G",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "H",
+      {
+        "type": "mclose",
+        "value": "]"
+      }
+    ]
+  }
+}

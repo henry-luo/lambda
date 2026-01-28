@@ -1,0 +1,191 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\xrightarrow[\\mathrm{under}]{\\mathrm{over}} b  \\xleftarrow[\\mathrm{under}]{\\mathrm{over}} c",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.179Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\xrightarrow[\\mathrm{under}]{\\mathrm{over}} b  \\xleftarrow[\\mathrm{under}]{\\mathrm{over}} c",
+    "body": [
+      "a",
+      {
+        "type": "overunder",
+        "command": "\\xrightarrow",
+        "verbatimLatex": "\\xrightarrow[\\mathrm{under}]{\\mathrm{over}}",
+        "subsupPlacement": "over-under",
+        "above": [
+          {
+            "type": "mord",
+            "value": "o",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "v",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "e",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "r",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "value": "u",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "n",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "d",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "e",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "r",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "skipBoundary": false,
+        "svgBody": "xrightarrow",
+        "boxType": "rel",
+        "paddedBody": true,
+        "paddedLabels": true
+      },
+      "b",
+      {
+        "type": "overunder",
+        "command": "\\xleftarrow",
+        "verbatimLatex": "\\xleftarrow[\\mathrm{under}]{\\mathrm{over}}",
+        "subsupPlacement": "over-under",
+        "above": [
+          {
+            "type": "mord",
+            "value": "o",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "v",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "e",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "r",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "value": "u",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "n",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "d",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "e",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "r",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "skipBoundary": false,
+        "svgBody": "xleftarrow",
+        "boxType": "rel",
+        "paddedBody": true,
+        "paddedLabels": true
+      },
+      "c"
+    ]
+  }
+}

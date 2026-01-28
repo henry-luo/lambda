@@ -89,9 +89,194 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     const char* pos = text_copy;
     Format format = parser->config.format;
 
+    log_debug("parse_inline_spans: format=%d (RST=%d)", (int)format, (int)Format::RST);
+
     while (*pos) {
+        // RST interpreted text :role:`content`
+        if (format == Format::RST && *pos == ':') {
+            // Check for :role:`content` pattern
+            const char* role_start = pos + 1;
+            const char* role_end = role_start;
+
+            // Find role name end (terminated by :`)
+            while (*role_end && *role_end != ':' && *role_end != '`' && *role_end != ' ' && *role_end != '\n') {
+                role_end++;
+            }
+
+            // Must be :role:` pattern
+            if (*role_end == ':' && *(role_end + 1) == '`') {
+                size_t role_len = role_end - role_start;
+
+                // Find content end (terminated by `)
+                const char* content_start = role_end + 2; // skip :`
+                const char* content_end = content_start;
+                while (*content_end && *content_end != '`') {
+                    content_end++;
+                }
+
+                if (*content_end == '`') {
+                    // Valid interpreted text found
+                    // Flush current buffer
+                    if (sb->length > 0) {
+                        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                        Item text_item = {.item = s2it(text_content)};
+                        list_push((List*)span, text_item);
+                        increment_element_content_length(span);
+                        stringbuf_reset(sb);
+                    }
+
+                    // Map role to HTML element
+                    const char* elem_name = "span"; // default
+                    if (role_len == 4 && strncmp(role_start, "code", 4) == 0) {
+                        elem_name = "code";
+                    } else if (role_len == 8 && strncmp(role_start, "emphasis", 8) == 0) {
+                        elem_name = "em";
+                    } else if (role_len == 6 && strncmp(role_start, "strong", 6) == 0) {
+                        elem_name = "strong";
+                    } else if (role_len == 3 && strncmp(role_start, "sub", 3) == 0) {
+                        elem_name = "sub";
+                    } else if (role_len == 3 && strncmp(role_start, "sup", 3) == 0) {
+                        elem_name = "sup";
+                    } else if (role_len == 7 && strncmp(role_start, "literal", 7) == 0) {
+                        elem_name = "code";
+                    } else if (role_len == 5 && strncmp(role_start, "title", 5) == 0) {
+                        elem_name = "cite";
+                    }
+
+                    Element* role_elem = create_element(parser, elem_name);
+                    if (role_elem) {
+                        // Add role as class if not a standard element
+                        if (strcmp(elem_name, "span") == 0) {
+                            String* class_key = parser->builder.createString("class");
+                            String* class_val = parser->builder.createString(role_start, role_len);
+                            if (class_key && class_val) {
+                                parser->builder.putToElement(role_elem, class_key, Item{.item = s2it(class_val)});
+                            }
+                        }
+
+                        // Add content as text
+                        size_t content_len = content_end - content_start;
+                        String* content = parser->builder.createString(content_start, content_len);
+                        Item content_item = {.item = s2it(content)};
+                        list_push((List*)role_elem, content_item);
+                        increment_element_content_length(role_elem);
+
+                        list_push((List*)span, Item{.item = (uint64_t)role_elem});
+                        increment_element_content_length(span);
+                    }
+
+                    pos = content_end + 1; // skip closing `
+                    continue;
+                }
+            }
+        }
+
         // Check for emphasis markers (* or _)
+        // But for RST, underscore after word followed by non-word char is a reference, not emphasis
         if (*pos == '*' || *pos == '_') {
+            // RST special case: word_ at end or before punctuation is a reference
+            if (format == Format::RST && *pos == '_' && sb->length > 0) {
+                char prev_char = sb->str->chars[sb->length - 1];
+                char next_char = *(pos + 1);
+                bool prev_is_alnum = ((prev_char >= 'a' && prev_char <= 'z') ||
+                                     (prev_char >= 'A' && prev_char <= 'Z') ||
+                                     (prev_char >= '0' && prev_char <= '9'));
+                bool next_is_end = (next_char == '\0' || next_char == ' ' || next_char == '\n' ||
+                                   next_char == '\r' || next_char == '.' || next_char == ',' ||
+                                   next_char == '!' || next_char == '?' || next_char == ';' ||
+                                   next_char == ':' || next_char == ')' || next_char == ']');
+                if (prev_is_alnum && next_is_end) {
+                    // This is a reference like word_ - handle as shorthand reference
+                    // Find the start of the word in the buffer
+                    int word_start = sb->length - 1;
+                    while (word_start > 0) {
+                        char c = sb->str->chars[word_start - 1];
+                        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                              (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+                            break;
+                        }
+                        word_start--;
+                    }
+
+                    // Extract the reference name from buffer
+                    size_t ref_len = sb->length - word_start;
+                    char ref_name[256];
+                    if (ref_len < 255) {
+                        strncpy(ref_name, sb->str->chars + word_start, ref_len);
+                        ref_name[ref_len] = '\0';
+
+                        // Look up the reference in link_defs_
+                        const char* url = nullptr;
+                        for (int i = 0; i < parser->link_def_count_; i++) {
+                            size_t label_len = strlen(parser->link_defs_[i].label);
+                            if (label_len == ref_len) {
+                                bool match = true;
+                                for (size_t j = 0; j < ref_len; j++) {
+                                    if (tolower((unsigned char)ref_name[j]) !=
+                                        tolower((unsigned char)parser->link_defs_[i].label[j])) {
+                                        match = false;
+                                        break;
+                                    }
+                                }
+                                if (match) {
+                                    url = parser->link_defs_[i].url;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // If reference found, create link
+                        if (url) {
+                            // Flush text before the reference word
+                            if (word_start > 0) {
+                                sb->str->chars[word_start] = '\0';
+                                sb->length = word_start;
+                                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                                Item text_item = {.item = s2it(text_content)};
+                                list_push((List*)span, text_item);
+                                increment_element_content_length(span);
+                            }
+                            stringbuf_reset(sb);
+
+                            // Create anchor element
+                            Element* link_elem = create_element(parser, "a");
+                            if (link_elem) {
+                                // Add href attribute
+                                String* href_key = parser->builder.createString("href");
+                                String* href_val = parser->builder.createString(url);
+                                if (href_key && href_val) {
+                                    parser->builder.putToElement(link_elem, href_key, Item{.item = s2it(href_val)});
+                                }
+
+                                // Add class attribute
+                                String* class_key = parser->builder.createString("class");
+                                String* class_val = parser->builder.createString("reference");
+                                if (class_key && class_val) {
+                                    parser->builder.putToElement(link_elem, class_key, Item{.item = s2it(class_val)});
+                                }
+
+                                // Add link text
+                                String* text_str = create_string(parser, ref_name);
+                                if (text_str) {
+                                    list_push((List*)link_elem, Item{.item = s2it(text_str)});
+                                    increment_element_content_length(link_elem);
+                                }
+
+                                list_push((List*)span, Item{.item = (uint64_t)link_elem});
+                                increment_element_content_length(span);
+                            }
+
+                            pos++; // skip _
+                            continue;
+                        }
+                    }
+                    // Reference not found - treat underscore as literal
+                    stringbuf_append_char(sb, *pos);
+                    pos++;
+                    continue;
+                }
+            }
+
             // Save current buffer before trying emphasis parsing
             // This is critical because parse_emphasis may call parse_inline_spans
             // recursively, which resets the shared buffer
@@ -196,6 +381,76 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 stringbuf_append_char(sb, *pos);
                 pos++;
             }
+            continue;
+        }
+
+        // RST-specific backtick handling - RST uses backticks for links, not code
+        // EXCEPT: double backticks `` are inline literals (code)
+        if (format == Format::RST && *pos == '`') {
+            // Check for double backticks first - these are inline literals (code)
+            if (*(pos + 1) == '`') {
+                // This is a double backtick - let the code span parser handle it
+                // Flush text first
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+
+                // Count opening backticks
+                const char* backtick_start = pos;
+                int opening_count = 0;
+                while (*pos == '`') {
+                    opening_count++;
+                    pos++;
+                }
+                pos = backtick_start;
+
+                Item code_item = parse_code_span(parser, &pos);
+                if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, code_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+                // Code span failed - treat as literal text
+                for (int i = 0; i < opening_count; i++) {
+                    stringbuf_append_char(sb, '`');
+                }
+                pos = backtick_start + opening_count;
+                continue;
+            }
+
+            // Single backtick - try RST link patterns
+            // Flush text first
+            if (sb->length > 0) {
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                stringbuf_reset(sb);
+            }
+
+            // Try inline link first: `text <url>`_
+            Item link_item = parse_rst_inline_link(parser, &pos);
+            if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, link_item);
+                increment_element_content_length(span);
+                continue;
+            }
+
+            // Try reference link: `text`_
+            Item ref_item = parse_rst_reference_link(parser, &pos);
+            if (ref_item.item != ITEM_ERROR && ref_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, ref_item);
+                increment_element_content_length(span);
+                continue;
+            }
+
+            // Not an RST link, treat backtick as literal text
+            stringbuf_append_char(sb, *pos);
+            pos++;
             continue;
         }
 

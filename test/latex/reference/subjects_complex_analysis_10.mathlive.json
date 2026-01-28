@@ -1,0 +1,263 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{Res}(f, z_0) = \\frac{1}{(n-1)!} \\lim_{z \\to z_0} \\frac{d^{n-1}}{dz^{n-1}} [(z-z_0)^n f(z)]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.118Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{Res}(f, z_0) = \\frac{1}{(n-1)!} \\lim_{z \\to z_0} \\frac{d^{n-1}}{dz^{n-1}} [(z-z_0)^n f(z)]",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "R",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "f",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "z",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{(n-1)!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "n",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          "!"
+        ]
+      },
+      {
+        "type": "operator",
+        "command": "\\lim",
+        "value": "lim",
+        "subsupPlacement": "over-under",
+        "args": [],
+        "subscript": [
+          "z",
+          {
+            "type": "mrel",
+            "command": "\\to",
+            "value": "→",
+            "verbatimLatex": "\\to"
+          },
+          "z",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "0"
+            ]
+          }
+        ],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "lim"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{d^{n-1}}{dz^{n-1}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "d",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "1"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "d",
+              "z",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "1"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "d",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ]
+          }
+        ],
+        "below": [
+          "d",
+          "z",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "z",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      }
+    ]
+  }
+}

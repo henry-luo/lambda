@@ -1,0 +1,50 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathbb{R}^n \\to \\mathbb{C}^m",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.528Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathbb{R}^n \\to \\mathbb{C}^m",
+    "body": [
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      {
+        "type": "mord",
+        "value": "C",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "m"
+        ]
+      }
+    ]
+  }
+}

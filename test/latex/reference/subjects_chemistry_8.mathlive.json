@@ -1,0 +1,176 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{pH} = \\text{p}K_\\text{a} + \\log\\frac{[\\text{A}^-]}{[\\text{HA}]}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.103Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{pH} = \\text{p}K_\\text{a} + \\log\\frac{[\\text{A}^-]}{[\\text{HA}]}",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "H",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      "K",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "a",
+            "displayContainsHighlight": true
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "operator",
+        "command": "\\log",
+        "value": "log",
+        "verbatimLatex": "\\log",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "log"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{[\\text{A}^-]}{[\\text{HA}]}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "A",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  }
+                ]
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "H",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "A",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "A",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              }
+            ]
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          }
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "H",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "A",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          }
+        ]
+      }
+    ]
+  }
+}

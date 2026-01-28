@@ -1,0 +1,73 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\det(A) = \\prod_{i=1}^{n} \\lambda_i",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.135Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\det(A) = \\prod_{i=1}^{n} \\lambda_i",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\det",
+        "value": "det",
+        "verbatimLatex": "\\det",
+        "subsupPlacement": "over-under",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "det"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "A"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\prod",
+        "value": "∏",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "i",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∏"
+      },
+      {
+        "type": "mord",
+        "command": "\\lambda",
+        "value": "λ",
+        "verbatimLatex": "\\lambda"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "i"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "format": "mathlive-ast",
+  "latex": "z = x + iy = r e^{i\\theta} = r(\\cos\\theta + i\\sin\\theta)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.114Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "z = x + iy = r e^{i\\theta} = r(\\cos\\theta + i\\sin\\theta)",
+    "body": [
+      "z",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "x",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "i",
+      "y",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "r",
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "i",
+          {
+            "type": "mord",
+            "command": "\\theta",
+            "value": "θ",
+            "verbatimLatex": "\\theta"
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "r",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "operator",
+        "command": "\\cos",
+        "value": "cos",
+        "verbatimLatex": "\\cos",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "cos"
+      },
+      {
+        "type": "mord",
+        "command": "\\theta",
+        "value": "θ",
+        "verbatimLatex": "\\theta"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "i",
+      {
+        "type": "operator",
+        "command": "\\sin",
+        "value": "sin",
+        "verbatimLatex": "\\sin",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sin"
+      },
+      {
+        "type": "mord",
+        "command": "\\theta",
+        "value": "θ",
+        "verbatimLatex": "\\theta"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

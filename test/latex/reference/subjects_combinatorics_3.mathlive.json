@@ -1,0 +1,109 @@
+{
+  "format": "mathlive-ast",
+  "latex": "(x + y)^n = \\sum_{k=0}^{n} \\binom{n}{k} x^k y^{n-k}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.109Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "(x + y)^n = \\sum_{k=0}^{n} \\binom{n}{k} x^k y^{n-k}",
+    "body": [
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "y",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "k",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "n"
+        ],
+        "below": [
+          "k"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "k"
+        ]
+      },
+      "y",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "k"
+        ]
+      }
+    ]
+  }
+}

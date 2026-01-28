@@ -1,0 +1,94 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{1}{1 + \\frac{1}{2}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.045Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{1}{1 + \\frac{1}{2}}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{1 + \\frac{1}{2}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "1",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1}{2}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "2"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1"
+                ],
+                "below": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "1",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

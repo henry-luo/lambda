@@ -1,0 +1,27 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\begin{.}\\end{.}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.676Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\begin{.}\\end{.}",
+    "body": [
+      {
+        "type": "error",
+        "value": "\\end",
+        "verbatimLatex": "\\end"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{.}",
+        "skipBoundary": true,
+        "body": [
+          "."
+        ]
+      }
+    ]
+  }
+}
