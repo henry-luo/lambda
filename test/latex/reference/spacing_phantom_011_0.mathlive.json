@@ -1,0 +1,25 @@
+{
+  "format": "mathlive-ast",
+  "latex": "#3130da",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.988Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "#3130da",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\#",
+        "value": "#"
+      },
+      "3",
+      "1",
+      "3",
+      "0",
+      "d",
+      "a"
+    ]
+  }
+}

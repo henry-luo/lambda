@@ -1,0 +1,85 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{Rate} = k[\\text{A}]^m[\\text{B}]^n",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.107Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{Rate} = k[\\text{A}]^m[\\text{B}]^n",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "R",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "k",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "A",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "m"
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "B",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

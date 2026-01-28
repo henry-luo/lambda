@@ -1,0 +1,46 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathcal{L}, \\mathcal{H}, \\mathcal{F}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.528Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathcal{L}, \\mathcal{H}, \\mathcal{F}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "L",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "value": "H",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "value": "F",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

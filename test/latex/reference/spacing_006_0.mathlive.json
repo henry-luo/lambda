@@ -1,0 +1,85 @@
+{
+  "format": "mathlive-ast",
+  "latex": "+-a+b=c+-d=x^{2-\\frac{1}{2}}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.976Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "+-a+b=c+-d=x^{2-\\frac{1}{2}}",
+    "body": [
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "c",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "d",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

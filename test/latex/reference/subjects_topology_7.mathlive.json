@@ -1,0 +1,321 @@
+{
+  "format": "mathlive-ast",
+  "latex": "X \\text{ compact} \\iff \\text{every open cover has a finite subcover}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.173Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "body": [
+      "X",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "m",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "macro",
+        "command": "\\iff",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "spacing",
+            "command": "\\;",
+            "verbatimLatex": "\\;",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\char",
+            "verbatimLatex": "\\char\"27FA",
+            "args": [
+              {
+                "number": 10234,
+                "base": "hexadecimal"
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\;",
+            "verbatimLatex": "\\;",
+            "args": []
+          }
+        ],
+        "expand": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "v",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "y",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "v",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "h",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "f",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "u",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "b",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "v",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

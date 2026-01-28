@@ -1,0 +1,51 @@
+{
+  "format": "mathlive-ast",
+  "latex": "R/I = \\{r + I : r \\in R\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.088Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "R/I = \\{r + I : r \\in R\\}",
+    "body": [
+      "R",
+      "/",
+      "I",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "r",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "I",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "r",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "R",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

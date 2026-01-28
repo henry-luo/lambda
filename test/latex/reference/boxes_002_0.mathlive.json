@@ -1,0 +1,117 @@
+{
+  "format": "mathlive-ast",
+  "latex": "-\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}-",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.679Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "-\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}-",
+    "body": [
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "box",
+        "command": "\\bbox",
+        "verbatimLatex": "\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}",
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{\\frac{2}{1+x}}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{2}{1+x}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "1",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          "x"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "2"
+                    ],
+                    "below": [
+                      "1",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      "x"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{2}{1+x}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "2"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "1",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      "x"
+                    ]
+                  }
+                ],
+                "above": [
+                  "2"
+                ],
+                "below": [
+                  "1",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "x"
+                ]
+              }
+            ]
+          }
+        ],
+        "backgroundcolor": {
+          "string": "yellow"
+        }
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\textcolor{red}{a=}+b",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.969Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\textcolor{red}{a=}+b",
+    "body": [
+      {
+        "type": "mord",
+        "value": "a",
+        "style": {
+          "verbatimColor": "red",
+          "color": "#d7170b"
+        }
+      },
+      {
+        "type": "mrel",
+        "value": "=",
+        "style": {
+          "verbatimColor": "red",
+          "color": "#d7170b"
+        }
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b"
+    ]
+  }
+}

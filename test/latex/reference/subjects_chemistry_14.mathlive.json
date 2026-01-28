@@ -1,0 +1,58 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\Delta G^\\circ = -RT \\ln K",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.105Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\Delta G^\\circ = -RT \\ln K",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\Delta",
+        "value": "Δ",
+        "verbatimLatex": "\\Delta"
+      },
+      "G",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "\\circ",
+            "value": "∘",
+            "verbatimLatex": "\\circ"
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "R",
+      "T",
+      {
+        "type": "operator",
+        "command": "\\ln",
+        "value": "ln",
+        "verbatimLatex": "\\ln",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "ln"
+      },
+      "K"
+    ]
+  }
+}

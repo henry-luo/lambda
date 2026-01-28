@@ -1,0 +1,59 @@
+{
+  "format": "mathlive-ast",
+  "latex": "o0+\\frac00=\\sum",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.002Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "o0+\\frac00=\\sum",
+    "body": [
+      "o",
+      "0",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac00",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "0"
+            ]
+          },
+          {
+            "atoms": [
+              "0"
+            ]
+          }
+        ],
+        "above": [
+          "0"
+        ],
+        "below": [
+          "0"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "verbatimLatex": "\\sum",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      }
+    ]
+  }
+}

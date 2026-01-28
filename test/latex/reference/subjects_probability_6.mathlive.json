@@ -1,0 +1,119 @@
+{
+  "format": "mathlive-ast",
+  "latex": "P(X = k) = \\frac{\\lambda^k e^{-\\lambda}}{k!}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.154Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "P(X = k) = \\frac{\\lambda^k e^{-\\lambda}}{k!}",
+    "body": [
+      "P",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "k",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\lambda^k e^{-\\lambda}}{k!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\lambda",
+                "value": "λ",
+                "verbatimLatex": "\\lambda"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "k"
+                ]
+              },
+              "e",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  {
+                    "type": "mord",
+                    "command": "\\lambda",
+                    "value": "λ",
+                    "verbatimLatex": "\\lambda"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "k",
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\lambda",
+            "value": "λ",
+            "verbatimLatex": "\\lambda"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "k"
+            ]
+          },
+          "e",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              {
+                "type": "mord",
+                "command": "\\lambda",
+                "value": "λ",
+                "verbatimLatex": "\\lambda"
+              }
+            ]
+          }
+        ],
+        "below": [
+          "k",
+          "!"
+        ]
+      }
+    ]
+  }
+}

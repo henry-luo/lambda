@@ -1,0 +1,105 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left(P + \\frac{an^2}{V^2}\\right)(V - nb) = nRT",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.105Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left(P + \\frac{an^2}{V^2}\\right)(V - nb) = nRT",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "P",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{an^2}{V^2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "a",
+                  "n",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "V",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "above": [
+              "a",
+              "n",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ],
+            "below": [
+              "V",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "V",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "n",
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "n",
+      "R",
+      "T"
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\cdot b \\quad a \\ast b \\quad a \\star b \\quad a \\circ b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.049Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\cdot b \\quad a \\ast b \\quad a \\star b \\quad a \\circ b",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\cdot",
+        "value": "⋅",
+        "verbatimLatex": "\\cdot"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\ast",
+        "value": "∗",
+        "verbatimLatex": "\\ast"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\star",
+        "value": "⋆",
+        "verbatimLatex": "\\star"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\circ",
+        "value": "∘",
+        "verbatimLatex": "\\circ"
+      },
+      "b"
+    ]
+  }
+}

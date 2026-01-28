@@ -1,0 +1,198 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\exists! x : P(x) \\quad \\text{(there exists exactly one)}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.167Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\exists! x : P(x) \\quad \\text{(there exists exactly one)}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\exists",
+        "value": "∃",
+        "verbatimLatex": "\\exists"
+      },
+      "!",
+      "x",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "P",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "(",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "h",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "x",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "x",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "l",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "y",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": ")",
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

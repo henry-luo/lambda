@@ -1,0 +1,23 @@
+{
+  "format": "mathlive-ast",
+  "latex": "PV = nRT",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.104Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "PV = nRT",
+    "body": [
+      "P",
+      "V",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "n",
+      "R",
+      "T"
+    ]
+  }
+}

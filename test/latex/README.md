@@ -177,7 +177,7 @@ npm run generate:ast        # Generate AST references
 The test runner calls Lambda's math typesetter:
 
 ```bash
-./lambda.exe typeset-math "\\frac{a}{b}" \
+./lambda.exe math "\\frac{a}{b}" \
     --output-ast output.ast.json \
     --output-html output.html \
     --output-dvi output.dvi
@@ -340,7 +340,7 @@ fi
 - **npm packages**:
   - `jsdom`: HTML parsing
   - `puppeteer`: Browser automation (for MathLive)
-- **Lambda**: Must implement `typeset-math` command
+- **Lambda**: Must implement `math` command with `--output-ast`, `--output-html`, `--output-dvi` options
 - **pdfTeX**: For baseline reference DVIs (optional)
 
 ## Future Enhancements

@@ -1,0 +1,180 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\overline{xyz}\\overline{1+\\frac34}\\underline{abc}\\underline{\\frac57}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.608Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\overline{xyz}\\overline{1+\\frac34}\\underline{abc}\\underline{\\frac57}",
+    "body": [
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{xyz}",
+        "args": [
+          {
+            "group": [
+              "x",
+              "y",
+              "z"
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          "y",
+          "z"
+        ]
+      },
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{1+\\frac34}",
+        "args": [
+          {
+            "group": [
+              "1",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac34",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "3"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "4"
+                    ]
+                  }
+                ],
+                "above": [
+                  "3"
+                ],
+                "below": [
+                  "4"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          "1",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac34",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "3"
+                ]
+              },
+              {
+                "atoms": [
+                  "4"
+                ]
+              }
+            ],
+            "above": [
+              "3"
+            ],
+            "below": [
+              "4"
+            ]
+          }
+        ]
+      },
+      {
+        "command": "\\underline",
+        "verbatimLatex": "\\underline{abc}",
+        "args": [
+          {
+            "group": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "command": "\\underline",
+        "verbatimLatex": "\\underline{\\frac57}",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac57",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "5"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "7"
+                    ]
+                  }
+                ],
+                "above": [
+                  "5"
+                ],
+                "below": [
+                  "7"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac57",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "5"
+                ]
+              },
+              {
+                "atoms": [
+                  "7"
+                ]
+              }
+            ],
+            "above": [
+              "5"
+            ],
+            "below": [
+              "7"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

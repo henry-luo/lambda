@@ -1,0 +1,128 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not= \\not{}= \\not{}= \\not=",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.957Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not= \\not{}= \\not{}= \\not=",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not=",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "value": "="
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "value": "="
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\not",
+        "value": "",
+        "verbatimLatex": "\\not{}",
+        "args": [
+          {
+            "group": []
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mrel",
+        "command": "\\not",
+        "value": "",
+        "verbatimLatex": "\\not{}",
+        "args": [
+          {
+            "group": []
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not=",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "value": "="
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "value": "="
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          }
+        ]
+      }
+    ]
+  }
+}

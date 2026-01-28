@@ -1,0 +1,61 @@
+{
+  "format": "mathlive-ast",
+  "latex": "A\\vec{v} = \\lambda\\vec{v}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.128Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "A\\vec{v} = \\lambda\\vec{v}",
+    "body": [
+      "A",
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{v}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "v"
+            ]
+          }
+        ],
+        "body": [
+          "v"
+        ],
+        "accentChar": 8407
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\lambda",
+        "value": "λ",
+        "verbatimLatex": "\\lambda"
+      },
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{v}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "v"
+            ]
+          }
+        ],
+        "body": [
+          "v"
+        ],
+        "accentChar": 8407
+      }
+    ]
+  }
+}

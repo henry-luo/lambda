@@ -1,0 +1,170 @@
+{
+  "format": "mathlive-ast",
+  "latex": "(X, \\tau): \\quad \\emptyset, X \\in \\tau, \\text{ closed under } \\cup, \\cap",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.169Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "(X, \\tau): \\quad \\emptyset, X \\in \\tau, \\text{ closed under } \\cup, \\cap",
+    "body": [
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "command": "\\tau",
+        "value": "τ",
+        "verbatimLatex": "\\tau"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "command": "\\emptyset",
+        "value": "∅",
+        "verbatimLatex": "\\emptyset"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "X",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      {
+        "type": "mord",
+        "command": "\\tau",
+        "value": "τ",
+        "verbatimLatex": "\\tau"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "l",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "d",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "u",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "d",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mbin",
+        "command": "\\cup",
+        "value": "∪",
+        "verbatimLatex": "\\cup"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mbin",
+        "command": "\\cap",
+        "value": "∩",
+        "verbatimLatex": "\\cap"
+      }
+    ]
+  }
+}

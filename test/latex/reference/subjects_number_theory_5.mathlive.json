@@ -1,0 +1,126 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a^{p-1} \\equiv 1 \\pmod{p}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.139Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "body": [
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "p",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\equiv",
+        "value": "≡",
+        "verbatimLatex": "\\equiv"
+      },
+      "1",
+      {
+        "type": "macro",
+        "command": "\\pmod",
+        "body": [
+          {
+            "type": "spacing",
+            "command": "\\quad",
+            "verbatimLatex": "\\quad",
+            "args": []
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          {
+            "type": "mop",
+            "command": "\\operatorname",
+            "verbatimLatex": "\\operatorname{mod}",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "value": "m",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "o",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "d",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mord",
+                "value": "m",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "o",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "d",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              }
+            ]
+          },
+          {
+            "type": "space",
+            "command": "\\ ",
+            "value": " ",
+            "verbatimLatex": "\\ "
+          },
+          "p",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ],
+        "captureSelection": false,
+        "args": "{p}"
+      }
+    ]
+  }
+}

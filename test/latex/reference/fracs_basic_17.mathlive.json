@@ -1,0 +1,610 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}}{\\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.554Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}}{\\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}}{\\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "a",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{1}{2}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "1"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "2"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "1"
+                            ],
+                            "below": [
+                              "2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "group": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{2}{3}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "2"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "2"
+                            ],
+                            "below": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "above": [
+                  "a",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{1}{2}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "1"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "1"
+                        ],
+                        "below": [
+                          "2"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "below": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{2}{3}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "2"
+                        ],
+                        "below": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "c",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{1}{2}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "1"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "2"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "1"
+                            ],
+                            "below": [
+                              "2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "group": [
+                      "d",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\frac",
+                            "verbatimLatex": "\\frac{2}{3}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "group": [
+                                  "2"
+                                ]
+                              },
+                              {
+                                "group": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "2"
+                            ],
+                            "below": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "above": [
+                  "c",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{1}{2}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "1"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "1"
+                        ],
+                        "below": [
+                          "2"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "below": [
+                  "d",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{2}{3}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "2"
+                        ],
+                        "below": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{a^{\\frac{1}{2}}}{b^{\\frac{2}{3}}}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "a",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{1}{2}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "1"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "1"
+                        ],
+                        "below": [
+                          "2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{2}{3}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "2"
+                        ],
+                        "below": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "above": [
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{1}{2}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "1"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "1"
+                    ],
+                    "below": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "below": [
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{2}{3}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "3"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "2"
+                    ],
+                    "below": [
+                      "3"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{c^{\\frac{1}{2}}}{d^{\\frac{2}{3}}}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "c",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{1}{2}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "1"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "1"
+                        ],
+                        "below": [
+                          "2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "d",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{2}{3}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "2"
+                        ],
+                        "below": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "above": [
+              "c",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{1}{2}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "1"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "1"
+                    ],
+                    "below": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "below": [
+              "d",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{2}{3}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "3"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "2"
+                    ],
+                    "below": [
+                      "3"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

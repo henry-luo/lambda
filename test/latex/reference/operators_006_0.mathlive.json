@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sin+b",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.967Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sin+b",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\sin",
+        "value": "sin",
+        "verbatimLatex": "\\sin",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sin"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b"
+    ]
+  }
+}

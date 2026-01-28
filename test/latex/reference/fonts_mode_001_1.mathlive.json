@@ -1,0 +1,51 @@
+{
+  "format": "mathlive-ast",
+  "latex": "}+3+\\textcolor{red}{4}+\\text{5\\textcolor{purple}{6}}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.945Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "}+3+\\textcolor{red}{4}+\\text{5\\textcolor{purple}{6}}",
+    "body": [
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "3",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mord",
+        "value": "4",
+        "style": {
+          "verbatimColor": "red",
+          "color": "#d7170b"
+        }
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "5",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "6",
+        "style": {
+          "verbatimColor": "purple",
+          "color": "#a219e6"
+        },
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

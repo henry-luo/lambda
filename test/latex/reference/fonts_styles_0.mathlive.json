@@ -1,0 +1,40 @@
+{
+  "format": "mathlive-ast",
+  "latex": "abcdefghijklmnopqrstuvwxyz",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.518Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "abcdefghijklmnopqrstuvwxyz",
+    "body": [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "g",
+      "h",
+      "i",
+      "j",
+      "k",
+      "l",
+      "m",
+      "n",
+      "o",
+      "p",
+      "q",
+      "r",
+      "s",
+      "t",
+      "u",
+      "v",
+      "w",
+      "x",
+      "y",
+      "z"
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\in b \\quad a \\ni b \\quad a \\notin b \\quad a \\mid b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.053Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\in b \\quad a \\ni b \\quad a \\notin b \\quad a \\mid b",
+    "body": [
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\ni",
+        "value": "∋",
+        "verbatimLatex": "\\ni"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\notin",
+        "value": "∉",
+        "verbatimLatex": "\\notin"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\mid",
+        "value": "∣",
+        "verbatimLatex": "\\mid"
+      },
+      "b"
+    ]
+  }
+}

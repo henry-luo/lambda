@@ -1,0 +1,72 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{a\\not}{b}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.038Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{a\\not}{b}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{a\\not}{b}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              {
+                "type": "mrel",
+                "command": "\\not",
+                "value": "",
+                "verbatimLatex": "\\not}",
+                "args": [
+                  "<null>"
+                ]
+              },
+              {
+                "type": "group",
+                "verbatimLatex": "{b}",
+                "skipBoundary": true,
+                "body": [
+                  "b"
+                ]
+              }
+            ]
+          },
+          "<null>"
+        ],
+        "above": [
+          "a",
+          {
+            "type": "mrel",
+            "command": "\\not",
+            "value": "",
+            "verbatimLatex": "\\not}",
+            "args": [
+              "<null>"
+            ]
+          },
+          {
+            "type": "group",
+            "verbatimLatex": "{b}",
+            "skipBoundary": true,
+            "body": [
+              "b"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "placeholder",
+            "command": "\\placeholder",
+            "captureSelection": true
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\partial A = \\overline{A} \\setminus \\text{int}(A)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.171Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\partial A = \\overline{A} \\setminus \\text{int}(A)",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\partial",
+        "value": "∂",
+        "verbatimLatex": "\\partial"
+      },
+      "A",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{A}",
+        "args": [
+          {
+            "group": [
+              "A"
+            ]
+          }
+        ],
+        "body": [
+          "A"
+        ]
+      },
+      {
+        "type": "mbin",
+        "command": "\\setminus",
+        "value": "∖",
+        "verbatimLatex": "\\setminus"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "A",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

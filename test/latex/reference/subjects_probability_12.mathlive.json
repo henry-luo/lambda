@@ -1,0 +1,153 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{Cov}(X, Y) = E[(X - \\mu_X)(Y - \\mu_Y)] = E[XY] - E[X]E[Y]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.160Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{Cov}(X, Y) = E[(X - \\mu_X)(Y - \\mu_Y)] = E[XY] - E[X]E[Y]",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "C",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "v",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "Y",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mord",
+        "command": "\\mu",
+        "value": "μ",
+        "verbatimLatex": "\\mu"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "X"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "Y",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mord",
+        "command": "\\mu",
+        "value": "μ",
+        "verbatimLatex": "\\mu"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "Y"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "X",
+      "Y",
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "X",
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "Y",
+      {
+        "type": "mclose",
+        "value": "]"
+      }
+    ]
+  }
+}

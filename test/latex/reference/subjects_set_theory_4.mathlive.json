@@ -1,0 +1,80 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\overline{A \\cup B} = \\overline{A} \\cap \\overline{B}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.164Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\overline{A \\cup B} = \\overline{A} \\cap \\overline{B}",
+    "body": [
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{A \\cup B}",
+        "args": [
+          {
+            "group": [
+              "A",
+              {
+                "type": "mbin",
+                "command": "\\cup",
+                "value": "∪",
+                "verbatimLatex": "\\cup"
+              },
+              "B"
+            ]
+          }
+        ],
+        "body": [
+          "A",
+          {
+            "type": "mbin",
+            "command": "\\cup",
+            "value": "∪",
+            "verbatimLatex": "\\cup"
+          },
+          "B"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{A}",
+        "args": [
+          {
+            "group": [
+              "A"
+            ]
+          }
+        ],
+        "body": [
+          "A"
+        ]
+      },
+      {
+        "type": "mbin",
+        "command": "\\cap",
+        "value": "∩",
+        "verbatimLatex": "\\cap"
+      },
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{B}",
+        "args": [
+          {
+            "group": [
+              "B"
+            ]
+          }
+        ],
+        "body": [
+          "B"
+        ]
+      }
+    ]
+  }
+}

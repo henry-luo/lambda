@@ -1,0 +1,229 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mu(n) = \\begin{cases}\n1 & \\text{if } n = 1 \\\\\n(-1)^k & \\text{if } n = p_1 p_2 \\cdots p_k \\\\\n0 & \\text{if } p^2 | n\n\\end{cases}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.142Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mu(n) = \\begin{cases}\n1 & \\text{if } n = 1 \\\\\n(-1)^k & \\text{if } n = p_1 p_2 \\cdots p_k \\\\\n0 & \\text{if } p^2 | n\n\\end{cases}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\mu",
+        "value": "μ",
+        "verbatimLatex": "\\mu"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "n",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "array",
+        "environmentName": "cases",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              "1"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "f",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              "n",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "1"
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "k"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "f",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              "n",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "p",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1"
+                ]
+              },
+              "p",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "minner",
+                "command": "\\cdots",
+                "value": "⋯",
+                "verbatimLatex": "\\cdots"
+              },
+              "p",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "k"
+                ]
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "0"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "f",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              "p",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mord",
+                "command": "|",
+                "value": "∣"
+              },
+              "n"
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          },
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "l"
+          },
+          {
+            "gap": 1
+          },
+          {
+            "align": "l"
+          }
+        ],
+        "arraystretch": 1.2,
+        "leftDelim": "\\lbrace",
+        "rightDelim": "."
+      }
+    ]
+  }
+}

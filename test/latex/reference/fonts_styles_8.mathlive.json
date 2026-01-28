@@ -1,0 +1,222 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathtt{abcdefghijklmnopqrstuvwxyz}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.524Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathtt{abcdefghijklmnopqrstuvwxyz}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "a",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "b",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "c",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "d",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "e",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "f",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "g",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "h",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "i",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "j",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "k",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "l",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "m",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "n",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "o",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "p",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "q",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "r",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "s",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "t",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "u",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "v",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "w",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "x",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "y",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "z",
+        "style": {
+          "variant": "monospace",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

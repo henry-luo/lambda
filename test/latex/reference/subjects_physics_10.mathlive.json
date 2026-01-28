@@ -1,0 +1,217 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{d}{dt}\\left(\\frac{\\partial \\mathcal{L}}{\\partial \\dot{q}}\\right) - \\frac{\\partial \\mathcal{L}}{\\partial q} = 0",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.147Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{d}{dt}\\left(\\frac{\\partial \\mathcal{L}}{\\partial \\dot{q}}\\right) - \\frac{\\partial \\mathcal{L}}{\\partial q} = 0",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{d}{dt}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "d"
+            ]
+          },
+          {
+            "group": [
+              "d",
+              "t"
+            ]
+          }
+        ],
+        "above": [
+          "d"
+        ],
+        "below": [
+          "d",
+          "t"
+        ]
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{\\partial\\mathcal{L}}{\\partial\\dot{q}}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\partial",
+                    "value": "∂",
+                    "verbatimLatex": "\\partial"
+                  },
+                  {
+                    "type": "mord",
+                    "value": "L",
+                    "style": {
+                      "variant": "calligraphic",
+                      "variantStyle": "up"
+                    }
+                  }
+                ]
+              },
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\partial",
+                    "value": "∂",
+                    "verbatimLatex": "\\partial"
+                  },
+                  {
+                    "type": "accent",
+                    "command": "\\dot",
+                    "verbatimLatex": "\\dot{q}",
+                    "skipBoundary": true,
+                    "captureSelection": true,
+                    "args": [
+                      {
+                        "group": [
+                          "q"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "q"
+                    ],
+                    "accentChar": 729
+                  }
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "mord",
+                "value": "L",
+                "style": {
+                  "variant": "calligraphic",
+                  "variantStyle": "up"
+                }
+              }
+            ],
+            "below": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "accent",
+                "command": "\\dot",
+                "verbatimLatex": "\\dot{q}",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "q"
+                    ]
+                  }
+                ],
+                "body": [
+                  "q"
+                ],
+                "accentChar": 729
+              }
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\partial\\mathcal{L}}{\\partial q}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "mord",
+                "value": "L",
+                "style": {
+                  "variant": "calligraphic",
+                  "variantStyle": "up"
+                }
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "q"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          {
+            "type": "mord",
+            "value": "L",
+            "style": {
+              "variant": "calligraphic",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "q"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "0"
+    ]
+  }
+}

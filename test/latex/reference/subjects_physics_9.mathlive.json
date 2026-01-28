@@ -1,0 +1,102 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathcal{L} = T - V = \\frac{1}{2}m\\dot{x}^2 - V(x)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.147Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathcal{L} = T - V = \\frac{1}{2}m\\dot{x}^2 - V(x)",
+    "body": [
+      {
+        "type": "mord",
+        "value": "L",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "T",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "V",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2"
+        ]
+      },
+      "m",
+      {
+        "type": "accent",
+        "command": "\\dot",
+        "verbatimLatex": "\\dot{x}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "body": [
+          "x"
+        ],
+        "accentChar": 729
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "V",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

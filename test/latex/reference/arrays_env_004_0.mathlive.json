@@ -1,0 +1,89 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\begin{array}{ll}xyz & abc & 123 \\\\ cde & fgh \\end{array}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.629Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\begin{array}{ll}xyz & abc & 123 \\\\ cde & fgh \\end{array}",
+    "body": [
+      {
+        "type": "array",
+        "environmentName": "array",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              "x",
+              "y",
+              "z"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              "b",
+              "c"
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "1",
+              "2",
+              "3"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "placeholder",
+                "command": "\\placeholder",
+                "captureSelection": true
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "c",
+              "d",
+              "e"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "f",
+              "g",
+              "h"
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "l"
+          },
+          {
+            "align": "l"
+          }
+        ]
+      }
+    ]
+  }
+}

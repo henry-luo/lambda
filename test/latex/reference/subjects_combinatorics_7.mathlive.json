@@ -1,0 +1,74 @@
+{
+  "format": "mathlive-ast",
+  "latex": "C_{n+1} = \\sum_{i=0}^{n} C_i C_{n-i}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.111Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "C_{n+1} = \\sum_{i=0}^{n} C_i C_{n-i}",
+    "body": [
+      "C",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "i",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      "C",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "i"
+        ]
+      },
+      "C",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "i"
+        ]
+      }
+    ]
+  }
+}

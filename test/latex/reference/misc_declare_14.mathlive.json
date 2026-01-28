@@ -1,0 +1,15 @@
+{
+  "format": "mathlive-ast",
+  "latex": "n",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.014Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "n",
+    "body": [
+      "n"
+    ]
+  }
+}

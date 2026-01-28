@@ -1,0 +1,122 @@
+{
+  "format": "mathlive-ast",
+  "latex": "A^{-1} = \\frac{1}{\\det(A)} \\text{adj}(A)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.130Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "A^{-1} = \\frac{1}{\\det(A)} \\text{adj}(A)",
+    "body": [
+      "A",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{\\det(A)}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "operator",
+                "command": "\\det",
+                "value": "det",
+                "verbatimLatex": "\\det",
+                "subsupPlacement": "over-under",
+                "isFunction": true,
+                "args": [],
+                "variant": "main",
+                "limits": "over-under",
+                "symbol": "det"
+              },
+              {
+                "type": "leftright",
+                "displayContainsHighlight": true,
+                "body": [
+                  "A"
+                ],
+                "leftDelim": "(",
+                "rightDelim": ")"
+              }
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          {
+            "type": "operator",
+            "command": "\\det",
+            "value": "det",
+            "verbatimLatex": "\\det",
+            "subsupPlacement": "over-under",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "limits": "over-under",
+            "symbol": "det"
+          },
+          {
+            "type": "leftright",
+            "displayContainsHighlight": true,
+            "body": [
+              "A"
+            ],
+            "leftDelim": "(",
+            "rightDelim": ")"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "d",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "j",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "A",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

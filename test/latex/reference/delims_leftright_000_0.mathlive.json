@@ -1,0 +1,59 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left\\lbrace a \\middle\\mid \\frac12 \\right \\rbrace",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.931Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left\\lbrace a \\middle\\mid \\frac12 \\right \\rbrace",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "a",
+          {
+            "type": "delim",
+            "command": "\\middle",
+            "value": "\\mid",
+            "verbatimLatex": "\\middle\\mid",
+            "args": [
+              "\\mid"
+            ],
+            "delim": "\\mid",
+            "size": 1
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac12",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "1"
+                ]
+              },
+              {
+                "atoms": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "\\lbrace",
+        "rightDelim": "\\rbrace"
+      }
+    ]
+  }
+}
