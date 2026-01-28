@@ -265,6 +265,43 @@ Item list_end(List *list) {
     }
 }
 
+// create a spreadable array for for-expression results
+Array* array_spreadable() {
+    log_debug("array_spreadable: creating spreadable array");
+    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->is_spreadable = true;  // mark as spreadable
+    frame_start();
+    return arr;
+}
+
+// finalize spreadable array - returns array as Item (no flattening)
+Item array_end(Array* arr) {
+    frame_end();
+    log_debug("array_end: length=%ld, is_spreadable=%d", arr->length, arr->is_spreadable);
+    if (arr->length == 0) {
+        return ItemNull;
+    }
+    return {.array = arr};
+}
+
+// push item to array, spreading if the item is a spreadable array
+void array_push_spread(Array* arr, Item item) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ARRAY) {
+        Array* inner = item.array;
+        if (inner && inner->is_spreadable) {
+            log_debug("array_push_spread: spreading array of length %ld", inner->length);
+            for (int i = 0; i < inner->length; i++) {
+                array_push(arr, inner->items[i]);
+            }
+            return;
+        }
+    }
+    // not spreadable, push as-is
+    array_push(arr, item);
+}
+
 Item list_fill(List *list, int count, ...) {
     log_debug("list_fill cnt: %d", count);
     va_list args;
@@ -492,5 +529,68 @@ Item item_at(Item data, int index) {
     default:
         log_error("item_at: unsupported item_at type: %d", type_id);
         return ItemNull;
+    }
+}
+// Get attribute by name from an Item (for map/element attribute access)
+Item item_attr(Item data, const char* key) {
+    if (!data.item || !key) { return ItemNull; }
+    TypeId type_id = get_type_id(data);
+    switch (type_id) {
+    case LMD_TYPE_MAP: {
+        Map* map = data.map;
+        bool is_found;
+        return _map_get((TypeMap*)map->type, map->data, (char*)key, &is_found);
+    }
+    case LMD_TYPE_ELEMENT: {
+        Element* elmt = data.element;
+        bool is_found;
+        return _map_get((TypeMap*)elmt->type, elmt->data, (char*)key, &is_found);
+    }
+    default:
+        log_debug("item_attr: unsupported type %d", type_id);
+        return ItemNull;
+    }
+}
+
+// Get list of attribute/field names from an Item
+ArrayList* item_keys(Item data) {
+    if (!data.item) { return NULL; }
+    TypeId type_id = get_type_id(data);
+    switch (type_id) {
+    case LMD_TYPE_MAP: {
+        Map* map = data.map;
+        TypeMap* map_type = (TypeMap*)map->type;
+        ArrayList* keys = arraylist_new(8);
+        ShapeEntry* field = map_type->shape;
+        while (field) {
+            if (field->name) {
+                // Convert StrView to String for the transpiled code
+                StrView* sv = field->name;
+                String* str = heap_strcpy((char*)sv->str, sv->length);
+                arraylist_append(keys, (void*)str);
+            }
+            field = field->next;
+        }
+        return keys;
+    }
+    case LMD_TYPE_ELEMENT: {
+        Element* elmt = data.element;
+        TypeMap* elmt_type = (TypeMap*)elmt->type;
+        ArrayList* keys = arraylist_new(8);
+        ShapeEntry* field = elmt_type->shape;
+        while (field) {
+            if (field->name) {
+                // Convert StrView to String for the transpiled code
+                StrView* sv = field->name;
+                String* str = heap_strcpy((char*)sv->str, sv->length);
+                arraylist_append(keys, (void*)str);
+            }
+            field = field->next;
+        }
+        return keys;
+    }
+    default:
+        log_debug("item_keys: unsupported type %d", type_id);
+        return NULL;
     }
 }
