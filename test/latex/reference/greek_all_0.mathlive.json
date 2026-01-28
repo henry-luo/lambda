@@ -3,7 +3,6 @@
   "latex": "\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.570Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

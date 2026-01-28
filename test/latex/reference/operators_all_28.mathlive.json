@@ -3,7 +3,6 @@
   "latex": "\\overbrace{abc} \\quad \\underbrace{abc}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.060Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

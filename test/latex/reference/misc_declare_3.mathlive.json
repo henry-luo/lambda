@@ -3,7 +3,6 @@
   "latex": "f, f(a), f(q), f(a,b), \\mbox{ but } f(a+b)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.009Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "D_n = n! \\sum_{k=0}^{n} \\frac{(-1)^k}{k!}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.112Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

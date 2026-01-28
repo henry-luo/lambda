@@ -239,6 +239,139 @@ function countElements(node) {
 }
 
 /**
+ * Unwrap MathLive's root wrapper to get the actual content node.
+ * MathLive wraps everything in {type:"root", body:[...]} but Lambda returns
+ * the content node directly (e.g., {type:"FRAC",...}).
+ */
+function unwrapMathLiveRoot(node) {
+    if (!node) return null;
+
+    // Handle MathLive's root wrapper: {type:"root", body:[{actual content}]}
+    const type = normalizeType(node.type);
+    if (type === 'root' && node.body) {
+        const body = Array.isArray(node.body) ? node.body : [node.body];
+        if (body.length === 1) {
+            return body[0];
+        }
+        // Multiple children in root body - return a synthetic group
+        return { type: 'group', body: body };
+    }
+    return node;
+}
+
+/**
+ * Normalize a branch value from MathLive format.
+ * MathLive uses string arrays like ["a", "b"] for simple content,
+ * but Lambda uses object arrays like [{type:"ORD", value:"a"}].
+ * This extracts the semantic values for comparison.
+ */
+function normalizeBranchContent(branch) {
+    if (!branch) return [];
+    if (!Array.isArray(branch)) branch = [branch];
+
+    return branch.map(item => {
+        if (typeof item === 'string') {
+            // MathLive simple string content
+            return { type: 'value', value: item };
+        } else if (item && typeof item === 'object') {
+            // Already an object - extract value if present
+            return {
+                type: item.type || 'value',
+                value: item.value || item.symbol || item.char || null,
+                codepoint: item.codepoint
+            };
+        }
+        return { type: 'unknown', value: String(item) };
+    });
+}
+
+/**
+ * Compare branch content semantically.
+ * Returns true if the values match regardless of structural differences.
+ */
+function compareBranchValues(lambdaBranch, mathliveBranch) {
+    const lambdaNorm = normalizeBranchContent(lambdaBranch);
+    const mathliveNorm = normalizeBranchContent(mathliveBranch);
+
+    if (lambdaNorm.length !== mathliveNorm.length) {
+        return { match: false, reason: 'length mismatch' };
+    }
+
+    for (let i = 0; i < lambdaNorm.length; i++) {
+        const lVal = lambdaNorm[i].value;
+        const mVal = mathliveNorm[i].value;
+
+        if (lVal !== mVal) {
+            return { match: false, reason: `value mismatch at ${i}: ${lVal} vs ${mVal}` };
+        }
+    }
+
+    return { match: true };
+}
+
+/**
+ * Normalize MathLive's body array to merge base+subsup into Lambda-style SCRIPTS.
+ *
+ * MathLive structure: ["r", {type: "subsup", superscript: ["2"]}]
+ * Lambda structure:   [{type: "SCRIPTS", body: {value: "r"}, superscript: {value: "2"}}]
+ *
+ * This function merges consecutive base + subsup into a single node.
+ */
+function normalizeMathLiveBody(body) {
+    if (!Array.isArray(body)) return body;
+
+    const result = [];
+    for (let i = 0; i < body.length; i++) {
+        const item = body[i];
+        const next = body[i + 1];
+
+        // Check if next item is a subsup that should attach to current item
+        if (next && typeof next === 'object' && normalizeType(next.type) === 'subsup') {
+            // Merge base + subsup into a SCRIPTS-like node
+            result.push({
+                type: 'SCRIPTS',
+                body: typeof item === 'string' ? { type: 'ORD', value: item } : item,
+                superscript: next.superscript,
+                subscript: next.subscript,
+            });
+            i++; // Skip the subsup
+        } else {
+            result.push(item);
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Deep normalize MathLive AST to be more comparable with Lambda's structure.
+ */
+function normalizeMathLiveAST(node) {
+    if (!node) return null;
+
+    if (Array.isArray(node)) {
+        // First normalize children, then merge base+subsup patterns
+        const normalized = node.map(normalizeMathLiveAST);
+        return normalizeMathLiveBody(normalized);
+    }
+
+    if (typeof node !== 'object') return node;
+
+    // Create a new normalized node
+    const result = { ...node };
+
+    // Normalize branches
+    const branches = ['body', 'above', 'below', 'numer', 'denom', 'superscript', 'subscript'];
+    for (const branch of branches) {
+        if (result[branch]) {
+            result[branch] = normalizeMathLiveAST(result[branch]);
+        }
+    }
+
+    return result;
+}
+
+/**
  * Compare Lambda AST against MathLive AST reference
  *
  * @param {Object} lambdaAST - Lambda's AST output
@@ -258,9 +391,13 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
         mathliveAST = mathliveRef;
     }
 
-    // Normalize both trees
+    // Unwrap MathLive's root wrapper first, then normalize structure
+    const mathLiveUnwrapped = unwrapMathLiveRoot(mathliveAST);
+    const mathLiveStructureNorm = normalizeMathLiveAST(mathLiveUnwrapped);
+
+    // Normalize both trees (remove trivial wrappers)
     const lambdaNorm = unwrapTrivialNodes(JSON.parse(JSON.stringify(lambdaAST)));
-    const mathLiveNorm = unwrapTrivialNodes(JSON.parse(JSON.stringify(mathliveAST)));
+    const mathLiveNorm = unwrapTrivialNodes(JSON.parse(JSON.stringify(mathLiveStructureNorm)));
 
     /**
      * Recursively compare nodes
@@ -299,17 +436,28 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
             });
         }
 
-        // Compare values
+        // Compare values - use command as fallback for symbol comparison
+        // Lambda uses TFM codepoints (control chars), MathLive uses Unicode
         const lambdaValue = lambda.value || lambda.symbol || lambda.char || '';
         const mathliveValue = mathlive.value || mathlive.symbol || mathlive.char || '';
 
+        // Normalize command names for comparison (remove leading backslash)
+        const lambdaCmd = (lambda.command || '').replace(/^\\/, '');
+        const mathliveCmd = (mathlive.command || '').replace(/^\\/, '');
+
         if (lambdaValue && mathliveValue && lambdaValue !== mathliveValue) {
-            differences.push({
-                path,
-                issue: 'Value mismatch',
-                lambda: lambdaValue,
-                mathlive: mathliveValue,
-            });
+            // If values differ, check if commands match (semantic equivalence)
+            if (lambdaCmd && mathliveCmd && lambdaCmd === mathliveCmd) {
+                // Commands match - this is semantically equivalent, just different representation
+                // Don't record as a difference
+            } else {
+                differences.push({
+                    path,
+                    issue: 'Value mismatch',
+                    lambda: lambdaValue,
+                    mathlive: mathliveValue,
+                });
+            }
         }
 
         // Compare branches
@@ -320,7 +468,26 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
             const mathliveBranch = getBranch(mathlive, branch);
 
             if (lambdaBranch || mathliveBranch) {
-                if (Array.isArray(lambdaBranch) && Array.isArray(mathliveBranch)) {
+                // Check if MathLive branch contains simple strings (vs Lambda objects)
+                const mathliveIsStrings = Array.isArray(mathliveBranch) &&
+                    mathliveBranch.length > 0 &&
+                    mathliveBranch.every(item => typeof item === 'string');
+
+                if (mathliveIsStrings) {
+                    // Use semantic comparison for string vs object branches
+                    totalElements++;
+                    const comparison = compareBranchValues(lambdaBranch, mathliveBranch);
+                    if (comparison.match) {
+                        matchedElements++;
+                    } else {
+                        differences.push({
+                            path: `${path}.${branch}`,
+                            issue: `Branch content mismatch: ${comparison.reason}`,
+                            lambda: JSON.stringify(lambdaBranch),
+                            mathlive: JSON.stringify(mathliveBranch),
+                        });
+                    }
+                } else if (Array.isArray(lambdaBranch) && Array.isArray(mathliveBranch)) {
                     // Compare arrays element by element
                     const maxLen = Math.max(lambdaBranch.length, mathliveBranch.length);
                     for (let i = 0; i < maxLen; i++) {

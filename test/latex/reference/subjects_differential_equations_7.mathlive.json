@@ -3,7 +3,6 @@
   "latex": "\\mathcal{L}\\{f'\\} = sF(s) - f(0)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.123Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

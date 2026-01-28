@@ -3,7 +3,6 @@
   "latex": "\\frac{\\frac{1}{2}}{3}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.569Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

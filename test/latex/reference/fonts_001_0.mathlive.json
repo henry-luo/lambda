@@ -3,7 +3,6 @@
   "latex": "\\alpha + x - 1 - \\Gamma",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.942Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\left( \\frac{\\frac{\\frac{a}{b}}{c}}{d} \\right)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.517Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

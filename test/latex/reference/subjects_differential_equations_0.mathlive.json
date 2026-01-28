@@ -3,7 +3,6 @@
   "latex": "\\frac{dy}{dx} + P(x)y = Q(x)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.120Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

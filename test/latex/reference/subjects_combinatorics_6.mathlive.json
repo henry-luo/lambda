@@ -3,7 +3,6 @@
   "latex": "C_n = \\frac{1}{n+1}\\binom{2n}{n} = \\frac{(2n)!}{(n+1)!n!}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.110Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

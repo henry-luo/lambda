@@ -3,7 +3,6 @@
   "latex": "\\frac{{a^n \\over b^m}}{{c^n \\over d^m}}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.544Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

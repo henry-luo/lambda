@@ -3,7 +3,6 @@
   "latex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.572Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

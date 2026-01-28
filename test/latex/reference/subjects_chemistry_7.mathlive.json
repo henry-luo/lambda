@@ -3,7 +3,6 @@
   "latex": "\\text{pH} = -\\log_{10}[\\text{H}^+]",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.103Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

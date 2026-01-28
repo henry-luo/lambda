@@ -3,7 +3,6 @@
   "latex": "Q^T Q = Q Q^T = I",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.130Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

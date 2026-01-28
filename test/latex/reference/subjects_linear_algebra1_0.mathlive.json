@@ -3,7 +3,6 @@
   "latex": "A = \\begin{pmatrix}\na_{11} & a_{12} & \\cdots & a_{1n} \\\\\na_{21} & a_{22} & \\cdots & a_{2n} \\\\\n\\vdots & \\vdots & \\ddots & \\vdots \\\\\na_{m1} & a_{m2} & \\cdots & a_{mn}\n\\end{pmatrix}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.132Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

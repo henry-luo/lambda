@@ -3,7 +3,6 @@
   "latex": "\\lim_{x \\to \\lim_{y \\to 0} f(y)} g(x)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.043Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\begin{bmatrix}a & b & c\\\\ d \\\\ g & h & i & j\\end{bmatrix}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.612Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "f: X \\to Y \\text{ continuous} \\iff f^{-1}(V) \\text{ open for all open } V",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.172Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

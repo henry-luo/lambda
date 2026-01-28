@@ -3,7 +3,6 @@
   "latex": "\\dot{a} \\quad \\ddot{a} \\quad \\breve{a} \\quad \\bar{a} \\quad \\vec{a}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.059Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

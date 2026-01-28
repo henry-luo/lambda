@@ -3,7 +3,6 @@
   "latex": "\\int_a^b f(x)\\,dx = F(b) - F(a)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.095Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
