@@ -1,0 +1,94 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\boldsymbol{\\alpha}, \\boldsymbol{\\beta}, \\boldsymbol{\\gamma}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.580Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\boldsymbol{\\alpha}, \\boldsymbol{\\beta}, \\boldsymbol{\\gamma}",
+    "body": [
+      {
+        "command": "\\boldsymbol",
+        "verbatimLatex": "\\boldsymbol{\\alpha}",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\alpha",
+                "value": "α",
+                "verbatimLatex": "\\alpha"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\alpha",
+            "value": "α",
+            "verbatimLatex": "\\alpha"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\boldsymbol",
+        "verbatimLatex": "\\boldsymbol{\\beta}",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\beta",
+                "value": "β",
+                "verbatimLatex": "\\beta"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\beta",
+            "value": "β",
+            "verbatimLatex": "\\beta"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\boldsymbol",
+        "verbatimLatex": "\\boldsymbol{\\gamma}",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\gamma",
+                "value": "γ",
+                "verbatimLatex": "\\gamma"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\gamma",
+            "value": "γ",
+            "verbatimLatex": "\\gamma"
+          }
+        ]
+      }
+    ]
+  }
+}

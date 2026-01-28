@@ -1,0 +1,282 @@
+{
+  "format": "mathlive-ast",
+  "latex": "(x_1 + x_2 + \\cdots + x_m)^n = \\sum_{k_1+k_2+\\cdots+k_m=n} \\binom{n}{k_1, k_2, \\ldots, k_m} \\prod_{i=1}^{m} x_i^{k_i}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.109Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "(x_1 + x_2 + \\cdots + x_m)^n = \\sum_{k_1+k_2+\\cdots+k_m=n} \\binom{n}{k_1, k_2, \\ldots, k_m} \\prod_{i=1}^{m} x_i^{k_i}",
+    "body": [
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "1"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "minner",
+        "command": "\\cdots",
+        "value": "⋯",
+        "verbatimLatex": "\\cdots"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "m"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "1"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "minner",
+            "command": "\\cdots",
+            "value": "⋯",
+            "verbatimLatex": "\\cdots"
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "m"
+            ]
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n}{k_1, k_2, \\ldots, k_m}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "k",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1"
+                ]
+              },
+              {
+                "type": "mpunct",
+                "value": ","
+              },
+              "k",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mpunct",
+                "value": ","
+              },
+              {
+                "type": "minner",
+                "command": "\\ldots",
+                "value": "…",
+                "verbatimLatex": "\\ldots"
+              },
+              {
+                "type": "mpunct",
+                "value": ","
+              },
+              "k",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "m"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "n"
+        ],
+        "below": [
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "1"
+            ]
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          {
+            "type": "minner",
+            "command": "\\ldots",
+            "value": "…",
+            "verbatimLatex": "\\ldots"
+          },
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "m"
+            ]
+          }
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\prod",
+        "value": "∏",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "i",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          "m"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∏"
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "i"
+        ],
+        "superscript": [
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

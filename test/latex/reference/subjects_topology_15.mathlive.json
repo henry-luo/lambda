@@ -1,0 +1,81 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\chi = 2 - 2g \\quad (g = \\text{genus})",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.176Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\chi = 2 - 2g \\quad (g = \\text{genus})",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\chi",
+        "value": "χ",
+        "verbatimLatex": "\\chi"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "2",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "2",
+      "g",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "g",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "g",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "u",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\rule{0}{4}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.913Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\rule{0}{4}",
+    "body": [
+      {
+        "command": "\\rule",
+        "verbatimLatex": "\\rule{0}{4}",
+        "args": [
+          "<null>",
+          {
+            "number": 0,
+            "base": "decimal"
+          },
+          {
+            "number": 4,
+            "base": "decimal"
+          }
+        ]
+      }
+    ]
+  }
+}

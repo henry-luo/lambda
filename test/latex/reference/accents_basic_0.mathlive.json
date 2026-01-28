@@ -1,0 +1,104 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.471Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\hat",
+        "verbatimLatex": "\\hat{a}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a"
+            ]
+          }
+        ],
+        "body": [
+          "a"
+        ],
+        "accentChar": 94
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\check",
+        "verbatimLatex": "\\check{b}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "b"
+            ]
+          }
+        ],
+        "body": [
+          "b"
+        ],
+        "accentChar": 711
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\tilde",
+        "verbatimLatex": "\\tilde{c}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "c"
+            ]
+          }
+        ],
+        "body": [
+          "c"
+        ],
+        "accentChar": 126
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\acute",
+        "verbatimLatex": "\\acute{d}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "d"
+            ]
+          }
+        ],
+        "body": [
+          "d"
+        ],
+        "accentChar": 714
+      }
+    ]
+  }
+}

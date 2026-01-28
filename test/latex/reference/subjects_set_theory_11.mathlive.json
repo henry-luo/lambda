@@ -1,0 +1,93 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|\\mathbb{N}| = |\\mathbb{Z}| = |\\mathbb{Q}| = \\aleph_0",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.166Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|\\mathbb{N}| = |\\mathbb{Z}| = |\\mathbb{Q}| = \\aleph_0",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mord",
+        "value": "N",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mord",
+        "value": "Z",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mord",
+        "value": "Q",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\aleph",
+        "value": "ℵ",
+        "verbatimLatex": "\\aleph"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      }
+    ]
+  }
+}

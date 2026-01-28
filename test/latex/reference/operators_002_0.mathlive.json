@@ -1,0 +1,34 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x^n+y^n",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.965Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x^n+y^n",
+    "body": [
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "y",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\vec{x} \\scriptstyle \\vec{x}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.977Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\vec{x} \\scriptstyle \\vec{x}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{x}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "body": [
+          "x"
+        ],
+        "accentChar": 8407
+      },
+      {
+        "command": "\\scriptstyle",
+        "verbatimLatex": "\\scriptstyle\\vec{x}",
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "accent",
+                "command": "\\vec",
+                "verbatimLatex": "\\vec{x}",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "x"
+                    ]
+                  }
+                ],
+                "body": [
+                  "x"
+                ],
+                "accentChar": 8407
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\vec",
+            "verbatimLatex": "\\vec{x}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "x"
+                ]
+              }
+            ],
+            "body": [
+              "x"
+            ],
+            "accentChar": 8407
+          }
+        ]
+      }
+    ]
+  }
+}

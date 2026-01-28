@@ -1,0 +1,110 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a + \\foo b \\choose c \\bar + d",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.566Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a + \\foo b \\choose c \\bar + d",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\choose",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "error",
+                "value": "\\foo",
+                "verbatimLatex": "\\foo"
+              },
+              "b"
+            ]
+          },
+          {
+            "atoms": [
+              "c",
+              {
+                "type": "accent",
+                "command": "\\bar",
+                "verbatimLatex": "\\bar+",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "atoms": [
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  }
+                ],
+                "accentChar": 713
+              },
+              "d"
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "error",
+            "value": "\\foo",
+            "verbatimLatex": "\\foo"
+          },
+          "b"
+        ],
+        "below": [
+          "c",
+          {
+            "type": "accent",
+            "command": "\\bar",
+            "verbatimLatex": "\\bar+",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mbin",
+                "value": "+"
+              }
+            ],
+            "accentChar": 713
+          },
+          "d"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      }
+    ]
+  }
+}

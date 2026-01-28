@@ -1,0 +1,122 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt[\\placeholder{}]{x}\\scriptstyle \\sqrt[\\placeholder{}]{x}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.976Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt[\\placeholder{}]{x}\\scriptstyle \\sqrt[\\placeholder{}]{x}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt[\\placeholder{}]{x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "placeholder",
+                "command": "\\placeholder",
+                "captureSelection": true
+              }
+            ]
+          },
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "body": [
+          "x"
+        ],
+        "above": [
+          {
+            "type": "placeholder",
+            "command": "\\placeholder",
+            "captureSelection": true
+          }
+        ]
+      },
+      {
+        "command": "\\scriptstyle",
+        "verbatimLatex": "\\scriptstyle\\sqrt[\\placeholder{}]{x}",
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt[\\placeholder{}]{x}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      {
+                        "type": "placeholder",
+                        "command": "\\placeholder",
+                        "captureSelection": true
+                      }
+                    ]
+                  },
+                  {
+                    "group": [
+                      "x"
+                    ]
+                  }
+                ],
+                "body": [
+                  "x"
+                ],
+                "above": [
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt[\\placeholder{}]{x}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "x"
+                ]
+              }
+            ],
+            "body": [
+              "x"
+            ],
+            "above": [
+              {
+                "type": "placeholder",
+                "command": "\\placeholder",
+                "captureSelection": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

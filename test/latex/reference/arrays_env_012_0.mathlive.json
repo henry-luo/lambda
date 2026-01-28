@@ -1,0 +1,67 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\begin{bmatrix}\\end{Bmatrix}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.656Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\begin{bmatrix}\\end{Bmatrix}",
+    "body": [
+      {
+        "type": "array",
+        "environmentName": "bmatrix",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "placeholder",
+                "command": "\\placeholder",
+                "captureSelection": true
+              }
+            ]
+          ]
+        ],
+        "rowGaps": [],
+        "columns": [
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          }
+        ],
+        "leftDelim": "[",
+        "rightDelim": "]"
+      }
+    ]
+  }
+}

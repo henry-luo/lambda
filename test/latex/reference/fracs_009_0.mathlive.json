@@ -1,0 +1,39 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\over b \\over c",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.951Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\over b \\over c",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\over",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "a"
+            ]
+          },
+          {
+            "atoms": [
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "above": [
+          "a"
+        ],
+        "below": [
+          "b",
+          "c"
+        ]
+      }
+    ]
+  }
+}

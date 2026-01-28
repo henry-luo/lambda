@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac57",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.946Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac57",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac57",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "5"
+            ]
+          },
+          {
+            "atoms": [
+              "7"
+            ]
+          }
+        ],
+        "above": [
+          "5"
+        ],
+        "below": [
+          "7"
+        ]
+      }
+    ]
+  }
+}

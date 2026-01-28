@@ -1,0 +1,114 @@
+{
+  "format": "mathlive-ast",
+  "latex": "t_{1/2} = \\frac{\\ln 2}{k} = \\frac{0.693}{k}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.107Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "t_{1/2} = \\frac{\\ln 2}{k} = \\frac{0.693}{k}",
+    "body": [
+      "t",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "1",
+          "/",
+          "2"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\ln2}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "operator",
+                "command": "\\ln",
+                "value": "ln",
+                "verbatimLatex": "\\ln",
+                "subsupPlacement": "adjacent",
+                "isFunction": true,
+                "args": [],
+                "variant": "main",
+                "variantStyle": "up",
+                "limits": "adjacent",
+                "symbol": "ln"
+              },
+              "2"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "operator",
+            "command": "\\ln",
+            "value": "ln",
+            "verbatimLatex": "\\ln",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "variantStyle": "up",
+            "limits": "adjacent",
+            "symbol": "ln"
+          },
+          "2"
+        ],
+        "below": [
+          "k"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{0.693}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "0",
+              ".",
+              "6",
+              "9",
+              "3"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "0",
+          ".",
+          "6",
+          "9",
+          "3"
+        ],
+        "below": [
+          "k"
+        ]
+      }
+    ]
+  }
+}

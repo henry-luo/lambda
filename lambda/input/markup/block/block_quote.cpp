@@ -29,6 +29,7 @@ extern Item parse_divider(MarkupParser* parser);
 extern Item parse_list_structure(MarkupParser* parser, int base_indent);
 extern Item parse_html_block(MarkupParser* parser, const char* line);
 extern Item parse_paragraph(MarkupParser* parser, const char* line);
+extern Item parse_block_element(MarkupParser* parser);
 
 /**
  * strip_quote_markers_with_tabs - Strip quote markers with proper tab expansion
@@ -308,6 +309,129 @@ static bool is_lazy_continuation(const char* line) {
 }
 
 /**
+ * parse_rst_blockquote - Parse RST indentation-based blockquote
+ *
+ * RST blockquotes are indented blocks (3+ spaces) that are not directives.
+ * The indentation level determines the blockquote scope.
+ */
+static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
+    log_debug("parse_rst_blockquote: starting at line %d: '%s'", (int)parser->current_line, line);
+
+    Element* quote = create_element(parser, "blockquote");
+    if (!quote) {
+        parser->current_line++;
+        return Item{.item = ITEM_ERROR};
+    }
+
+    // Determine the indentation level of the first line
+    const char* p = line;
+    int base_indent = 0;
+    while (*p == ' ') { base_indent++; p++; }
+
+    log_debug("parse_rst_blockquote: base_indent=%d", base_indent);
+
+    // Collect all lines with at least base_indent spaces
+    std::vector<char*> content_lines;
+
+    while (parser->current_line < parser->line_count) {
+        const char* current = parser->lines[parser->current_line];
+
+        // Empty line - could be part of blockquote or end it
+        if (is_empty_line(current)) {
+            // Check if next non-empty line continues the blockquote
+            size_t peek = parser->current_line + 1;
+            while (peek < parser->line_count && is_empty_line(parser->lines[peek])) {
+                peek++;
+            }
+            if (peek < parser->line_count) {
+                const char* next = parser->lines[peek];
+                int next_indent = 0;
+                const char* np = next;
+                while (*np == ' ') { next_indent++; np++; }
+                if (next_indent >= base_indent) {
+                    // Empty line is part of the blockquote
+                    content_lines.push_back(strdup(""));
+                    parser->current_line++;
+                    continue;
+                }
+            }
+            // End of blockquote
+            break;
+        }
+
+        // Check indentation of this line
+        int indent = 0;
+        p = current;
+        while (*p == ' ') { indent++; p++; }
+
+        log_debug("parse_rst_blockquote: line %d indent=%d base=%d content='%s'",
+                  (int)parser->current_line, indent, base_indent, current);
+
+        // Line with less indentation ends the blockquote
+        if (indent < base_indent) {
+            break;
+        }
+
+        // Strip exactly base_indent spaces
+        char* stripped = strdup(current + base_indent);
+        content_lines.push_back(stripped);
+        parser->current_line++;
+    }
+
+    log_debug("parse_rst_blockquote: collected %zu lines", content_lines.size());
+
+    // Parse the collected content as block elements
+    if (!content_lines.empty()) {
+        size_t num_lines = content_lines.size();
+        char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
+        for (size_t i = 0; i < num_lines; i++) {
+            lines_array[i] = content_lines[i];
+        }
+
+        // Save current parser state
+        char** saved_lines = parser->lines;
+        size_t saved_line_count = parser->line_count;
+        size_t saved_current_line = parser->current_line;
+
+        // Set up parser to process the content lines
+        parser->lines = lines_array;
+        parser->line_count = num_lines;
+        parser->current_line = 0;
+
+        // For RST blockquotes, content is typically paragraph text.
+        // Avoid calling full block detection to prevent infinite recursion.
+        while (parser->current_line < parser->line_count) {
+            const char* content_line = parser->lines[parser->current_line];
+
+            if (is_empty_line(content_line)) {
+                parser->current_line++;
+                continue;
+            }
+
+            // Parse as paragraph to avoid recursion
+            Item child = parse_paragraph(parser, content_line);
+            if (child.item != ItemNull.item && child.item != ITEM_ERROR && child.item != ITEM_UNDEFINED) {
+                list_push((List*)quote, child);
+                increment_element_content_length(quote);
+            }
+        }
+
+        // Restore parser state
+        parser->lines = saved_lines;
+        parser->line_count = saved_line_count;
+        parser->current_line = saved_current_line + num_lines;
+
+        // Free content lines
+        for (size_t i = 0; i < num_lines; i++) {
+            free(lines_array[i]);
+        }
+        free(lines_array);
+    }
+
+    return Item{.item = (uint64_t)quote};
+}
+
+/**
  * parse_blockquote - Parse a blockquote element
  *
  * Creates a <blockquote> element. Handles:
@@ -323,6 +447,11 @@ static bool is_lazy_continuation(const char* line) {
 Item parse_blockquote(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
+    }
+
+    // RST uses indentation-based blockquotes, not > markers
+    if (parser->config.format == Format::RST) {
+        return parse_rst_blockquote(parser, line);
     }
 
     Element* quote = create_element(parser, "blockquote");

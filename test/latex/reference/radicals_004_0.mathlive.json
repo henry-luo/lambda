@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt[3]5",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.972Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt[3]5",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt[3]5",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "3"
+            ]
+          },
+          {
+            "atoms": [
+              "5"
+            ]
+          }
+        ],
+        "body": [
+          "5"
+        ],
+        "above": [
+          "3"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathbb{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.526Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathbb{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "A",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "B",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "C",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "D",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "E",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "F",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "G",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "H",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "I",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "J",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "K",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "L",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "M",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "N",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "O",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "P",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Q",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "S",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "T",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "U",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "V",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "W",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "X",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Y",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Z",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

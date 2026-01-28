@@ -1,0 +1,160 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\zeta(s) = 2^s \\pi^{s-1} \\sin\\left(\\frac{\\pi s}{2}\\right) \\Gamma(1-s) \\zeta(1-s)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.139Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\zeta(s) = 2^s \\pi^{s-1} \\sin\\left(\\frac{\\pi s}{2}\\right) \\Gamma(1-s) \\zeta(1-s)",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\zeta",
+        "value": "ζ",
+        "verbatimLatex": "\\zeta"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "s",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "2",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "s"
+        ]
+      },
+      {
+        "type": "mord",
+        "command": "\\pi",
+        "value": "π",
+        "verbatimLatex": "\\pi"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "s",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "operator",
+        "command": "\\sin",
+        "value": "sin",
+        "verbatimLatex": "\\sin",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sin"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{\\pi s}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\pi",
+                    "value": "π",
+                    "verbatimLatex": "\\pi"
+                  },
+                  "s"
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "s"
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mord",
+        "command": "\\Gamma",
+        "value": "Γ",
+        "verbatimLatex": "\\Gamma"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "1",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "s",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "\\zeta",
+        "value": "ζ",
+        "verbatimLatex": "\\zeta"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "1",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "s",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\lim_{n \\to \\infty} \\frac{1}{n}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.508Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\lim_{n \\to \\infty} \\frac{1}{n}",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\lim",
+        "value": "lim",
+        "subsupPlacement": "over-under",
+        "args": [],
+        "subscript": [
+          "n",
+          {
+            "type": "mrel",
+            "command": "\\to",
+            "value": "→",
+            "verbatimLatex": "\\to"
+          },
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "lim"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{n}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "n"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

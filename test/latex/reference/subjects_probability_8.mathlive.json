@@ -1,0 +1,149 @@
+{
+  "format": "mathlive-ast",
+  "latex": "M_X(t) = E[e^{tX}] = \\sum_{n=0}^{\\infty} \\frac{E[X^n]}{n!} t^n",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.157Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "M_X(t) = E[e^{tX}] = \\sum_{n=0}^{\\infty} \\frac{E[X^n]}{n!} t^n",
+    "body": [
+      "M",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "X"
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "t",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "t",
+          "X"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "n",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{E[X^n]}{n!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "E",
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              "X",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              }
+            ]
+          },
+          {
+            "group": [
+              "n",
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          "E",
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          "X",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          }
+        ],
+        "below": [
+          "n",
+          "!"
+        ]
+      },
+      "t",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

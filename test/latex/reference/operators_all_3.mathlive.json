@@ -1,0 +1,72 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\cup b \\quad a \\sqcap b \\quad a \\sqcup b \\quad a \\vee b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.049Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\cup b \\quad a \\sqcap b \\quad a \\sqcup b \\quad a \\vee b",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\cup",
+        "value": "∪",
+        "verbatimLatex": "\\cup"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "extensible-symbol",
+        "command": "\\sqcap",
+        "value": "⊓",
+        "verbatimLatex": "\\sqcap",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "limits": "adjacent",
+        "symbol": "⊓"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "extensible-symbol",
+        "command": "\\sqcup",
+        "value": "⊔",
+        "verbatimLatex": "\\sqcup",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "limits": "adjacent",
+        "symbol": "⊔"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\vee",
+        "value": "∨",
+        "verbatimLatex": "\\vee"
+      },
+      "b"
+    ]
+  }
+}

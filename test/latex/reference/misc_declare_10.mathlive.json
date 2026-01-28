@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a\\plus b; \\baz, \\foo{x}, \\foo{j}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.012Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a\\plus b; \\baz, \\foo{x}, \\foo{j}",
+    "body": [
+      "a",
+      {
+        "type": "error",
+        "value": "\\plus",
+        "verbatimLatex": "\\plus"
+      },
+      "b",
+      {
+        "type": "mpunct",
+        "value": ";"
+      },
+      {
+        "type": "error",
+        "value": "\\baz",
+        "verbatimLatex": "\\baz"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "error",
+        "value": "\\foo",
+        "verbatimLatex": "\\foo"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{x}",
+        "skipBoundary": true,
+        "body": [
+          "x"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "error",
+        "value": "\\foo",
+        "verbatimLatex": "\\foo"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{j}",
+        "skipBoundary": true,
+        "body": [
+          "j"
+        ]
+      }
+    ]
+  }
+}

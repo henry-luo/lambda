@@ -1,0 +1,59 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\varphi_X(t) = E[e^{itX}]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.158Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\varphi_X(t) = E[e^{itX}]",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\varphi",
+        "value": "φ",
+        "verbatimLatex": "\\varphi"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "X"
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "t",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "i",
+          "t",
+          "X"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      }
+    ]
+  }
+}
