@@ -3,7 +3,6 @@
   "latex": "ax^2+bx+c = a \\left( x - \\frac{-b + \\sqrt {b^2-4ac}}{2a} \\right) \\left( x - \\frac{-b - \\sqrt {b^2-4ac}}{2a} \\right)",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.971Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -306,7 +306,6 @@ async function generateWithPuppeteer(testFiles, options = {}) {
                     latex: latex,
                     description: expr.description || null,
                     type: expr.type || 'display',
-                    generatedAt: new Date().toISOString(),
                     generator: 'MathLive toJson()',
                     ast: ast
                 };

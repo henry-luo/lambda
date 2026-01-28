@@ -3,7 +3,6 @@
   "latex": "\\frac{\\bar{X}_n - \\mu}{\\sigma/\\sqrt{n}} \\xrightarrow{d} N(0,1)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.159Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

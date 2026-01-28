@@ -3,7 +3,6 @@
   "latex": "\\rule{+10em}{+  10 em}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.925Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

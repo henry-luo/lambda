@@ -3,7 +3,6 @@
   "latex": "\\Phi(z) = \\frac{1}{\\sqrt{2\\pi}} \\int_{-\\infty}^{z} e^{-\\frac{t^2}{2}} \\, dt",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.153Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\mathrm{d}x \\quad \\mathrm{e}^x \\quad \\mathrm{i}\\theta",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.531Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

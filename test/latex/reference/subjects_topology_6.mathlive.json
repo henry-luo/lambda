@@ -3,7 +3,6 @@
   "latex": "f: X \\to Y \\text{ homeomorphism} \\iff f \\text{ bijective, continuous, } f^{-1} \\text{ continuous}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.172Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

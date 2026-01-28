@@ -3,7 +3,6 @@
   "latex": "\\lim_{n \\to \\infty} \\frac{1}{n}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.508Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

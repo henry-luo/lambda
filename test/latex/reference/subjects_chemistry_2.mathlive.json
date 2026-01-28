@@ -3,7 +3,6 @@
   "latex": "\\text{CH}_4 + 2\\text{O}_2 \\to \\text{CO}_2 + 2\\text{H}_2\\text{O}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.100Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

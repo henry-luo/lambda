@@ -3,7 +3,6 @@
   "latex": "(x_1 + x_2 + \\cdots + x_m)^n = \\sum_{k_1+k_2+\\cdots+k_m=n} \\binom{n}{k_1, k_2, \\ldots, k_m} \\prod_{i=1}^{m} x_i^{k_i}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.109Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

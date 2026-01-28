@@ -3,7 +3,6 @@
   "latex": "\\zeta(s) = \\sum_{n=1}^{\\infty} \\frac{1}{n^s} = \\prod_{p \\text{ prime}} \\frac{1}{1-p^{-s}}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.138Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

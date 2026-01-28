@@ -3,7 +3,6 @@
   "latex": "K \\subset \\mathbb{R}^n \\text{ compact} \\iff K \\text{ closed and bounded}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.173Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
