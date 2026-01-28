@@ -290,7 +290,7 @@ async function runLambdaParser(latex, options = {}) {
 
         // Build Lambda command
         const args = [
-            'typeset-math',
+            'math',
             latex,
             '--output-ast', astFile,
             '--output-html', htmlFile,

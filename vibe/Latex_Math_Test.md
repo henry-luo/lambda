@@ -732,8 +732,8 @@ test/latex/
 
 **CLI Support**:
 ```bash
-make test-latex-math feature=fractions    # Test only fractions
-make test-latex-math feature=scripts      # Test only scripts
+make test-math feature=fractions    # Test only fractions
+make test-math feature=scripts      # Test only scripts
 ```
 
 ### 4. KaTeX Cross-Reference
@@ -750,7 +750,7 @@ Add KaTeX as secondary reference for validation:
 When investigating failures, launch interactive mode:
 
 ```bash
-make test-latex-debug test=complex_fraction
+make test-math-debug test=complex_fraction
 ```
 
 **Features**:
