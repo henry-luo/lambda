@@ -7015,7 +7015,11 @@
     },
     "pattern_any": {
       "type": "STRING",
-      "value": "."
+      "value": "\\."
+    },
+    "pattern_any_star": {
+      "type": "STRING",
+      "value": "..."
     },
     "pattern_count": {
       "type": "CHOICE",
@@ -7099,6 +7103,10 @@
         {
           "type": "SYMBOL",
           "name": "pattern_any"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "pattern_any_star"
         },
         {
           "type": "SEQ",
