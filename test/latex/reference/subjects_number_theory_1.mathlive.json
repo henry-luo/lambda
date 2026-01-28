@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "e^{ix} = \\cos x + i\\sin x",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.137Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "e^{ix} = \\cos x + i\\sin x",
+    "body": [
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "i",
+          "x"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "operator",
+        "command": "\\cos",
+        "value": "cos",
+        "verbatimLatex": "\\cos",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "cos"
+      },
+      "x",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "i",
+      {
+        "type": "operator",
+        "command": "\\sin",
+        "value": "sin",
+        "verbatimLatex": "\\sin",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sin"
+      },
+      "x"
+    ]
+  }
+}

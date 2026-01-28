@@ -1,0 +1,130 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|f(z)| \\leq M \\text{ on } \\partial D \\implies |f(z)| \\leq M \\text{ in } D",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.119Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|f(z)| \\leq M \\text{ on } \\partial D \\implies |f(z)| \\leq M \\text{ in } D",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "command": "\\leq",
+        "value": "≤",
+        "verbatimLatex": "\\leq"
+      },
+      "M",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mord",
+        "command": "\\partial",
+        "value": "∂",
+        "verbatimLatex": "\\partial"
+      },
+      "D",
+      {
+        "type": "mrel",
+        "command": "\\implies",
+        "value": "⟹",
+        "verbatimLatex": "\\implies"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "command": "\\leq",
+        "value": "≤",
+        "verbatimLatex": "\\leq"
+      },
+      "M",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      "D"
+    ]
+  }
+}

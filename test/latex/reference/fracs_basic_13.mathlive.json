@@ -1,0 +1,157 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a^{\\frac{1}{2}} \\over b^{\\frac{2}{3}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.550Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a^{\\frac{1}{2}} \\over b^{\\frac{2}{3}}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\over",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{1}{2}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "1"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "1"
+                    ],
+                    "below": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "atoms": [
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "verbatimLatex": "\\frac{2}{3}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "group": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "group": [
+                          "3"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "2"
+                    ],
+                    "below": [
+                      "3"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1}{2}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "2"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1"
+                ],
+                "below": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "below": [
+          "b",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{2}{3}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "2"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "3"
+                    ]
+                  }
+                ],
+                "above": [
+                  "2"
+                ],
+                "below": [
+                  "3"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

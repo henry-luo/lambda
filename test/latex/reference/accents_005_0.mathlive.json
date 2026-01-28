@@ -1,0 +1,26 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\tilde",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.600Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\tilde",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\tilde",
+        "verbatimLatex": "\\tilde",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          "<null>"
+        ],
+        "body": [],
+        "accentChar": 126
+      }
+    ]
+  }
+}

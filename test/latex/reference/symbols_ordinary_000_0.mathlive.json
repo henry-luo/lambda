@@ -1,0 +1,114 @@
+{
+  "format": "mathlive-ast",
+  "latex": "-+=:\\colon \\coloneq ffif",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.002Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "body": [
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      {
+        "type": "mpunct",
+        "command": "\\colon",
+        "value": ":",
+        "verbatimLatex": "\\colon"
+      },
+      {
+        "type": "macro",
+        "command": "\\coloneq",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "group",
+            "verbatimLatex": "{\\mathop{\\char\"3A\\char\"2212}}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "mop",
+                "command": "\\mathop",
+                "verbatimLatex": "\\mathop{\\char\"3A\\char\"2212}",
+                "subsupPlacement": "over-under",
+                "isFunction": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      {
+                        "type": "mord",
+                        "command": "\\char",
+                        "verbatimLatex": "\\char\"3A",
+                        "args": [
+                          {
+                            "number": 58,
+                            "base": "hexadecimal"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "mord",
+                        "command": "\\char",
+                        "verbatimLatex": "\\char\"2212",
+                        "args": [
+                          {
+                            "number": 8722,
+                            "base": "hexadecimal"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  {
+                    "type": "mord",
+                    "command": "\\char",
+                    "verbatimLatex": "\\char\"3A",
+                    "args": [
+                      {
+                        "number": 58,
+                        "base": "hexadecimal"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "mord",
+                    "command": "\\char",
+                    "verbatimLatex": "\\char\"2212",
+                    "args": [
+                      {
+                        "number": 8722,
+                        "base": "hexadecimal"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "f",
+      "f",
+      "i",
+      "f"
+    ]
+  }
+}

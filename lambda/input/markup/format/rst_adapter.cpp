@@ -160,19 +160,62 @@ public:
         return is_blank_line(line);
     }
 
+    bool detectIndentedCode(const char* line, const char** content_start) override {
+        // RST doesn't use 4-space indentation for code blocks
+        // Instead, RST uses :: at the end of a paragraph followed by indented content
+        // This is handled differently - indented blocks in RST are blockquotes
+        (void)line;
+        if (content_start) *content_start = nullptr;
+        return false;
+    }
+
     BlockquoteInfo detectBlockquote(const char* line) override {
-        // RST doesn't have blockquotes like Markdown
-        // Indented blocks can serve similar purpose
+        // RST blockquotes are indented blocks
+        // They start with indentation (spaces, typically 3-4+)
         BlockquoteInfo info;
+
+        // Count leading spaces
+        const char* p = line;
+        int indent = 0;
+        while (*p == ' ') {
+            indent++;
+            p++;
+        }
+
+        // Need at least 3 spaces of indentation for blockquote
+        // and non-empty content after the indent
+        if (indent >= 3 && *p && *p != '\n' && *p != '\r') {
+            // Not a directive (starting with ..)
+            if (*p != '.' || *(p+1) != '.') {
+                info.content_start = p;
+                info.depth = 1;
+                info.valid = true;
+            }
+        }
+
         return info;
     }
 
     bool detectTable(const char* line, const char* next_line) override {
         (void)next_line;
+        // Skip leading whitespace
+        const char* p = line;
+        while (*p == ' ') p++;
         // RST grid tables: +---+---+
-        // RST simple tables: === ===
-        if (*line == '+' && strstr(line, "-+")) return true;
-        if (*line == '=' && strstr(line, "= ")) return true;
+        if (*p == '+' && strstr(p, "-+")) return true;
+        // RST simple tables: === === or ===  =====
+        if (*p == '=') {
+            // Count consecutive =
+            int count = 0;
+            while (*p == '=') { count++; p++; }
+            // Must have at least 3 = and be followed by space or more =
+            if (count >= 2) {
+                while (*p == ' ') p++;
+                if (*p == '\0' || *p == '\n' || *p == '\r' || *p == '=') {
+                    return true;
+                }
+            }
+        }
         return false;
     }
 

@@ -1,0 +1,125 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\det(A) = \\begin{vmatrix}\na & b \\\\\nc & d\n\\end{vmatrix} = ad - bc",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.128Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\det(A) = \\begin{vmatrix}\na & b \\\\\nc & d\n\\end{vmatrix} = ad - bc",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\det",
+        "value": "det",
+        "verbatimLatex": "\\det",
+        "subsupPlacement": "over-under",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "det"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "A"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "array",
+        "environmentName": "vmatrix",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              "a"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "b"
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "c"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "d"
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          }
+        ],
+        "leftDelim": "\\vert",
+        "rightDelim": "\\vert"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "a",
+      "d",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "b",
+      "c"
+    ]
+  }
+}

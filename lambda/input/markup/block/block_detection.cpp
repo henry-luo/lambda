@@ -211,6 +211,67 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             }
         }
 
+        // RST line block detection (| at start of line followed by space)
+        // But NOT for grid table rows (which have | at both start and end)
+        if (parser->config.format == Format::RST) {
+            const char* p = line;
+            while (*p == ' ') p++;
+            if (*p == '|' && (*(p+1) == ' ' || *(p+1) == '\n' || *(p+1) == '\r' || *(p+1) == '\0')) {
+                // Check if this is a table row (has | at end too)
+                const char* end = p;
+                while (*end && *end != '\n' && *end != '\r') end++;
+                // Trim trailing whitespace
+                while (end > p && (*(end-1) == ' ' || *(end-1) == '\t')) end--;
+                // If ends with |, it's likely a table row, not a line block
+                if (end > p && *(end-1) != '|') {
+                    return BlockType::DIRECTIVE; // Use DIRECTIVE for line blocks
+                }
+            }
+            // RST image directive: .. image::
+            if (strncmp(p, ".. image::", 10) == 0 || strncmp(p, ".. figure::", 11) == 0) {
+                return BlockType::DIRECTIVE; // Use DIRECTIVE for image
+            }
+
+            // RST link definition: .. _label: URL - skip these (already pre-scanned)
+            if (strncmp(p, ".. _", 4) == 0) {
+                // Find colon after the label
+                const char* cp = p + 4;
+                while (*cp && *cp != ':' && *cp != '\n' && *cp != '\r') cp++;
+                if (*cp == ':') {
+                    // This is a link definition - return BLANK to skip
+                    return BlockType::BLANK;
+                }
+            }
+
+            // RST definition list detection
+            // A term line followed by an indented definition line
+            // Term must be at start of line (no leading whitespace)
+            // Next line must be indented
+            if (*line != ' ' && *line != '\t' && *line != '\n' && *line != '\r' && *line != '\0') {
+                // Not indented - could be a term
+                // But exclude table separator lines (=== or ---)
+                if (*line != '=' && *line != '-' && *line != '+') {
+                    // Check if next line is indented (definition)
+                    if (parser->current_line + 1 < parser->line_count) {
+                        const char* next = parser->lines[parser->current_line + 1];
+                        if (next && (*next == ' ' || *next == '\t')) {
+                            // Check that next line isn't empty (just whitespace)
+                            const char* np = next;
+                            while (*np == ' ' || *np == '\t') np++;
+                            if (*np && *np != '\n' && *np != '\r') {
+                                // Also ensure current line doesn't look like other block types
+                                // Not a list item (-, *, +, digit)
+                                if (*line != '-' && *line != '*' && *line != '+' &&
+                                    !(*line >= '0' && *line <= '9')) {
+                                    return BlockType::DEFINITION_LIST;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Blockquote detection
         BlockquoteInfo quote_info = adapter->detectBlockquote(line);
         if (quote_info.valid) {
@@ -271,7 +332,8 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
     }
 
     // Indented code block (4+ spaces, not inside list)
-    if (!parser->state.list_depth && is_indented_code_line(line)) {
+    // Skip for RST - RST uses :: for literal blocks, not generic indentation
+    if (!parser->state.list_depth && parser->config.format != Format::RST && is_indented_code_line(line)) {
         return BlockType::CODE_BLOCK;
     }
 

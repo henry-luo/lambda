@@ -1,0 +1,108 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\oint_C f(z) \\, dz = 2\\pi i \\sum_{k} \\text{Res}(f, z_k)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.117Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\oint_C f(z) \\, dz = 2\\pi i \\sum_{k} \\text{Res}(f, z_k)",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\oint",
+        "value": "∮",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "C"
+        ],
+        "limits": "adjacent",
+        "symbol": "∮"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "z",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "2",
+      {
+        "type": "mord",
+        "command": "\\pi",
+        "value": "π",
+        "verbatimLatex": "\\pi"
+      },
+      "i",
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "k"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "R",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "f",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "z",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "k"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{Var}(X) = E[(X - \\mu)^2] = E[X^2] - (E[X])^2",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.153Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{Var}(X) = E[(X - \\mu)^2] = E[X^2] - (E[X])^2",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "V",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mord",
+        "command": "\\mu",
+        "value": "μ",
+        "verbatimLatex": "\\mu"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "X",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "E",
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "X",
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

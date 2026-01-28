@@ -1,0 +1,118 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sin x, \\cos x, \\tan x, \\log x, \\ln x, \\exp x",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.531Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sin x, \\cos x, \\tan x, \\log x, \\ln x, \\exp x",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\sin",
+        "value": "sin",
+        "verbatimLatex": "\\sin",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sin"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\cos",
+        "value": "cos",
+        "verbatimLatex": "\\cos",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "cos"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\tan",
+        "value": "tan",
+        "verbatimLatex": "\\tan",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "tan"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\log",
+        "value": "log",
+        "verbatimLatex": "\\log",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "log"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\ln",
+        "value": "ln",
+        "verbatimLatex": "\\ln",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "ln"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\exp",
+        "value": "exp",
+        "verbatimLatex": "\\exp",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "exp"
+      },
+      "x"
+    ]
+  }
+}

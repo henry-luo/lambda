@@ -1,0 +1,281 @@
+{
+  "format": "mathlive-ast",
+  "latex": "A = \\begin{pmatrix}\na_{11} & a_{12} & \\cdots & a_{1n} \\\\\na_{21} & a_{22} & \\cdots & a_{2n} \\\\\n\\vdots & \\vdots & \\ddots & \\vdots \\\\\na_{m1} & a_{m2} & \\cdots & a_{mn}\n\\end{pmatrix}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.132Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "A = \\begin{pmatrix}\na_{11} & a_{12} & \\cdots & a_{1n} \\\\\na_{21} & a_{22} & \\cdots & a_{2n} \\\\\n\\vdots & \\vdots & \\ddots & \\vdots \\\\\na_{m1} & a_{m2} & \\cdots & a_{mn}\n\\end{pmatrix}",
+    "body": [
+      "A",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "array",
+        "environmentName": "pmatrix",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1",
+                  "1"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1",
+                  "2"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "minner",
+                "command": "\\cdots",
+                "value": "⋯",
+                "verbatimLatex": "\\cdots"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1",
+                  "n"
+                ]
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2",
+                  "1"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2",
+                  "2"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "minner",
+                "command": "\\cdots",
+                "value": "⋯",
+                "verbatimLatex": "\\cdots"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2",
+                  "n"
+                ]
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "mord",
+                "command": "\\vdots",
+                "value": "⋮",
+                "verbatimLatex": "\\vdots"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "mord",
+                "command": "\\vdots",
+                "value": "⋮",
+                "verbatimLatex": "\\vdots"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "minner",
+                "command": "\\ddots",
+                "value": "⋱",
+                "verbatimLatex": "\\ddots"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "mord",
+                "command": "\\vdots",
+                "value": "⋮",
+                "verbatimLatex": "\\vdots"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "m",
+                  "1"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "m",
+                  "2"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "minner",
+                "command": "\\cdots",
+                "value": "⋯",
+                "verbatimLatex": "\\cdots"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "m",
+                  "n"
+                ]
+              }
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          },
+          {
+            "dimension": 0
+          },
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          }
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      }
+    ]
+  }
+}

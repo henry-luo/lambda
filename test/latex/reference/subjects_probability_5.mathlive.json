@@ -1,0 +1,196 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\Phi(z) = \\frac{1}{\\sqrt{2\\pi}} \\int_{-\\infty}^{z} e^{-\\frac{t^2}{2}} \\, dt",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.153Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\Phi(z) = \\frac{1}{\\sqrt{2\\pi}} \\int_{-\\infty}^{z} e^{-\\frac{t^2}{2}} \\, dt",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\Phi",
+        "value": "Φ",
+        "verbatimLatex": "\\Phi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{\\sqrt{2\\pi}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{2\\pi}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "2",
+                      {
+                        "type": "mord",
+                        "command": "\\pi",
+                        "value": "π",
+                        "verbatimLatex": "\\pi"
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  "2",
+                  {
+                    "type": "mord",
+                    "command": "\\pi",
+                    "value": "π",
+                    "verbatimLatex": "\\pi"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{2\\pi}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "2",
+                  {
+                    "type": "mord",
+                    "command": "\\pi",
+                    "value": "π",
+                    "verbatimLatex": "\\pi"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              "2",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "superscript": [
+          "z"
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{t^2}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "t",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "t",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "t"
+    ]
+  }
+}

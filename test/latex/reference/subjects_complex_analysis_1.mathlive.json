@@ -1,0 +1,157 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|z| = \\sqrt{x^2 + y^2}, \\quad \\arg(z) = \\arctan\\frac{y}{x}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.114Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|z| = \\sqrt{x^2 + y^2}, \\quad \\arg(z) = \\arctan\\frac{y}{x}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "z",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{x^2 + y^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "x",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "operator",
+        "command": "\\arg",
+        "value": "arg",
+        "verbatimLatex": "\\arg",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "arg"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "z"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "operator",
+        "command": "\\arctan",
+        "value": "arctan",
+        "verbatimLatex": "\\arctan",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "arctan"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{y}{x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "y"
+            ]
+          },
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "above": [
+          "y"
+        ],
+        "below": [
+          "x"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{int}(A) = A^\\circ = \\bigcup \\{U : U \\subseteq A, U \\text{ open}\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.170Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{int}(A) = A^\\circ = \\bigcup \\{U : U \\subseteq A, U \\text{ open}\\}",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "A",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "A",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "\\circ",
+            "value": "∘",
+            "verbatimLatex": "\\circ"
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigcup",
+        "value": "⋃",
+        "verbatimLatex": "\\bigcup",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋃"
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "U",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "U",
+      {
+        "type": "mrel",
+        "command": "\\subseteq",
+        "value": "⊆",
+        "verbatimLatex": "\\subseteq"
+      },
+      "A",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "U",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

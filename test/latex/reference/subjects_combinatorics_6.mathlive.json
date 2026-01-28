@@ -1,0 +1,169 @@
+{
+  "format": "mathlive-ast",
+  "latex": "C_n = \\frac{1}{n+1}\\binom{2n}{n} = \\frac{(2n)!}{(n+1)!n!}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.110Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "C_n = \\frac{1}{n+1}\\binom{2n}{n} = \\frac{(2n)!}{(n+1)!n!}",
+    "body": [
+      "C",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{n+1}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "n",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "1"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "n",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{2n}{n}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "2",
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "n"
+            ]
+          }
+        ],
+        "above": [
+          "2",
+          "n"
+        ],
+        "below": [
+          "n"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{(2n)!}{(n+1)!n!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "2",
+              "n",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              "!"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "n",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "1",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              "!",
+              "n",
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "2",
+          "n",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          "!"
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "n",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          "!",
+          "n",
+          "!"
+        ]
+      }
+    ]
+  }
+}

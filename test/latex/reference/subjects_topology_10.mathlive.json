@@ -1,0 +1,122 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\forall x, y \\in X, \\exists \\gamma: [0,1] \\to X, \\gamma(0) = x, \\gamma(1) = y",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.174Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\forall x, y \\in X, \\exists \\gamma: [0,1] \\to X, \\gamma(0) = x, \\gamma(1) = y",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\forall",
+        "value": "∀",
+        "verbatimLatex": "\\forall"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "y",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "X",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "command": "\\exists",
+        "value": "∃",
+        "verbatimLatex": "\\exists"
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      "0",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "1",
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      "X",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "0",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "1",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "y"
+    ]
+  }
+}

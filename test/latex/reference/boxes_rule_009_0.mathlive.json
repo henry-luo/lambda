@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\rule{5em}{7em}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.921Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\rule{5em}{7em}",
+    "body": [
+      {
+        "command": "\\rule",
+        "verbatimLatex": "\\rule{5em}{7em}",
+        "args": [
+          "<null>",
+          {
+            "dimension": 5,
+            "unit": "em"
+          },
+          {
+            "dimension": 7,
+            "unit": "em"
+          }
+        ]
+      }
+    ]
+  }
+}

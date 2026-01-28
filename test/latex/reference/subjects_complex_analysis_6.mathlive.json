@@ -1,0 +1,101 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f(z) = \\sum_{n=-\\infty}^{\\infty} a_n (z - z_0)^n",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.116Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f(z) = \\sum_{n=-\\infty}^{\\infty} a_n (z - z_0)^n",
+    "body": [
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "n",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "z",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathcal{T}_\\WildCard",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.026Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathcal{T}_\\WildCard",
+    "body": [
+      {
+        "type": "mord",
+        "value": "T",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "error",
+            "value": "\\WildCard",
+            "verbatimLatex": "\\WildCard"
+          }
+        ]
+      }
+    ]
+  }
+}

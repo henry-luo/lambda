@@ -1,0 +1,57 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a + \\bgroup b \\choose c \\egroup + d",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.564Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a + \\bgroup b \\choose c \\egroup + d",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{b \\choose c }",
+        "skipBoundary": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\choose",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "b"
+                ]
+              },
+              {
+                "atoms": [
+                  "c"
+                ]
+              }
+            ],
+            "above": [
+              "b"
+            ],
+            "below": [
+              "c"
+            ],
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "hasBarLine": false
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "d"
+    ]
+  }
+}

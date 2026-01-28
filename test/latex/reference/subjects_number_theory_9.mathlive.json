@@ -1,0 +1,93 @@
+{
+  "format": "mathlive-ast",
+  "latex": "n! \\sim \\sqrt{2\\pi n}\\left(\\frac{n}{e}\\right)^n",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.141Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "n! \\sim \\sqrt{2\\pi n}\\left(\\frac{n}{e}\\right)^n",
+    "body": [
+      "n",
+      "!",
+      {
+        "type": "mrel",
+        "command": "\\sim",
+        "value": "∼",
+        "verbatimLatex": "\\sim"
+      },
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{2\\pi n}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "2",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "n"
+            ]
+          }
+        ],
+        "body": [
+          "2",
+          {
+            "type": "mord",
+            "command": "\\pi",
+            "value": "π",
+            "verbatimLatex": "\\pi"
+          },
+          "n"
+        ]
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{n}{e}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "n"
+                ]
+              },
+              {
+                "group": [
+                  "e"
+                ]
+              }
+            ],
+            "above": [
+              "n"
+            ],
+            "below": [
+              "e"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

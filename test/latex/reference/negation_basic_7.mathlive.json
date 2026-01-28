@@ -1,0 +1,120 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\frac{1}{2}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.037Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\frac{1}{2}",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\frac",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "displayContainsHighlight": true,
+                "args": [],
+                "above": [
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ],
+                "below": [
+                  {
+                    "type": "placeholder",
+                    "command": "\\placeholder",
+                    "captureSelection": true
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\frac",
+                    "displayContainsHighlight": true,
+                    "args": [],
+                    "above": [
+                      {
+                        "type": "placeholder",
+                        "command": "\\placeholder",
+                        "captureSelection": true
+                      }
+                    ],
+                    "below": [
+                      {
+                        "type": "placeholder",
+                        "command": "\\placeholder",
+                        "captureSelection": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "displayContainsHighlight": true,
+            "args": [],
+            "above": [
+              {
+                "type": "placeholder",
+                "command": "\\placeholder",
+                "captureSelection": true
+              }
+            ],
+            "below": [
+              {
+                "type": "placeholder",
+                "command": "\\placeholder",
+                "captureSelection": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{1}",
+        "skipBoundary": true,
+        "body": [
+          "1"
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{2}",
+        "skipBoundary": true,
+        "body": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

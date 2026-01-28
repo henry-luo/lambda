@@ -1,0 +1,184 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\bar{X}_n - \\mu}{\\sigma/\\sqrt{n}} \\xrightarrow{d} N(0,1)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.159Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\bar{X}_n - \\mu}{\\sigma/\\sqrt{n}} \\xrightarrow{d} N(0,1)",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\bar{X}_n - \\mu}{\\sigma/\\sqrt{n}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "accent",
+                "command": "\\bar",
+                "verbatimLatex": "\\bar{X}",
+                "skipBoundary": true,
+                "captureSelection": true,
+                "args": [
+                  {
+                    "group": [
+                      "X"
+                    ]
+                  }
+                ],
+                "body": [
+                  "X"
+                ],
+                "accentChar": 713
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "n"
+                ]
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              {
+                "type": "mord",
+                "command": "\\mu",
+                "value": "μ",
+                "verbatimLatex": "\\mu"
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\sigma",
+                "value": "σ",
+                "verbatimLatex": "\\sigma"
+              },
+              "/",
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{n}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "n"
+                    ]
+                  }
+                ],
+                "body": [
+                  "n"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "accent",
+            "command": "\\bar",
+            "verbatimLatex": "\\bar{X}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "X"
+                ]
+              }
+            ],
+            "body": [
+              "X"
+            ],
+            "accentChar": 713
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "n"
+            ]
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "mord",
+            "command": "\\mu",
+            "value": "μ",
+            "verbatimLatex": "\\mu"
+          }
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\sigma",
+            "value": "σ",
+            "verbatimLatex": "\\sigma"
+          },
+          "/",
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{n}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "n"
+                ]
+              }
+            ],
+            "body": [
+              "n"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "overunder",
+        "command": "\\xrightarrow",
+        "verbatimLatex": "\\xrightarrow{d}",
+        "subsupPlacement": "over-under",
+        "above": [
+          "d"
+        ],
+        "below": [],
+        "skipBoundary": false,
+        "svgBody": "xrightarrow",
+        "boxType": "rel",
+        "paddedBody": true,
+        "paddedLabels": true
+      },
+      "N",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "0",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "1",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

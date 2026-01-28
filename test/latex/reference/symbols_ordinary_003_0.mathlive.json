@@ -1,0 +1,56 @@
+{
+  "format": "mathlive-ast",
+  "latex": "(+-1234.56=0)\\{|/@",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.003Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "(+-1234.56=0)\\{|/@",
+    "body": [
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "1",
+      "2",
+      "3",
+      "4",
+      ".",
+      "5",
+      "6",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "0",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "/",
+      "@"
+    ]
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\bigcup \\bigcap \\bigsqcup \\bigvee \\bigwedge",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.057Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\bigcup \\bigcap \\bigsqcup \\bigvee \\bigwedge",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigcup",
+        "value": "⋃",
+        "verbatimLatex": "\\bigcup",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋃"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigcap",
+        "value": "⋂",
+        "verbatimLatex": "\\bigcap",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋂"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigsqcup",
+        "value": "⨆",
+        "verbatimLatex": "\\bigsqcup",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⨆"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigvee",
+        "value": "⋁",
+        "verbatimLatex": "\\bigvee",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋁"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigwedge",
+        "value": "⋀",
+        "verbatimLatex": "\\bigwedge",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋀"
+      }
+    ]
+  }
+}

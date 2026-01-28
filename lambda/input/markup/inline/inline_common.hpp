@@ -238,6 +238,28 @@ Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text);
 Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text);
 
 /**
+ * parse_rst_inline_link - Parse RST inline links
+ *
+ * Handles: `text <url>`_ (inline hyperlink with embedded URL)
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing anchor element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_rst_inline_link(MarkupParser* parser, const char** text);
+
+/**
+ * parse_rst_reference_link - Parse RST reference links
+ *
+ * Handles: `text`_ (reference to a link definition)
+ *
+ * @param parser The markup parser
+ * @param text Pointer to current position (updated on success)
+ * @return Item containing anchor element, or ITEM_UNDEFINED if not matched
+ */
+Item parse_rst_reference_link(MarkupParser* parser, const char** text);
+
+/**
  * parse_org_emphasis - Parse Org-mode emphasis
  *
  * Handles: /italic/, =code=, ~verbatim~, +strikethrough+

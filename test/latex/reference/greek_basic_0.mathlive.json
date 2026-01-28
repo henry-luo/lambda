@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\alpha \\beta \\gamma \\delta",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.583Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\alpha \\beta \\gamma \\delta",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\alpha",
+        "value": "α",
+        "verbatimLatex": "\\alpha"
+      },
+      {
+        "type": "mord",
+        "command": "\\beta",
+        "value": "β",
+        "verbatimLatex": "\\beta"
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mord",
+        "command": "\\delta",
+        "value": "δ",
+        "verbatimLatex": "\\delta"
+      }
+    ]
+  }
+}
