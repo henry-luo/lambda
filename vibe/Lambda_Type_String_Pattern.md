@@ -109,19 +109,13 @@ string trimmed = !\s (\s* !\s)*
 
 ```lambda
 // Any character
-.      // matches any single character
-
-// Start/end anchors (for full-match vs partial-match)
-^      // start of string
-$      // end of string
-
-// Escaped special characters
-\\     // literal backslash
-\'     // literal single quote
-\"     // literal double quote
-\n     // newline
-\t     // tab
+\.     // matches any single character
+...    // matches zero or more of any character (shorthand for \.*)
 ```
+
+> **Note:** Lambda patterns always perform full-match (the entire string must match the pattern). Start/end anchors (`^`, `$`) are automatically applied internally and are not exposed as user syntax.
+>
+> **Note:** Escape sequences like `\\`, `\"`, `\n`, `\t` are already supported in string literals and can be used directly in patterns (e.g., `"\t"` matches a tab character).
 
 ---
 

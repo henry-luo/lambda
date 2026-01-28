@@ -759,8 +759,11 @@ module.exports = grammar({
       '\\a',  // alpha [a-zA-Z]
     )),
 
-    // Dot matches any character
-    pattern_any: _ => '.',
+    // Backslash-dot matches any character
+    pattern_any: _ => '\\.',
+
+    // Ellipsis matches zero or more of any character (shorthand for \.*)
+    pattern_any_star: _ => '...',
 
     // Occurrence count for patterns: {n}, {n,}, {n,m}
     pattern_count: $ => choice(
@@ -773,7 +776,8 @@ module.exports = grammar({
     primary_pattern: $ => choice(
       $.string,                          // literal string "abc"
       $.pattern_char_class,              // \d, \w, \s, \a
-      $.pattern_any,                     // . (any character)
+      $.pattern_any,                     // \. (any character)
+      $.pattern_any_star,                // ... (zero or more of any character)
       seq('(', $._pattern_expr, ')'),    // grouping
     ),
 
