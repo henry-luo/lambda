@@ -425,10 +425,10 @@ replace("hello hello", "l", "x")        // "hexxo hexxo"
 
 > **Status**: Keep In View - planned but not yet implemented.
 
-| Function                  | Signature                         | Description         | Symbol? |
-| ------------------------- | --------------------------------- | ------------------- | ------- |
-| `pad_start(s, len, char)` | `(string, int, string) -> string` | Left-pad to length  | ✅       |
-| `pad_end(s, len, char)`   | `(string, int, string) -> string` | Right-pad to length | ✅       |
+| Function                 | Signature                         | Description         | Symbol? |
+| ------------------------ | --------------------------------- | ------------------- | ------- |
+| `pad_start(s, len, pad)` | `(string, int, string) -> string` | Left-pad to length  | ✅       |
+| `pad_end(s, len, pad)`   | `(string, int, string) -> string` | Right-pad to length | ✅       |
 
 ```lambda
 pad_start("42", 5, "0")   // "00042"
