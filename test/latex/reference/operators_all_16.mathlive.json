@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\nearrow \\searrow \\swarrow \\nwarrow",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.055Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\nearrow \\searrow \\swarrow \\nwarrow",
+    "body": [
+      {
+        "type": "mrel",
+        "command": "\\nearrow",
+        "value": "↗",
+        "verbatimLatex": "\\nearrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\searrow",
+        "value": "↘",
+        "verbatimLatex": "\\searrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\swarrow",
+        "value": "↙",
+        "verbatimLatex": "\\swarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\nwarrow",
+        "value": "↖",
+        "verbatimLatex": "\\nwarrow"
+      }
+    ]
+  }
+}

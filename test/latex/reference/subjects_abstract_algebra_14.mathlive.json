@@ -1,0 +1,119 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\dim(V) = \\dim(\\ker T) + \\dim(\\text{im } T)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.090Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\dim(V) = \\dim(\\ker T) + \\dim(\\text{im } T)",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\dim",
+        "value": "dim",
+        "verbatimLatex": "\\dim",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "dim"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "V"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "operator",
+        "command": "\\dim",
+        "value": "dim",
+        "verbatimLatex": "\\dim",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "dim"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "operator",
+            "command": "\\ker",
+            "value": "ker",
+            "verbatimLatex": "\\ker",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "variantStyle": "up",
+            "limits": "adjacent",
+            "symbol": "ker"
+          },
+          "T"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "operator",
+        "command": "\\dim",
+        "value": "dim",
+        "verbatimLatex": "\\dim",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "dim"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "i",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "m",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": " ",
+            "displayContainsHighlight": true
+          },
+          "T"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      }
+    ]
+  }
+}

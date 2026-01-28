@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\power{x}{2}+\\power{y}{3}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.006Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\power{x}{2}+\\power{y}{3}",
+    "body": [
+      {
+        "type": "error",
+        "value": "\\power",
+        "verbatimLatex": "\\power"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{x}",
+        "skipBoundary": true,
+        "body": [
+          "x"
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{2}",
+        "skipBoundary": true,
+        "body": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "error",
+        "value": "\\power",
+        "verbatimLatex": "\\power"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{y}",
+        "skipBoundary": true,
+        "body": [
+          "y"
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{3}",
+        "skipBoundary": true,
+        "body": [
+          "3"
+        ]
+      }
+    ]
+  }
+}

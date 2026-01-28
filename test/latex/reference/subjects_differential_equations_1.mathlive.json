@@ -1,0 +1,68 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mu(x) = e^{\\int P(x)\\,dx}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.120Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mu(x) = e^{\\int P(x)\\,dx}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\mu",
+        "value": "μ",
+        "verbatimLatex": "\\mu"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\int",
+            "value": "∫",
+            "verbatimLatex": "\\int",
+            "subsupPlacement": "adjacent",
+            "args": [],
+            "limits": "adjacent",
+            "symbol": "∫"
+          },
+          "P",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "x",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "spacing",
+            "command": "\\,",
+            "verbatimLatex": "\\,",
+            "args": []
+          },
+          "d",
+          "x"
+        ]
+      }
+    ]
+  }
+}

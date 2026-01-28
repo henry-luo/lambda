@@ -1,0 +1,106 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mbox{a \\tiny x y}b",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.999Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mbox{a \\tiny x y}b",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\mbox",
+        "verbatimLatex": "\\mbox{a \\tiny x y}",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "a",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "x",
+                "style": {
+                  "fontSize": 1
+                },
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "style": {
+                  "fontSize": 1
+                },
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "y",
+                "style": {
+                  "fontSize": 1
+                },
+                "displayContainsHighlight": true
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "a",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": " ",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "x",
+            "style": {
+              "fontSize": 1
+            },
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": " ",
+            "style": {
+              "fontSize": 1
+            },
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "y",
+            "style": {
+              "fontSize": 1
+            },
+            "displayContainsHighlight": true
+          }
+        ]
+      },
+      "b"
+    ]
+  }
+}

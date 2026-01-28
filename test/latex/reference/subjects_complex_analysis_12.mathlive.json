@@ -1,0 +1,165 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{1}{2\\pi i} \\oint_C \\frac{f'(z)}{f(z)} \\, dz = N - P",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.119Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{1}{2\\pi i} \\oint_C \\frac{f'(z)}{f(z)} \\, dz = N - P",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{2\\pi i}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "2",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "i"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2",
+          {
+            "type": "mord",
+            "command": "\\pi",
+            "value": "π",
+            "verbatimLatex": "\\pi"
+          },
+          "i"
+        ]
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\oint",
+        "value": "∮",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "C"
+        ],
+        "limits": "adjacent",
+        "symbol": "∮"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{f'(z)}{f(z)}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "f",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "mord",
+                    "command": "\\prime",
+                    "value": "′"
+                  }
+                ]
+              },
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "z",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          },
+          {
+            "group": [
+              "f",
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "z",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          }
+        ],
+        "above": [
+          "f",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mord",
+                "command": "\\prime",
+                "value": "′"
+              }
+            ]
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "z",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ],
+        "below": [
+          "f",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "z",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "z",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "N",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "P"
+    ]
+  }
+}

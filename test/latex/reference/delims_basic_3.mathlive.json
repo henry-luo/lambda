@@ -1,13 +1,13 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\left(\\frac{a}{b}\\right)",
-  "description": "Left/right parentheses",
-  "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.101Z",
+  "latex": "\\left[\\frac{x}{y}\\right]",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.510Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\left(\\frac{a}{b}\\right)",
+    "verbatimLatex": "\\left[\\frac{x}{y}\\right]",
     "body": [
       {
         "type": "leftright",
@@ -16,31 +16,31 @@
           {
             "type": "genfrac",
             "command": "\\frac",
-            "verbatimLatex": "\\frac{a}{b}",
+            "verbatimLatex": "\\frac{x}{y}",
             "displayContainsHighlight": true,
             "args": [
               {
                 "group": [
-                  "a"
+                  "x"
                 ]
               },
               {
                 "group": [
-                  "b"
+                  "y"
                 ]
               }
             ],
             "above": [
-              "a"
+              "x"
             ],
             "below": [
-              "b"
+              "y"
             ]
           }
         ],
         "variant": "left...right",
-        "leftDelim": "(",
-        "rightDelim": ")"
+        "leftDelim": "[",
+        "rightDelim": "]"
       }
     ]
   }

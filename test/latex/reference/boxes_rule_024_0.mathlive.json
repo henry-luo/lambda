@@ -1,0 +1,23 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\rule{",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.929Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\rule{",
+    "body": [
+      {
+        "command": "\\rule",
+        "verbatimLatex": "\\rule{",
+        "args": [
+          "<null>",
+          "<null>",
+          "<null>"
+        ]
+      }
+    ]
+  }
+}

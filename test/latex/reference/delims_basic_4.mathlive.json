@@ -1,46 +1,51 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\left[\\frac{a}{b}\\right]",
-  "description": "Left/right brackets",
-  "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.102Z",
+  "latex": "\\left\\{\\sum_{i=1}^{n} x_i\\right\\}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.511Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\left[\\frac{a}{b}\\right]",
+    "verbatimLatex": "\\left\\{\\sum_{i=1}^{n} x_i\\right\\}",
     "body": [
       {
         "type": "leftright",
         "displayContainsHighlight": true,
         "body": [
           {
-            "type": "genfrac",
-            "command": "\\frac",
-            "verbatimLatex": "\\frac{a}{b}",
-            "displayContainsHighlight": true,
-            "args": [
+            "type": "extensible-symbol",
+            "command": "\\sum",
+            "value": "∑",
+            "subsupPlacement": "auto",
+            "args": [],
+            "subscript": [
+              "i",
               {
-                "group": [
-                  "a"
-                ]
+                "type": "mrel",
+                "value": "="
               },
-              {
-                "group": [
-                  "b"
-                ]
-              }
+              "1"
             ],
-            "above": [
-              "a"
+            "superscript": [
+              "n"
             ],
-            "below": [
-              "b"
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∑"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
             ]
           }
         ],
         "variant": "left...right",
-        "leftDelim": "[",
-        "rightDelim": "]"
+        "leftDelim": "\\{",
+        "rightDelim": "\\}"
       }
     ]
   }

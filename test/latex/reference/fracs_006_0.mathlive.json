@@ -1,0 +1,42 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\tbinom{n}{k}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.949Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\tbinom{n}{k}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\tbinom",
+        "verbatimLatex": "\\tbinom{n}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "n"
+        ],
+        "below": [
+          "k"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false,
+        "mathstyleName": "textstyle"
+      }
+    ]
+  }
+}

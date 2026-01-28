@@ -1,0 +1,84 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\htmlData{foo=green, bar}{2+\\frac{1}{x}}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.952Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\htmlData{foo=green, bar}{2+\\frac{1}{x}}",
+    "body": [
+      {
+        "command": "\\htmlData",
+        "args": [
+          "foo=green, bar",
+          {
+            "group": [
+              "2",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1}{x}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "x"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1"
+                ],
+                "below": [
+                  "x"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          "2",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{x}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "x"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "x"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,430 @@
+{
+  "format": "mathlive-ast",
+  "latex": "1 + \\frac{q^2}{(1-q)}+\\frac{q^6}{(1-q)(1-q^2)}+\\cdots = \\prod_{j=0}^{\\infty}\\frac{1}{(1-q^{5j+2})(1-q^{5j+3})}, \\quad\\quad \\text{for $|q|<1$}.",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.947Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "1 + \\frac{q^2}{(1-q)}+\\frac{q^6}{(1-q)(1-q^2)}+\\cdots = \\prod_{j=0}^{\\infty}\\frac{1}{(1-q^{5j+2})(1-q^{5j+3})}, \\quad\\quad \\text{for $|q|<1$}.",
+    "body": [
+      "1",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{q^2}{(1-q)}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "q",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "1",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "q",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          }
+        ],
+        "above": [
+          "q",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "1",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "q",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{q^6}{(1-q)(1-q^2)}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "q",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "6"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "1",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "q",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "1",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "q",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          }
+        ],
+        "above": [
+          "q",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "6"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "1",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "q",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "1",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "q",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "minner",
+        "command": "\\cdots",
+        "value": "⋯",
+        "verbatimLatex": "\\cdots"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\prod",
+        "value": "∏",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "j",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∏"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{(1-q^{5j+2})(1-q^{5j+3})}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "1",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "q",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "5",
+                  "j",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "2"
+                ]
+              },
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "1",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "q",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "5",
+                  "j",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "3"
+                ]
+              },
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "1",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "q",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "5",
+              "j",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "2"
+            ]
+          },
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "1",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "q",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "5",
+              "j",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "3"
+            ]
+          },
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "f",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "q",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "<"
+      },
+      "1",
+      "."
+    ]
+  }
+}

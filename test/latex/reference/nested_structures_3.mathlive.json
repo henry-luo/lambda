@@ -1,0 +1,74 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left[\\left(\\left\\{\\left|\\frac{a}{b}\\right|\\right\\}\\right)\\right]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.041Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left[\\left(\\left\\{\\left|\\frac{a}{b}\\right|\\right\\}\\right)\\right]",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "leftright",
+            "displayContainsHighlight": true,
+            "body": [
+              {
+                "type": "leftright",
+                "displayContainsHighlight": true,
+                "body": [
+                  {
+                    "type": "leftright",
+                    "displayContainsHighlight": true,
+                    "body": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\frac",
+                        "verbatimLatex": "\\frac{a}{b}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "group": [
+                              "a"
+                            ]
+                          },
+                          {
+                            "group": [
+                              "b"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "a"
+                        ],
+                        "below": [
+                          "b"
+                        ]
+                      }
+                    ],
+                    "variant": "left...right",
+                    "leftDelim": "|",
+                    "rightDelim": "|"
+                  }
+                ],
+                "variant": "left...right",
+                "leftDelim": "\\{",
+                "rightDelim": "\\}"
+              }
+            ],
+            "variant": "left...right",
+            "leftDelim": "(",
+            "rightDelim": ")"
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "[",
+        "rightDelim": "]"
+      }
+    ]
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\overline{A} = A \\cup \\partial A = \\bigcap \\{F : F \\supseteq A, F \\text{ closed}\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.170Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\overline{A} = A \\cup \\partial A = \\bigcap \\{F : F \\supseteq A, F \\text{ closed}\\}",
+    "body": [
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{A}",
+        "args": [
+          {
+            "group": [
+              "A"
+            ]
+          }
+        ],
+        "body": [
+          "A"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\cup",
+        "value": "∪",
+        "verbatimLatex": "\\cup"
+      },
+      {
+        "type": "mord",
+        "command": "\\partial",
+        "value": "∂",
+        "verbatimLatex": "\\partial"
+      },
+      "A",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigcap",
+        "value": "⋂",
+        "verbatimLatex": "\\bigcap",
+        "subsupPlacement": "auto",
+        "args": [],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋂"
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "F",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "F",
+      {
+        "type": "mrel",
+        "command": "\\supseteq",
+        "value": "⊇",
+        "verbatimLatex": "\\supseteq"
+      },
+      "A",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "F",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "l",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "d",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

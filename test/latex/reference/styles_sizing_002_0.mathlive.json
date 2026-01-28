@@ -1,0 +1,285 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\binom12  \\sqrt[3]{x}  \\Huge \\sqrt[3]{x} \\binom56 x \\text{text is huge}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.000Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\binom12  \\sqrt[3]{x}  \\Huge \\sqrt[3]{x} \\binom56 x \\text{text is huge}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom12",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "1"
+            ]
+          },
+          {
+            "atoms": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt[3]{x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "3"
+            ]
+          },
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "body": [
+          "x"
+        ],
+        "above": [
+          "3"
+        ]
+      },
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "style": {
+          "fontSize": 10
+        },
+        "verbatimLatex": "\\sqrt[3]{x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mord",
+                "value": "3",
+                "style": {
+                  "fontSize": 10
+                }
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "value": "x",
+                "style": {
+                  "fontSize": 10
+                }
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "mord",
+            "value": "x",
+            "style": {
+              "fontSize": 10
+            }
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "value": "3",
+            "style": {
+              "fontSize": 10
+            }
+          }
+        ]
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "style": {
+          "fontSize": 10
+        },
+        "verbatimLatex": "\\binom56",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mord",
+                "value": "5",
+                "style": {
+                  "fontSize": 10
+                }
+              }
+            ]
+          },
+          {
+            "atoms": [
+              {
+                "type": "mord",
+                "value": "6",
+                "style": {
+                  "fontSize": 10
+                }
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "value": "5",
+            "style": {
+              "fontSize": 10
+            }
+          }
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "value": "6",
+            "style": {
+              "fontSize": 10
+            }
+          }
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "type": "mord",
+        "value": "x",
+        "style": {
+          "fontSize": 10
+        }
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "x",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "i",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "s",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "h",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "u",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "g",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "style": {
+          "fontSize": 10
+        },
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

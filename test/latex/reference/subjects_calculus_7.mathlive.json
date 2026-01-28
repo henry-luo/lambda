@@ -1,0 +1,148 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\oint_C \\vec{F} \\cdot d\\vec{r} = \\iint_S (\\nabla \\times \\vec{F}) \\cdot d\\vec{S}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.097Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\oint_C \\vec{F} \\cdot d\\vec{r} = \\iint_S (\\nabla \\times \\vec{F}) \\cdot d\\vec{S}",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\oint",
+        "value": "∮",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "C"
+        ],
+        "limits": "adjacent",
+        "symbol": "∮"
+      },
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{F}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "F"
+            ]
+          }
+        ],
+        "body": [
+          "F"
+        ],
+        "accentChar": 8407
+      },
+      {
+        "type": "mbin",
+        "command": "\\cdot",
+        "value": "⋅",
+        "verbatimLatex": "\\cdot"
+      },
+      "d",
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{r}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "r"
+            ]
+          }
+        ],
+        "body": [
+          "r"
+        ],
+        "accentChar": 8407
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\iint",
+        "value": "∬",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "S"
+        ],
+        "limits": "adjacent",
+        "symbol": "∬"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "mord",
+        "command": "\\nabla",
+        "value": "∇",
+        "verbatimLatex": "\\nabla"
+      },
+      {
+        "type": "mbin",
+        "command": "\\times",
+        "value": "×",
+        "verbatimLatex": "\\times"
+      },
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{F}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "F"
+            ]
+          }
+        ],
+        "body": [
+          "F"
+        ],
+        "accentChar": 8407
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "command": "\\cdot",
+        "value": "⋅",
+        "verbatimLatex": "\\cdot"
+      },
+      "d",
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{S}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "S"
+            ]
+          }
+        ],
+        "body": [
+          "S"
+        ],
+        "accentChar": 8407
+      }
+    ]
+  }
+}

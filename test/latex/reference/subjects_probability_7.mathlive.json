@@ -1,0 +1,96 @@
+{
+  "format": "mathlive-ast",
+  "latex": "P(X = k) = \\binom{n}{k} p^k (1-p)^{n-k}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.156Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "P(X = k) = \\binom{n}{k} p^k (1-p)^{n-k}",
+    "body": [
+      "P",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "k",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "n"
+        ],
+        "below": [
+          "k"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      "p",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "k"
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "1",
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "p",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "k"
+        ]
+      }
+    ]
+  }
+}

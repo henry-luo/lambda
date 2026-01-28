@@ -1,31 +1,67 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\tilde{a}",
-  "description": "Tilde accent",
+  "latex": "\\overline{a+b} \\quad \\underline{x+y}",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.060Z",
+  "generatedAt": "2026-01-28T02:51:40.484Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\tilde{a}",
+    "verbatimLatex": "\\overline{a+b} \\quad \\underline{x+y}",
     "body": [
       {
-        "type": "accent",
-        "command": "\\tilde",
-        "verbatimLatex": "\\tilde{a}",
-        "skipBoundary": true,
-        "captureSelection": true,
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{a+b}",
         "args": [
           {
             "group": [
-              "a"
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b"
             ]
           }
         ],
         "body": [
-          "a"
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "b"
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "command": "\\underline",
+        "verbatimLatex": "\\underline{x+y}",
+        "args": [
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y"
+            ]
+          }
         ],
-        "accentChar": 126
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y"
+        ]
       }
     ]
   }

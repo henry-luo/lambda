@@ -1,0 +1,186 @@
+{
+  "format": "mathlive-ast",
+  "latex": "R_{\\mu\\nu} - \\frac{1}{2}Rg_{\\mu\\nu} + \\Lambda g_{\\mu\\nu} = \\frac{8\\pi G}{c^4}T_{\\mu\\nu}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.144Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "R_{\\mu\\nu} - \\frac{1}{2}Rg_{\\mu\\nu} + \\Lambda g_{\\mu\\nu} = \\frac{8\\pi G}{c^4}T_{\\mu\\nu}",
+    "body": [
+      "R",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "mord",
+            "command": "\\mu",
+            "value": "μ",
+            "verbatimLatex": "\\mu"
+          },
+          {
+            "type": "mord",
+            "command": "\\nu",
+            "value": "ν",
+            "verbatimLatex": "\\nu"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2"
+        ]
+      },
+      "R",
+      "g",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "mord",
+            "command": "\\mu",
+            "value": "μ",
+            "verbatimLatex": "\\mu"
+          },
+          {
+            "type": "mord",
+            "command": "\\nu",
+            "value": "ν",
+            "verbatimLatex": "\\nu"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mord",
+        "command": "\\Lambda",
+        "value": "Λ",
+        "verbatimLatex": "\\Lambda"
+      },
+      "g",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "mord",
+            "command": "\\mu",
+            "value": "μ",
+            "verbatimLatex": "\\mu"
+          },
+          {
+            "type": "mord",
+            "command": "\\nu",
+            "value": "ν",
+            "verbatimLatex": "\\nu"
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{8\\pi G}{c^4}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "8",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "G"
+            ]
+          },
+          {
+            "group": [
+              "c",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "4"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "8",
+          {
+            "type": "mord",
+            "command": "\\pi",
+            "value": "π",
+            "verbatimLatex": "\\pi"
+          },
+          "G"
+        ],
+        "below": [
+          "c",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "4"
+            ]
+          }
+        ]
+      },
+      "T",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "mord",
+            "command": "\\mu",
+            "value": "μ",
+            "verbatimLatex": "\\mu"
+          },
+          {
+            "type": "mord",
+            "command": "\\nu",
+            "value": "ν",
+            "verbatimLatex": "\\nu"
+          }
+        ]
+      }
+    ]
+  }
+}

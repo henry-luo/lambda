@@ -1,0 +1,82 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{Fe}^{2+} \\to \\text{Fe}^{3+} + e^-",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.101Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{Fe}^{2+} \\to \\text{Fe}^{3+} + e^-",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "F",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2",
+          {
+            "type": "mbin",
+            "value": "+"
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "F",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "3",
+          {
+            "type": "mbin",
+            "value": "+"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          }
+        ]
+      }
+    ]
+  }
+}

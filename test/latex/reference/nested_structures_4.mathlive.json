@@ -1,0 +1,46 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x_{i_j}^{k^{l^m}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.042Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x_{i_j}^{k^{l^m}}",
+    "body": [
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "i",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "j"
+            ]
+          }
+        ],
+        "superscript": [
+          "k",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "l",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "m"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

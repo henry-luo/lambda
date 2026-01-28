@@ -1,35 +1,67 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\widehat{abc}",
-  "description": "Wide hat",
+  "latex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.062Z",
+  "generatedAt": "2026-01-28T02:51:40.485Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\widehat{abc}",
+    "verbatimLatex": "\\overbrace{a+b+c}^{n} \\quad \\underbrace{x+y+z}_{m}",
     "body": [
       {
-        "type": "accent",
-        "command": "\\widehat",
-        "verbatimLatex": "\\widehat{abc}",
-        "skipBoundary": true,
-        "captureSelection": true,
-        "args": [
-          {
-            "group": [
-              "a",
-              "b",
-              "c"
-            ]
-          }
-        ],
+        "type": "overunder",
+        "command": "\\overbrace",
+        "subsupPlacement": "over-under",
         "body": [
           "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
           "b",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
           "c"
         ],
-        "svgAccent": "widehat2"
+        "superscript": [
+          "n"
+        ],
+        "skipBoundary": false,
+        "svgAbove": "overbrace",
+        "paddedBody": true
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "overunder",
+        "command": "\\underbrace",
+        "subsupPlacement": "over-under",
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "z"
+        ],
+        "subscript": [
+          "m"
+        ],
+        "skipBoundary": false,
+        "svgBelow": "underbrace",
+        "paddedBody": true
       }
     ]
   }

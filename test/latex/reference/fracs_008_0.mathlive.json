@@ -1,0 +1,58 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\pdiff{f(x)}{x}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.951Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\pdiff{f(x)}{x}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\pdiff",
+        "verbatimLatex": "\\pdiff{f(x)}{x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "f",
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "x",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          },
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "above": [
+          "f",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "x",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ],
+        "below": [
+          "x"
+        ],
+        "numerPrefix": "∂",
+        "denomPrefix": "∂"
+      }
+    ]
+  }
+}

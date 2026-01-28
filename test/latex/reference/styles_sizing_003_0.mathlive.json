@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a\\Large bc",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.000Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a\\Large bc",
+    "body": [
+      "a",
+      {
+        "type": "mord",
+        "value": "b",
+        "style": {
+          "fontSize": 7
+        }
+      },
+      {
+        "type": "mord",
+        "value": "c",
+        "style": {
+          "fontSize": 7
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,228 @@
+{
+  "format": "mathlive-ast",
+  "latex": "F_n = \\frac{\\phi^n - \\psi^n}{\\sqrt{5}}, \\quad \\phi = \\frac{1+\\sqrt{5}}{2}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.112Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "F_n = \\frac{\\phi^n - \\psi^n}{\\sqrt{5}}, \\quad \\phi = \\frac{1+\\sqrt{5}}{2}",
+    "body": [
+      "F",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\phi^n - \\psi^n}{\\sqrt{5}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\phi",
+                "value": "ϕ",
+                "verbatimLatex": "\\phi"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              {
+                "type": "mord",
+                "command": "\\psi",
+                "value": "ψ",
+                "verbatimLatex": "\\psi"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{5}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "5"
+                    ]
+                  }
+                ],
+                "body": [
+                  "5"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\phi",
+            "value": "ϕ",
+            "verbatimLatex": "\\phi"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "mord",
+            "command": "\\psi",
+            "value": "ψ",
+            "verbatimLatex": "\\psi"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{5}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "5"
+                ]
+              }
+            ],
+            "body": [
+              "5"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "command": "\\phi",
+        "value": "ϕ",
+        "verbatimLatex": "\\phi"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1+\\sqrt{5}}{2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{5}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "5"
+                    ]
+                  }
+                ],
+                "body": [
+                  "5"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "1",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{5}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "5"
+                ]
+              }
+            ],
+            "body": [
+              "5"
+            ]
+          }
+        ],
+        "below": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

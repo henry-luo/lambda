@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac {5} {7}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.946Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac {5} {7}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{5} {7}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "5"
+            ]
+          },
+          {
+            "group": [
+              "7"
+            ]
+          }
+        ],
+        "above": [
+          "5"
+        ],
+        "below": [
+          "7"
+        ]
+      }
+    ]
+  }
+}
