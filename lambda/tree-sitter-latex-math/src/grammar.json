@@ -455,14 +455,6 @@
           },
           {
             "type": "STRING",
-            "value": "\\lbrace"
-          },
-          {
-            "type": "STRING",
-            "value": "\\rbrace"
-          },
-          {
-            "type": "STRING",
             "value": "'"
           }
         ]

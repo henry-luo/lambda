@@ -538,6 +538,7 @@ private:
     MathASTNode* build_environment(TSNode node);
     MathASTNode* build_text_command(TSNode node);
     MathASTNode* build_space_command(TSNode node);
+    MathASTNode* build_style_command(TSNode node);
 
     // Helpers
     const char* node_text(TSNode node, int* out_len);
@@ -629,6 +630,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "environment") == 0) return build_environment(node);
     if (strcmp(type, "text_command") == 0) return build_text_command(node);
     if (strcmp(type, "space_command") == 0) return build_space_command(node);
+    if (strcmp(type, "style_command") == 0) return build_style_command(node);
     if (strcmp(type, "brack_group") == 0) return build_brack_group(node);
 
     // Unknown - try children
@@ -1614,6 +1616,75 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
     }
 
     return make_math_space(arena, width_mu);
+}
+
+MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
+    // Get the command name (first child or by examining text)
+    int cmd_len;
+    const char* full_text = node_text(node, &cmd_len);
+
+    // Find the command name - starts with \ and ends before the {
+    const char* cmd = nullptr;
+    int name_len = 0;
+    if (full_text && full_text[0] == '\\') {
+        cmd = full_text + 1;  // skip backslash
+        for (int i = 1; i < cmd_len; i++) {
+            if (!((full_text[i] >= 'a' && full_text[i] <= 'z') ||
+                  (full_text[i] >= 'A' && full_text[i] <= 'Z'))) {
+                name_len = i - 1;
+                break;
+            }
+        }
+    }
+
+    log_debug("tex_math_ast_builder: build_style_command cmd='%.*s'", name_len, cmd ? cmd : "");
+
+    // Get the argument (the group)
+    TSNode arg_node = ts_node_child_by_field_name(node, "arg", 3);
+    MathASTNode* body = nullptr;
+    if (!ts_node_is_null(arg_node)) {
+        body = build_group(arg_node);
+    }
+
+    // For math variants (\mathbf, \mathrm, etc.), we need to change the font
+    // for each character in the body. For now, just mark it with a text node
+    // that the typesetter can recognize.
+    if (cmd && name_len > 0) {
+        // Check for style commands that should change rendering
+        if (name_len == 6 && strncmp(cmd, "mathrm", 6) == 0) {
+            // Roman text - wrap in TEXT node
+            if (body && body->type == MathNodeType::ROW) {
+                // Collect all letters in the body
+                MathASTNode* text = make_math_text(arena, "", 0, true);
+                // For now, just return the body as-is since we need font support
+                return body;
+            }
+            return body;
+        }
+        if (name_len == 12 && strncmp(cmd, "displaystyle", 12) == 0) {
+            // Display style - just return the body
+            return body;
+        }
+        if (name_len == 9 && strncmp(cmd, "textstyle", 9) == 0) {
+            return body;
+        }
+        if (name_len == 11 && strncmp(cmd, "scriptstyle", 11) == 0) {
+            return body;
+        }
+        if (name_len == 17 && strncmp(cmd, "scriptscriptstyle", 17) == 0) {
+            return body;
+        }
+        if (name_len == 12 && strncmp(cmd, "operatorname", 12) == 0) {
+            // Operator name - convert to OP
+            if (body) {
+                body->type = MathNodeType::OP;
+            }
+            return body;
+        }
+    }
+
+    // Default: just return the body
+    return body;
 }
 
 // ============================================================================
