@@ -243,7 +243,7 @@ typedef enum PatternCharClass {
     PATTERN_WORD,       // \w - [a-zA-Z0-9_]
     PATTERN_SPACE,      // \s - whitespace
     PATTERN_ALPHA,      // \a - [a-zA-Z]
-    PATTERN_ANY,        // .  - any character
+    PATTERN_ANY,        // \. - any character
 } PatternCharClass;
 
 typedef enum SysFunc {
