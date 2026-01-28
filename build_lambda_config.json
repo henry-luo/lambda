@@ -208,6 +208,13 @@
             "name": "gif",
             "lib": "/opt/homebrew/lib/libgif.a",
             "link": "static"
+        },
+        {
+            "name": "re2",
+            "description": "RE2 regular expression library for string pattern matching",
+            "include": "/opt/homebrew/Cellar/re2/20250812_1/include",
+            "lib": "-lre2",
+            "link": "dynamic"
         }
     ],
     "dev_libraries": [
