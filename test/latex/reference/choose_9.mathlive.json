@@ -1,0 +1,80 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a + \\open b \\choose c \\close + d",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.205Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a + \\open b \\choose c \\close + d",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\choose",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "error",
+                "value": "\\open",
+                "verbatimLatex": "\\open"
+              },
+              "b"
+            ]
+          },
+          {
+            "atoms": [
+              "c",
+              {
+                "type": "error",
+                "value": "\\close",
+                "verbatimLatex": "\\close"
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "d"
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "error",
+            "value": "\\open",
+            "verbatimLatex": "\\open"
+          },
+          "b"
+        ],
+        "below": [
+          "c",
+          {
+            "type": "error",
+            "value": "\\close",
+            "verbatimLatex": "\\close"
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "d"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      }
+    ]
+  }
+}

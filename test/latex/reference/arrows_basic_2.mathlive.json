@@ -1,0 +1,20 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\leftrightarrow",
+  "description": "Bidirectional arrow",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.068Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\leftrightarrow",
+    "body": [
+      {
+        "type": "mrel",
+        "command": "\\leftrightarrow",
+        "value": "↔",
+        "verbatimLatex": "\\leftrightarrow"
+      }
+    ]
+  }
+}

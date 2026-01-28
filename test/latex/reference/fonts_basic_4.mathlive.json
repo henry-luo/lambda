@@ -1,0 +1,22 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathbb{R}",
+  "description": "Blackboard bold",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.108Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathbb{R}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathfrak{g}",
+  "description": "Fraktur",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.108Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathfrak{g}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "g",
+        "style": {
+          "variant": "fraktur",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

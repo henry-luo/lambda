@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\dot{a}",
+  "description": "Dot accent",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.056Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\dot{a}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\dot",
+        "verbatimLatex": "\\dot{a}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a"
+            ]
+          }
+        ],
+        "body": [
+          "a"
+        ],
+        "accentChar": 729
+      }
+    ]
+  }
+}

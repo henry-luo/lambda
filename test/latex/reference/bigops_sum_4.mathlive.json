@@ -1,0 +1,66 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sum_{k=0}^{\\infty} \\frac{1}{k!}",
+  "description": "Sum with fraction",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.080Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sum_{k=0}^{\\infty} \\frac{1}{k!}",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "k",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "0"
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{k!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "k",
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "k",
+          "!"
+        ]
+      }
+    ]
+  }
+}

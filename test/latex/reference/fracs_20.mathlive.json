@@ -1,0 +1,617 @@
+{
+  "format": "mathlive-ast",
+  "latex": "{a^{1 \\over 2} \\over b^{2 \\over 3}} \\over {c^{1 \\over 2} \\over d^{2 \\over 3}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.270Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "{a^{1 \\over 2} \\over b^{2 \\over 3}} \\over {c^{1 \\over 2} \\over d^{2 \\over 3}}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\over",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "group",
+                "verbatimLatex": "{a^{1 \\over2} \\over b^{2 \\over3}}",
+                "skipBoundary": true,
+                "body": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\over",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "atoms": [
+                          "a",
+                          {
+                            "type": "subsup",
+                            "subsupPlacement": "auto",
+                            "superscript": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\over",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "1"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "2"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "1"
+                                ],
+                                "below": [
+                                  "2"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "atoms": [
+                          "b",
+                          {
+                            "type": "subsup",
+                            "subsupPlacement": "auto",
+                            "superscript": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\over",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "2"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "3"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "2"
+                                ],
+                                "below": [
+                                  "3"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "a",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "1"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "1"
+                            ],
+                            "below": [
+                              "2"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "below": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "2"
+                            ],
+                            "below": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "atoms": [
+              {
+                "type": "group",
+                "verbatimLatex": "{c^{1 \\over2} \\over d^{2 \\over3}}",
+                "skipBoundary": true,
+                "body": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\over",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "atoms": [
+                          "c",
+                          {
+                            "type": "subsup",
+                            "subsupPlacement": "auto",
+                            "superscript": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\over",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "1"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "2"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "1"
+                                ],
+                                "below": [
+                                  "2"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "atoms": [
+                          "d",
+                          {
+                            "type": "subsup",
+                            "subsupPlacement": "auto",
+                            "superscript": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\over",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "2"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "3"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "2"
+                                ],
+                                "below": [
+                                  "3"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "c",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "1"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "1"
+                            ],
+                            "below": [
+                              "2"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "below": [
+                      "d",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "2"
+                            ],
+                            "below": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "group",
+            "verbatimLatex": "{a^{1 \\over2} \\over b^{2 \\over3}}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\over",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "a",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "1"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "1"
+                            ],
+                            "below": [
+                              "2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "2"
+                            ],
+                            "below": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "above": [
+                  "a",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\over",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "1"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "2"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "1"
+                        ],
+                        "below": [
+                          "2"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "below": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\over",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "2"
+                        ],
+                        "below": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "group",
+            "verbatimLatex": "{c^{1 \\over2} \\over d^{2 \\over3}}",
+            "skipBoundary": true,
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\over",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "c",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "1"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "1"
+                            ],
+                            "below": [
+                              "2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "d",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\over",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "2"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "3"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "2"
+                            ],
+                            "below": [
+                              "3"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "above": [
+                  "c",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\over",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "1"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "2"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "1"
+                        ],
+                        "below": [
+                          "2"
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "below": [
+                  "d",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\over",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "3"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "2"
+                        ],
+                        "below": [
+                          "3"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

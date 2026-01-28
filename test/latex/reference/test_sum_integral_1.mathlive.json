@@ -1,0 +1,41 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\int_0^1 f(x) dx",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.383Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\int_0^1 f(x) dx",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "0"
+        ],
+        "superscript": [
+          "1"
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      "d",
+      "x"
+    ]
+  }
+}

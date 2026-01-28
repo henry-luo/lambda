@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\gcd(a, b), \\lcm(a, b)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.342Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\gcd(a, b), \\lcm(a, b)",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\gcd",
+        "value": "gcd",
+        "verbatimLatex": "\\gcd",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "gcd"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "a",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "b"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "error",
+        "value": "\\lcm",
+        "verbatimLatex": "\\lcm"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

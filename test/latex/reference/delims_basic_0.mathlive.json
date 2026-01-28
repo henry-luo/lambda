@@ -1,0 +1,28 @@
+{
+  "format": "mathlive-ast",
+  "latex": "(a+b)",
+  "description": "Parentheses",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.098Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "(a+b)",
+    "body": [
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

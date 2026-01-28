@@ -1,0 +1,47 @@
+{
+  "format": "mathlive-ast",
+  "latex": "{n \\choose k}",
+  "description": "Choose notation",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.083Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "{n \\choose k}",
+    "body": [
+      {
+        "type": "group",
+        "verbatimLatex": "{n \\choose k}",
+        "skipBoundary": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\choose",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "n"
+                ]
+              },
+              {
+                "atoms": [
+                  "k"
+                ]
+              }
+            ],
+            "above": [
+              "n"
+            ],
+            "below": [
+              "k"
+            ],
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "hasBarLine": false
+          }
+        ]
+      }
+    ]
+  }
+}

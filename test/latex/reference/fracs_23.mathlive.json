@@ -1,0 +1,39 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\tfrac{a}{b}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.272Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\tfrac{a}{b}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\tfrac",
+        "verbatimLatex": "\\tfrac{a}{b}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "a"
+            ]
+          },
+          {
+            "group": [
+              "b"
+            ]
+          }
+        ],
+        "above": [
+          "a"
+        ],
+        "below": [
+          "b"
+        ],
+        "mathstyleName": "textstyle"
+      }
+    ]
+  }
+}

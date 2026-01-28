@@ -1,0 +1,271 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\begin{pmatrix}\n\\begin{array}{cc} a & b \\\\ c & d \\end{array} &\n\\begin{array}{cc} e & f \\\\ g & h \\end{array} \\\\\n\\begin{array}{cc} i & j \\\\ k & l \\end{array} &\n\\begin{array}{cc} m & n \\\\ o & p \\end{array}\n\\end{pmatrix}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.374Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\begin{pmatrix}\n\\begin{array}{cc} a & b \\\\ c & d \\end{array} &\n\\begin{array}{cc} e & f \\\\ g & h \\end{array} \\\\\n\\begin{array}{cc} i & j \\\\ k & l \\end{array} &\n\\begin{array}{cc} m & n \\\\ o & p \\end{array}\n\\end{pmatrix}",
+    "body": [
+      {
+        "type": "array",
+        "environmentName": "pmatrix",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "array",
+                "environmentName": "array",
+                "array": [
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "a"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "b"
+                    ]
+                  ],
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "c"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "d"
+                    ]
+                  ]
+                ],
+                "rowGaps": [
+                  {
+                    "dimension": 0
+                  }
+                ],
+                "columns": [
+                  {
+                    "align": "c"
+                  },
+                  {
+                    "align": "c"
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "array",
+                "environmentName": "array",
+                "array": [
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "e"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "f"
+                    ]
+                  ],
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "g"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "h"
+                    ]
+                  ]
+                ],
+                "rowGaps": [
+                  {
+                    "dimension": 0
+                  }
+                ],
+                "columns": [
+                  {
+                    "align": "c"
+                  },
+                  {
+                    "align": "c"
+                  }
+                ]
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "array",
+                "environmentName": "array",
+                "array": [
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "i"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "j"
+                    ]
+                  ],
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "k"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "l"
+                    ]
+                  ]
+                ],
+                "rowGaps": [
+                  {
+                    "dimension": 0
+                  }
+                ],
+                "columns": [
+                  {
+                    "align": "c"
+                  },
+                  {
+                    "align": "c"
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "array",
+                "environmentName": "array",
+                "array": [
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "m"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "n"
+                    ]
+                  ],
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "o"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "p"
+                    ]
+                  ]
+                ],
+                "rowGaps": [
+                  {
+                    "dimension": 0
+                  }
+                ],
+                "columns": [
+                  {
+                    "align": "c"
+                  },
+                  {
+                    "align": "c"
+                  }
+                ]
+              }
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          }
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      }
+    ]
+  }
+}

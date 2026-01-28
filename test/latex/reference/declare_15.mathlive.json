@@ -1,0 +1,40 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\hat{\\WildCard}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.222Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\hat{\\WildCard}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\hat",
+        "verbatimLatex": "\\hat{\\WildCard}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "error",
+                "value": "\\WildCard",
+                "verbatimLatex": "\\WildCard"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "error",
+            "value": "\\WildCard",
+            "verbatimLatex": "\\WildCard"
+          }
+        ],
+        "accentChar": 94
+      }
+    ]
+  }
+}

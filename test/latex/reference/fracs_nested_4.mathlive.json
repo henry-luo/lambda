@@ -1,0 +1,116 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{a^2 + b^2}{a^2 - b^2}",
+  "description": "Fraction with superscripts",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.116Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{a^2 + b^2}{a^2 - b^2}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{a^2 + b^2}{a^2 - b^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "b",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ],
+        "below": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "b",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left[\\frac{a}{b}\\right]",
+  "description": "Left/right brackets",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.102Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left[\\frac{a}{b}\\right]",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{a}{b}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              },
+              {
+                "group": [
+                  "b"
+                ]
+              }
+            ],
+            "above": [
+              "a"
+            ],
+            "below": [
+              "b"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "[",
+        "rightDelim": "]"
+      }
+    ]
+  }
+}

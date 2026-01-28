@@ -1,0 +1,53 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a_{b_{c_{d}}}^{f^{g^{h}}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.364Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a_{b_{c_{d}}}^{f^{g^{h}}}",
+    "body": [
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "b",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "c",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "d"
+                ]
+              }
+            ]
+          }
+        ],
+        "superscript": [
+          "f",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "g",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "h"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

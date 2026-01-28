@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathrm{d}x \\quad \\mathrm{e}^x \\quad \\mathrm{i}\\theta",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.339Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathrm{d}x \\quad \\mathrm{e}^x \\quad \\mathrm{i}\\theta",
+    "body": [
+      {
+        "type": "mord",
+        "value": "d",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "up"
+        }
+      },
+      "x",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "value": "e",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "x"
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "value": "i",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "command": "\\theta",
+        "value": "θ",
+        "verbatimLatex": "\\theta"
+      }
+    ]
+  }
+}
