@@ -1,0 +1,99 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not a,  \\not\\alpha",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.035Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not a,  \\not\\alpha",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not a",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              "a"
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  "a"
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          "a"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\alpha",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mord",
+                "command": "\\alpha",
+                "value": "α",
+                "verbatimLatex": "\\alpha"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mord",
+                    "command": "\\alpha",
+                    "value": "α",
+                    "verbatimLatex": "\\alpha"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mord",
+            "command": "\\alpha",
+            "value": "α",
+            "verbatimLatex": "\\alpha"
+          }
+        ]
+      }
+    ]
+  }
+}

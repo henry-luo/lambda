@@ -1,31 +1,103 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\bar{a}",
-  "description": "Bar accent",
+  "latex": "\\grave{e} \\quad \\dot{f} \\quad \\ddot{g} \\quad \\breve{h}",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.053Z",
+  "generatedAt": "2026-01-28T02:51:40.479Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\bar{a}",
+    "verbatimLatex": "\\grave{e} \\quad \\dot{f} \\quad \\ddot{g} \\quad \\breve{h}",
     "body": [
       {
         "type": "accent",
-        "command": "\\bar",
-        "verbatimLatex": "\\bar{a}",
+        "command": "\\grave",
+        "verbatimLatex": "\\grave{e}",
         "skipBoundary": true,
         "captureSelection": true,
         "args": [
           {
             "group": [
-              "a"
+              "e"
             ]
           }
         ],
         "body": [
-          "a"
+          "e"
         ],
-        "accentChar": 713
+        "accentChar": 715
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\dot",
+        "verbatimLatex": "\\dot{f}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "f"
+            ]
+          }
+        ],
+        "body": [
+          "f"
+        ],
+        "accentChar": 729
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\ddot",
+        "verbatimLatex": "\\ddot{g}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "g"
+            ]
+          }
+        ],
+        "body": [
+          "g"
+        ],
+        "accentChar": 168
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\breve",
+        "verbatimLatex": "\\breve{h}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "h"
+            ]
+          }
+        ],
+        "body": [
+          "h"
+        ],
+        "accentChar": 728
       }
     ]
   }

@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\rule{5cm}{7cm}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.916Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\rule{5cm}{7cm}",
+    "body": [
+      {
+        "command": "\\rule",
+        "verbatimLatex": "\\rule{5cm}{7cm}",
+        "args": [
+          "<null>",
+          {
+            "dimension": 5,
+            "unit": "cm"
+          },
+          {
+            "dimension": 7,
+            "unit": "cm"
+          }
+        ]
+      }
+    ]
+  }
+}

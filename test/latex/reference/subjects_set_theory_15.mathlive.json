@@ -1,0 +1,96 @@
+{
+  "format": "mathlive-ast",
+  "latex": "p \\land q, \\quad p \\lor q, \\quad p \\Rightarrow q, \\quad p \\Leftrightarrow q, \\quad \\neg p",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.168Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "p \\land q, \\quad p \\lor q, \\quad p \\Rightarrow q, \\quad p \\Leftrightarrow q, \\quad \\neg p",
+    "body": [
+      "p",
+      {
+        "type": "mbin",
+        "command": "\\land",
+        "value": "∧",
+        "verbatimLatex": "\\land"
+      },
+      "q",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "p",
+      {
+        "type": "mbin",
+        "command": "\\lor",
+        "value": "∨",
+        "verbatimLatex": "\\lor"
+      },
+      "q",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "p",
+      {
+        "type": "mrel",
+        "command": "\\Rightarrow",
+        "value": "⇒",
+        "verbatimLatex": "\\Rightarrow"
+      },
+      "q",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "p",
+      {
+        "type": "mrel",
+        "command": "\\Leftrightarrow",
+        "value": "⇔",
+        "verbatimLatex": "\\Leftrightarrow"
+      },
+      "q",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mrel",
+        "command": "\\neg",
+        "value": "¬",
+        "style": {
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\neg"
+      },
+      "p"
+    ]
+  }
+}

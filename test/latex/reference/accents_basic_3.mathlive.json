@@ -1,31 +1,63 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\dot{a}",
-  "description": "Dot accent",
+  "latex": "\\widehat{xyz} \\quad \\widetilde{abc}",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.056Z",
+  "generatedAt": "2026-01-28T02:51:40.482Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\dot{a}",
+    "verbatimLatex": "\\widehat{xyz} \\quad \\widetilde{abc}",
     "body": [
       {
         "type": "accent",
-        "command": "\\dot",
-        "verbatimLatex": "\\dot{a}",
+        "command": "\\widehat",
+        "verbatimLatex": "\\widehat{xyz}",
         "skipBoundary": true,
         "captureSelection": true,
         "args": [
           {
             "group": [
-              "a"
+              "x",
+              "y",
+              "z"
             ]
           }
         ],
         "body": [
-          "a"
+          "x",
+          "y",
+          "z"
         ],
-        "accentChar": 729
+        "svgAccent": "widehat2"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\widetilde",
+        "verbatimLatex": "\\widetilde{abc}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          "b",
+          "c"
+        ],
+        "svgAccent": "widetilde2"
       }
     ]
   }

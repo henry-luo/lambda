@@ -1,56 +1,63 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\frac{a+b}{c+d}",
-  "description": "Fraction with sums",
+  "latex": "a^n \\over b^n",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.113Z",
+  "generatedAt": "2026-01-28T02:51:40.541Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\frac{a+b}{c+d}",
+    "verbatimLatex": "a^n \\over b^n",
     "body": [
       {
         "type": "genfrac",
-        "command": "\\frac",
-        "verbatimLatex": "\\frac{a+b}{c+d}",
+        "command": "\\over",
         "displayContainsHighlight": true,
         "args": [
           {
-            "group": [
+            "atoms": [
               "a",
               {
-                "type": "mbin",
-                "value": "+"
-              },
-              "b"
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
             ]
           },
           {
-            "group": [
-              "c",
+            "atoms": [
+              "b",
               {
-                "type": "mbin",
-                "value": "+"
-              },
-              "d"
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
             ]
           }
         ],
         "above": [
           "a",
           {
-            "type": "mbin",
-            "value": "+"
-          },
-          "b"
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          }
         ],
         "below": [
-          "c",
+          "b",
           {
-            "type": "mbin",
-            "value": "+"
-          },
-          "d"
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          }
         ]
       }
     ]

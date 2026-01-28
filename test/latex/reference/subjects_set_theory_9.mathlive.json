@@ -1,0 +1,63 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|\\mathcal{P}(A)| = 2^{|A|}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.165Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|\\mathcal{P}(A)| = 2^{|A|}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mord",
+        "value": "P",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "A",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "2",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          "A",
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          }
+        ]
+      }
+    ]
+  }
+}

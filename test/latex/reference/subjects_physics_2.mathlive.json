@@ -1,0 +1,118 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\hat{H} = -\\frac{\\hbar^2}{2m}\\nabla^2 + V(r)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.144Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\hat{H} = -\\frac{\\hbar^2}{2m}\\nabla^2 + V(r)",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\hat",
+        "verbatimLatex": "\\hat{H}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "H"
+            ]
+          }
+        ],
+        "body": [
+          "H"
+        ],
+        "accentChar": 94
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\hbar^2}{2m}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\hbar",
+                "value": "ℏ",
+                "verbatimLatex": "\\hbar"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "2",
+              "m"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\hbar",
+            "value": "ℏ",
+            "verbatimLatex": "\\hbar"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ],
+        "below": [
+          "2",
+          "m"
+        ]
+      },
+      {
+        "type": "mord",
+        "command": "\\nabla",
+        "value": "∇",
+        "verbatimLatex": "\\nabla"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "V",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "r",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

@@ -1,27 +1,23 @@
 {
   "format": "mathlive-ast",
-  "latex": "[a+b]",
-  "description": "Square brackets",
-  "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.099Z",
+  "latex": "\\left(a\\right)",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.509Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "[a+b]",
+    "verbatimLatex": "\\left(a\\right)",
     "body": [
       {
-        "type": "mopen",
-        "value": "["
-      },
-      "a",
-      {
-        "type": "mbin",
-        "value": "+"
-      },
-      "b",
-      {
-        "type": "mclose",
-        "value": "]"
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "a"
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
       }
     ]
   }

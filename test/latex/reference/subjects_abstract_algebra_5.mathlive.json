@@ -1,0 +1,108 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathbb{Z}_n = \\langle a \\rangle = \\{e, a, a^2, \\ldots, a^{n-1}\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.086Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathbb{Z}_n = \\langle a \\rangle = \\{e, a, a^2, \\ldots, a^{n-1}\\}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "Z",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\langle",
+        "value": "⟨",
+        "verbatimLatex": "\\langle"
+      },
+      "a",
+      {
+        "type": "mclose",
+        "command": "\\rangle",
+        "value": "⟩",
+        "verbatimLatex": "\\rangle"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "e",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "a",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "minner",
+        "command": "\\ldots",
+        "value": "…",
+        "verbatimLatex": "\\ldots"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

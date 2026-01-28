@@ -1,0 +1,188 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\partial f}{\\partial x} = \\lim_{h \\to 0} \\frac{f(x+h, y) - f(x, y)}{h}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.094Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\partial f}{\\partial x} = \\lim_{h \\to 0} \\frac{f(x+h, y) - f(x, y)}{h}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\partial f}{\\partial x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "f"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "x"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "f"
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "x"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "operator",
+        "command": "\\lim",
+        "value": "lim",
+        "subsupPlacement": "over-under",
+        "args": [],
+        "subscript": [
+          "h",
+          {
+            "type": "mrel",
+            "command": "\\to",
+            "value": "→",
+            "verbatimLatex": "\\to"
+          },
+          "0"
+        ],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "lim"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{f(x+h, y) - f(x, y)}{h}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "f",
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "h",
+              {
+                "type": "mpunct",
+                "value": ","
+              },
+              "y",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "f",
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "x",
+              {
+                "type": "mpunct",
+                "value": ","
+              },
+              "y",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          },
+          {
+            "group": [
+              "h"
+            ]
+          }
+        ],
+        "above": [
+          "f",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "h",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "y",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "f",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "x",
+          {
+            "type": "mpunct",
+            "value": ","
+          },
+          "y",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ],
+        "below": [
+          "h"
+        ]
+      }
+    ]
+  }
+}

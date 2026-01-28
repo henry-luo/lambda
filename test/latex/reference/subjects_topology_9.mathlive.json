@@ -1,0 +1,257 @@
+{
+  "format": "mathlive-ast",
+  "latex": "X \\text{ connected} \\iff X \\neq A \\cup B, A \\cap B = \\emptyset, A, B \\text{ open nonempty}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.174Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "body": [
+      "X",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "c",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "d",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "macro",
+        "command": "\\iff",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "spacing",
+            "command": "\\;",
+            "verbatimLatex": "\\;",
+            "args": []
+          },
+          {
+            "type": "mord",
+            "command": "\\char",
+            "verbatimLatex": "\\char\"27FA",
+            "args": [
+              {
+                "number": 10234,
+                "base": "hexadecimal"
+              }
+            ]
+          },
+          {
+            "type": "spacing",
+            "command": "\\;",
+            "verbatimLatex": "\\;",
+            "args": []
+          }
+        ],
+        "expand": true
+      },
+      "X",
+      {
+        "type": "mrel",
+        "command": "\\neq",
+        "verbatimLatex": "\\neq",
+        "captureSelection": true,
+        "args": [],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\neq",
+            "skipBoundary": true,
+            "args": [],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right",
+            "boxType": "rel"
+          },
+          {
+            "command": "\\neq",
+            "value": "=",
+            "args": []
+          }
+        ]
+      },
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\cup",
+        "value": "∪",
+        "verbatimLatex": "\\cup"
+      },
+      "B",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\cap",
+        "value": "∩",
+        "verbatimLatex": "\\cap"
+      },
+      "B",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\emptyset",
+        "value": "∅",
+        "verbatimLatex": "\\emptyset"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "A",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "B",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "m",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "t",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "y",
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

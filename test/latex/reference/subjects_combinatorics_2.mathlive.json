@@ -1,0 +1,139 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\binom{n}{k} = \\binom{n-1}{k-1} + \\binom{n-1}{k}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.109Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\binom{n}{k} = \\binom{n-1}{k-1} + \\binom{n-1}{k}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "n"
+        ],
+        "below": [
+          "k"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n-1}{k-1}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "k",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ]
+          }
+        ],
+        "above": [
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ],
+        "below": [
+          "k",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n-1}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ],
+        "below": [
+          "k"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      }
+    ]
+  }
+}

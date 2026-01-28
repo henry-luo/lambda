@@ -1,0 +1,89 @@
+{
+  "format": "mathlive-ast",
+  "latex": "A \\setminus B = \\{x : x \\in A \\text{ and } x \\notin B\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.163Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "A \\setminus B = \\{x : x \\in A \\text{ and } x \\notin B\\}",
+    "body": [
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\setminus",
+        "value": "∖",
+        "verbatimLatex": "\\setminus"
+      },
+      "B",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "x",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "x",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "A",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "d",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      "x",
+      {
+        "type": "mrel",
+        "command": "\\notin",
+        "value": "∉",
+        "verbatimLatex": "\\notin"
+      },
+      "B",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\oint_C f(z) \\, dz",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.115Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\oint_C f(z) \\, dz",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\oint",
+        "value": "∮",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "C"
+        ],
+        "limits": "adjacent",
+        "symbol": "∮"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "z"
+    ]
+  }
+}

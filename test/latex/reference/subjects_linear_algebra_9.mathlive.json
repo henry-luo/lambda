@@ -1,0 +1,145 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\|x\\|_2 = \\sqrt{\\sum_{i=1}^{n} |x_i|^2}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.131Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\|x\\|_2 = \\sqrt{\\sum_{i=1}^{n} |x_i|^2}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\|",
+        "value": "∥",
+        "verbatimLatex": "\\|"
+      },
+      "x",
+      {
+        "type": "mord",
+        "command": "\\|",
+        "value": "∥",
+        "verbatimLatex": "\\|"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{\\sum_{i=1}^{n} |x_i|^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              {
+                "type": "extensible-symbol",
+                "command": "\\sum",
+                "value": "∑",
+                "subsupPlacement": "auto",
+                "args": [],
+                "subscript": [
+                  "i",
+                  {
+                    "type": "mrel",
+                    "value": "="
+                  },
+                  "1"
+                ],
+                "superscript": [
+                  "n"
+                ],
+                "variant": "main",
+                "limits": "auto",
+                "symbol": "∑"
+              },
+              {
+                "type": "mord",
+                "command": "|",
+                "value": "∣"
+              },
+              "x",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "i"
+                ]
+              },
+              {
+                "type": "mord",
+                "command": "|",
+                "value": "∣"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\sum",
+            "value": "∑",
+            "subsupPlacement": "auto",
+            "args": [],
+            "subscript": [
+              "i",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "1"
+            ],
+            "superscript": [
+              "n"
+            ],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∑"
+          },
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ]
+          },
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

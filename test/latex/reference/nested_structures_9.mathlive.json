@@ -1,0 +1,179 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left\\| \\frac{\\partial}{\\partial x} \\left[ \\sum_{n=0}^{\\infty} \\frac{1}{n!} \\left( \\int_a^b f(t) \\, dt \\right)^n \\right] \\right\\|",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.044Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left\\| \\frac{\\partial}{\\partial x} \\left[ \\sum_{n=0}^{\\infty} \\frac{1}{n!} \\left( \\int_a^b f(t) \\, dt \\right)^n \\right] \\right\\|",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{\\partial}{\\partial x}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\partial",
+                    "value": "∂",
+                    "verbatimLatex": "\\partial"
+                  }
+                ]
+              },
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "command": "\\partial",
+                    "value": "∂",
+                    "verbatimLatex": "\\partial"
+                  },
+                  "x"
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              }
+            ],
+            "below": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "x"
+            ]
+          },
+          {
+            "type": "leftright",
+            "displayContainsHighlight": true,
+            "body": [
+              {
+                "type": "extensible-symbol",
+                "command": "\\sum",
+                "value": "∑",
+                "subsupPlacement": "auto",
+                "args": [],
+                "subscript": [
+                  "n",
+                  {
+                    "type": "mrel",
+                    "value": "="
+                  },
+                  "0"
+                ],
+                "superscript": [
+                  {
+                    "type": "mord",
+                    "command": "\\infty",
+                    "value": "∞",
+                    "verbatimLatex": "\\infty"
+                  }
+                ],
+                "variant": "main",
+                "limits": "auto",
+                "symbol": "∑"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1}{n!}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "n",
+                      "!"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1"
+                ],
+                "below": [
+                  "n",
+                  "!"
+                ]
+              },
+              {
+                "type": "leftright",
+                "displayContainsHighlight": true,
+                "body": [
+                  {
+                    "type": "extensible-symbol",
+                    "command": "\\int",
+                    "value": "∫",
+                    "subsupPlacement": "adjacent",
+                    "args": [],
+                    "subscript": [
+                      "a"
+                    ],
+                    "superscript": [
+                      "b"
+                    ],
+                    "limits": "adjacent",
+                    "symbol": "∫"
+                  },
+                  "f",
+                  {
+                    "type": "mopen",
+                    "value": "("
+                  },
+                  "t",
+                  {
+                    "type": "mclose",
+                    "value": ")"
+                  },
+                  {
+                    "type": "spacing",
+                    "command": "\\,",
+                    "verbatimLatex": "\\,",
+                    "args": []
+                  },
+                  "d",
+                  "t"
+                ],
+                "variant": "left...right",
+                "leftDelim": "(",
+                "rightDelim": ")"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
+            ],
+            "variant": "left...right",
+            "leftDelim": "[",
+            "rightDelim": "]"
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "\\|",
+        "rightDelim": "\\|"
+      }
+    ]
+  }
+}

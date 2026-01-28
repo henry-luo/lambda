@@ -1,0 +1,123 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\overset{\\mathrm{over}}{\\rightarrow} b \\underset{\\mathrm{under}}{\\leftarrow} c",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.180Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\overset{\\mathrm{over}}{\\rightarrow} b \\underset{\\mathrm{under}}{\\leftarrow} c",
+    "body": [
+      "a",
+      {
+        "type": "overunder",
+        "command": "\\overset",
+        "verbatimLatex": "\\overset{\\mathrm{over}}{\\rightarrow}",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\rightarrow",
+            "value": "→",
+            "verbatimLatex": "\\rightarrow"
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "value": "o",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "v",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "e",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "r",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "skipBoundary": false,
+        "boxType": "rel"
+      },
+      "b",
+      {
+        "type": "overunder",
+        "command": "\\underset",
+        "verbatimLatex": "\\underset{\\mathrm{under}}{\\leftarrow}",
+        "body": [
+          {
+            "type": "mrel",
+            "command": "\\leftarrow",
+            "value": "←",
+            "verbatimLatex": "\\leftarrow"
+          }
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "value": "u",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "n",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "d",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "e",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          },
+          {
+            "type": "mord",
+            "value": "r",
+            "style": {
+              "variant": "normal",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "skipBoundary": false,
+        "boxType": "rel"
+      },
+      "c"
+    ]
+  }
+}

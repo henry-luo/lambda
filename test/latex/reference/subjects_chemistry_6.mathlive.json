@@ -1,0 +1,225 @@
+{
+  "format": "mathlive-ast",
+  "latex": "K_\\text{eq} = \\frac{[\\text{C}]^c [\\text{D}]^d}{[\\text{A}]^a [\\text{B}]^b}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.102Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "K_\\text{eq} = \\frac{[\\text{C}]^c [\\text{D}]^d}{[\\text{A}]^a [\\text{B}]^b}",
+    "body": [
+      "K",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "e",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "q",
+            "displayContainsHighlight": true
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{[\\text{C}]^c [\\text{D}]^d}{[\\text{A}]^a [\\text{B}]^b}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "C",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "c"
+                ]
+              },
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "D",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "d"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "A",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "a"
+                ]
+              },
+              {
+                "type": "mopen",
+                "value": "["
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "B",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "mclose",
+                "value": "]"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "b"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "C",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "c"
+            ]
+          },
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "D",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "d"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "A",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "a"
+            ]
+          },
+          {
+            "type": "mopen",
+            "value": "["
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "B",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "mclose",
+            "value": "]"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "b"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

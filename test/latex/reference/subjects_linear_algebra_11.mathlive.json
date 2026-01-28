@@ -1,0 +1,83 @@
+{
+  "format": "mathlive-ast",
+  "latex": "M = \\left[\\begin{array}{c|c}\nA & B \\\\\n\\hline\nC & D\n\\end{array}\\right]",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.132Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "M = \\left[\\begin{array}{c|c}\nA & B \\\\\n\\hline\nC & D\n\\end{array}\\right]",
+    "body": [
+      "M",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "array",
+            "environmentName": "array",
+            "array": [
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  "A"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "B"
+                ]
+              ],
+              [
+                [
+                  {
+                    "type": "first"
+                  },
+                  {
+                    "type": "error",
+                    "value": "\\hline",
+                    "verbatimLatex": "\\hline"
+                  },
+                  "C"
+                ],
+                [
+                  {
+                    "type": "first"
+                  },
+                  "D"
+                ]
+              ]
+            ],
+            "rowGaps": [
+              {
+                "dimension": 0
+              }
+            ],
+            "columns": [
+              {
+                "align": "c"
+              },
+              {
+                "separator": "solid"
+              },
+              {
+                "align": "c"
+              }
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "[",
+        "rightDelim": "]"
+      }
+    ]
+  }
+}

@@ -1,58 +1,74 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\frac{x+1}{x-1}",
-  "description": "Fraction with expressions",
-  "type": "inline",
-  "generatedAt": "2026-01-28T01:48:55.112Z",
+  "latex": "\\frac{a_{n+1}}{b^n}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.540Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\frac{x+1}{x-1}",
+    "verbatimLatex": "\\frac{a_{n+1}}{b^n}",
     "body": [
       {
         "type": "genfrac",
         "command": "\\frac",
-        "verbatimLatex": "\\frac{x+1}{x-1}",
+        "verbatimLatex": "\\frac{a_{n+1}}{b^n}",
         "displayContainsHighlight": true,
         "args": [
           {
             "group": [
-              "x",
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "n",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "1"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "n",
               {
                 "type": "mbin",
                 "value": "+"
               },
               "1"
             ]
-          },
-          {
-            "group": [
-              "x",
-              {
-                "type": "mbin",
-                "command": "-",
-                "value": "−"
-              },
-              "1"
-            ]
           }
         ],
-        "above": [
-          "x",
-          {
-            "type": "mbin",
-            "value": "+"
-          },
-          "1"
-        ],
         "below": [
-          "x",
+          "b",
           {
-            "type": "mbin",
-            "command": "-",
-            "value": "−"
-          },
-          "1"
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n"
+            ]
+          }
         ]
       }
     ]

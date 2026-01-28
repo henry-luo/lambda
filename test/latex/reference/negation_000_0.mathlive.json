@@ -1,0 +1,144 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\in \\not{}\\in \\not{}\\in \\not\\in",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.956Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\in \\not{}\\in \\not{}\\in \\not\\in",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\in",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\in",
+                "value": "∈",
+                "verbatimLatex": "\\in"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\in",
+                    "value": "∈",
+                    "verbatimLatex": "\\in"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\in",
+            "value": "∈",
+            "verbatimLatex": "\\in"
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\not",
+        "value": "",
+        "verbatimLatex": "\\not{}",
+        "args": [
+          {
+            "group": []
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      {
+        "type": "mrel",
+        "command": "\\not",
+        "value": "",
+        "verbatimLatex": "\\not{}",
+        "args": [
+          {
+            "group": []
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\in",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\in",
+                "value": "∈",
+                "verbatimLatex": "\\in"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\in",
+                    "value": "∈",
+                    "verbatimLatex": "\\in"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\in",
+            "value": "∈",
+            "verbatimLatex": "\\in"
+          }
+        ]
+      }
+    ]
+  }
+}

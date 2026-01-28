@@ -1,0 +1,42 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\prod_{k=1}^{n} k = n!",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.498Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\prod_{k=1}^{n} k = n!",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\prod",
+        "value": "∏",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "k",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∏"
+      },
+      "k",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "n",
+      "!"
+    ]
+  }
+}

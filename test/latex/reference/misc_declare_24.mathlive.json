@@ -1,0 +1,26 @@
+{
+  "format": "mathlive-ast",
+  "latex": "q_{\\WildCard}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.017Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "q_{\\WildCard}",
+    "body": [
+      "q",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          {
+            "type": "error",
+            "value": "\\WildCard",
+            "verbatimLatex": "\\WildCard"
+          }
+        ]
+      }
+    ]
+  }
+}

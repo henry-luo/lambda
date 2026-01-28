@@ -1,0 +1,85 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|A \\cup B| = |A| + |B| - |A \\cap B|",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.165Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|A \\cup B| = |A| + |B| - |A \\cap B|",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\cup",
+        "value": "∪",
+        "verbatimLatex": "\\cup"
+      },
+      "B",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "A",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "B",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\cap",
+        "value": "∩",
+        "verbatimLatex": "\\cap"
+      },
+      "B",
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "format": "mathlive-ast",
+  "latex": "k = A e^{-E_\\text{a}/RT}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.104Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "k = A e^{-E_\\text{a}/RT}",
+    "body": [
+      "k",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "A",
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "E",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "a",
+                "displayContainsHighlight": true
+              }
+            ]
+          },
+          "/",
+          "R",
+          "T"
+        ]
+      }
+    ]
+  }
+}

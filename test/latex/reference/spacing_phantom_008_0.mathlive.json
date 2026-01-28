@@ -1,0 +1,24 @@
+{
+  "format": "mathlive-ast",
+  "latex": "aquamarine",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.987Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "aquamarine",
+    "body": [
+      "a",
+      "q",
+      "u",
+      "a",
+      "m",
+      "a",
+      "r",
+      "i",
+      "n",
+      "e"
+    ]
+  }
+}

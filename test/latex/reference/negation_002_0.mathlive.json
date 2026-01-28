@@ -1,0 +1,110 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not= \\ne \\neq",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.957Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not= \\ne \\neq",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not=",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "value": "="
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "value": "="
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "value": "="
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\ne",
+        "verbatimLatex": "\\ne",
+        "captureSelection": true,
+        "args": [],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\ne",
+            "skipBoundary": true,
+            "args": [],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right",
+            "boxType": "rel"
+          },
+          {
+            "command": "\\ne",
+            "value": "=",
+            "args": []
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\neq",
+        "verbatimLatex": "\\neq",
+        "captureSelection": true,
+        "args": [],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\neq",
+            "skipBoundary": true,
+            "args": [],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right",
+            "boxType": "rel"
+          },
+          {
+            "command": "\\neq",
+            "value": "=",
+            "args": []
+          }
+        ]
+      }
+    ]
+  }
+}

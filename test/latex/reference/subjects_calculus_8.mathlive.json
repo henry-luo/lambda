@@ -1,0 +1,147 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\iiint_V f(x,y,z)\\,dV = \\int_a^b \\int_c^d \\int_e^f f(x,y,z)\\,dz\\,dy\\,dx",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.098Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\iiint_V f(x,y,z)\\,dV = \\int_a^b \\int_c^d \\int_e^f f(x,y,z)\\,dz\\,dy\\,dx",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\iiint",
+        "value": "∭",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "V"
+        ],
+        "limits": "adjacent",
+        "symbol": "∭"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "y",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "V",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "a"
+        ],
+        "superscript": [
+          "b"
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "c"
+        ],
+        "superscript": [
+          "d"
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "e"
+        ],
+        "superscript": [
+          "f"
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "y",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "z",
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "y",
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "x"
+    ]
+  }
+}

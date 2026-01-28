@@ -1,0 +1,76 @@
+{
+  "format": "mathlive-ast",
+  "latex": "A \\times B = \\{(a, b) : a \\in A, b \\in B\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.164Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "A \\times B = \\{(a, b) : a \\in A, b \\in B\\}",
+    "body": [
+      "A",
+      {
+        "type": "mbin",
+        "command": "\\times",
+        "value": "×",
+        "verbatimLatex": "\\times"
+      },
+      "B",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "A",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "b",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "B",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mapsto \\longmapsto \\hookrightarrow \\hookleftarrow",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.055Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mapsto \\longmapsto \\hookrightarrow \\hookleftarrow",
+    "body": [
+      {
+        "type": "mrel",
+        "command": "\\mapsto",
+        "value": "↦",
+        "verbatimLatex": "\\mapsto"
+      },
+      {
+        "type": "mrel",
+        "command": "\\longmapsto",
+        "value": "⟼",
+        "verbatimLatex": "\\longmapsto"
+      },
+      {
+        "type": "mrel",
+        "command": "\\hookrightarrow",
+        "value": "↪",
+        "verbatimLatex": "\\hookrightarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\hookleftarrow",
+        "value": "↩",
+        "verbatimLatex": "\\hookleftarrow"
+      }
+    ]
+  }
+}

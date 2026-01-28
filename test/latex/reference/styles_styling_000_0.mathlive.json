@@ -1,0 +1,86 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\gothicCapitalC\\gothicCapitalH\\scriptCapitalE\\doubleStruckCapitalQ\\Bbbk",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.001Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "body": [
+      {
+        "type": "macro",
+        "command": "\\gothicCapitalC",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "mord",
+            "value": "C",
+            "style": {
+              "variant": "fraktur",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "expand": true
+      },
+      {
+        "type": "macro",
+        "command": "\\gothicCapitalH",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "mord",
+            "value": "H",
+            "style": {
+              "variant": "fraktur",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "expand": true
+      },
+      {
+        "type": "macro",
+        "command": "\\scriptCapitalE",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "mord",
+            "value": "E",
+            "style": {
+              "variant": "script",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "expand": true
+      },
+      {
+        "type": "macro",
+        "command": "\\doubleStruckCapitalQ",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "mord",
+            "value": "Q",
+            "style": {
+              "variant": "double-struck",
+              "variantStyle": "up"
+            }
+          }
+        ],
+        "expand": true
+      },
+      {
+        "type": "mord",
+        "command": "\\Bbbk",
+        "value": "k",
+        "style": {
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\Bbbk"
+      }
+    ]
+  }
+}
