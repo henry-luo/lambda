@@ -234,7 +234,17 @@ typedef enum Operator {
     OPERATOR_OPTIONAL,  // ?
     OPERATOR_ONE_MORE,  // +
     OPERATOR_ZERO_MORE,  // *
+    OPERATOR_REPEAT,    // {n}, {n,}, {n,m} for patterns
 } Operator;
+
+// Character class types for pattern matching
+typedef enum PatternCharClass {
+    PATTERN_DIGIT,      // \d - [0-9]
+    PATTERN_WORD,       // \w - [a-zA-Z0-9_]
+    PATTERN_SPACE,      // \s - whitespace
+    PATTERN_ALPHA,      // \a - [a-zA-Z]
+    PATTERN_ANY,        // .  - any character
+} PatternCharClass;
 
 typedef enum SysFunc {
     SYSFUNC_LEN,
@@ -370,6 +380,17 @@ typedef struct TypeSysFunc : Type {
 typedef struct TypeType : Type {
     Type* type;  // full type defintion
 } TypeType;
+
+// Forward declaration for RE2
+namespace re2 { class RE2; }
+
+// Compiled string/symbol pattern for regex matching
+typedef struct TypePattern : Type {
+    int pattern_index;      // index in type_list for runtime access
+    bool is_symbol;         // true for symbol pattern, false for string pattern
+    re2::RE2* re2;          // compiled RE2 regex (owned)
+    String* source;         // original pattern source for error messages
+} TypePattern;
 
 struct Pack {
     size_t size;           // Current used size of the pack

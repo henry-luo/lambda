@@ -201,6 +201,16 @@ module.exports = grammar({
     $.primary_type,
     $.type_occurrence,
     $.binary_type,
+  ],
+  // Pattern precedences
+  [
+    $.primary_pattern,
+    $.pattern_occurrence,
+    $.pattern_negation,
+    'pattern_concat',
+    'pattern_range',
+    'pattern_intersect',
+    'pattern_union',
   ]],
 
   conflicts: $ => [],
@@ -312,6 +322,8 @@ module.exports = grammar({
       $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
+      $.string_pattern,
+      $.symbol_pattern,
     ),
 
     _content_expr: $ => choice(
@@ -735,6 +747,100 @@ module.exports = grammar({
 
     _import_stam: $ => seq(
       'import', $.import_module, repeat(seq(',', $.import_module)),
+    ),
+
+    // ==================== String/Symbol Pattern Definitions ====================
+
+    // Character classes for pattern matching
+    pattern_char_class: _ => token(choice(
+      '\\d',  // digit [0-9]
+      '\\w',  // word [a-zA-Z0-9_]
+      '\\s',  // whitespace
+      '\\a',  // alpha [a-zA-Z]
+    )),
+
+    // Dot matches any character
+    pattern_any: _ => '.',
+
+    // Occurrence count for patterns: {n}, {n,}, {n,m}
+    pattern_count: $ => choice(
+      seq('{', $.integer, '}'),                        // exactly n
+      seq('{', $.integer, ',', '}'),                   // n or more
+      seq('{', $.integer, ',', $.integer, '}'),        // n to m
+    ),
+
+    // Primary pattern expression
+    primary_pattern: $ => choice(
+      $.string,                          // literal string "abc"
+      $.pattern_char_class,              // \d, \w, \s, \a
+      $.pattern_any,                     // . (any character)
+      seq('(', $._pattern_expr, ')'),    // grouping
+    ),
+
+    // Pattern with occurrence modifiers: ?, +, *, {n}, {n,}, {n,m}
+    pattern_occurrence: $ => prec.right(seq(
+      field('operand', choice($.primary_pattern, $.pattern_negation)),
+      field('operator', choice('?', '+', '*', $.pattern_count)),
+    )),
+
+    // Pattern negation: !pattern
+    pattern_negation: $ => prec.right(seq(
+      '!',
+      field('operand', $.primary_pattern),
+    )),
+
+    // Pattern range: "a" to "z" -> [a-z]
+    pattern_range: $ => prec.left('pattern_range', seq(
+      field('left', $.string),
+      'to',
+      field('right', $.string),
+    )),
+
+    // Binary pattern expressions: | (union), & (intersection)
+    binary_pattern: $ => choice(
+      prec.left('pattern_union', seq(
+        field('left', $._pattern_term),
+        field('operator', '|'),
+        field('right', $._pattern_expr),
+      )),
+      prec.left('pattern_intersect', seq(
+        field('left', $._pattern_term),
+        field('operator', '&'),
+        field('right', $._pattern_expr),
+      )),
+    ),
+
+    // Pattern term: single pattern unit (possibly with occurrence)
+    _pattern_term: $ => choice(
+      $.primary_pattern,
+      $.pattern_occurrence,
+      $.pattern_negation,
+      $.pattern_range,
+    ),
+
+    // Pattern sequence: patterns concatenated
+    pattern_seq: $ => prec.left('pattern_concat', repeat1($._pattern_term)),
+
+    // Pattern expression (all pattern forms)
+    _pattern_expr: $ => choice(
+      $.pattern_seq,
+      $.binary_pattern,
+    ),
+
+    // String pattern definition: string name = pattern
+    string_pattern: $ => seq(
+      'string',
+      field('name', $.identifier),
+      '=',
+      field('pattern', $._pattern_expr),
+    ),
+
+    // Symbol pattern definition: symbol name = pattern
+    symbol_pattern: $ => seq(
+      'symbol',
+      field('name', $.identifier),
+      '=',
+      field('pattern', $._pattern_expr),
     ),
 
   },

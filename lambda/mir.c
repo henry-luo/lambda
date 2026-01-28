@@ -177,6 +177,7 @@ func_obj_t func_list[] = {
     {"fn_to", (fn_ptr) fn_to},
     {"base_type", (fn_ptr) base_type},
     {"const_type", (fn_ptr) const_type},
+    {"const_pattern", (fn_ptr) const_pattern},
     {"fn_string", (fn_ptr) fn_string},
     {"fn_type", (fn_ptr) fn_type},
     {"fn_input1", (fn_ptr) fn_input1},

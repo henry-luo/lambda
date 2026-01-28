@@ -74,6 +74,19 @@ extern "C" {
 // #define SYM_SYS_FUNC sym_sys_func
 #define SYM_IMPORT_MODULE sym_import_module
 
+// String/Symbol Pattern symbols
+#define SYM_STRING_PATTERN sym_string_pattern
+#define SYM_SYMBOL_PATTERN sym_symbol_pattern
+#define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
+#define SYM_PATTERN_ANY sym_pattern_any
+#define SYM_PATTERN_COUNT sym_pattern_count
+#define SYM_PRIMARY_PATTERN sym_primary_pattern
+#define SYM_PATTERN_OCCURRENCE sym_pattern_occurrence
+#define SYM_PATTERN_NEGATION sym_pattern_negation
+#define SYM_PATTERN_RANGE sym_pattern_range
+#define SYM_BINARY_PATTERN sym_binary_pattern
+#define SYM_PATTERN_SEQ sym_pattern_seq
+
 #define SYM_COMMENT sym_comment
 #define SYM_NAMED_ARGUMENT sym_named_argument
 
@@ -102,6 +115,7 @@ extern "C" {
 #define FIELD_VALUE field_value
 #define FIELD_VARIADIC field_variadic
 #define FIELD_TARGET field_target
+#define FIELD_PATTERN field_pattern
 
 #ifdef __cplusplus
 }
@@ -175,6 +189,12 @@ typedef enum AstNodeType {
     AST_NODE_FUNC_EXPR,
     AST_NODE_PROC, // procedural function
     AST_NODE_IMPORT,
+    // String/Symbol Pattern nodes
+    AST_NODE_STRING_PATTERN,    // string name = pattern
+    AST_NODE_SYMBOL_PATTERN,    // symbol name = pattern
+    AST_NODE_PATTERN_RANGE,     // "a" to "z"
+    AST_NODE_PATTERN_CHAR_CLASS, // \d, \w, \s, \a, .
+    AST_NODE_PATTERN_SEQ,       // sequence of patterns (concatenation)
     AST_SCRIPT,
 } AstNodeType;
 
@@ -296,6 +316,30 @@ typedef struct AstMapNode : AstNode {
 typedef struct AstElementNode : AstMapNode {
     AstNode *content;  // first content node
 } AstElementNode;
+
+// ==================== String/Symbol Pattern AST Nodes ====================
+
+// Pattern definition node (string name = pattern OR symbol name = pattern)
+// Extends AstNamedNode so it has 'name' and 'as' (the pattern expression)
+typedef struct AstPatternDefNode : AstNamedNode {
+    bool is_symbol;     // true for symbol pattern, false for string pattern
+} AstPatternDefNode;
+
+// Pattern range node ("a" to "z")
+typedef struct AstPatternRangeNode : AstNode {
+    AstNode* start;     // start of range (string literal)
+    AstNode* end;       // end of range (string literal)
+} AstPatternRangeNode;
+
+// Pattern character class node (\d, \w, \s, \a, .)
+typedef struct AstPatternCharClassNode : AstNode {
+    PatternCharClass char_class;
+} AstPatternCharClassNode;
+
+// Pattern sequence node (concatenation of patterns)
+typedef struct AstPatternSeqNode : AstNode {
+    AstNode* first;     // first pattern in sequence (linked list via 'next')
+} AstPatternSeqNode;
 
 // Forward declare for capture list
 struct CaptureInfo;

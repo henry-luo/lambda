@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include "safety_analyzer.hpp"
+#include "re2_wrapper.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 
@@ -538,6 +539,12 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);  // raw pointer treated as Item
         strbuf_append_char(tp->code_buf, ')');
         break;
+    case LMD_TYPE_PATTERN:
+        // Pattern is a pointer to TypePattern, which contains compiled RE2
+        strbuf_append_str(tp->code_buf, "(Item)(");
+        transpile_expr(tp, item);  // raw pointer treated as Item
+        strbuf_append_char(tp->code_buf, ')');
+        break;
     case LMD_TYPE_ANY:
     case LMD_TYPE_ERROR:
         // ANY and ERROR types are already Item at runtime - no boxing needed
@@ -550,9 +557,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 
 void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
-        // skip let declaration
+        // skip let declaration and pattern definitions
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || 
-            item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
+            item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
+            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
             item = item->next;  continue;
         }
         strbuf_append_format(tp->code_buf, "\n list_push(%s, ", is_elmt ? "el" : "ls");
@@ -717,6 +725,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         }
                         strbuf_append_char(tp->code_buf, ')');
                     }
+                }
+                else if (entry_node->node_type == AST_NODE_STRING_PATTERN || entry_node->node_type == AST_NODE_SYMBOL_PATTERN) {
+                    // Pattern reference - emit const_pattern call
+                    AstPatternDefNode* pattern_def = (AstPatternDefNode*)entry_node;
+                    TypePattern* pattern_type = (TypePattern*)pattern_def->type;
+                    log_debug("transpile_primary_expr: pattern reference '%.*s', index=%d",
+                        (int)ident_node->name->len, ident_node->name->chars, pattern_type->pattern_index);
+                    strbuf_append_format(tp->code_buf, "const_pattern(%d)", pattern_type->pattern_index);
                 }
                 else {
                     log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
@@ -1456,9 +1472,10 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
 void transpile_items(Transpiler* tp, AstNode *item) {
     bool is_first = true;
     while (item) {
-        // skip let declaration
+        // skip let declaration and pattern definitions
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || 
-            item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
+            item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
+            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
             item = item->next;  continue;
         }
         if (is_first) { is_first = false; } 
@@ -1564,7 +1581,8 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         if (scan->node_type != AST_NODE_LET_STAM && scan->node_type != AST_NODE_PUB_STAM &&
             scan->node_type != AST_NODE_TYPE_STAM && scan->node_type != AST_NODE_FUNC &&
             scan->node_type != AST_NODE_FUNC_EXPR && scan->node_type != AST_NODE_PROC &&
-            scan->node_type != AST_NODE_VAR_STAM) {
+            scan->node_type != AST_NODE_VAR_STAM &&
+            scan->node_type != AST_NODE_STRING_PATTERN && scan->node_type != AST_NODE_SYMBOL_PATTERN) {
             last_item = scan;
         }
         scan = scan->next;
@@ -1579,8 +1597,9 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         }
         else if (item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM ||
                  item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR ||
-                 item->node_type == AST_NODE_PROC) {
-            // skip - already handled globally
+                 item->node_type == AST_NODE_PROC ||
+                 item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+            // skip - already handled globally or pattern definitions
         }
         else if (item->node_type == AST_NODE_WHILE_STAM) {
             transpile_while(tp, (AstWhileNode*)item);
@@ -2925,7 +2944,8 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
     case AST_NODE_FUNC:  case AST_NODE_PROC:
-        // already transpiled
+    case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN:
+        // already transpiled or pattern definitions (handled at compile time)
         break;
     case AST_NODE_FUNC_EXPR:
         transpile_fn_expr(tp, (AstFuncNode*)expr_node);
@@ -3060,6 +3080,33 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         while (declare) {
             define_ast_node(tp, declare);
             declare = declare->next;
+        }
+        break;
+    }
+    case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN: {
+        // Pattern definitions - compile the pattern and store in type_list
+        AstPatternDefNode* pattern_def = (AstPatternDefNode*)node;
+        TypePattern* pattern_type = (TypePattern*)pattern_def->type;
+        
+        // Compile pattern to regex if not already compiled
+        if (pattern_type->re2 == nullptr && pattern_def->as != nullptr) {
+            const char* error_msg = nullptr;
+            TypePattern* compiled = compile_pattern_ast(tp->pool, pattern_def->as, 
+                pattern_def->is_symbol, &error_msg);
+            if (compiled) {
+                // Copy compiled info to existing type
+                pattern_type->re2 = compiled->re2;
+                pattern_type->source = compiled->source;
+                // Add to type_list for runtime access
+                arraylist_append(tp->type_list, pattern_type);
+                pattern_type->pattern_index = tp->type_list->length - 1;
+                log_debug("compiled pattern '%.*s' to regex, index=%d", 
+                    (int)pattern_def->name->len, pattern_def->name->chars, pattern_type->pattern_index);
+            } else {
+                log_error("failed to compile pattern '%.*s': %s",
+                    (int)pattern_def->name->len, pattern_def->name->chars, 
+                    error_msg ? error_msg : "unknown error");
+            }
         }
         break;
     }
@@ -3332,6 +3379,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             assign_global_var(tp, (AstLetNode*)child);       
             break;  // already handled
         case AST_NODE_IMPORT:  case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
+        case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN:
             break;  // skip global definition nodes
         case AST_NODE_CONTENT:
             transpile_content_expr(tp, (AstListNode*)child, true);
