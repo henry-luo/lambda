@@ -3,7 +3,6 @@
   "latex": "(X, \\tau): \\quad \\emptyset, X \\in \\tau, \\text{ closed under } \\cup, \\cap",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.169Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "|\\mathbb{N}| = |\\mathbb{Z}| = |\\mathbb{Q}| = \\aleph_0",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.166Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

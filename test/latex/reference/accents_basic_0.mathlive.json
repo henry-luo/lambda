@@ -3,7 +3,6 @@
   "latex": "\\hat{a} \\quad \\check{b} \\quad \\tilde{c} \\quad \\acute{d}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.471Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.487Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

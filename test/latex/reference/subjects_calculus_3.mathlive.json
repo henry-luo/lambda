@@ -3,7 +3,6 @@
   "latex": "\\frac{\\partial f}{\\partial x} = \\lim_{h \\to 0} \\frac{f(x+h, y) - f(x, y)}{h}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.094Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

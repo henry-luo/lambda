@@ -3,7 +3,6 @@
   "latex": "\\sin x, \\cos x, \\tan x, \\log x, \\ln x, \\exp x",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.531Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "P(A|B) = \\frac{P(B|A) \\cdot P(A)}{P(B)}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.151Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

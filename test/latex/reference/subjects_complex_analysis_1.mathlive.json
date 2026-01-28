@@ -3,7 +3,6 @@
   "latex": "|z| = \\sqrt{x^2 + y^2}, \\quad \\arg(z) = \\arctan\\frac{y}{x}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.114Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

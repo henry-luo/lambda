@@ -3,7 +3,6 @@
   "latex": "} \\textcolor{m1}{\\blacktriangle}\\textcolor{m2}{\\blacktriangle}\\textcolor{m3}{\\blacktriangle}\\textcolor{m4}{\\blacktriangle}\\textcolor{m5}{\\blacktriangle}\\textcolor{m6}{\\blacktriangle}\\textcolor{m7}{\\blacktriangle}\\textcolor{m8}{\\blacktriangle}\\textcolor{m9}{\\blacktriangle}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.981Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

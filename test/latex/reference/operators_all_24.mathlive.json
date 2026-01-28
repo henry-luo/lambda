@@ -3,7 +3,6 @@
   "latex": "\\langle a \\rangle \\quad \\lfloor a \\rfloor \\quad \\lceil a \\rceil",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.058Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

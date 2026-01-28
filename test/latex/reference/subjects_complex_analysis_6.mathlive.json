@@ -3,7 +3,6 @@
   "latex": "f(z) = \\sum_{n=-\\infty}^{\\infty} a_n (z - z_0)^n",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.116Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

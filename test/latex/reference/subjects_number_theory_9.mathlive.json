@@ -3,7 +3,6 @@
   "latex": "n! \\sim \\sqrt{2\\pi n}\\left(\\frac{n}{e}\\right)^n",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.141Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

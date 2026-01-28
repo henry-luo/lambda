@@ -3,7 +3,6 @@
   "latex": "\\left[ \\begin{array}{c} a \\\\ b \\\\ c \\end{array} \\right]",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.513Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

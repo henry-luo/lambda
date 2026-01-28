@@ -3,7 +3,6 @@
   "latex": "\\forall x, y \\in X, \\exists \\gamma: [0,1] \\to X, \\gamma(0) = x, \\gamma(1) = y",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.174Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

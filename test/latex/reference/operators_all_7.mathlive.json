@@ -3,7 +3,6 @@
   "latex": "a \\leq b \\quad a \\geq b \\quad a \\ll b \\quad a \\gg b",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.051Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

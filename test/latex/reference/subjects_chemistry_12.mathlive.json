@@ -3,7 +3,6 @@
   "latex": "\\left(P + \\frac{an^2}{V^2}\\right)(V - nb) = nRT",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.105Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\text{a \\tiny x y}b",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.998Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

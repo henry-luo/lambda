@@ -3,7 +3,6 @@
   "latex": "-\\bbox[yellow]{\\sqrt{\\frac{2}{1+x}}}-",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.681Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "y = \\begin{cases}\nC_1 e^{r_1 x} + C_2 e^{r_2 x} & \\text{distinct real} \\\\\n(C_1 + C_2 x) e^{rx} & \\text{repeated} \\\\\ne^{\\alpha x}(C_1 \\cos\\beta x + C_2 \\sin\\beta x) & \\text{complex}\n\\end{cases}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.122Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

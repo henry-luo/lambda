@@ -3,7 +3,6 @@
   "latex": "a \\wedge b \\quad a \\oplus b \\quad a \\ominus b \\quad a \\otimes b",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.050Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
