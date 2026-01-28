@@ -1,0 +1,27 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x^{n+1}",
+  "description": "Superscript with expression",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.152Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x^{n+1}",
+    "body": [
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1"
+        ]
+      }
+    ]
+  }
+}

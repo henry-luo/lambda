@@ -1,0 +1,99 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\begin{vmatrix} 1 & 0 \\\\ 0 & 1 \\end{vmatrix} \\det",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.355Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\begin{vmatrix} 1 & 0 \\\\ 0 & 1 \\end{vmatrix} \\det",
+    "body": [
+      {
+        "type": "array",
+        "environmentName": "vmatrix",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              "1"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "0"
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "0"
+            ],
+            [
+              {
+                "type": "first"
+              },
+              "1"
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          },
+          {
+            "align": "c"
+          }
+        ],
+        "leftDelim": "\\vert",
+        "rightDelim": "\\vert"
+      },
+      {
+        "type": "operator",
+        "command": "\\det",
+        "value": "det",
+        "verbatimLatex": "\\det",
+        "subsupPlacement": "over-under",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "det"
+      }
+    ]
+  }
+}

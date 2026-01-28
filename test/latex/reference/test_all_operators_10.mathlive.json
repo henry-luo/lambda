@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\subset b \\quad a \\supset b \\quad a \\subseteq b \\quad a \\supseteq b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.309Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\subset b \\quad a \\supset b \\quad a \\subseteq b \\quad a \\supseteq b",
+    "body": [
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\subset",
+        "value": "⊂",
+        "verbatimLatex": "\\subset"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\supset",
+        "value": "⊃",
+        "verbatimLatex": "\\supset"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\subseteq",
+        "value": "⊆",
+        "verbatimLatex": "\\subseteq"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\supseteq",
+        "value": "⊇",
+        "verbatimLatex": "\\supseteq"
+      },
+      "b"
+    ]
+  }
+}

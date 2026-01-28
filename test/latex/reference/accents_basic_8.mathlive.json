@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\overline{abc}",
+  "description": "Overline",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.064Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\overline{abc}",
+    "body": [
+      {
+        "command": "\\overline",
+        "verbatimLatex": "\\overline{abc}",
+        "args": [
+          {
+            "group": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          "b",
+          "c"
+        ]
+      }
+    ]
+  }
+}

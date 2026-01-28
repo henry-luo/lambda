@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\hat{a}",
+  "description": "Hat accent",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.047Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\hat{a}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\hat",
+        "verbatimLatex": "\\hat{a}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a"
+            ]
+          }
+        ],
+        "body": [
+          "a"
+        ],
+        "accentChar": 94
+      }
+    ]
+  }
+}

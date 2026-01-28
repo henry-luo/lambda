@@ -1,0 +1,130 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x, x', x_1, x_n, x_{2n-1}, \\hat{x}, \\widehat{x}, \\mathbf{x}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.209Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x, x', x_1, x_n, x_{2n-1}, \\hat{x}, \\widehat{x}, \\mathbf{x}",
+    "body": [
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\prime",
+            "value": "′"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "1"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2",
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "accent",
+        "command": "\\hat",
+        "verbatimLatex": "\\hat{x}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "body": [
+          "x"
+        ],
+        "accentChar": 94
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "accent",
+        "command": "\\widehat",
+        "verbatimLatex": "\\widehat{x}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "x"
+            ]
+          }
+        ],
+        "body": [
+          "x"
+        ],
+        "svgAccent": "widehat1"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "value": "x",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      }
+    ]
+  }
+}

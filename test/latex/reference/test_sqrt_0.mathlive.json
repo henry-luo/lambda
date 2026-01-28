@@ -1,0 +1,31 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt{2}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.375Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt{2}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{2}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "2"
+            ]
+          }
+        ],
+        "body": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a\\quad b",
+  "description": "Quad space",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.156Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a\\quad b",
+    "body": [
+      "a",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "b"
+    ]
+  }
+}

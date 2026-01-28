@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{x+1}{y-2}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.345Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{x+1}{y-2}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{x+1}{y-2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "y",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1"
+        ],
+        "below": [
+          "y",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "2"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\Delta x = x_2 - x_1",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.298Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\Delta x = x_2 - x_1",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\Delta",
+        "value": "Δ",
+        "verbatimLatex": "\\Delta"
+      },
+      "x",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "1"
+        ]
+      }
+    ]
+  }
+}

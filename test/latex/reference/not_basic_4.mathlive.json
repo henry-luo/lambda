@@ -1,0 +1,62 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\equiv",
+  "description": "Not equivalent",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.138Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\equiv",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\equiv",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\equiv",
+                "value": "≡",
+                "verbatimLatex": "\\equiv"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\equiv",
+                    "value": "≡",
+                    "verbatimLatex": "\\equiv"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\equiv",
+            "value": "≡",
+            "verbatimLatex": "\\equiv"
+          }
+        ]
+      }
+    ]
+  }
+}

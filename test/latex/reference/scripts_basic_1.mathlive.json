@@ -1,0 +1,22 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x_n",
+  "description": "Simple subscript",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.150Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x_n",
+    "body": [
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

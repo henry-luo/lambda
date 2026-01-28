@@ -1,0 +1,38 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{1}{2}",
+  "description": "Numeric fraction",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.110Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{1}{2}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

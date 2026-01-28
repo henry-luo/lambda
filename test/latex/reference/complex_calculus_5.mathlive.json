@@ -1,0 +1,175 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\partial^2 u}{\\partial x^2} + \\frac{\\partial^2 u}{\\partial y^2} = 0",
+  "description": "Laplace equation",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.090Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\partial^2 u}{\\partial x^2} + \\frac{\\partial^2 u}{\\partial y^2} = 0",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\partial^2 u}{\\partial x^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              "u"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "x",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          "u"
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\partial^2 u}{\\partial y^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              "u"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "y",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          "u"
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "y",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "0"
+    ]
+  }
+}

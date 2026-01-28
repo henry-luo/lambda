@@ -1,0 +1,130 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\frac{a}{b}}{\\frac{c}{d}}",
+  "description": "Double nested fractions",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.115Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\frac{a}{b}}{\\frac{c}{d}}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\frac{a}{b}}{\\frac{c}{d}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{a}{b}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "a"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "b"
+                    ]
+                  }
+                ],
+                "above": [
+                  "a"
+                ],
+                "below": [
+                  "b"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{c}{d}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "c"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "d"
+                    ]
+                  }
+                ],
+                "above": [
+                  "c"
+                ],
+                "below": [
+                  "d"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{a}{b}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              },
+              {
+                "group": [
+                  "b"
+                ]
+              }
+            ],
+            "above": [
+              "a"
+            ],
+            "below": [
+              "b"
+            ]
+          }
+        ],
+        "below": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{c}{d}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "c"
+                ]
+              },
+              {
+                "group": [
+                  "d"
+                ]
+              }
+            ],
+            "above": [
+              "c"
+            ],
+            "below": [
+              "d"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

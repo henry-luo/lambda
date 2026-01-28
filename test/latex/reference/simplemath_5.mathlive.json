@@ -1,0 +1,45 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a(x) + b(x) + 123",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.291Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a(x) + b(x) + 123",
+    "body": [
+      "a",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "1",
+      "2",
+      "3"
+    ]
+  }
+}

@@ -1,0 +1,148 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a + \\frac{b \\choose c}{d \\choose e} + f",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.204Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a + \\frac{b \\choose c}{d \\choose e} + f",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{b \\choose c}{d \\choose e}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\choose",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "b"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "c"
+                    ]
+                  }
+                ],
+                "above": [
+                  "b"
+                ],
+                "below": [
+                  "c"
+                ],
+                "leftDelim": "(",
+                "rightDelim": ")",
+                "hasBarLine": false
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\choose",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "d"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "e"
+                    ]
+                  }
+                ],
+                "above": [
+                  "d"
+                ],
+                "below": [
+                  "e"
+                ],
+                "leftDelim": "(",
+                "rightDelim": ")",
+                "hasBarLine": false
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "genfrac",
+            "command": "\\choose",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "b"
+                ]
+              },
+              {
+                "atoms": [
+                  "c"
+                ]
+              }
+            ],
+            "above": [
+              "b"
+            ],
+            "below": [
+              "c"
+            ],
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "hasBarLine": false
+          }
+        ],
+        "below": [
+          {
+            "type": "genfrac",
+            "command": "\\choose",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "d"
+                ]
+              },
+              {
+                "atoms": [
+                  "e"
+                ]
+              }
+            ],
+            "above": [
+              "d"
+            ],
+            "below": [
+              "e"
+            ],
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "hasBarLine": false
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "f"
+    ]
+  }
+}

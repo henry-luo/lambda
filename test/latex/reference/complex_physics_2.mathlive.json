@@ -1,0 +1,88 @@
+{
+  "format": "mathlive-ast",
+  "latex": "F = G\\frac{m_1 m_2}{r^2}",
+  "description": "Newton's law of gravitation",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.093Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "F = G\\frac{m_1 m_2}{r^2}",
+    "body": [
+      "F",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "G",
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{m_1 m_2}{r^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "m",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1"
+                ]
+              },
+              "m",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "r",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "m",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "1"
+            ]
+          },
+          "m",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "2"
+            ]
+          }
+        ],
+        "below": [
+          "r",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

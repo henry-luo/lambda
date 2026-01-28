@@ -1,0 +1,20 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\pi",
+  "description": "Pi",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.125Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\pi",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\pi",
+        "value": "π",
+        "verbatimLatex": "\\pi"
+      }
+    ]
+  }
+}

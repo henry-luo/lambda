@@ -1,0 +1,78 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\bigcup_{i=1}^{n} A_i \\quad \\bigcap_{j=1}^{m} B_j",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.194Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\bigcup_{i=1}^{n} A_i \\quad \\bigcap_{j=1}^{m} B_j",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigcup",
+        "value": "⋃",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "i",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋃"
+      },
+      "A",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "i"
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\bigcap",
+        "value": "⋂",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "j",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          "m"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "⋂"
+      },
+      "B",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "j"
+        ]
+      }
+    ]
+  }
+}

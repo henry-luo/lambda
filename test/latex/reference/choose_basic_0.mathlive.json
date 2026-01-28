@@ -1,0 +1,41 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\binom{n}{k}",
+  "description": "Simple binomial coefficient",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.082Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\binom{n}{k}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom{n}{k}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n"
+            ]
+          },
+          {
+            "group": [
+              "k"
+            ]
+          }
+        ],
+        "above": [
+          "n"
+        ],
+        "below": [
+          "k"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      }
+    ]
+  }
+}

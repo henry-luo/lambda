@@ -1,0 +1,25 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x^2_n",
+  "description": "Both super and subscript",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.151Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x^2_n",
+    "body": [
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ],
+        "subscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

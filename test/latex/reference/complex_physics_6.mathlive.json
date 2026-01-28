@@ -1,0 +1,46 @@
+{
+  "format": "mathlive-ast",
+  "latex": "S = k_B \\ln \\Omega",
+  "description": "Boltzmann entropy",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.096Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "S = k_B \\ln \\Omega",
+    "body": [
+      "S",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "k",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "B"
+        ]
+      },
+      {
+        "type": "operator",
+        "command": "\\ln",
+        "value": "ln",
+        "verbatimLatex": "\\ln",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "ln"
+      },
+      {
+        "type": "mord",
+        "command": "\\Omega",
+        "value": "Ω",
+        "verbatimLatex": "\\Omega"
+      }
+    ]
+  }
+}

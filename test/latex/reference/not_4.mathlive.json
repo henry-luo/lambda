@@ -1,0 +1,80 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\sin",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.278Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\sin",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\sin",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "operator",
+                "command": "\\sin",
+                "value": "sin",
+                "subsupPlacement": "adjacent",
+                "isFunction": true,
+                "args": [],
+                "variant": "main",
+                "variantStyle": "up",
+                "limits": "adjacent",
+                "symbol": "sin"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "operator",
+                    "command": "\\sin",
+                    "value": "sin",
+                    "subsupPlacement": "adjacent",
+                    "isFunction": true,
+                    "args": [],
+                    "variant": "main",
+                    "variantStyle": "up",
+                    "limits": "adjacent",
+                    "symbol": "sin"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "operator",
+            "command": "\\sin",
+            "value": "sin",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "variantStyle": "up",
+            "limits": "adjacent",
+            "symbol": "sin"
+          }
+        ]
+      }
+    ]
+  }
+}

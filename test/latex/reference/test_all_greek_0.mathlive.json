@@ -1,0 +1,74 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.293Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\alpha \\beta \\gamma \\delta \\epsilon \\varepsilon \\zeta \\eta \\theta \\vartheta",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\alpha",
+        "value": "α",
+        "verbatimLatex": "\\alpha"
+      },
+      {
+        "type": "mord",
+        "command": "\\beta",
+        "value": "β",
+        "verbatimLatex": "\\beta"
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mord",
+        "command": "\\delta",
+        "value": "δ",
+        "verbatimLatex": "\\delta"
+      },
+      {
+        "type": "mord",
+        "command": "\\epsilon",
+        "value": "ϵ",
+        "verbatimLatex": "\\epsilon"
+      },
+      {
+        "type": "mord",
+        "command": "\\varepsilon",
+        "value": "ε",
+        "verbatimLatex": "\\varepsilon"
+      },
+      {
+        "type": "mord",
+        "command": "\\zeta",
+        "value": "ζ",
+        "verbatimLatex": "\\zeta"
+      },
+      {
+        "type": "mord",
+        "command": "\\eta",
+        "value": "η",
+        "verbatimLatex": "\\eta"
+      },
+      {
+        "type": "mord",
+        "command": "\\theta",
+        "value": "θ",
+        "verbatimLatex": "\\theta"
+      },
+      {
+        "type": "mord",
+        "command": "\\vartheta",
+        "value": "ϑ",
+        "verbatimLatex": "\\vartheta"
+      }
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\tilde{a}",
+  "description": "Tilde accent",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.060Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\tilde{a}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\tilde",
+        "verbatimLatex": "\\tilde{a}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a"
+            ]
+          }
+        ],
+        "body": [
+          "a"
+        ],
+        "accentChar": 126
+      }
+    ]
+  }
+}

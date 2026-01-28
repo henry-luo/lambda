@@ -1,0 +1,28 @@
+{
+  "format": "mathlive-ast",
+  "latex": "E = mc^2",
+  "description": "Mass-energy equivalence",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.092Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "E = mc^2",
+    "body": [
+      "E",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "m",
+      "c",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt{\\smash{y}} \\quad \\sqrt{y}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.284Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt{\\smash{y}} \\quad \\sqrt{y}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{\\smash{y}}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              {
+                "type": "phantom",
+                "command": "\\smash",
+                "verbatimLatex": "\\smash{y}",
+                "captureSelection": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "y"
+                    ]
+                  }
+                ],
+                "body": [
+                  "y"
+                ],
+                "smashDepth": true,
+                "smashHeight": true
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "phantom",
+            "command": "\\smash",
+            "verbatimLatex": "\\smash{y}",
+            "captureSelection": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "y"
+                ]
+              }
+            ],
+            "body": [
+              "y"
+            ],
+            "smashDepth": true,
+            "smashHeight": true
+          }
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{y}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "y"
+            ]
+          }
+        ],
+        "body": [
+          "y"
+        ]
+      }
+    ]
+  }
+}

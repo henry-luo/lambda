@@ -1,0 +1,50 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a {b c \\over d e} f",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.385Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a {b c \\over d e} f",
+    "body": [
+      "a",
+      {
+        "type": "group",
+        "verbatimLatex": "{b c \\over d e}",
+        "skipBoundary": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\over",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "b",
+                  "c"
+                ]
+              },
+              {
+                "atoms": [
+                  "d",
+                  "e"
+                ]
+              }
+            ],
+            "above": [
+              "b",
+              "c"
+            ],
+            "below": [
+              "d",
+              "e"
+            ]
+          }
+        ]
+      },
+      "f"
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.174Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\overrightarrow{AB} \\quad \\overleftarrow{CD}",
+    "body": [
+      {
+        "type": "overunder",
+        "command": "\\overrightarrow",
+        "verbatimLatex": "\\overrightarrow{AB}",
+        "subsupPlacement": "over-under",
+        "body": [
+          "A",
+          "B"
+        ],
+        "skipBoundary": false,
+        "svgAbove": "overrightarrow",
+        "boxType": "rel",
+        "paddedBody": true
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "overunder",
+        "command": "\\overleftarrow",
+        "verbatimLatex": "\\overleftarrow{CD}",
+        "subsupPlacement": "over-under",
+        "body": [
+          "C",
+          "D"
+        ],
+        "skipBoundary": false,
+        "svgAbove": "overleftarrow",
+        "boxType": "rel",
+        "paddedBody": true
+      }
+    ]
+  }
+}

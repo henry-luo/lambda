@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\times b \\div c",
+  "description": "Multiplication and division",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.140Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\times b \\div c",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\times",
+        "value": "×",
+        "verbatimLatex": "\\times"
+      },
+      "b",
+      {
+        "type": "mbin",
+        "command": "\\div",
+        "value": "÷",
+        "verbatimLatex": "\\div"
+      },
+      "c"
+    ]
+  }
+}

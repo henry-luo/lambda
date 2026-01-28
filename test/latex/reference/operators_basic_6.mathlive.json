@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\in B \\subset C",
+  "description": "Set membership and subset",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.148Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\in B \\subset C",
+    "body": [
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "B",
+      {
+        "type": "mrel",
+        "command": "\\subset",
+        "value": "⊂",
+        "verbatimLatex": "\\subset"
+      },
+      "C"
+    ]
+  }
+}
