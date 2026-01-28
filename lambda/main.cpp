@@ -1078,8 +1078,21 @@ int main(int argc, char *argv[]) {
         bool dump_boxes = false;
         bool output_html = false;
         bool standalone_html = false;
+        bool formula_taken = false;  // Track if we've taken the formula argument
 
         for (int i = 2; i < argc; i++) {
+            // If we haven't taken the formula yet, first non-option arg is the formula
+            // (even if it starts with - like "-\bbox{...}")
+            if (!formula_taken && formula == NULL &&
+                strcmp(argv[i], "-o") != 0 && strcmp(argv[i], "--output") != 0 &&
+                strcmp(argv[i], "--output-ast") != 0 && strcmp(argv[i], "--output-html") != 0 &&
+                strcmp(argv[i], "--output-dvi") != 0 && strcmp(argv[i], "--html") != 0 &&
+                strcmp(argv[i], "--standalone") != 0 && strcmp(argv[i], "--dump-ast") != 0 &&
+                strcmp(argv[i], "--dump-boxes") != 0) {
+                formula = argv[i];
+                formula_taken = true;
+                continue;
+            }
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
                 if (i + 1 < argc) {
                     output_file = argv[++i];
@@ -1120,10 +1133,8 @@ int main(int argc, char *argv[]) {
                 dump_ast = true;
             } else if (strcmp(argv[i], "--dump-boxes") == 0) {
                 dump_boxes = true;
-            } else if (argv[i][0] != '-') {
-                // Positional argument is the formula
-                formula = argv[i];
             } else {
+                // Unknown option - but formula should already be taken
                 printf("Error: Unknown option '%s'\n", argv[i]);
                 log_finish();
                 return 1;
