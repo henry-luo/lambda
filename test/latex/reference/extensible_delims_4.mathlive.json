@@ -1,0 +1,52 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left| \\sum_{i=1}^{n} x_i \\right|",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.250Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left| \\sum_{i=1}^{n} x_i \\right|",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "extensible-symbol",
+            "command": "\\sum",
+            "value": "∑",
+            "subsupPlacement": "auto",
+            "args": [],
+            "subscript": [
+              "i",
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              "1"
+            ],
+            "superscript": [
+              "n"
+            ],
+            "variant": "main",
+            "limits": "auto",
+            "symbol": "∑"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "i"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "|",
+        "rightDelim": "|"
+      }
+    ]
+  }
+}

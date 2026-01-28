@@ -1,0 +1,36 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\widehat{abc}",
+  "description": "Wide hat",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.062Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\widehat{abc}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\widehat",
+        "verbatimLatex": "\\widehat{abc}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          "b",
+          "c"
+        ],
+        "svgAccent": "widehat2"
+      }
+    ]
+  }
+}

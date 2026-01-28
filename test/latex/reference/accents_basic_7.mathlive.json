@@ -1,0 +1,36 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\widetilde{abc}",
+  "description": "Wide tilde",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.063Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\widetilde{abc}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\widetilde",
+        "verbatimLatex": "\\widetilde{abc}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          "b",
+          "c"
+        ],
+        "svgAccent": "widetilde2"
+      }
+    ]
+  }
+}

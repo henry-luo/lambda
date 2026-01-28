@@ -1,0 +1,84 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\frac{a}{b}}{c}",
+  "description": "Nested fraction in numerator",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.113Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\frac{a}{b}}{c}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\frac{a}{b}}{c}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{a}{b}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "a"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "b"
+                    ]
+                  }
+                ],
+                "above": [
+                  "a"
+                ],
+                "below": [
+                  "b"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "c"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{a}{b}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              },
+              {
+                "group": [
+                  "b"
+                ]
+              }
+            ],
+            "above": [
+              "a"
+            ],
+            "below": [
+              "b"
+            ]
+          }
+        ],
+        "below": [
+          "c"
+        ]
+      }
+    ]
+  }
+}

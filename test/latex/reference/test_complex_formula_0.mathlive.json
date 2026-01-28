@@ -1,0 +1,161 @@
+{
+  "format": "mathlive-ast",
+  "latex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.323Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}",
+    "body": [
+      "x",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{-b \\pm\\sqrt{b^2 - 4ac}}{2a}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "b",
+              {
+                "type": "mbin",
+                "command": "\\pm",
+                "value": "±",
+                "verbatimLatex": "\\pm"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{b^2 - 4ac}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "4",
+                      "a",
+                      "c"
+                    ]
+                  }
+                ],
+                "body": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  },
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "4",
+                  "a",
+                  "c"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "2",
+              "a"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "b",
+          {
+            "type": "mbin",
+            "command": "\\pm",
+            "value": "±",
+            "verbatimLatex": "\\pm"
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{b^2 - 4ac}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  },
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "4",
+                  "a",
+                  "c"
+                ]
+              }
+            ],
+            "body": [
+              "b",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "4",
+              "a",
+              "c"
+            ]
+          }
+        ],
+        "below": [
+          "2",
+          "a"
+        ]
+      }
+    ]
+  }
+}

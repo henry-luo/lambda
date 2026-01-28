@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "z(a+b), \\widehat{z}(a)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.213Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "z(a+b), \\widehat{z}(a)",
+    "body": [
+      "z",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "accent",
+        "command": "\\widehat",
+        "verbatimLatex": "\\widehat{z}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "z"
+            ]
+          }
+        ],
+        "body": [
+          "z"
+        ],
+        "svgAccent": "widehat1"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

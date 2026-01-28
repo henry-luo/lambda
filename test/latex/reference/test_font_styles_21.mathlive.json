@@ -1,0 +1,114 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\max\\{a, b\\}, \\min\\{a, b\\}, \\sup S, \\inf S",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.341Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\max\\{a, b\\}, \\min\\{a, b\\}, \\sup S, \\inf S",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\max",
+        "value": "max",
+        "verbatimLatex": "\\max",
+        "subsupPlacement": "over-under",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "max"
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "a",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "b",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\min",
+        "value": "min",
+        "verbatimLatex": "\\min",
+        "subsupPlacement": "over-under",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "min"
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "a",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "b",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\sup",
+        "value": "sup",
+        "verbatimLatex": "\\sup",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "sup"
+      },
+      "S",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "operator",
+        "command": "\\inf",
+        "value": "inf",
+        "verbatimLatex": "\\inf",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "inf"
+      },
+      "S"
+    ]
+  }
+}

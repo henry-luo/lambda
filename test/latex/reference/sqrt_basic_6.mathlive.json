@@ -1,0 +1,69 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt{x^2 + y^2}",
+  "description": "Square root with superscripts",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.166Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt{x^2 + y^2}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{x^2 + y^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "x",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

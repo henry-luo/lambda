@@ -1,0 +1,348 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\lim_{n \\to \\infty} a_n, \\limsup a_n, \\liminf a_n",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.342Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\lim",
+        "value": "lim",
+        "subsupPlacement": "over-under",
+        "args": [],
+        "subscript": [
+          "n",
+          {
+            "type": "mrel",
+            "command": "\\to",
+            "value": "→",
+            "verbatimLatex": "\\to"
+          },
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "lim"
+      },
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "macro",
+        "command": "\\limsup",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "mop",
+            "command": "\\operatorname*",
+            "verbatimLatex": "\\operatorname*{lim\\,sup}",
+            "subsupPlacement": "over-under",
+            "isFunction": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "value": "l",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "i",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "m",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "command": "\\,",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    },
+                    "verbatimLatex": "\\,",
+                    "args": []
+                  },
+                  {
+                    "type": "mord",
+                    "value": "s",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "u",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "p",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mord",
+                "value": "l",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "i",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "m",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "command": "\\,",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                },
+                "verbatimLatex": "\\,",
+                "args": []
+              },
+              {
+                "type": "mord",
+                "value": "s",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "u",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "p",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              }
+            ]
+          }
+        ],
+        "expand": true
+      },
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "macro",
+        "command": "\\liminf",
+        "captureSelection": true,
+        "body": [
+          {
+            "type": "mop",
+            "command": "\\operatorname*",
+            "verbatimLatex": "\\operatorname*{lim\\,inf}",
+            "subsupPlacement": "over-under",
+            "isFunction": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mord",
+                    "value": "l",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "i",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "m",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "command": "\\,",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    },
+                    "verbatimLatex": "\\,",
+                    "args": []
+                  },
+                  {
+                    "type": "mord",
+                    "value": "i",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "n",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  },
+                  {
+                    "type": "mord",
+                    "value": "f",
+                    "style": {
+                      "variant": "main",
+                      "variantStyle": "up"
+                    }
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "mord",
+                "value": "l",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "i",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "m",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "command": "\\,",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                },
+                "verbatimLatex": "\\,",
+                "args": []
+              },
+              {
+                "type": "mord",
+                "value": "i",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "n",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              },
+              {
+                "type": "mord",
+                "value": "f",
+                "style": {
+                  "variant": "main",
+                  "variantStyle": "up"
+                }
+              }
+            ]
+          }
+        ],
+        "expand": true
+      },
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      }
+    ]
+  }
+}

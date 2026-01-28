@@ -1,0 +1,79 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a = b \\quad a \\neq b \\quad a < b \\quad a > b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.306Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a = b \\quad a \\neq b \\quad a < b \\quad a > b",
+    "body": [
+      "a",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\neq",
+        "verbatimLatex": "\\neq",
+        "captureSelection": true,
+        "args": [],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\neq",
+            "skipBoundary": true,
+            "args": [],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right",
+            "boxType": "rel"
+          },
+          {
+            "command": "\\neq",
+            "value": "=",
+            "args": []
+          }
+        ]
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "value": "<"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mrel",
+        "value": ">"
+      },
+      "b"
+    ]
+  }
+}

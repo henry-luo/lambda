@@ -1,0 +1,650 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\equiv, \\not>,\\not\\ge,\\not\\gg,\n   \\not\\succ,\\not\\succeq,\n   \\not\\supset,\\not\\supseteq,\\not\\sqsupseteq,\n   \\not\\rhd,\\not\\unrhd,\n   \\not\\approx,",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.276Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\equiv, \\not>,\\not\\ge,\\not\\gg,\n   \\not\\succ,\\not\\succeq,\n   \\not\\supset,\\not\\supseteq,\\not\\sqsupseteq,\n   \\not\\rhd,\\not\\unrhd,\n   \\not\\approx,",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\equiv",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\equiv",
+                "value": "≡",
+                "verbatimLatex": "\\equiv"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\equiv",
+                    "value": "≡",
+                    "verbatimLatex": "\\equiv"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\equiv",
+            "value": "≡",
+            "verbatimLatex": "\\equiv"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not>",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "value": ">"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "value": ">"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "value": ">"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\ge",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\ge",
+                "value": "≥",
+                "verbatimLatex": "\\ge"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\ge",
+                    "value": "≥",
+                    "verbatimLatex": "\\ge"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\ge",
+            "value": "≥",
+            "verbatimLatex": "\\ge"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\gg",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\gg",
+                "value": "≫",
+                "verbatimLatex": "\\gg"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\gg",
+                    "value": "≫",
+                    "verbatimLatex": "\\gg"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\gg",
+            "value": "≫",
+            "verbatimLatex": "\\gg"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\succ",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\succ",
+                "value": "≻",
+                "verbatimLatex": "\\succ"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\succ",
+                    "value": "≻",
+                    "verbatimLatex": "\\succ"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\succ",
+            "value": "≻",
+            "verbatimLatex": "\\succ"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\succeq",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\succeq",
+                "value": "⪰",
+                "verbatimLatex": "\\succeq"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\succeq",
+                    "value": "⪰",
+                    "verbatimLatex": "\\succeq"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\succeq",
+            "value": "⪰",
+            "verbatimLatex": "\\succeq"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\supset",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\supset",
+                "value": "⊃",
+                "verbatimLatex": "\\supset"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\supset",
+                    "value": "⊃",
+                    "verbatimLatex": "\\supset"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\supset",
+            "value": "⊃",
+            "verbatimLatex": "\\supset"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\supseteq",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\supseteq",
+                "value": "⊇",
+                "verbatimLatex": "\\supseteq"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\supseteq",
+                    "value": "⊇",
+                    "verbatimLatex": "\\supseteq"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\supseteq",
+            "value": "⊇",
+            "verbatimLatex": "\\supseteq"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\sqsupseteq",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\sqsupseteq",
+                "value": "⊒",
+                "verbatimLatex": "\\sqsupseteq"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\sqsupseteq",
+                    "value": "⊒",
+                    "verbatimLatex": "\\sqsupseteq"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\sqsupseteq",
+            "value": "⊒",
+            "verbatimLatex": "\\sqsupseteq"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\rhd",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mbin",
+                "command": "\\rhd",
+                "value": "⊳",
+                "style": {
+                  "variant": "ams"
+                },
+                "verbatimLatex": "\\rhd"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mbin",
+                    "command": "\\rhd",
+                    "value": "⊳",
+                    "style": {
+                      "variant": "ams"
+                    },
+                    "verbatimLatex": "\\rhd"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mbin",
+            "command": "\\rhd",
+            "value": "⊳",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\rhd"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\unrhd",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mbin",
+                "command": "\\unrhd",
+                "value": "⊵",
+                "style": {
+                  "variant": "ams"
+                },
+                "verbatimLatex": "\\unrhd"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mbin",
+                    "command": "\\unrhd",
+                    "value": "⊵",
+                    "style": {
+                      "variant": "ams"
+                    },
+                    "verbatimLatex": "\\unrhd"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mbin",
+            "command": "\\unrhd",
+            "value": "⊵",
+            "style": {
+              "variant": "ams"
+            },
+            "verbatimLatex": "\\unrhd"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\approx",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\approx",
+                "value": "≈",
+                "verbatimLatex": "\\approx"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\approx",
+                    "value": "≈",
+                    "verbatimLatex": "\\approx"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\approx",
+            "value": "≈",
+            "verbatimLatex": "\\approx"
+          }
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      }
+    ]
+  }
+}

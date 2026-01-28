@@ -1,0 +1,50 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\leftarrow \\rightarrow \\leftrightarrow \\Leftarrow \\Rightarrow \\Leftrightarrow",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.310Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\leftarrow \\rightarrow \\leftrightarrow \\Leftarrow \\Rightarrow \\Leftrightarrow",
+    "body": [
+      {
+        "type": "mrel",
+        "command": "\\leftarrow",
+        "value": "←",
+        "verbatimLatex": "\\leftarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\rightarrow",
+        "value": "→",
+        "verbatimLatex": "\\rightarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\leftrightarrow",
+        "value": "↔",
+        "verbatimLatex": "\\leftrightarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\Leftarrow",
+        "value": "⇐",
+        "verbatimLatex": "\\Leftarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\Rightarrow",
+        "value": "⇒",
+        "verbatimLatex": "\\Rightarrow"
+      },
+      {
+        "type": "mrel",
+        "command": "\\Leftrightarrow",
+        "value": "⇔",
+        "verbatimLatex": "\\Leftrightarrow"
+      }
+    ]
+  }
+}

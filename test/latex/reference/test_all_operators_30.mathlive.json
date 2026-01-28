@@ -1,0 +1,98 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\neg \\quad \\emptyset \\quad \\varnothing \\quad \\wp \\quad \\Re \\quad \\Im",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.321Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\neg \\quad \\emptyset \\quad \\varnothing \\quad \\wp \\quad \\Re \\quad \\Im",
+    "body": [
+      {
+        "type": "mrel",
+        "command": "\\neg",
+        "value": "¬",
+        "style": {
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\neg"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "command": "\\emptyset",
+        "value": "∅",
+        "verbatimLatex": "\\emptyset"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "command": "\\varnothing",
+        "value": "∅",
+        "style": {
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\varnothing"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "command": "\\wp",
+        "value": "℘",
+        "verbatimLatex": "\\wp"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "operator",
+        "command": "\\Re",
+        "value": "ℜ",
+        "verbatimLatex": "\\Re",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "fraktur",
+        "limits": "adjacent",
+        "symbol": "ℜ"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "operator",
+        "command": "\\Im",
+        "value": "ℑ",
+        "verbatimLatex": "\\Im",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "fraktur",
+        "limits": "adjacent",
+        "symbol": "ℑ"
+      }
+    ]
+  }
+}

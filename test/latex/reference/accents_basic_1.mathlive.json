@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\bar{a}",
+  "description": "Bar accent",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.053Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\bar{a}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\bar",
+        "verbatimLatex": "\\bar{a}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a"
+            ]
+          }
+        ],
+        "body": [
+          "a"
+        ],
+        "accentChar": 713
+      }
+    ]
+  }
+}

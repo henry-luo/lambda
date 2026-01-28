@@ -1,0 +1,84 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\frac{1}{2}}{3}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.345Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\frac{1}{2}}{3}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\frac{1}{2}}{3}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1}{2}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "2"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1"
+                ],
+                "below": [
+                  "2"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "3"
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ],
+        "below": [
+          "3"
+        ]
+      }
+    ]
+  }
+}
