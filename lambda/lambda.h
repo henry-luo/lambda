@@ -48,6 +48,7 @@ enum EnumTypeId {
     LMD_TYPE_ELEMENT,
     LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
+    LMD_TYPE_PATTERN,  // compiled regex pattern for string matching
 
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
@@ -86,6 +87,7 @@ typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
 typedef struct Decimal Decimal;
+typedef struct TypePattern TypePattern;
 
 /*
 * The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
@@ -445,6 +447,7 @@ typedef struct Context {
     Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
     Type* base_type(TypeId type_id);
     Type* const_type(int type_index);
+    TypePattern* const_pattern(int pattern_index);  // retrieve compiled pattern by index
 
     // returns the type of the item
     Type* fn_type(Item item);

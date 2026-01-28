@@ -11,6 +11,12 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 
+// Forward declarations for pattern building
+AstNode* build_pattern_expr(Transpiler* tp, TSNode node);
+AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
+AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
+AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
+
 // System function definitions with method call support
 // Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
 // is_method_eligible: true if can be called as obj.method() style
@@ -3216,6 +3222,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return NULL;
     case SYM_COMMENT:
         return NULL;
+    // String/Symbol Pattern nodes
+    case SYM_STRING_PATTERN:
+        return build_string_pattern(tp, expr_node, false);
+    case SYM_SYMBOL_PATTERN:
+        return build_string_pattern(tp, expr_node, true);
     case SYM_INDEX:
         // This is likely a parsing error - index tokens should not appear as standalone expressions
         // Common cause: malformed syntax like "1..3" which parses as "1." + ".3"
@@ -3324,6 +3335,264 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             log_debug("module type not supported yet: %.*s", (int)ast_node->module.length, ast_node->module.str);
         }
     }
+    return (AstNode*)ast_node;
+}
+
+// ==================== String/Symbol Pattern Building ====================
+
+// Build pattern character class (\d, \w, \s, \a, .)
+AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
+    log_debug("build pattern char class");
+    AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
+        alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
+    
+    StrView source = ts_node_source(tp, node);
+    
+    if (source.length == 2 && source.str[0] == '\\') {
+        switch (source.str[1]) {
+        case 'd': ast_node->char_class = PATTERN_DIGIT; break;
+        case 'w': ast_node->char_class = PATTERN_WORD; break;
+        case 's': ast_node->char_class = PATTERN_SPACE; break;
+        case 'a': ast_node->char_class = PATTERN_ALPHA; break;
+        default: ast_node->char_class = PATTERN_ANY; break;
+        }
+    } else {
+        // Single dot for any character
+        ast_node->char_class = PATTERN_ANY;
+    }
+    
+    // Type is pattern
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Build pattern range node ("a" to "z")
+AstNode* build_pattern_range(Transpiler* tp, TSNode node) {
+    log_debug("build pattern range");
+    AstPatternRangeNode* ast_node = (AstPatternRangeNode*)
+        alloc_ast_node(tp, AST_NODE_PATTERN_RANGE, node, sizeof(AstPatternRangeNode));
+    
+    TSNode left_node = ts_node_child_by_field_id(node, FIELD_LEFT);
+    TSNode right_node = ts_node_child_by_field_id(node, FIELD_RIGHT);
+    
+    ast_node->start = build_lit_node(tp, left_node, true, SYM_STRING);
+    ast_node->end = build_lit_node(tp, right_node, true, SYM_STRING);
+    
+    // Type is pattern
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Build primary pattern expression
+AstNode* build_primary_pattern(Transpiler* tp, TSNode node) {
+    log_debug("build primary pattern");
+    uint32_t child_count = ts_node_child_count(node);
+    
+    // Check for parenthesized expression: ( _pattern_expr )
+    if (child_count == 3) {
+        TSNode first = ts_node_child(node, 0);
+        StrView first_src = ts_node_source(tp, first);
+        if (first_src.length == 1 && first_src.str[0] == '(') {
+            return build_pattern_expr(tp, ts_node_child(node, 1));
+        }
+    }
+    
+    // Single child - delegate to appropriate builder
+    TSNode child = ts_node_child(node, 0);
+    TSSymbol symbol = ts_node_symbol(child);
+    
+    if (symbol == SYM_STRING) {
+        return build_lit_node(tp, child, true, SYM_STRING);
+    } else if (symbol == SYM_PATTERN_CHAR_CLASS) {
+        return build_pattern_char_class(tp, child);
+    } else if (symbol == SYM_PATTERN_ANY) {
+        // Build a char class node for '.'
+        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
+            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
+        ast_node->char_class = PATTERN_ANY;
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        return (AstNode*)ast_node;
+    }
+    
+    log_error("build_primary_pattern: unknown child symbol %d", symbol);
+    return nullptr;
+}
+
+// Build pattern occurrence (pattern with ?, +, *, {n,m})
+AstNode* build_pattern_occurrence(Transpiler* tp, TSNode node) {
+    log_debug("build pattern occurrence");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
+    
+    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
+    TSNode operator_node = ts_node_child_by_field_id(node, FIELD_OPERATOR);
+    
+    ast_node->operand = build_pattern_expr(tp, operand_node);
+    ast_node->op_str = ts_node_source(tp, operator_node);
+    
+    // Determine operator from string
+    if (ast_node->op_str.length == 1) {
+        switch (ast_node->op_str.str[0]) {
+        case '?': ast_node->op = OPERATOR_OPTIONAL; break;
+        case '+': ast_node->op = OPERATOR_ONE_MORE; break;
+        case '*': ast_node->op = OPERATOR_ZERO_MORE; break;
+        default: ast_node->op = OPERATOR_REPEAT; break;
+        }
+    } else {
+        // {n}, {n,}, {n,m} - treat as OPERATOR_REPEAT
+        ast_node->op = OPERATOR_REPEAT;
+    }
+    
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Build pattern negation (!pattern)
+AstNode* build_pattern_negation(Transpiler* tp, TSNode node) {
+    log_debug("build pattern negation");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
+    
+    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
+    ast_node->operand = build_pattern_expr(tp, operand_node);
+    ast_node->op = OPERATOR_NOT;
+    ast_node->op_str = {.str = "!", .length = 1};
+    
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Build binary pattern expression (| or &)
+AstNode* build_binary_pattern(Transpiler* tp, TSNode node) {
+    log_debug("build binary pattern");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, node, sizeof(AstBinaryNode));
+    
+    TSNode left_node = ts_node_child_by_field_id(node, FIELD_LEFT);
+    TSNode op_node = ts_node_child_by_field_id(node, FIELD_OPERATOR);
+    TSNode right_node = ts_node_child_by_field_id(node, FIELD_RIGHT);
+    
+    ast_node->left = build_pattern_expr(tp, left_node);
+    ast_node->right = build_pattern_expr(tp, right_node);
+    ast_node->op_str = ts_node_source(tp, op_node);
+    
+    // Determine operator
+    if (ast_node->op_str.length == 1) {
+        switch (ast_node->op_str.str[0]) {
+        case '|': ast_node->op = OPERATOR_UNION; break;
+        case '&': ast_node->op = OPERATOR_INTERSECT; break;
+        default: ast_node->op = OPERATOR_UNION; break;
+        }
+    }
+    
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    return (AstNode*)ast_node;
+}
+
+// Main pattern expression builder - dispatches to specific builders
+AstNode* build_pattern_expr(Transpiler* tp, TSNode node) {
+    TSSymbol symbol = ts_node_symbol(node);
+    log_debug("build_pattern_expr: symbol=%d (%s)", symbol, ts_node_type(node));
+    
+    if (symbol == SYM_STRING) {
+        return build_lit_node(tp, node, true, SYM_STRING);
+    }
+    else if (symbol == SYM_PATTERN_CHAR_CLASS) {
+        return build_pattern_char_class(tp, node);
+    }
+    else if (symbol == SYM_PATTERN_ANY) {
+        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
+            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
+        ast_node->char_class = PATTERN_ANY;
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        return (AstNode*)ast_node;
+    }
+    else if (symbol == SYM_PATTERN_RANGE) {
+        return build_pattern_range(tp, node);
+    }
+    else if (symbol == SYM_PATTERN_OCCURRENCE) {
+        return build_pattern_occurrence(tp, node);
+    }
+    else if (symbol == SYM_PATTERN_NEGATION) {
+        return build_pattern_negation(tp, node);
+    }
+    else if (symbol == SYM_BINARY_PATTERN) {
+        return build_binary_pattern(tp, node);
+    }
+    else if (symbol == SYM_PRIMARY_PATTERN) {
+        return build_primary_pattern(tp, node);
+    }
+    else if (symbol == SYM_PATTERN_SEQ) {
+        // Pattern sequence - concatenation of multiple patterns
+        AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
+            alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
+        seq_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        
+        uint32_t child_count = ts_node_named_child_count(node);
+        log_debug("build_pattern_seq: %d children", child_count);
+        
+        AstNode* prev = nullptr;
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_named_child(node, i);
+            AstNode* child_node = build_pattern_expr(tp, child);
+            if (child_node) {
+                if (prev) {
+                    prev->next = child_node;
+                } else {
+                    seq_node->first = child_node;
+                }
+                prev = child_node;
+            }
+        }
+        return (AstNode*)seq_node;
+    }
+    else if (symbol == SYM_IDENT) {
+        // Pattern reference by identifier
+        return build_identifier(tp, node);
+    }
+    
+    // Handle parenthesized expressions
+    uint32_t child_count = ts_node_child_count(node);
+    if (child_count == 3) {
+        TSNode first = ts_node_child(node, 0);
+        StrView first_src = ts_node_source(tp, first);
+        if (first_src.length == 1 && first_src.str[0] == '(') {
+            return build_pattern_expr(tp, ts_node_child(node, 1));
+        }
+    }
+    
+    log_error("build_pattern_expr: unknown node symbol %d (%s)", symbol, ts_node_type(node));
+    return nullptr;
+}
+
+// Build string/symbol pattern definition
+AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
+    log_debug("build %s pattern definition", is_symbol ? "symbol" : "string");
+    
+    AstPatternDefNode* ast_node = (AstPatternDefNode*)
+        alloc_ast_node(tp, is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN,
+                       node, sizeof(AstPatternDefNode));
+    ast_node->is_symbol = is_symbol;
+    
+    // Get pattern name
+    TSNode name_node = ts_node_child_by_field_id(node, FIELD_NAME);
+    int start_byte = ts_node_start_byte(name_node);
+    StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+    
+    // Get pattern expression
+    TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
+    ast_node->as = build_pattern_expr(tp, pattern_node);
+    
+    // Type is pattern type
+    TypePattern* pattern_type = (TypePattern*)alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    pattern_type->is_symbol = is_symbol;
+    pattern_type->pattern_index = -1;  // Will be set during compilation
+    pattern_type->re2 = nullptr;       // Will be compiled during transpilation
+    pattern_type->source = nullptr;
+    ast_node->type = (Type*)pattern_type;
+    
+    // Register pattern name in current scope
+    push_name(tp, (AstNamedNode*)ast_node, NULL);
+    
+    log_debug("built pattern definition: %.*s", (int)ast_node->name->len, ast_node->name->chars);
     return (AstNode*)ast_node;
 }
 
