@@ -1,0 +1,30 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sum_0^n",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.998Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sum_0^n",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "0"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      }
+    ]
+  }
+}

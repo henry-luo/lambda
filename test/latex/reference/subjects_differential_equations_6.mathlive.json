@@ -1,0 +1,114 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathcal{L}\\{f(t)\\} = F(s) = \\int_0^{\\infty} e^{-st} f(t) \\, dt",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.123Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathcal{L}\\{f(t)\\} = F(s) = \\int_0^{\\infty} e^{-st} f(t) \\, dt",
+    "body": [
+      {
+        "type": "mord",
+        "value": "L",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "t",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "F",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "s",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "0"
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "limits": "adjacent",
+        "symbol": "∫"
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "s",
+          "t"
+        ]
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "t",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "t"
+    ]
+  }
+}

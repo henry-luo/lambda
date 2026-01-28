@@ -1,37 +1,38 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\frac{1}{2}",
-  "description": "Numeric fraction",
+  "latex": "\\tfrac{a}{b}",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.110Z",
+  "generatedAt": "2026-01-28T02:51:40.539Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\frac{1}{2}",
+    "verbatimLatex": "\\tfrac{a}{b}",
     "body": [
       {
         "type": "genfrac",
-        "command": "\\frac",
-        "verbatimLatex": "\\frac{1}{2}",
+        "command": "\\tfrac",
+        "verbatimLatex": "\\tfrac{a}{b}",
         "displayContainsHighlight": true,
         "args": [
           {
             "group": [
-              "1"
+              "a"
             ]
           },
           {
             "group": [
-              "2"
+              "b"
             ]
           }
         ],
         "above": [
-          "1"
+          "a"
         ],
         "below": [
-          "2"
-        ]
+          "b"
+        ],
+        "mathstyleName": "textstyle"
       }
     ]
   }

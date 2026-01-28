@@ -1,0 +1,41 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt{x+y}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.067Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt{x+y}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{x+y}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y"
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y"
+        ]
+      }
+    ]
+  }
+}

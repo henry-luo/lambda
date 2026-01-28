@@ -1,0 +1,100 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{CH}_4 + 2\\text{O}_2 \\to \\text{CO}_2 + 2\\text{H}_2\\text{O}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.100Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{CH}_4 + 2\\text{O}_2 \\to \\text{CO}_2 + 2\\text{H}_2\\text{O}",
+    "body": [
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "C",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "H",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "4"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "2",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "O",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "C",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "O",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "2",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "H",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "O",
+        "displayContainsHighlight": true
+      }
+    ]
+  }
+}

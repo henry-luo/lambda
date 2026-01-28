@@ -1,0 +1,113 @@
+{
+  "format": "mathlive-ast",
+  "latex": "} \\textcolor{m1}{\\blacktriangle}\\textcolor{m2}{\\blacktriangle}\\textcolor{m3}{\\blacktriangle}\\textcolor{m4}{\\blacktriangle}\\textcolor{m5}{\\blacktriangle}\\textcolor{m6}{\\blacktriangle}\\textcolor{m7}{\\blacktriangle}\\textcolor{m8}{\\blacktriangle}\\textcolor{m9}{\\blacktriangle}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.981Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "} \\textcolor{m1}{\\blacktriangle}\\textcolor{m2}{\\blacktriangle}\\textcolor{m3}{\\blacktriangle}\\textcolor{m4}{\\blacktriangle}\\textcolor{m5}{\\blacktriangle}\\textcolor{m6}{\\blacktriangle}\\textcolor{m7}{\\blacktriangle}\\textcolor{m8}{\\blacktriangle}\\textcolor{m9}{\\blacktriangle}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m1",
+          "color": "#993d71",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m2",
+          "color": "#998b3d",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m3",
+          "color": "#3d9956",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m4",
+          "color": "#3d5a99",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m5",
+          "color": "#993d90",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m6",
+          "color": "#996d3d",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m7",
+          "color": "#43993d",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m8",
+          "color": "#3d7999",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      },
+      {
+        "type": "mord",
+        "command": "\\blacktriangle",
+        "value": "▲",
+        "style": {
+          "verbatimColor": "m9",
+          "color": "#843d99",
+          "variant": "ams"
+        },
+        "verbatimLatex": "\\blacktriangle"
+      }
+    ]
+  }
+}

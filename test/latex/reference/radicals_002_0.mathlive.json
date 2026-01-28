@@ -1,0 +1,347 @@
+{
+  "format": "mathlive-ast",
+  "latex": "ax^2+bx+c = a \\left( x - \\frac{-b + \\sqrt {b^2-4ac}}{2a} \\right) \\left( x - \\frac{-b - \\sqrt {b^2-4ac}}{2a} \\right)",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.971Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "ax^2+bx+c = a \\left( x - \\frac{-b + \\sqrt {b^2-4ac}}{2a} \\right) \\left( x - \\frac{-b - \\sqrt {b^2-4ac}}{2a} \\right)",
+    "body": [
+      "a",
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      "x",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "c",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "a",
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{-b + \\sqrt{b^2-4ac}}{2a}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "b",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{b^2-4ac}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "b",
+                          {
+                            "type": "subsup",
+                            "subsupPlacement": "auto",
+                            "superscript": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "type": "mbin",
+                            "command": "-",
+                            "value": "−"
+                          },
+                          "4",
+                          "a",
+                          "c"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "4",
+                      "a",
+                      "c"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "2",
+                  "a"
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "b",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{b^2-4ac}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "4",
+                      "a",
+                      "c"
+                    ]
+                  }
+                ],
+                "body": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  },
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "4",
+                  "a",
+                  "c"
+                ]
+              }
+            ],
+            "below": [
+              "2",
+              "a"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{-b - \\sqrt{b^2-4ac}}{2a}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "b",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{b^2-4ac}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "b",
+                          {
+                            "type": "subsup",
+                            "subsupPlacement": "auto",
+                            "superscript": [
+                              "2"
+                            ]
+                          },
+                          {
+                            "type": "mbin",
+                            "command": "-",
+                            "value": "−"
+                          },
+                          "4",
+                          "a",
+                          "c"
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "4",
+                      "a",
+                      "c"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "2",
+                  "a"
+                ]
+              }
+            ],
+            "above": [
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "b",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{b^2-4ac}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "b",
+                      {
+                        "type": "subsup",
+                        "subsupPlacement": "auto",
+                        "superscript": [
+                          "2"
+                        ]
+                      },
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "4",
+                      "a",
+                      "c"
+                    ]
+                  }
+                ],
+                "body": [
+                  "b",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  },
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "4",
+                  "a",
+                  "c"
+                ]
+              }
+            ],
+            "below": [
+              "2",
+              "a"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      }
+    ]
+  }
+}

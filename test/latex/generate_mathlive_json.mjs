@@ -24,13 +24,76 @@ import { JSDOM } from 'jsdom';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const MATH_DIR = path.join(__dirname, 'math');
-const MATH_AST_DIR = path.join(__dirname, 'math-ast');
+const FIXTURES_MATH_DIR = path.join(__dirname, 'fixtures', 'math');
 const REFERENCE_DIR = path.join(__dirname, 'reference');
 
 // Ensure directories exist
 if (!fs.existsSync(REFERENCE_DIR)) {
     fs.mkdirSync(REFERENCE_DIR, { recursive: true });
+}
+
+/**
+ * Parse a .tex file and extract math expressions
+ */
+function parseTexFile(texPath) {
+    try {
+        const content = fs.readFileSync(texPath, 'utf-8');
+        const expressions = [];
+        let index = 0;
+
+        // Remove comments (lines starting with %)
+        const lines = content.split('\n');
+        const cleanLines = lines.filter(line => !line.trim().startsWith('%'));
+        const cleanContent = cleanLines.join('\n');
+
+        // Pattern for display math: \[...\] or $$...$$
+        const displayMathRegex = /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g;
+        let match;
+
+        while ((match = displayMathRegex.exec(cleanContent)) !== null) {
+            const latex = (match[1] || match[2]).trim();
+            if (latex && !latex.includes('\\begin{document}') && !latex.includes('\\end{document}')) {
+                expressions.push({
+                    index: index++,
+                    type: 'display',
+                    latex: latex
+                });
+            }
+        }
+
+        // Pattern for inline math: $...$  (but not $$)
+        const inlineMathRegex = /(?<!\$)\$(?!\$)([\s\S]*?)(?<!\$)\$(?!\$)/g;
+        while ((match = inlineMathRegex.exec(cleanContent)) !== null) {
+            const latex = match[1].trim();
+            if (latex && !latex.includes('\\begin{document}') && !latex.includes('\\end{document}')) {
+                expressions.push({
+                    index: index++,
+                    type: 'inline',
+                    latex: latex
+                });
+            }
+        }
+
+        // Pattern for \(...\) inline math
+        const inlineParenRegex = /\\\(([\s\S]*?)\\\)/g;
+        while ((match = inlineParenRegex.exec(cleanContent)) !== null) {
+            const latex = match[1].trim();
+            if (latex) {
+                expressions.push({
+                    index: index++,
+                    type: 'inline',
+                    latex: latex
+                });
+            }
+        }
+
+        return {
+            source: path.basename(texPath),
+            expressions: expressions
+        };
+    } catch (error) {
+        return { error: error.message };
+    }
 }
 
 /**
@@ -206,13 +269,18 @@ async function generateWithPuppeteer(testFiles, options = {}) {
 
     for (const testFile of testFiles) {
         const testPath = testFile.path;
-        const testName = path.basename(testPath, '.json');
+        const ext = path.extname(testPath);
+        const testName = path.basename(testPath, ext);
 
-        console.log(`Processing: ${testName}`);
+        console.log(`Processing: ${testFile.relPath || testName}`);
 
         let testData;
         try {
-            testData = JSON.parse(fs.readFileSync(testPath, 'utf-8'));
+            if (ext === '.tex') {
+                testData = parseTexFile(testPath);
+            } else {
+                testData = JSON.parse(fs.readFileSync(testPath, 'utf-8'));
+            }
         } catch (e) {
             console.error(`  Failed to read ${testPath}: ${e.message}`);
             continue;
@@ -265,32 +333,41 @@ async function generateWithPuppeteer(testFiles, options = {}) {
 }
 
 /**
- * Collect test files from math/ and math-ast/ directories
+ * Recursively collect tex files from fixtures/math directory
  */
 function collectTestFiles(options = {}) {
     const files = [];
 
-    // Check math directory
-    if (fs.existsSync(MATH_DIR)) {
-        const mathFiles = fs.readdirSync(MATH_DIR)
-            .filter(f => f.endsWith('.json'))
-            .map(f => ({ file: f, path: path.join(MATH_DIR, f) }));
-        files.push(...mathFiles);
-    }
+    // Recursively collect all .tex files from fixtures/math
+    const collectTexFiles = (dir, prefix = '') => {
+        if (!fs.existsSync(dir)) return;
 
-    // Check math-ast directory
-    if (fs.existsSync(MATH_AST_DIR)) {
-        const astFiles = fs.readdirSync(MATH_AST_DIR)
-            .filter(f => f.endsWith('.json'))
-            .map(f => ({ file: f, path: path.join(MATH_AST_DIR, f) }));
-        files.push(...astFiles);
-    }
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                // Recurse into subdirectories
+                const subPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+                collectTexFiles(fullPath, subPrefix);
+            } else if (entry.name.endsWith('.tex')) {
+                const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+                files.push({
+                    file: entry.name,
+                    path: fullPath,
+                    relPath: relPath
+                });
+            }
+        }
+    };
+
+    collectTexFiles(FIXTURES_MATH_DIR);
 
     // Filter if specific test requested
     if (options.test) {
         return files.filter(f =>
             f.file.startsWith(options.test) ||
-            f.file === options.test + '.json'
+            f.file === options.test + '.tex' ||
+            f.relPath.includes(options.test)
         );
     }
 

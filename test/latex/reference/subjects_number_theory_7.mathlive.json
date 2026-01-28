@@ -1,0 +1,182 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left(\\frac{p}{q}\\right)\\left(\\frac{q}{p}\\right) = (-1)^{\\frac{p-1}{2}\\cdot\\frac{q-1}{2}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.140Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left(\\frac{p}{q}\\right)\\left(\\frac{q}{p}\\right) = (-1)^{\\frac{p-1}{2}\\cdot\\frac{q-1}{2}}",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{p}{q}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "p"
+                ]
+              },
+              {
+                "group": [
+                  "q"
+                ]
+              }
+            ],
+            "above": [
+              "p"
+            ],
+            "below": [
+              "q"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{q}{p}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "q"
+                ]
+              },
+              {
+                "group": [
+                  "p"
+                ]
+              }
+            ],
+            "above": [
+              "q"
+            ],
+            "below": [
+              "p"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "1",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{p-1}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "p",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "p",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ],
+            "below": [
+              "2"
+            ]
+          },
+          {
+            "type": "mbin",
+            "command": "\\cdot",
+            "value": "⋅",
+            "verbatimLatex": "\\cdot"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{q-1}{2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "q",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "2"
+                ]
+              }
+            ],
+            "above": [
+              "q",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ],
+            "below": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,192 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a_n = \\frac{1}{2\\pi i} \\oint_C \\frac{f(z)}{(z-z_0)^{n+1}} \\, dz",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.117Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a_n = \\frac{1}{2\\pi i} \\oint_C \\frac{f(z)}{(z-z_0)^{n+1}} \\, dz",
+    "body": [
+      "a",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{1}{2\\pi i}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "2",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "i"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2",
+          {
+            "type": "mord",
+            "command": "\\pi",
+            "value": "π",
+            "verbatimLatex": "\\pi"
+          },
+          "i"
+        ]
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\oint",
+        "value": "∮",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "C"
+        ],
+        "limits": "adjacent",
+        "symbol": "∮"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{f(z)}{(z-z_0)^{n+1}}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "f",
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "z",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "z",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "z",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "0"
+                ]
+              },
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "n",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "1"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          "f",
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "z",
+          {
+            "type": "mclose",
+            "value": ")"
+          }
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "z",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "z",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "0"
+            ]
+          },
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "n",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "1"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "z"
+    ]
+  }
+}

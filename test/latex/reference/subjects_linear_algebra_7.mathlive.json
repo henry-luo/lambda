@@ -1,0 +1,41 @@
+{
+  "format": "mathlive-ast",
+  "latex": "Q^T Q = Q Q^T = I",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.130Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "Q^T Q = Q Q^T = I",
+    "body": [
+      "Q",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "T"
+        ]
+      },
+      "Q",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "Q",
+      "Q",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "T"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "I"
+    ]
+  }
+}

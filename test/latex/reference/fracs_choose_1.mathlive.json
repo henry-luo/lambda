@@ -1,0 +1,40 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\choose b",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.563Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\choose b",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\choose",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "a"
+            ]
+          },
+          {
+            "atoms": [
+              "b"
+            ]
+          }
+        ],
+        "above": [
+          "a"
+        ],
+        "below": [
+          "b"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      }
+    ]
+  }
+}

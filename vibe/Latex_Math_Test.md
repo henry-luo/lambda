@@ -36,59 +36,71 @@ This weighted approach ensures:
 test/
 ├── latex/
 │   ├── test_math_comparison.js      # Main test runner (Node.js)
-│   ├── mathlive_reference.mjs       # MathLive AST/HTML generator
-│   ├── katex_reference.mjs          # KaTeX HTML generator
+│   ├── generate_mathlive_json.mjs   # MathLive AST reference generator
 │   ├── comparators/
 │   │   ├── ast_comparator.js        # AST semantic comparison
+│   │   ├── mathlive_ast_comparator.js # MathLive AST comparison (preferred)
 │   │   ├── html_comparator.js       # HTML structure comparison
 │   │   └── dvi_comparator.js        # DVI output comparison
-│   ├── math/                        # All test files (flat structure)
-│   │   ├── accents_*.json           # Accent tests
-│   │   ├── arrows_*.json            # Arrow symbol tests
-│   │   ├── bigops_*.json            # Big operator tests (\sum, \int, etc.)
-│   │   ├── choose_*.json            # Binomial coefficient tests
-│   │   ├── delims_*.json            # Delimiter tests
-│   │   ├── fonts_*.json             # Font style tests (\mathbf, \mathrm, etc.)
-│   │   ├── fracs_*.json             # Fraction tests
-│   │   ├── greek_*.json             # Greek letter tests
-│   │   ├── matrix_*.json            # Matrix/array tests
-│   │   ├── operators_*.json         # Binary/relation operator tests
-│   │   ├── scripts_*.json           # Subscript/superscript tests
-│   │   ├── spacing_*.json           # Spacing and phantom tests
-│   │   ├── sqrt_*.json              # Square root tests
-│   │   └── complex_*.json           # Complex real-world formulas
+│   ├── fixtures/
+│   │   └── math/                    # SOURCE OF TRUTH: All math test fixtures (.tex)
+│   │       ├── accents.tex          # Accent tests
+│   │       ├── arrows.tex           # Arrow symbol tests
+│   │       ├── fracs.tex            # Fraction tests
+│   │       ├── ... (32 top-level .tex files)
+│   │       ├── mathlive/            # MathLive test suite (196 .tex files)
+│   │       │   ├── accents_*.tex
+│   │       │   ├── fractions_*.tex
+│   │       │   └── ...
+│   │       └── subjects/            # Subject-specific tests
 │   ├── baseline/                    # Baseline tests (DVI must pass 100%)
 │   │   ├── *.tex
 │   │   └── reference/*.dvi
-│   └── reference/                   # Reference files for extended tests
+│   └── reference/                   # Generated reference files
 │       ├── *.mathlive.json          # MathLive AST reference (toJson() - preferred)
-│       ├── *.mathml.json            # MathML reference (fallback for AST comparison)
+│       ├── *.mathml.json            # MathML reference (fallback)
 │       ├── *.mathlive.html          # MathLive HTML reference
-│       ├── *.katex.html             # KaTeX HTML reference
-│       └── *.dvi                    # pdfTeX DVI reference
+│       └── *.katex.html             # KaTeX HTML reference
 ```
+
+### Test Source Files
+
+**Single source of truth**: `test/latex/fixtures/math/`
+
+All math tests use `.tex` files as source. The test runner parses these files to extract
+math expressions (`$...$`, `$$...$$`, `\[...\]`, `\(...\)`).
+
+| Directory | Content | Count |
+|-----------|---------|-------|
+| `fixtures/math/` | Top-level test files | ~30 .tex files |
+| `fixtures/math/mathlive/` | MathLive test suite | ~201 .tex files |
+| `fixtures/math/subjects/` | Subject-specific tests | ~17 .tex files |
 
 ### Test Naming Convention
 
-All test files start with their **feature group prefix** for easy identification and filtering:
+**All test files start with their feature group prefix** (e.g., `accents_`, `fracs_`, `subjects_`).
+This enables easy filtering with `--group <prefix>`.
 
-| Prefix | Feature Group | Examples |
-|--------|---------------|----------|
-| `accents_` | Accents & decorations | `accents_hat.json`, `accents_vec.json` |
-| `arrows_` | Arrow symbols | `arrows_basic.json`, `arrows_extensible.json` |
-| `bigops_` | Big operators | `bigops_sum.json`, `bigops_integral.json` |
-| `choose_` | Binomial coefficients | `choose_basic.json`, `choose_nested.json` |
-| `delims_` | Delimiters | `delims_basic.json`, `delims_extensible.json` |
-| `fonts_` | Font styles | `fonts_mathbf.json`, `fonts_mathrm.json` |
-| `fracs_` | Fractions | `fracs_basic.json`, `fracs_nested.json` |
-| `greek_` | Greek letters | `greek_lower.json`, `greek_upper.json` |
-| `matrix_` | Matrices & arrays | `matrix_basic.json`, `matrix_cases.json` |
-| `not_` | Negations | `not_basic.json`, `not_relations.json` |
-| `operators_` | Binary/relation ops | `operators_binary.json`, `operators_relations.json` |
-| `scripts_` | Sub/superscripts | `scripts_basic.json`, `scripts_limits.json` |
-| `spacing_` | Spacing & phantoms | `spacing_quad.json`, `spacing_phantom.json` |
-| `sqrt_` | Square roots | `sqrt_basic.json`, `sqrt_nested.json` |
-| `complex_` | Complex formulas | `complex_calculus.json`, `complex_physics.json` |
+| Prefix | Feature Group | Description |
+|--------|---------------|-------------|
+| `accents_` | Accents & decorations | Hats, bars, dots, over/under constructs |
+| `arrays_` | Arrays & matrices | Array environments, matrix types |
+| `bigops_` | Big operators | Sum, integral, product with limits |
+| `boxes_` | Boxes & rules | mbox, fbox, rule, dimensions |
+| `delims_` | Delimiters | Left/right, sizing (big, Big, etc.) |
+| `fonts_` | Font styles | Bold, italic, mathbb, mode shifts |
+| `fracs_` | Fractions | frac, dfrac, cfrac, binomial, choose |
+| `greek_` | Greek letters | Alpha to omega, variants |
+| `misc_` | Miscellaneous | Extensions, samplers, declare |
+| `negation_` | Negation | not, negated symbols |
+| `nested_` | Nested structures | Complex multi-level formulas |
+| `operators_` | Operators & relations | Binary, relational, ambiguous |
+| `radicals_` | Radicals | sqrt, nth roots |
+| `scripts_` | Sub/superscripts | Subscripts, superscripts, limits |
+| `spacing_` | Spacing & phantoms | Horizontal/vertical space, phantom |
+| `styles_` | Display styles | displaystyle, textstyle, sizing |
+| `subjects_` | Subject tests | Calculus, physics, linear algebra, etc. |
+| `symbols_` | Symbols | Arrows, ordinary symbols |
 
 ### Test Categories
 

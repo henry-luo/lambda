@@ -1,0 +1,141 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\forall x \\neq y, \\exists U, V \\text{ open}: x \\in U, y \\in V, U \\cap V = \\emptyset",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.175Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\forall x \\neq y, \\exists U, V \\text{ open}: x \\in U, y \\in V, U \\cap V = \\emptyset",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\forall",
+        "value": "∀",
+        "verbatimLatex": "\\forall"
+      },
+      "x",
+      {
+        "type": "mrel",
+        "command": "\\neq",
+        "verbatimLatex": "\\neq",
+        "captureSelection": true,
+        "args": [],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\neq",
+            "skipBoundary": true,
+            "args": [],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right",
+            "boxType": "rel"
+          },
+          {
+            "command": "\\neq",
+            "value": "=",
+            "args": []
+          }
+        ]
+      },
+      "y",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "command": "\\exists",
+        "value": "∃",
+        "verbatimLatex": "\\exists"
+      },
+      "U",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "V",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "p",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "e",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "x",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "U",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "y",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "V",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "U",
+      {
+        "type": "mbin",
+        "command": "\\cap",
+        "value": "∩",
+        "verbatimLatex": "\\cap"
+      },
+      "V",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\emptyset",
+        "value": "∅",
+        "verbatimLatex": "\\emptyset"
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "123\\colorbox{red}456",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.973Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "123\\colorbox{red}456",
+    "body": [
+      "1",
+      "2",
+      "3",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "4",
+        "style": {
+          "verbatimBackgroundColor": "red",
+          "backgroundColor": "#fbbbb6"
+        },
+        "displayContainsHighlight": true
+      },
+      "5",
+      "6"
+    ]
+  }
+}

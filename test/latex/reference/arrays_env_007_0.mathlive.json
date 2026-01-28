@@ -1,0 +1,254 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\begin{cases}\\sum_n^{100}+\\frac{x-y}{4}=\\frac{4-y}{8}\\\\-\\frac{y+3}{8}=\\frac{1-2x}{8}+\\sum_n^{100}\\end{cases}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.641Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\begin{cases}\\sum_n^{100}+\\frac{x-y}{4}=\\frac{4-y}{8}\\\\-\\frac{y+3}{8}=\\frac{1-2x}{8}+\\sum_n^{100}\\end{cases}",
+    "body": [
+      {
+        "type": "array",
+        "environmentName": "cases",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "extensible-symbol",
+                "command": "\\sum",
+                "value": "∑",
+                "subsupPlacement": "auto",
+                "args": [],
+                "subscript": [
+                  "n"
+                ],
+                "superscript": [
+                  "1",
+                  "0",
+                  "0"
+                ],
+                "variant": "main",
+                "limits": "auto",
+                "symbol": "∑"
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{x-y}{4}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "x",
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "y"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "4"
+                    ]
+                  }
+                ],
+                "above": [
+                  "x",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "y"
+                ],
+                "below": [
+                  "4"
+                ]
+              },
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{4-y}{8}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "4",
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "y"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "8"
+                    ]
+                  }
+                ],
+                "above": [
+                  "4",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "y"
+                ],
+                "below": [
+                  "8"
+                ]
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{y+3}{8}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "y",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      "3"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "8"
+                    ]
+                  }
+                ],
+                "above": [
+                  "y",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  "3"
+                ],
+                "below": [
+                  "8"
+                ]
+              },
+              {
+                "type": "mrel",
+                "value": "="
+              },
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac{1-2x}{8}",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "group": [
+                      "1",
+                      {
+                        "type": "mbin",
+                        "command": "-",
+                        "value": "−"
+                      },
+                      "2",
+                      "x"
+                    ]
+                  },
+                  {
+                    "group": [
+                      "8"
+                    ]
+                  }
+                ],
+                "above": [
+                  "1",
+                  {
+                    "type": "mbin",
+                    "command": "-",
+                    "value": "−"
+                  },
+                  "2",
+                  "x"
+                ],
+                "below": [
+                  "8"
+                ]
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "extensible-symbol",
+                "command": "\\sum",
+                "value": "∑",
+                "subsupPlacement": "auto",
+                "args": [],
+                "subscript": [
+                  "n"
+                ],
+                "superscript": [
+                  "1",
+                  "0",
+                  "0"
+                ],
+                "variant": "main",
+                "limits": "auto",
+                "symbol": "∑"
+              }
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "l"
+          },
+          {
+            "gap": 1
+          },
+          {
+            "align": "l"
+          }
+        ],
+        "arraystretch": 1.2,
+        "leftDelim": "\\lbrace",
+        "rightDelim": "."
+      }
+    ]
+  }
+}

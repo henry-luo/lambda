@@ -1,0 +1,73 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\sqrt{x}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.036Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\sqrt{x}",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\sqrt",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "displayContainsHighlight": true,
+                "args": [],
+                "body": []
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "displayContainsHighlight": true,
+                    "args": [],
+                    "body": []
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "displayContainsHighlight": true,
+            "args": [],
+            "body": []
+          }
+        ]
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{x}",
+        "skipBoundary": true,
+        "body": [
+          "x"
+        ]
+      }
+    ]
+  }
+}

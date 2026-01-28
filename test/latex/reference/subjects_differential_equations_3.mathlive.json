@@ -1,0 +1,81 @@
+{
+  "format": "mathlive-ast",
+  "latex": "y'' + p(x)y' + q(x)y = r(x)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.121Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "y'' + p(x)y' + q(x)y = r(x)",
+    "body": [
+      "y",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\doubleprime",
+            "value": "′′"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "p",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      "y",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\prime",
+            "value": "′"
+          }
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "q",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      "y",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "r",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

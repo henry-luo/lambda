@@ -1,0 +1,81 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\{x \\in \\mathbb{R} : x^2 < 1\\} = (-1, 1)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.166Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\{x \\in \\mathbb{R} : x^2 < 1\\} = (-1, 1)",
+    "body": [
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "x",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "double-struck",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "<"
+      },
+      "1",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "1",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "1",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{X''}{X} = \\frac{T'}{kT} = -\\lambda",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.126Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{X''}{X} = \\frac{T'}{kT} = -\\lambda",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{X''}{X}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "X",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "mord",
+                    "command": "\\doubleprime",
+                    "value": "′′"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "X"
+            ]
+          }
+        ],
+        "above": [
+          "X",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mord",
+                "command": "\\doubleprime",
+                "value": "′′"
+              }
+            ]
+          }
+        ],
+        "below": [
+          "X"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{T'}{kT}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "T",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "mord",
+                    "command": "\\prime",
+                    "value": "′"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "k",
+              "T"
+            ]
+          }
+        ],
+        "above": [
+          "T",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              {
+                "type": "mord",
+                "command": "\\prime",
+                "value": "′"
+              }
+            ]
+          }
+        ],
+        "below": [
+          "k",
+          "T"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      {
+        "type": "mord",
+        "command": "\\lambda",
+        "value": "λ",
+        "verbatimLatex": "\\lambda"
+      }
+    ]
+  }
+}

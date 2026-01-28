@@ -1,9 +1,9 @@
 {
   "format": "mathlive-ast",
   "latex": "\\frac{a}{b}",
-  "description": "Simple fraction",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.109Z",
+  "generatedAt": "2026-01-28T02:51:40.538Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

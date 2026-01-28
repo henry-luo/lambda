@@ -1,31 +1,46 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\{a+b\\}",
-  "description": "Curly braces",
-  "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.100Z",
+  "latex": "\\left(\\frac{a}{b}\\right)",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.510Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\{a+b\\}",
+    "verbatimLatex": "\\left(\\frac{a}{b}\\right)",
     "body": [
       {
-        "type": "mopen",
-        "command": "\\{",
-        "value": "{",
-        "verbatimLatex": "\\{"
-      },
-      "a",
-      {
-        "type": "mbin",
-        "value": "+"
-      },
-      "b",
-      {
-        "type": "mclose",
-        "command": "\\}",
-        "value": "}",
-        "verbatimLatex": "\\}"
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{a}{b}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "a"
+                ]
+              },
+              {
+                "group": [
+                  "b"
+                ]
+              }
+            ],
+            "above": [
+              "a"
+            ],
+            "below": [
+              "b"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
       }
     ]
   }

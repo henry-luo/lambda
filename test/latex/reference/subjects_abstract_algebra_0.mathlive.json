@@ -1,0 +1,92 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\phi: G \\to H, \\quad \\phi(ab) = \\phi(a)\\phi(b)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.083Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\phi: G \\to H, \\quad \\phi(ab) = \\phi(a)\\phi(b)",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\phi",
+        "value": "ϕ",
+        "verbatimLatex": "\\phi"
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "G",
+      {
+        "type": "mrel",
+        "command": "\\to",
+        "value": "→",
+        "verbatimLatex": "\\to"
+      },
+      "H",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "mord",
+        "command": "\\phi",
+        "value": "ϕ",
+        "verbatimLatex": "\\phi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\phi",
+        "value": "ϕ",
+        "verbatimLatex": "\\phi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "\\phi",
+        "value": "ϕ",
+        "verbatimLatex": "\\phi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

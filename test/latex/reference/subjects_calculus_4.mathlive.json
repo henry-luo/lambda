@@ -1,0 +1,108 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{dy}{dx} = \\frac{dy}{du} \\cdot \\frac{du}{dx}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.095Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{dy}{dx} = \\frac{dy}{du} \\cdot \\frac{du}{dx}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{dy}{dx}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "d",
+              "y"
+            ]
+          },
+          {
+            "group": [
+              "d",
+              "x"
+            ]
+          }
+        ],
+        "above": [
+          "d",
+          "y"
+        ],
+        "below": [
+          "d",
+          "x"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{dy}{du}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "d",
+              "y"
+            ]
+          },
+          {
+            "group": [
+              "d",
+              "u"
+            ]
+          }
+        ],
+        "above": [
+          "d",
+          "y"
+        ],
+        "below": [
+          "d",
+          "u"
+        ]
+      },
+      {
+        "type": "mbin",
+        "command": "\\cdot",
+        "value": "⋅",
+        "verbatimLatex": "\\cdot"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{du}{dx}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "d",
+              "u"
+            ]
+          },
+          {
+            "group": [
+              "d",
+              "x"
+            ]
+          }
+        ],
+        "above": [
+          "d",
+          "u"
+        ],
+        "below": [
+          "d",
+          "x"
+        ]
+      }
+    ]
+  }
+}

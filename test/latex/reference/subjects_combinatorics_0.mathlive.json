@@ -1,0 +1,89 @@
+{
+  "format": "mathlive-ast",
+  "latex": "P(n, k) = \\frac{n!}{(n-k)!}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.108Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "P(n, k) = \\frac{n!}{(n-k)!}",
+    "body": [
+      "P",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "n",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "k",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{n!}{(n-k)!}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "n",
+              "!"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "n",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "k",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              "!"
+            ]
+          }
+        ],
+        "above": [
+          "n",
+          "!"
+        ],
+        "below": [
+          {
+            "type": "mopen",
+            "value": "("
+          },
+          "n",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "k",
+          {
+            "type": "mclose",
+            "value": ")"
+          },
+          "!"
+        ]
+      }
+    ]
+  }
+}

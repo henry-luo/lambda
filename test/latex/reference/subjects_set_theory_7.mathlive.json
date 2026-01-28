@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathcal{P}(A) = \\{S : S \\subseteq A\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.165Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathcal{P}(A) = \\{S : S \\subseteq A\\}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "P",
+        "style": {
+          "variant": "calligraphic",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "A",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "S",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "S",
+      {
+        "type": "mrel",
+        "command": "\\subseteq",
+        "value": "⊆",
+        "verbatimLatex": "\\subseteq"
+      },
+      "A",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

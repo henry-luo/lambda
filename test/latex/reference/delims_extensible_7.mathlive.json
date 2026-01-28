@@ -1,0 +1,41 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left\\| \\vec{v} \\right\\|",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.517Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left\\| \\vec{v} \\right\\|",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "accent",
+            "command": "\\vec",
+            "verbatimLatex": "\\vec{v}",
+            "skipBoundary": true,
+            "captureSelection": true,
+            "args": [
+              {
+                "group": [
+                  "v"
+                ]
+              }
+            ],
+            "body": [
+              "v"
+            ],
+            "accentChar": 8407
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "\\|",
+        "rightDelim": "\\|"
+      }
+    ]
+  }
+}

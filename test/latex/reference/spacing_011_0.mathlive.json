@@ -1,0 +1,87 @@
+{
+  "format": "mathlive-ast",
+  "latex": ")x)+)=)\\frac34)))();",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.979Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": ")x)+)=)\\frac34)))();",
+    "body": [
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac34",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "3"
+            ]
+          },
+          {
+            "atoms": [
+              "4"
+            ]
+          }
+        ],
+        "above": [
+          "3"
+        ],
+        "below": [
+          "4"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mpunct",
+        "value": ";"
+      }
+    ]
+  }
+}

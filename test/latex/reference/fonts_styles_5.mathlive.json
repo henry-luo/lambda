@@ -1,0 +1,222 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathbf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.522Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathbf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "A",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "B",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "C",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "D",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "E",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "F",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "G",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "H",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "I",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "J",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "K",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "L",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "M",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "N",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "O",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "P",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Q",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "S",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "T",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "U",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "V",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "W",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "X",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Y",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Z",
+        "style": {
+          "variant": "normal",
+          "variantStyle": "bold"
+        }
+      }
+    ]
+  }
+}

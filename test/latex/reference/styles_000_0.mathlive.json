@@ -1,0 +1,1031 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\binom12 \\textstyle \\binom34 \\scriptstyle \\binom56 \\displaystyle \\binom78 \\scriptstyle \\binom90",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.997Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\binom12 \\textstyle \\binom34 \\scriptstyle \\binom56 \\displaystyle \\binom78 \\scriptstyle \\binom90",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\binom",
+        "verbatimLatex": "\\binom12",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "atoms": [
+              "1"
+            ]
+          },
+          {
+            "atoms": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "1"
+        ],
+        "below": [
+          "2"
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")",
+        "hasBarLine": false
+      },
+      {
+        "command": "\\textstyle",
+        "verbatimLatex": "\\textstyle\\binom34 \\scriptstyle\\binom56 \\displaystyle\\binom78 \\scriptstyle\\binom90",
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "genfrac",
+                "command": "\\binom",
+                "verbatimLatex": "\\binom34",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "3"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "4"
+                    ]
+                  }
+                ],
+                "above": [
+                  "3"
+                ],
+                "below": [
+                  "4"
+                ],
+                "leftDelim": "(",
+                "rightDelim": ")",
+                "hasBarLine": false
+              },
+              {
+                "command": "\\scriptstyle",
+                "verbatimLatex": "\\scriptstyle\\binom56 \\displaystyle\\binom78 \\scriptstyle\\binom90",
+                "args": [
+                  {
+                    "atoms": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\binom",
+                        "verbatimLatex": "\\binom56",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "5"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "6"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "5"
+                        ],
+                        "below": [
+                          "6"
+                        ],
+                        "leftDelim": "(",
+                        "rightDelim": ")",
+                        "hasBarLine": false
+                      },
+                      {
+                        "command": "\\displaystyle",
+                        "verbatimLatex": "\\displaystyle\\binom78 \\scriptstyle\\binom90",
+                        "args": [
+                          {
+                            "atoms": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom78",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "7"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "8"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "7"
+                                ],
+                                "below": [
+                                  "8"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              },
+                              {
+                                "command": "\\scriptstyle",
+                                "verbatimLatex": "\\scriptstyle\\binom90",
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      {
+                                        "type": "genfrac",
+                                        "command": "\\binom",
+                                        "verbatimLatex": "\\binom90",
+                                        "displayContainsHighlight": true,
+                                        "args": [
+                                          {
+                                            "atoms": [
+                                              "9"
+                                            ]
+                                          },
+                                          {
+                                            "atoms": [
+                                              "0"
+                                            ]
+                                          }
+                                        ],
+                                        "above": [
+                                          "9"
+                                        ],
+                                        "below": [
+                                          "0"
+                                        ],
+                                        "leftDelim": "(",
+                                        "rightDelim": ")",
+                                        "hasBarLine": false
+                                      }
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  {
+                                    "type": "genfrac",
+                                    "command": "\\binom",
+                                    "verbatimLatex": "\\binom90",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      {
+                                        "atoms": [
+                                          "9"
+                                        ]
+                                      },
+                                      {
+                                        "atoms": [
+                                          "0"
+                                        ]
+                                      }
+                                    ],
+                                    "above": [
+                                      "9"
+                                    ],
+                                    "below": [
+                                      "0"
+                                    ],
+                                    "leftDelim": "(",
+                                    "rightDelim": ")",
+                                    "hasBarLine": false
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom78",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "7"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "8"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "7"
+                            ],
+                            "below": [
+                              "8"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          },
+                          {
+                            "command": "\\scriptstyle",
+                            "verbatimLatex": "\\scriptstyle\\binom90",
+                            "args": [
+                              {
+                                "atoms": [
+                                  {
+                                    "type": "genfrac",
+                                    "command": "\\binom",
+                                    "verbatimLatex": "\\binom90",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      {
+                                        "atoms": [
+                                          "9"
+                                        ]
+                                      },
+                                      {
+                                        "atoms": [
+                                          "0"
+                                        ]
+                                      }
+                                    ],
+                                    "above": [
+                                      "9"
+                                    ],
+                                    "below": [
+                                      "0"
+                                    ],
+                                    "leftDelim": "(",
+                                    "rightDelim": ")",
+                                    "hasBarLine": false
+                                  }
+                                ]
+                              }
+                            ],
+                            "body": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom90",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "9"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "0"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "9"
+                                ],
+                                "below": [
+                                  "0"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\binom",
+                    "verbatimLatex": "\\binom56",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "atoms": [
+                          "5"
+                        ]
+                      },
+                      {
+                        "atoms": [
+                          "6"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "5"
+                    ],
+                    "below": [
+                      "6"
+                    ],
+                    "leftDelim": "(",
+                    "rightDelim": ")",
+                    "hasBarLine": false
+                  },
+                  {
+                    "command": "\\displaystyle",
+                    "verbatimLatex": "\\displaystyle\\binom78 \\scriptstyle\\binom90",
+                    "args": [
+                      {
+                        "atoms": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom78",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "7"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "8"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "7"
+                            ],
+                            "below": [
+                              "8"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          },
+                          {
+                            "command": "\\scriptstyle",
+                            "verbatimLatex": "\\scriptstyle\\binom90",
+                            "args": [
+                              {
+                                "atoms": [
+                                  {
+                                    "type": "genfrac",
+                                    "command": "\\binom",
+                                    "verbatimLatex": "\\binom90",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      {
+                                        "atoms": [
+                                          "9"
+                                        ]
+                                      },
+                                      {
+                                        "atoms": [
+                                          "0"
+                                        ]
+                                      }
+                                    ],
+                                    "above": [
+                                      "9"
+                                    ],
+                                    "below": [
+                                      "0"
+                                    ],
+                                    "leftDelim": "(",
+                                    "rightDelim": ")",
+                                    "hasBarLine": false
+                                  }
+                                ]
+                              }
+                            ],
+                            "body": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom90",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "9"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "0"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "9"
+                                ],
+                                "below": [
+                                  "0"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\binom",
+                        "verbatimLatex": "\\binom78",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "7"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "8"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "7"
+                        ],
+                        "below": [
+                          "8"
+                        ],
+                        "leftDelim": "(",
+                        "rightDelim": ")",
+                        "hasBarLine": false
+                      },
+                      {
+                        "command": "\\scriptstyle",
+                        "verbatimLatex": "\\scriptstyle\\binom90",
+                        "args": [
+                          {
+                            "atoms": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom90",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "9"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "0"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "9"
+                                ],
+                                "below": [
+                                  "0"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom90",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "9"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "0"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "9"
+                            ],
+                            "below": [
+                              "0"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\binom",
+            "verbatimLatex": "\\binom34",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "3"
+                ]
+              },
+              {
+                "atoms": [
+                  "4"
+                ]
+              }
+            ],
+            "above": [
+              "3"
+            ],
+            "below": [
+              "4"
+            ],
+            "leftDelim": "(",
+            "rightDelim": ")",
+            "hasBarLine": false
+          },
+          {
+            "command": "\\scriptstyle",
+            "verbatimLatex": "\\scriptstyle\\binom56 \\displaystyle\\binom78 \\scriptstyle\\binom90",
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\binom",
+                    "verbatimLatex": "\\binom56",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "atoms": [
+                          "5"
+                        ]
+                      },
+                      {
+                        "atoms": [
+                          "6"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "5"
+                    ],
+                    "below": [
+                      "6"
+                    ],
+                    "leftDelim": "(",
+                    "rightDelim": ")",
+                    "hasBarLine": false
+                  },
+                  {
+                    "command": "\\displaystyle",
+                    "verbatimLatex": "\\displaystyle\\binom78 \\scriptstyle\\binom90",
+                    "args": [
+                      {
+                        "atoms": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom78",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "7"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "8"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "7"
+                            ],
+                            "below": [
+                              "8"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          },
+                          {
+                            "command": "\\scriptstyle",
+                            "verbatimLatex": "\\scriptstyle\\binom90",
+                            "args": [
+                              {
+                                "atoms": [
+                                  {
+                                    "type": "genfrac",
+                                    "command": "\\binom",
+                                    "verbatimLatex": "\\binom90",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      {
+                                        "atoms": [
+                                          "9"
+                                        ]
+                                      },
+                                      {
+                                        "atoms": [
+                                          "0"
+                                        ]
+                                      }
+                                    ],
+                                    "above": [
+                                      "9"
+                                    ],
+                                    "below": [
+                                      "0"
+                                    ],
+                                    "leftDelim": "(",
+                                    "rightDelim": ")",
+                                    "hasBarLine": false
+                                  }
+                                ]
+                              }
+                            ],
+                            "body": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom90",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "9"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "0"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "9"
+                                ],
+                                "below": [
+                                  "0"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\binom",
+                        "verbatimLatex": "\\binom78",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "7"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "8"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "7"
+                        ],
+                        "below": [
+                          "8"
+                        ],
+                        "leftDelim": "(",
+                        "rightDelim": ")",
+                        "hasBarLine": false
+                      },
+                      {
+                        "command": "\\scriptstyle",
+                        "verbatimLatex": "\\scriptstyle\\binom90",
+                        "args": [
+                          {
+                            "atoms": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom90",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "9"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "0"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "9"
+                                ],
+                                "below": [
+                                  "0"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom90",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "9"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "0"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "9"
+                            ],
+                            "below": [
+                              "0"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "type": "genfrac",
+                "command": "\\binom",
+                "verbatimLatex": "\\binom56",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "5"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "6"
+                    ]
+                  }
+                ],
+                "above": [
+                  "5"
+                ],
+                "below": [
+                  "6"
+                ],
+                "leftDelim": "(",
+                "rightDelim": ")",
+                "hasBarLine": false
+              },
+              {
+                "command": "\\displaystyle",
+                "verbatimLatex": "\\displaystyle\\binom78 \\scriptstyle\\binom90",
+                "args": [
+                  {
+                    "atoms": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\binom",
+                        "verbatimLatex": "\\binom78",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "7"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "8"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "7"
+                        ],
+                        "below": [
+                          "8"
+                        ],
+                        "leftDelim": "(",
+                        "rightDelim": ")",
+                        "hasBarLine": false
+                      },
+                      {
+                        "command": "\\scriptstyle",
+                        "verbatimLatex": "\\scriptstyle\\binom90",
+                        "args": [
+                          {
+                            "atoms": [
+                              {
+                                "type": "genfrac",
+                                "command": "\\binom",
+                                "verbatimLatex": "\\binom90",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  {
+                                    "atoms": [
+                                      "9"
+                                    ]
+                                  },
+                                  {
+                                    "atoms": [
+                                      "0"
+                                    ]
+                                  }
+                                ],
+                                "above": [
+                                  "9"
+                                ],
+                                "below": [
+                                  "0"
+                                ],
+                                "leftDelim": "(",
+                                "rightDelim": ")",
+                                "hasBarLine": false
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom90",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "9"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "0"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "9"
+                            ],
+                            "below": [
+                              "0"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  {
+                    "type": "genfrac",
+                    "command": "\\binom",
+                    "verbatimLatex": "\\binom78",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      {
+                        "atoms": [
+                          "7"
+                        ]
+                      },
+                      {
+                        "atoms": [
+                          "8"
+                        ]
+                      }
+                    ],
+                    "above": [
+                      "7"
+                    ],
+                    "below": [
+                      "8"
+                    ],
+                    "leftDelim": "(",
+                    "rightDelim": ")",
+                    "hasBarLine": false
+                  },
+                  {
+                    "command": "\\scriptstyle",
+                    "verbatimLatex": "\\scriptstyle\\binom90",
+                    "args": [
+                      {
+                        "atoms": [
+                          {
+                            "type": "genfrac",
+                            "command": "\\binom",
+                            "verbatimLatex": "\\binom90",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              {
+                                "atoms": [
+                                  "9"
+                                ]
+                              },
+                              {
+                                "atoms": [
+                                  "0"
+                                ]
+                              }
+                            ],
+                            "above": [
+                              "9"
+                            ],
+                            "below": [
+                              "0"
+                            ],
+                            "leftDelim": "(",
+                            "rightDelim": ")",
+                            "hasBarLine": false
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      {
+                        "type": "genfrac",
+                        "command": "\\binom",
+                        "verbatimLatex": "\\binom90",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          {
+                            "atoms": [
+                              "9"
+                            ]
+                          },
+                          {
+                            "atoms": [
+                              "0"
+                            ]
+                          }
+                        ],
+                        "above": [
+                          "9"
+                        ],
+                        "below": [
+                          "0"
+                        ],
+                        "leftDelim": "(",
+                        "rightDelim": ")",
+                        "hasBarLine": false
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

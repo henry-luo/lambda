@@ -1,0 +1,49 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\iint_D f(x,y) \\, dA",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.500Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\iint_D f(x,y) \\, dA",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\iint",
+        "value": "∬",
+        "subsupPlacement": "adjacent",
+        "args": [],
+        "subscript": [
+          "D"
+        ],
+        "limits": "adjacent",
+        "symbol": "∬"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "y",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "spacing",
+        "command": "\\,",
+        "verbatimLatex": "\\,",
+        "args": []
+      },
+      "d",
+      "A"
+    ]
+  }
+}
