@@ -3,7 +3,6 @@
   "latex": "\\left|\\bigcup_{i=1}^{n} A_i\\right| = \\sum_{i} |A_i| - \\sum_{i<j} |A_i \\cap A_j| + \\cdots + (-1)^{n+1} |A_1 \\cap \\cdots \\cap A_n|",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.113Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

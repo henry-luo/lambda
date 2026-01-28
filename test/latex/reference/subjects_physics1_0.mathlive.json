@@ -3,7 +3,6 @@
   "latex": "E^2 = (pc)^2 + (m_0 c^2)^2",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.148Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\overline{A} = A^c = \\{x : x \\notin A\\}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.163Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "B_r(x) = \\{y \\in X : d(x, y) < r\\}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.170Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

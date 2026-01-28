@@ -3,7 +3,6 @@
   "latex": "e^{i\\pi} + 1 = 0",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.574Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\not=, \\not<,\\not\\le,\\not\\ll,\n   \\not\\prec,\\not\\preceq,\n   \\not\\subset,\\not\\subseteq,\\not\\sqsubseteq,\n   \\not\\lhd,\\not\\unlhd,\n   \\not\\asymp",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.033Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

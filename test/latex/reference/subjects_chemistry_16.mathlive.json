@@ -3,7 +3,6 @@
   "latex": "1s^2 2s^2 2p^6 3s^2 3p^6 3d^{10} 4s^2 4p^6",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.106Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

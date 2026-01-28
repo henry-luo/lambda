@@ -3,7 +3,6 @@
   "latex": "\\binom{n}{k_1, k_2, \\ldots, k_m} = \\frac{n!}{k_1! k_2! \\cdots k_m!}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.110Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

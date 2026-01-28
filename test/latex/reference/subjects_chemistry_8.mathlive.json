@@ -3,7 +3,6 @@
   "latex": "\\text{pH} = \\text{p}K_\\text{a} + \\log\\frac{[\\text{A}^-]}{[\\text{HA}]}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.103Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

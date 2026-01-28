@@ -3,7 +3,6 @@
   "latex": "\\left(\\frac{p}{q}\\right)\\left(\\frac{q}{p}\\right) = (-1)^{\\frac{p-1}{2}\\cdot\\frac{q-1}{2}}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.140Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

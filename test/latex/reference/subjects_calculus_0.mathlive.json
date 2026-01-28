@@ -3,7 +3,6 @@
   "latex": "\\lim_{x \\to 0} \\frac{\\sin x}{x} = 1",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.092Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

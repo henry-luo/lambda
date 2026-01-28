@@ -3,7 +3,6 @@
   "latex": "\\mu(n) = \\begin{cases}\n1 & \\text{if } n = 1 \\\\\n(-1)^k & \\text{if } n = p_1 p_2 \\cdots p_k \\\\\n0 & \\text{if } p^2 | n\n\\end{cases}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.142Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
