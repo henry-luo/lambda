@@ -1,0 +1,128 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\pi_1(X, x_0) = \\{[\\gamma] : \\gamma(0) = \\gamma(1) = x_0\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.175Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\pi_1(X, x_0) = \\{[\\gamma] : \\gamma(0) = \\gamma(1) = x_0\\}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\pi",
+        "value": "π",
+        "verbatimLatex": "\\pi"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "1"
+        ]
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "X",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "0",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mord",
+        "command": "\\gamma",
+        "value": "γ",
+        "verbatimLatex": "\\gamma"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "1",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "0"
+        ]
+      },
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

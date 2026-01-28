@@ -1,0 +1,26 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\Biggm",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.941Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\Biggm",
+    "body": [
+      {
+        "type": "sizeddelim",
+        "command": "\\Biggm",
+        "value": ".",
+        "verbatimLatex": "\\Biggm",
+        "args": [
+          "."
+        ],
+        "delim": ".",
+        "size": 4,
+        "delimType": "mrel"
+      }
+    ]
+  }
+}

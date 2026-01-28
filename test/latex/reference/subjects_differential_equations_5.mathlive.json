@@ -1,0 +1,423 @@
+{
+  "format": "mathlive-ast",
+  "latex": "y = \\begin{cases}\nC_1 e^{r_1 x} + C_2 e^{r_2 x} & \\text{distinct real} \\\\\n(C_1 + C_2 x) e^{rx} & \\text{repeated} \\\\\ne^{\\alpha x}(C_1 \\cos\\beta x + C_2 \\sin\\beta x) & \\text{complex}\n\\end{cases}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.122Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "y = \\begin{cases}\nC_1 e^{r_1 x} + C_2 e^{r_2 x} & \\text{distinct real} \\\\\n(C_1 + C_2 x) e^{rx} & \\text{repeated} \\\\\ne^{\\alpha x}(C_1 \\cos\\beta x + C_2 \\sin\\beta x) & \\text{complex}\n\\end{cases}",
+    "body": [
+      "y",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "array",
+        "environmentName": "cases",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              "C",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1"
+                ]
+              },
+              "e",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "r",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "subscript": [
+                      "1"
+                    ]
+                  },
+                  "x"
+                ]
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "C",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2"
+                ]
+              },
+              "e",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "r",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "subscript": [
+                      "2"
+                    ]
+                  },
+                  "x"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "d",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "s",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "t",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "n",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "c",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "t",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "r",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "e",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "a",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "l",
+                "displayContainsHighlight": true
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "C",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1"
+                ]
+              },
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "C",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2"
+                ]
+              },
+              "x",
+              {
+                "type": "mclose",
+                "value": ")"
+              },
+              "e",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "r",
+                  "x"
+                ]
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "r",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "e",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "p",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "e",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "a",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "t",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "e",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "d",
+                "displayContainsHighlight": true
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              "e",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  {
+                    "type": "mord",
+                    "command": "\\alpha",
+                    "value": "α",
+                    "verbatimLatex": "\\alpha"
+                  },
+                  "x"
+                ]
+              },
+              {
+                "type": "mopen",
+                "value": "("
+              },
+              "C",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "1"
+                ]
+              },
+              {
+                "type": "operator",
+                "command": "\\cos",
+                "value": "cos",
+                "verbatimLatex": "\\cos",
+                "subsupPlacement": "adjacent",
+                "isFunction": true,
+                "args": [],
+                "variant": "main",
+                "variantStyle": "up",
+                "limits": "adjacent",
+                "symbol": "cos"
+              },
+              {
+                "type": "mord",
+                "command": "\\beta",
+                "value": "β",
+                "verbatimLatex": "\\beta"
+              },
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "C",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "2"
+                ]
+              },
+              {
+                "type": "operator",
+                "command": "\\sin",
+                "value": "sin",
+                "verbatimLatex": "\\sin",
+                "subsupPlacement": "adjacent",
+                "isFunction": true,
+                "args": [],
+                "variant": "main",
+                "variantStyle": "up",
+                "limits": "adjacent",
+                "symbol": "sin"
+              },
+              {
+                "type": "mord",
+                "command": "\\beta",
+                "value": "β",
+                "verbatimLatex": "\\beta"
+              },
+              "x",
+              {
+                "type": "mclose",
+                "value": ")"
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "c",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "o",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "m",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "p",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "l",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "e",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "x",
+                "displayContainsHighlight": true
+              }
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          },
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "l"
+          },
+          {
+            "gap": 1
+          },
+          {
+            "align": "l"
+          }
+        ],
+        "arraystretch": 1.2,
+        "leftDelim": "\\lbrace",
+        "rightDelim": "."
+      }
+    ]
+  }
+}

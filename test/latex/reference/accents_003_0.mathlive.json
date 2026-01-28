@@ -1,0 +1,26 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\dot",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.590Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\dot",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\dot",
+        "verbatimLatex": "\\dot",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          "<null>"
+        ],
+        "body": [],
+        "accentChar": 729
+      }
+    ]
+  }
+}

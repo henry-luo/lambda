@@ -1,0 +1,28 @@
+{
+  "format": "mathlive-ast",
+  "latex": "rgb(xxy)",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.994Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "rgb(xxy)",
+    "body": [
+      "r",
+      "g",
+      "b",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      "x",
+      "y",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

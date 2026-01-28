@@ -1,0 +1,661 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.040Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{1 + \\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              "1",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "2",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "3",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "4",
+                                      {
+                                        "type": "mbin",
+                                        "value": "+"
+                                      },
+                                      {
+                                        "type": "surd",
+                                        "command": "\\sqrt",
+                                        "verbatimLatex": "\\sqrt{5}",
+                                        "displayContainsHighlight": true,
+                                        "args": [
+                                          "<null>",
+                                          {
+                                            "group": [
+                                              "5"
+                                            ]
+                                          }
+                                        ],
+                                        "body": [
+                                          "5"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "4",
+                                  {
+                                    "type": "mbin",
+                                    "value": "+"
+                                  },
+                                  {
+                                    "type": "surd",
+                                    "command": "\\sqrt",
+                                    "verbatimLatex": "\\sqrt{5}",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      "<null>",
+                                      {
+                                        "group": [
+                                          "5"
+                                        ]
+                                      }
+                                    ],
+                                    "body": [
+                                      "5"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "3",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "4",
+                                  {
+                                    "type": "mbin",
+                                    "value": "+"
+                                  },
+                                  {
+                                    "type": "surd",
+                                    "command": "\\sqrt",
+                                    "verbatimLatex": "\\sqrt{5}",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      "<null>",
+                                      {
+                                        "group": [
+                                          "5"
+                                        ]
+                                      }
+                                    ],
+                                    "body": [
+                                      "5"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "4",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{5}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "5"
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "5"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  "2",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "3",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "4",
+                                  {
+                                    "type": "mbin",
+                                    "value": "+"
+                                  },
+                                  {
+                                    "type": "surd",
+                                    "command": "\\sqrt",
+                                    "verbatimLatex": "\\sqrt{5}",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      "<null>",
+                                      {
+                                        "group": [
+                                          "5"
+                                        ]
+                                      }
+                                    ],
+                                    "body": [
+                                      "5"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "4",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{5}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "5"
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "5"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "3",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "4",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{5}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "5"
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "5"
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "4",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{5}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "5"
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "5"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          "1",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{2 + \\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "2",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "3",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "4",
+                                  {
+                                    "type": "mbin",
+                                    "value": "+"
+                                  },
+                                  {
+                                    "type": "surd",
+                                    "command": "\\sqrt",
+                                    "verbatimLatex": "\\sqrt{5}",
+                                    "displayContainsHighlight": true,
+                                    "args": [
+                                      "<null>",
+                                      {
+                                        "group": [
+                                          "5"
+                                        ]
+                                      }
+                                    ],
+                                    "body": [
+                                      "5"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "4",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{5}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "5"
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "5"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "3",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "4",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{5}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "5"
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "5"
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "4",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{5}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "5"
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "5"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "body": [
+              "2",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{3 + \\sqrt{4 + \\sqrt{5}}}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "3",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "4",
+                              {
+                                "type": "mbin",
+                                "value": "+"
+                              },
+                              {
+                                "type": "surd",
+                                "command": "\\sqrt",
+                                "verbatimLatex": "\\sqrt{5}",
+                                "displayContainsHighlight": true,
+                                "args": [
+                                  "<null>",
+                                  {
+                                    "group": [
+                                      "5"
+                                    ]
+                                  }
+                                ],
+                                "body": [
+                                  "5"
+                                ]
+                              }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "4",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{5}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "5"
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "5"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "body": [
+                  "3",
+                  {
+                    "type": "mbin",
+                    "value": "+"
+                  },
+                  {
+                    "type": "surd",
+                    "command": "\\sqrt",
+                    "verbatimLatex": "\\sqrt{4 + \\sqrt{5}}",
+                    "displayContainsHighlight": true,
+                    "args": [
+                      "<null>",
+                      {
+                        "group": [
+                          "4",
+                          {
+                            "type": "mbin",
+                            "value": "+"
+                          },
+                          {
+                            "type": "surd",
+                            "command": "\\sqrt",
+                            "verbatimLatex": "\\sqrt{5}",
+                            "displayContainsHighlight": true,
+                            "args": [
+                              "<null>",
+                              {
+                                "group": [
+                                  "5"
+                                ]
+                              }
+                            ],
+                            "body": [
+                              "5"
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "body": [
+                      "4",
+                      {
+                        "type": "mbin",
+                        "value": "+"
+                      },
+                      {
+                        "type": "surd",
+                        "command": "\\sqrt",
+                        "verbatimLatex": "\\sqrt{5}",
+                        "displayContainsHighlight": true,
+                        "args": [
+                          "<null>",
+                          {
+                            "group": [
+                              "5"
+                            ]
+                          }
+                        ],
+                        "body": [
+                          "5"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

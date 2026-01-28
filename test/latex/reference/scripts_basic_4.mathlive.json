@@ -1,19 +1,19 @@
 {
   "format": "mathlive-ast",
-  "latex": "x^{n+1}",
-  "description": "Superscript with expression",
-  "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.152Z",
+  "latex": "x_{n+1}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.071Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "x^{n+1}",
+    "verbatimLatex": "x_{n+1}",
     "body": [
       "x",
       {
         "type": "subsup",
         "subsupPlacement": "auto",
-        "superscript": [
+        "subscript": [
           "n",
           {
             "type": "mbin",

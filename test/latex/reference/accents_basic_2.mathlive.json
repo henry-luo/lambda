@@ -1,31 +1,79 @@
 {
   "format": "mathlive-ast",
-  "latex": "\\vec{a}",
-  "description": "Vector accent",
+  "latex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}",
+  "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.055Z",
+  "generatedAt": "2026-01-28T02:51:40.481Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
-    "verbatimLatex": "\\vec{a}",
+    "verbatimLatex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}",
     "body": [
       {
         "type": "accent",
-        "command": "\\vec",
-        "verbatimLatex": "\\vec{a}",
+        "command": "\\bar",
+        "verbatimLatex": "\\bar{i}",
         "skipBoundary": true,
         "captureSelection": true,
         "args": [
           {
             "group": [
-              "a"
+              "i"
             ]
           }
         ],
         "body": [
-          "a"
+          "i"
+        ],
+        "accentChar": 713
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\vec",
+        "verbatimLatex": "\\vec{v}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "v"
+            ]
+          }
+        ],
+        "body": [
+          "v"
         ],
         "accentChar": 8407
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\mathring",
+        "verbatimLatex": "\\mathring{o}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "o"
+            ]
+          }
+        ],
+        "body": [
+          "o"
+        ],
+        "accentChar": 730
       }
     ]
   }

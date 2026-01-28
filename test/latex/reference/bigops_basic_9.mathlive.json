@@ -1,0 +1,42 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\int\\limits_0^1 f(x) dx",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.504Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\int\\limits_0^1 f(x) dx",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\int",
+        "value": "∫",
+        "subsupPlacement": "over-under",
+        "explicitSubsupPlacement": true,
+        "args": [],
+        "subscript": [
+          "0"
+        ],
+        "superscript": [
+          "1"
+        ],
+        "limits": "over-under",
+        "symbol": "∫"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      "d",
+      "x"
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f_a,  f^a, f_a^a, f^a_a",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.072Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f_a,  f^a, f_a^a, f^a_a",
+    "body": [
+      "f",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "a"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "f",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "a"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "f",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "a"
+        ],
+        "superscript": [
+          "a"
+        ]
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "f",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "a"
+        ],
+        "subscript": [
+          "a"
+        ]
+      }
+    ]
+  }
+}

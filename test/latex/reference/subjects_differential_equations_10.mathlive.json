@@ -1,0 +1,178 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{\\partial^2 u}{\\partial t^2} = c^2 \\frac{\\partial^2 u}{\\partial x^2}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.125Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{\\partial^2 u}{\\partial t^2} = c^2 \\frac{\\partial^2 u}{\\partial x^2}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\partial^2 u}{\\partial t^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              "u"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "t",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          "u"
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "t",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "c",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "2"
+        ]
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{\\partial^2 u}{\\partial x^2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              },
+              "u"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "mord",
+                "command": "\\partial",
+                "value": "∂",
+                "verbatimLatex": "\\partial"
+              },
+              "x",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "above": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          },
+          "u"
+        ],
+        "below": [
+          {
+            "type": "mord",
+            "command": "\\partial",
+            "value": "∂",
+            "verbatimLatex": "\\partial"
+          },
+          "x",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "superscript": [
+              "2"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "format": "mathlive-ast",
+  "latex": "g(n) = \\sum_{d|n} f(d) \\implies f(n) = \\sum_{d|n} \\mu\\left(\\frac{n}{d}\\right) g(d)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.142Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "g(n) = \\sum_{d|n} f(d) \\implies f(n) = \\sum_{d|n} \\mu\\left(\\frac{n}{d}\\right) g(d)",
+    "body": [
+      "g",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "n",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "d",
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "d",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "command": "\\implies",
+        "value": "⟹",
+        "verbatimLatex": "\\implies"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "n",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "d",
+          {
+            "type": "mord",
+            "command": "|",
+            "value": "∣"
+          },
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "mord",
+        "command": "\\mu",
+        "value": "μ",
+        "verbatimLatex": "\\mu"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{n}{d}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "n"
+                ]
+              },
+              {
+                "group": [
+                  "d"
+                ]
+              }
+            ],
+            "above": [
+              "n"
+            ],
+            "below": [
+              "d"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      "g",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "d",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

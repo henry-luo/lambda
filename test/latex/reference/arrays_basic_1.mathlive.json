@@ -1,0 +1,45 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\matrix{a & b \\cr c & d}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.494Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\matrix{a & b \\cr c & d}",
+    "body": [
+      {
+        "type": "error",
+        "value": "\\matrix",
+        "verbatimLatex": "\\matrix"
+      },
+      {
+        "type": "group",
+        "verbatimLatex": "{a & b \\cr c & d}",
+        "skipBoundary": true,
+        "body": [
+          "a",
+          {
+            "type": "mord",
+            "command": "\\&",
+            "value": "&"
+          },
+          "b",
+          {
+            "type": "error",
+            "value": "\\cr",
+            "verbatimLatex": "\\cr"
+          },
+          "c",
+          {
+            "type": "mord",
+            "command": "\\&",
+            "value": "&"
+          },
+          "d"
+        ]
+      }
+    ]
+  }
+}

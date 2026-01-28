@@ -1,0 +1,154 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f, f(a), f(q), f(a,b), \\mbox{ but } f(a+b)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.009Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f, f(a), f(q), f(a,b), \\mbox{ but } f(a+b)",
+    "body": [
+      "f",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "q",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      {
+        "type": "mord",
+        "command": "\\mbox",
+        "verbatimLatex": "\\mbox{ but }",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "b",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "u",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "t",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "text",
+            "mode": "text",
+            "value": " ",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "b",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "u",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": "t",
+            "displayContainsHighlight": true
+          },
+          {
+            "type": "text",
+            "mode": "text",
+            "value": " ",
+            "displayContainsHighlight": true
+          }
+        ]
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      {
+        "type": "mclose",
+        "value": ")"
+      }
+    ]
+  }
+}

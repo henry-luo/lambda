@@ -1,9 +1,9 @@
 {
   "format": "mathlive-ast",
   "latex": "x^2",
-  "description": "Simple superscript",
-  "type": "display",
-  "generatedAt": "2026-01-28T01:48:55.149Z",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:41.068Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

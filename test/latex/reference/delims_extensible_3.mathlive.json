@@ -1,0 +1,75 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\left\\{ \\frac{x^2}{y^2} \\right\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:40.514Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\left\\{ \\frac{x^2}{y^2} \\right\\}",
+    "body": [
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{x^2}{y^2}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "x",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": [
+                  "y",
+                  {
+                    "type": "subsup",
+                    "subsupPlacement": "auto",
+                    "superscript": [
+                      "2"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "above": [
+              "x",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ],
+            "below": [
+              "y",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "superscript": [
+                  "2"
+                ]
+              }
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "\\{",
+        "rightDelim": "\\}"
+      }
+    ]
+  }
+}

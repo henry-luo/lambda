@@ -1,0 +1,96 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\ker(\\phi) = \\{g \\in G : \\phi(g) = e_H\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.084Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\ker(\\phi) = \\{g \\in G : \\phi(g) = e_H\\}",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\ker",
+        "value": "ker",
+        "verbatimLatex": "\\ker",
+        "subsupPlacement": "adjacent",
+        "isFunction": true,
+        "args": [],
+        "variant": "main",
+        "variantStyle": "up",
+        "limits": "adjacent",
+        "symbol": "ker"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          {
+            "type": "mord",
+            "command": "\\phi",
+            "value": "ϕ",
+            "verbatimLatex": "\\phi"
+          }
+        ],
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "g",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "G",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      {
+        "type": "mord",
+        "command": "\\phi",
+        "value": "ϕ",
+        "verbatimLatex": "\\phi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "g",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "e",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "H"
+        ]
+      },
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

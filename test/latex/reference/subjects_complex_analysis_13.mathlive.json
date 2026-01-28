@@ -1,0 +1,124 @@
+{
+  "format": "mathlive-ast",
+  "latex": "|f(z) - g(z)| < |f(z)| \\text{ on } C \\implies Z_f = Z_g",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.119Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "|f(z) - g(z)| < |f(z)| \\text{ on } C \\implies Z_f = Z_g",
+    "body": [
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mbin",
+        "command": "-",
+        "value": "−"
+      },
+      "g",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "mrel",
+        "value": "<"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "z",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mord",
+        "command": "|",
+        "value": "∣"
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "n",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      "C",
+      {
+        "type": "mrel",
+        "command": "\\implies",
+        "value": "⟹",
+        "verbatimLatex": "\\implies"
+      },
+      "Z",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "f"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "Z",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "g"
+        ]
+      }
+    ]
+  }
+}

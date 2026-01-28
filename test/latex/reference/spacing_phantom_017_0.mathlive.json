@@ -1,0 +1,25 @@
+{
+  "format": "mathlive-ast",
+  "latex": "#fCFcfC",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.991Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "#fCFcfC",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\#",
+        "value": "#"
+      },
+      "f",
+      "C",
+      "F",
+      "c",
+      "f",
+      "C"
+    ]
+  }
+}

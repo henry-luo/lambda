@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\wedge b \\quad a \\oplus b \\quad a \\ominus b \\quad a \\otimes b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.050Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\wedge b \\quad a \\oplus b \\quad a \\ominus b \\quad a \\otimes b",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\wedge",
+        "value": "∧",
+        "verbatimLatex": "\\wedge"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\oplus",
+        "value": "⊕",
+        "verbatimLatex": "\\oplus"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\ominus",
+        "value": "⊖",
+        "verbatimLatex": "\\ominus"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\otimes",
+        "value": "⊗",
+        "verbatimLatex": "\\otimes"
+      },
+      "b"
+    ]
+  }
+}

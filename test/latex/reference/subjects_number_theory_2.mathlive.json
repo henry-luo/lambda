@@ -1,0 +1,85 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\pi(x) \\sim \\frac{x}{\\ln x}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.138Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\pi(x) \\sim \\frac{x}{\\ln x}",
+    "body": [
+      {
+        "type": "mord",
+        "command": "\\pi",
+        "value": "π",
+        "verbatimLatex": "\\pi"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "command": "\\sim",
+        "value": "∼",
+        "verbatimLatex": "\\sim"
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{x}{\\ln x}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "x"
+            ]
+          },
+          {
+            "group": [
+              {
+                "type": "operator",
+                "command": "\\ln",
+                "value": "ln",
+                "verbatimLatex": "\\ln",
+                "subsupPlacement": "adjacent",
+                "isFunction": true,
+                "args": [],
+                "variant": "main",
+                "variantStyle": "up",
+                "limits": "adjacent",
+                "symbol": "ln"
+              },
+              "x"
+            ]
+          }
+        ],
+        "above": [
+          "x"
+        ],
+        "below": [
+          {
+            "type": "operator",
+            "command": "\\ln",
+            "value": "ln",
+            "verbatimLatex": "\\ln",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "variantStyle": "up",
+            "limits": "adjacent",
+            "symbol": "ln"
+          },
+          "x"
+        ]
+      }
+    ]
+  }
+}

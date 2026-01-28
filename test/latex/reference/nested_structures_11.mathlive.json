@@ -1,0 +1,253 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f(x) = \\begin{cases}\n\\begin{cases} a & x > 0 \\\\ b & x = 0 \\end{cases} & \\text{if } y > 0 \\\\\n\\begin{cases} c & x > 0 \\\\ d & x = 0 \\end{cases} & \\text{if } y \\leq 0\n\\end{cases}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.045Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f(x) = \\begin{cases}\n\\begin{cases} a & x > 0 \\\\ b & x = 0 \\end{cases} & \\text{if } y > 0 \\\\\n\\begin{cases} c & x > 0 \\\\ d & x = 0 \\end{cases} & \\text{if } y \\leq 0\n\\end{cases}",
+    "body": [
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "array",
+        "environmentName": "cases",
+        "array": [
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "array",
+                "environmentName": "cases",
+                "array": [
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "a"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "x",
+                      {
+                        "type": "mrel",
+                        "value": ">"
+                      },
+                      "0"
+                    ]
+                  ],
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "b"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "x",
+                      {
+                        "type": "mrel",
+                        "value": "="
+                      },
+                      "0"
+                    ]
+                  ]
+                ],
+                "rowGaps": [
+                  {
+                    "dimension": 0
+                  }
+                ],
+                "columns": [
+                  {
+                    "align": "l"
+                  },
+                  {
+                    "gap": 1
+                  },
+                  {
+                    "align": "l"
+                  }
+                ],
+                "arraystretch": 1.2,
+                "leftDelim": "\\lbrace",
+                "rightDelim": "."
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "f",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              "y",
+              {
+                "type": "mrel",
+                "value": ">"
+              },
+              "0"
+            ]
+          ],
+          [
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "array",
+                "environmentName": "cases",
+                "array": [
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "c"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "x",
+                      {
+                        "type": "mrel",
+                        "value": ">"
+                      },
+                      "0"
+                    ]
+                  ],
+                  [
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "d"
+                    ],
+                    [
+                      {
+                        "type": "first"
+                      },
+                      "x",
+                      {
+                        "type": "mrel",
+                        "value": "="
+                      },
+                      "0"
+                    ]
+                  ]
+                ],
+                "rowGaps": [
+                  {
+                    "dimension": 0
+                  }
+                ],
+                "columns": [
+                  {
+                    "align": "l"
+                  },
+                  {
+                    "gap": 1
+                  },
+                  {
+                    "align": "l"
+                  }
+                ],
+                "arraystretch": 1.2,
+                "leftDelim": "\\lbrace",
+                "rightDelim": "."
+              }
+            ],
+            [
+              {
+                "type": "first"
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "i",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": "f",
+                "displayContainsHighlight": true
+              },
+              {
+                "type": "text",
+                "mode": "text",
+                "value": " ",
+                "displayContainsHighlight": true
+              },
+              "y",
+              {
+                "type": "mrel",
+                "command": "\\leq",
+                "value": "≤",
+                "verbatimLatex": "\\leq"
+              },
+              "0"
+            ]
+          ]
+        ],
+        "rowGaps": [
+          {
+            "dimension": 0
+          }
+        ],
+        "columns": [
+          {
+            "align": "l"
+          },
+          {
+            "gap": 1
+          },
+          {
+            "align": "l"
+          }
+        ],
+        "arraystretch": 1.2,
+        "leftDelim": "\\lbrace",
+        "rightDelim": "."
+      }
+    ]
+  }
+}

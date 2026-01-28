@@ -1,0 +1,75 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\text{\\ensuremath{\\frac34}}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T02:51:40.944Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\text{\\ensuremath{\\frac34}}",
+    "body": [
+      {
+        "mode": "text",
+        "command": "\\ensuremath",
+        "verbatimLatex": "\\ensuremath{\\frac34}",
+        "args": [
+          {
+            "group": [
+              {
+                "type": "genfrac",
+                "command": "\\frac",
+                "verbatimLatex": "\\frac34",
+                "displayContainsHighlight": true,
+                "args": [
+                  {
+                    "atoms": [
+                      "3"
+                    ]
+                  },
+                  {
+                    "atoms": [
+                      "4"
+                    ]
+                  }
+                ],
+                "above": [
+                  "3"
+                ],
+                "below": [
+                  "4"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac34",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "atoms": [
+                  "3"
+                ]
+              },
+              {
+                "atoms": [
+                  "4"
+                ]
+              }
+            ],
+            "above": [
+              "3"
+            ],
+            "below": [
+              "4"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

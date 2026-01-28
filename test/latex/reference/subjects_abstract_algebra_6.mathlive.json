@@ -1,0 +1,76 @@
+{
+  "format": "mathlive-ast",
+  "latex": "G \\times H = \\{(g, h) : g \\in G, h \\in H\\}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.086Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "G \\times H = \\{(g, h) : g \\in G, h \\in H\\}",
+    "body": [
+      "G",
+      {
+        "type": "mbin",
+        "command": "\\times",
+        "value": "×",
+        "verbatimLatex": "\\times"
+      },
+      "H",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "g",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "h",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      "g",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "G",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "h",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "H",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

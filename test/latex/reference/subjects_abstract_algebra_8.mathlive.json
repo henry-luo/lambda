@@ -1,0 +1,116 @@
+{
+  "format": "mathlive-ast",
+  "latex": "I \\triangleleft R: \\quad rI \\subseteq I, Ir \\subseteq I \\text{ for all } r \\in R",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.087Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "I \\triangleleft R: \\quad rI \\subseteq I, Ir \\subseteq I \\text{ for all } r \\in R",
+    "body": [
+      "I",
+      {
+        "type": "mbin",
+        "command": "\\triangleleft",
+        "value": "◃",
+        "verbatimLatex": "\\triangleleft"
+      },
+      "R",
+      {
+        "type": "mrel",
+        "value": ":"
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "r",
+      "I",
+      {
+        "type": "mrel",
+        "command": "\\subseteq",
+        "value": "⊆",
+        "verbatimLatex": "\\subseteq"
+      },
+      "I",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "I",
+      "r",
+      {
+        "type": "mrel",
+        "command": "\\subseteq",
+        "value": "⊆",
+        "verbatimLatex": "\\subseteq"
+      },
+      "I",
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "f",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "o",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "r",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "a",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "l",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": "l",
+        "displayContainsHighlight": true
+      },
+      {
+        "type": "text",
+        "mode": "text",
+        "value": " ",
+        "displayContainsHighlight": true
+      },
+      "r",
+      {
+        "type": "mrel",
+        "command": "\\in",
+        "value": "∈",
+        "verbatimLatex": "\\in"
+      },
+      "R"
+    ]
+  }
+}

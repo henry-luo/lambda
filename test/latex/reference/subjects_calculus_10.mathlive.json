@@ -1,0 +1,227 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f(x) = \\frac{a_0}{2} + \\sum_{n=1}^{\\infty} \\left(a_n \\cos\\frac{n\\pi x}{L} + b_n \\sin\\frac{n\\pi x}{L}\\right)",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.099Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f(x) = \\frac{a_0}{2} + \\sum_{n=1}^{\\infty} \\left(a_n \\cos\\frac{n\\pi x}{L} + b_n \\sin\\frac{n\\pi x}{L}\\right)",
+    "body": [
+      "f",
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      "x",
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{a_0}{2}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              {
+                "type": "subsup",
+                "subsupPlacement": "auto",
+                "subscript": [
+                  "0"
+                ]
+              }
+            ]
+          },
+          {
+            "group": [
+              "2"
+            ]
+          }
+        ],
+        "above": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "0"
+            ]
+          }
+        ],
+        "below": [
+          "2"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "extensible-symbol",
+        "command": "\\sum",
+        "value": "∑",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "n",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∑"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "a",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "n"
+            ]
+          },
+          {
+            "type": "operator",
+            "command": "\\cos",
+            "value": "cos",
+            "verbatimLatex": "\\cos",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "variantStyle": "up",
+            "limits": "adjacent",
+            "symbol": "cos"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{n\\pi x}{L}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "n",
+                  {
+                    "type": "mord",
+                    "command": "\\pi",
+                    "value": "π",
+                    "verbatimLatex": "\\pi"
+                  },
+                  "x"
+                ]
+              },
+              {
+                "group": [
+                  "L"
+                ]
+              }
+            ],
+            "above": [
+              "n",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "x"
+            ],
+            "below": [
+              "L"
+            ]
+          },
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "b",
+          {
+            "type": "subsup",
+            "subsupPlacement": "auto",
+            "subscript": [
+              "n"
+            ]
+          },
+          {
+            "type": "operator",
+            "command": "\\sin",
+            "value": "sin",
+            "verbatimLatex": "\\sin",
+            "subsupPlacement": "adjacent",
+            "isFunction": true,
+            "args": [],
+            "variant": "main",
+            "variantStyle": "up",
+            "limits": "adjacent",
+            "symbol": "sin"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{n\\pi x}{L}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "n",
+                  {
+                    "type": "mord",
+                    "command": "\\pi",
+                    "value": "π",
+                    "verbatimLatex": "\\pi"
+                  },
+                  "x"
+                ]
+              },
+              {
+                "group": [
+                  "L"
+                ]
+              }
+            ],
+            "above": [
+              "n",
+              {
+                "type": "mord",
+                "command": "\\pi",
+                "value": "π",
+                "verbatimLatex": "\\pi"
+              },
+              "x"
+            ],
+            "below": [
+              "L"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      }
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n = e",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T02:51:41.093Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n = e",
+    "body": [
+      {
+        "type": "operator",
+        "command": "\\lim",
+        "value": "lim",
+        "subsupPlacement": "over-under",
+        "args": [],
+        "subscript": [
+          "n",
+          {
+            "type": "mrel",
+            "command": "\\to",
+            "value": "→",
+            "verbatimLatex": "\\to"
+          },
+          {
+            "type": "mord",
+            "command": "\\infty",
+            "value": "∞",
+            "verbatimLatex": "\\infty"
+          }
+        ],
+        "variant": "main",
+        "limits": "over-under",
+        "symbol": "lim"
+      },
+      {
+        "type": "leftright",
+        "displayContainsHighlight": true,
+        "body": [
+          "1",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          {
+            "type": "genfrac",
+            "command": "\\frac",
+            "verbatimLatex": "\\frac{1}{n}",
+            "displayContainsHighlight": true,
+            "args": [
+              {
+                "group": [
+                  "1"
+                ]
+              },
+              {
+                "group": [
+                  "n"
+                ]
+              }
+            ],
+            "above": [
+              "1"
+            ],
+            "below": [
+              "n"
+            ]
+          }
+        ],
+        "variant": "left...right",
+        "leftDelim": "(",
+        "rightDelim": ")"
+      },
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "superscript": [
+          "n"
+        ]
+      },
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      "e"
+    ]
+  }
+}
