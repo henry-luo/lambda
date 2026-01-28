@@ -39,6 +39,7 @@ import { compareAST } from './comparators/ast_comparator.js';
 import { compareHTML } from './comparators/html_comparator.js';
 import { compareDVI, validateDVI } from './comparators/dvi_comparator.js';
 import { compareASTToMathML } from './comparators/mathml_comparator.js';
+import { compareASTToMathLive } from './comparators/mathlive_ast_comparator.js';
 
 // Configuration
 const CONFIG = {
@@ -435,16 +436,23 @@ async function runExtendedTest(testInfo, options) {
         const testBaseName = path.basename(testInfo.file, '.json');
         const refBaseName = `${testBaseName}_${expr.index}`;
 
-        // Compare AST against MathML reference (authoritative)
+        // Compare AST - prefer MathLive AST (same branch structure) over MathML
         let astResult = null;
         if (options.compare === 'all' || options.compare === 'ast') {
+            const refMathLiveAstPath = path.join(REFERENCE_DIR, `${refBaseName}.mathlive.json`);
             const refMathMLPath = path.join(REFERENCE_DIR, `${refBaseName}.mathml.json`);
             const refAstPath = path.join(REFERENCE_DIR, `${refBaseName}.ast.json`);
 
-            if (fs.existsSync(refMathMLPath) && lambdaOutput.ast) {
-                // Use MathML reference (authoritative from MathLive)
+            if (fs.existsSync(refMathLiveAstPath) && lambdaOutput.ast) {
+                // Preferred: Use MathLive AST reference (same branch structure as Lambda)
+                const refMathLiveAst = JSON.parse(fs.readFileSync(refMathLiveAstPath, 'utf-8'));
+                astResult = compareASTToMathLive(lambdaOutput.ast, refMathLiveAst);
+                astResult.referenceType = 'mathlive-ast';
+            } else if (fs.existsSync(refMathMLPath) && lambdaOutput.ast) {
+                // Fallback: Use MathML reference (requires semantic mapping)
                 const refMathML = JSON.parse(fs.readFileSync(refMathMLPath, 'utf-8'));
                 astResult = compareASTToMathML(lambdaOutput.ast, refMathML);
+                astResult.referenceType = 'mathml';
             } else if (fs.existsSync(refAstPath) && lambdaOutput.ast) {
                 // Fallback to Lambda AST reference (for consistency testing)
                 const refAst = JSON.parse(fs.readFileSync(refAstPath, 'utf-8'));

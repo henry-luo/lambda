@@ -1,0 +1,60 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{x+1}{x-1}",
+  "description": "Fraction with expressions",
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.112Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\frac{x+1}{x-1}",
+    "body": [
+      {
+        "type": "genfrac",
+        "command": "\\frac",
+        "verbatimLatex": "\\frac{x+1}{x-1}",
+        "displayContainsHighlight": true,
+        "args": [
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "1"
+            ]
+          },
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "command": "-",
+                "value": "−"
+              },
+              "1"
+            ]
+          }
+        ],
+        "above": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "1"
+        ],
+        "below": [
+          "x",
+          {
+            "type": "mbin",
+            "command": "-",
+            "value": "−"
+          },
+          "1"
+        ]
+      }
+    ]
+  }
+}

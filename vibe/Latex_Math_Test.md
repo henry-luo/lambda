@@ -61,7 +61,8 @@ test/
 │   │   ├── *.tex
 │   │   └── reference/*.dvi
 │   └── reference/                   # Reference files for extended tests
-│       ├── *.ast.json               # MathLive AST reference
+│       ├── *.mathlive.json          # MathLive AST reference (toJson() - preferred)
+│       ├── *.mathml.json            # MathML reference (fallback for AST comparison)
 │       ├── *.mathlive.html          # MathLive HTML reference
 │       ├── *.katex.html             # KaTeX HTML reference
 │       └── *.dvi                    # pdfTeX DVI reference
@@ -98,13 +99,61 @@ All test files start with their **feature group prefix** for easy identification
 
 ---
 
+## Reference File Generation
+
+### AST Reference Design Decision
+
+**Problem**: Originally, AST comparison used MathML references (`*.mathml.json`) generated
+via `MathLive.convertLatexToMathMl()`. However, MathML has a fundamentally different
+structure than both Lambda and MathLive's internal AST:
+
+- **MathML** uses semantic elements: `<mfrac><mi>a</mi><mi>b</mi></mfrac>`
+- **Lambda/MathLive** use TeX-style branches: `{ type: "FRAC", above: {...}, below: {...} }`
+
+This mismatch required complex semantic mapping during comparison, causing false negatives.
+
+**Solution**: Use MathLive's internal AST (`toJson()`) which shares the same branch model:
+
+| Branch | Lambda AST | MathLive AST |
+|--------|------------|--------------|
+| Body content | `body` | `body` |
+| Numerator | `numer` / `above` | `above` |
+| Denominator | `denom` / `below` | `below` |
+| Superscript | `superscript` | `superscript` |
+| Subscript | `subscript` | `subscript` |
+
+### Reference Generation Scripts
+
+| Script | Output | Purpose |
+|--------|--------|---------|
+| `generate_mathlive_json.mjs` | `*.mathlive.json` | MathLive AST via `toJson()` (preferred) |
+| `generate_authoritative_references.mjs` | `*.mathml.json` | MathML output (legacy fallback) |
+
+**Generating References**:
+```bash
+# Generate MathLive AST references (preferred)
+node test/latex/generate_mathlive_json.mjs
+
+# Generate for specific test
+node test/latex/generate_mathlive_json.mjs --test fracs_basic
+```
+
+---
+
 ## Comparison Layers
 
 ### 1. AST Comparison (50% weight)
 
 **Purpose**: Verify that we parse LaTeX into the correct semantic structure.
 
-**Reference**: MathLive AST (via `convertLatexToMathMl()` or internal AST)
+**Reference**: MathLive AST (via `toJson()` internal AST)
+
+> **Important Design Decision**: We use MathLive's internal AST (`toJson()`) as the
+> reference, NOT MathML. Both Lambda and MathLive use the same branch structure:
+> `body`, `above`, `below`, `superscript`, `subscript`. This enables direct
+> structural comparison without semantic mapping overhead.
+>
+> Reference files: `reference/*.mathlive.json` (preferred), `*.mathml.json` (fallback)
 
 **Normalization Rules**:
 - Ignore node IDs and internal metadata
@@ -120,10 +169,10 @@ function compareAST(lambdaAST, mathLiveAST) {
         matchedNodes: 0,
         differences: []
     };
-    
+
     // Recursive tree comparison with normalization
     compareNodes(lambdaAST, mathLiveAST, '', results);
-    
+
     return {
         passRate: results.matchedNodes / results.totalNodes * 100,
         differences: results.differences
@@ -168,15 +217,15 @@ async function compareHTML(lambdaHTML, testName) {
     // Load both references
     const mathLiveHTML = await loadReference(`${testName}.mathlive.html`);
     const katexHTML = await loadReference(`${testName}.katex.html`);
-    
+
     // Compare against both
     const mathLiveScore = compareHTMLTrees(lambdaHTML, mathLiveHTML);
     const katexScore = compareHTMLTrees(lambdaHTML, katexHTML);
-    
+
     // Take the higher score (be generous)
     const bestScore = Math.max(mathLiveScore.passRate, katexScore.passRate);
     const bestRef = mathLiveScore.passRate >= katexScore.passRate ? 'mathlive' : 'katex';
-    
+
     return {
         passRate: bestScore,
         bestReference: bestRef,
@@ -200,11 +249,11 @@ function compareHTML(lambdaHTML, mathLiveHTML) {
     // Parse both into DOM trees
     const lambdaTree = parseHTML(lambdaHTML);
     const mathLiveTree = parseHTML(mathLiveHTML);
-    
+
     // Normalize both trees
     const normLambda = normalizeHTMLTree(lambdaTree);
     const normMathLive = normalizeHTMLTree(mathLiveTree);
-    
+
     // Compare structure
     return compareHTMLNodes(normLambda, normMathLive);
 }
@@ -227,16 +276,16 @@ const CLASS_CATEGORIES = {
     'ML__frac': 'frac',
     'frac': 'frac',
     'lambda-frac': 'frac',
-    
+
     // Roots
     'ML__sqrt': 'sqrt',
     'sqrt': 'sqrt',
     'lambda-sqrt': 'sqrt',
-    
+
     // Scripts (MathLive)
     'ML__sup': 'superscript',
     'ML__sub': 'subscript',
-    
+
     // Scripts (KaTeX)
     'msupsub': 'scripts',
     'vlist': 'vlist',
@@ -263,14 +312,14 @@ const CLASS_CATEGORIES = {
 function compareDVI(lambdaDVI, referenceDVI) {
     const lambdaGlyphs = parseDVI(lambdaDVI);
     const refGlyphs = parseDVI(referenceDVI);
-    
+
     const results = {
         totalGlyphs: refGlyphs.length,
         matchedGlyphs: 0,
         positionTolerance: 0.5, // points
         differences: []
     };
-    
+
     // Match glyphs with tolerance
     for (const refGlyph of refGlyphs) {
         const match = findMatchingGlyph(lambdaGlyphs, refGlyph, results.positionTolerance);
@@ -280,7 +329,7 @@ function compareDVI(lambdaDVI, referenceDVI) {
             results.differences.push({ expected: refGlyph, found: null });
         }
     }
-    
+
     return {
         passRate: results.matchedGlyphs / results.totalGlyphs * 100,
         differences: results.differences
@@ -310,12 +359,12 @@ function calculateTestScore(astResult, htmlResult, dviResult) {
         html: 0.40,  // 40% - visual representation
         dvi: 0.10    // 10% - precise typographics
     };
-    
-    const score = 
+
+    const score =
         astResult.passRate * weights.ast +
         htmlResult.passRate * weights.html +
         dviResult.passRate * weights.dvi;
-    
+
     return {
         overall: score,
         breakdown: {
@@ -333,7 +382,7 @@ function calculateTestScore(astResult, htmlResult, dviResult) {
 function calculateSuiteScore(testResults) {
     const total = testResults.reduce((sum, r) => sum + r.overall, 0);
     const average = total / testResults.length;
-    
+
     return {
         totalTests: testResults.length,
         averageScore: average,
@@ -416,12 +465,12 @@ function calculateSuiteScore(testResults) {
   Total Tests: 48
   Passed: 42 (87.5%)
   Failed: 6 (12.5%)
-  
+
   Component Averages:
     AST:  92.0%  (target: 95%)
     HTML: 87.6%  (target: 90%)
     DVI:  83.1%  (target: 80%)
-  
+
   Weighted Average Score: 90.1%
 ================================================================================
 ```
@@ -440,12 +489,12 @@ When a test fails or scores below threshold, show detailed diff:
 ├─ Total Nodes: 25
 ├─ Matched: 18
 └─ Differences:
-   
+
    1. Path: root > frac > numer > mrow[0]
       Expected: { type: 'mspace', width: '0.2em' }
       Got:      { type: 'mspace', width: '0.16em' }
       Issue: Width mismatch
-   
+
    2. Path: root > frac > denom
       Expected: 3 children
       Got:      2 children
@@ -456,12 +505,12 @@ When a test fails or scores below threshold, show detailed diff:
 ├─ Total Elements: 40
 ├─ Matched: 26
 └─ Differences:
-   
+
    1. Path: .math-container > .frac > .numer
       Expected: <span class="mspace" style="width:0.2em">
       Got:      <span class="mspace" style="width:0.16em">
       Issue: Style mismatch (ignored for scoring, but noted)
-   
+
    2. Path: .math-container > .frac > .denom
       Expected: 3 child elements
       Got:      2 child elements
@@ -473,12 +522,12 @@ When a test fails or scores below threshold, show detailed diff:
 ├─ Matched: 9
 ├─ Position Tolerance: 0.5pt
 └─ Differences:
-   
+
    1. Glyph #5: '+'
       Expected: (120.5pt, 45.0pt)
       Got:      (118.2pt, 45.0pt)
       Delta: 2.3pt (exceeds 0.5pt tolerance)
-   
+
    2. Glyph #12: missing
       Expected: 'x' at (145.0pt, 45.0pt)
       Got:      <not found>
@@ -604,10 +653,10 @@ async function generateReference(latex) {
     const mathfield = new MathfieldElement();
     mathfield.value = latex;
     const ast = mathfield.expression.json;
-    
+
     // Get HTML output
     const html = convertLatexToMarkup(latex, { mathstyle: 'displaystyle' });
-    
+
     return { ast, html };
 }
 ```
@@ -624,14 +673,14 @@ const NORMALIZED_NODE_TYPES = {
     'open': 'open',
     'close': 'close',
     'punct': 'punctuation',
-    
+
     // Structures
     'frac': 'fraction',
     'sqrt': 'radical',
     'sup': 'superscript',
     'sub': 'subscript',
     'supsub': 'scripts',
-    
+
     // Layout
     'mrow': 'row',
     'mspace': 'space',
@@ -654,7 +703,7 @@ function generateKaTeXReference(latex) {
         throwOnError: false,
         strict: false
     });
-    
+
     return html;
 }
 ```
@@ -677,12 +726,12 @@ KaTeX produces HTML with specific class patterns:
 function htmlCrossReference(lambdaHTML, testName) {
     const mathlive = compareHTML(lambdaHTML, loadRef(`${testName}.mathlive.html`));
     const katex = compareHTML(lambdaHTML, loadRef(`${testName}.katex.html`));
-    
+
     // Report both scores, use best
     console.log(`  MathLive: ${mathlive.passRate.toFixed(1)}%`);
     console.log(`  KaTeX:    ${katex.passRate.toFixed(1)}%`);
     console.log(`  Best:     ${Math.max(mathlive.passRate, katex.passRate).toFixed(1)}%`);
-    
+
     return {
         passRate: Math.max(mathlive.passRate, katex.passRate),
         mathlive: mathlive,

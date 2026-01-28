@@ -1,0 +1,46 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\derive2{f}+\\derive3{g}",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.207Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\derive2{f}+\\derive3{g}",
+    "body": [
+      {
+        "type": "error",
+        "value": "\\derive",
+        "verbatimLatex": "\\derive"
+      },
+      "2",
+      {
+        "type": "group",
+        "verbatimLatex": "{f}",
+        "skipBoundary": true,
+        "body": [
+          "f"
+        ]
+      },
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      {
+        "type": "error",
+        "value": "\\derive",
+        "verbatimLatex": "\\derive"
+      },
+      "3",
+      {
+        "type": "group",
+        "verbatimLatex": "{g}",
+        "skipBoundary": true,
+        "body": [
+          "g"
+        ]
+      }
+    ]
+  }
+}

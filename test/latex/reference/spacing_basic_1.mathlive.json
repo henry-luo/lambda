@@ -1,0 +1,22 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a\\qquad b",
+  "description": "Double quad space",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.156Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a\\qquad b",
+    "body": [
+      "a",
+      {
+        "type": "spacing",
+        "command": "\\qquad",
+        "verbatimLatex": "\\qquad",
+        "args": []
+      },
+      "b"
+    ]
+  }
+}

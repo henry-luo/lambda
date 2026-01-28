@@ -1,0 +1,43 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\prod_{i=1}^{n} x_i",
+  "description": "Product with limits",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.079Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\prod_{i=1}^{n} x_i",
+    "body": [
+      {
+        "type": "extensible-symbol",
+        "command": "\\prod",
+        "value": "∏",
+        "subsupPlacement": "auto",
+        "args": [],
+        "subscript": [
+          "i",
+          {
+            "type": "mrel",
+            "value": "="
+          },
+          "1"
+        ],
+        "superscript": [
+          "n"
+        ],
+        "variant": "main",
+        "limits": "auto",
+        "symbol": "∏"
+      },
+      "x",
+      {
+        "type": "subsup",
+        "subsupPlacement": "auto",
+        "subscript": [
+          "i"
+        ]
+      }
+    ]
+  }
+}

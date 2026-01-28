@@ -1,0 +1,222 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\mathsf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.331Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\mathsf{ABCDEFGHIJKLMNOPQRSTUVWXYZ}",
+    "body": [
+      {
+        "type": "mord",
+        "value": "A",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "B",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "C",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "D",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "E",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "F",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "G",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "H",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "I",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "J",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "K",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "L",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "M",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "N",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "O",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "P",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Q",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "R",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "S",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "T",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "U",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "V",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "W",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "X",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Y",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      },
+      {
+        "type": "mord",
+        "value": "Z",
+        "style": {
+          "variant": "sans-serif",
+          "variantStyle": "up"
+        }
+      }
+    ]
+  }
+}

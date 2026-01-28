@@ -1,0 +1,63 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\sqrt{\\sqrt{x}}",
+  "description": "Nested square roots",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.165Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\sqrt{\\sqrt{x}}",
+    "body": [
+      {
+        "type": "surd",
+        "command": "\\sqrt",
+        "verbatimLatex": "\\sqrt{\\sqrt{x}}",
+        "displayContainsHighlight": true,
+        "args": [
+          "<null>",
+          {
+            "group": [
+              {
+                "type": "surd",
+                "command": "\\sqrt",
+                "verbatimLatex": "\\sqrt{x}",
+                "displayContainsHighlight": true,
+                "args": [
+                  "<null>",
+                  {
+                    "group": [
+                      "x"
+                    ]
+                  }
+                ],
+                "body": [
+                  "x"
+                ]
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "surd",
+            "command": "\\sqrt",
+            "verbatimLatex": "\\sqrt{x}",
+            "displayContainsHighlight": true,
+            "args": [
+              "<null>",
+              {
+                "group": [
+                  "x"
+                ]
+              }
+            ],
+            "body": [
+              "x"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

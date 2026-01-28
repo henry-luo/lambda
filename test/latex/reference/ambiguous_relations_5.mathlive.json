@@ -1,0 +1,34 @@
+{
+  "format": "mathlive-ast",
+  "latex": "0 = <x,y>A",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.178Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "0 = <x,y>A",
+    "body": [
+      "0",
+      {
+        "type": "mrel",
+        "value": "="
+      },
+      {
+        "type": "mrel",
+        "value": "<"
+      },
+      "x",
+      {
+        "type": "mpunct",
+        "value": ","
+      },
+      "y",
+      {
+        "type": "mrel",
+        "value": ">"
+      },
+      "A"
+    ]
+  }
+}

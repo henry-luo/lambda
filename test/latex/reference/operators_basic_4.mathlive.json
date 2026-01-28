@@ -1,0 +1,29 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\leq b \\geq c",
+  "description": "Less/greater or equal",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.145Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\leq b \\geq c",
+    "body": [
+      "a",
+      {
+        "type": "mrel",
+        "command": "\\leq",
+        "value": "≤",
+        "verbatimLatex": "\\leq"
+      },
+      "b",
+      {
+        "type": "mrel",
+        "command": "\\geq",
+        "value": "≥",
+        "verbatimLatex": "\\geq"
+      },
+      "c"
+    ]
+  }
+}

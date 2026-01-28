@@ -1,0 +1,64 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a \\oslash b \\quad a \\odot b \\quad a \\bullet b \\quad a \\diamond b",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.305Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a \\oslash b \\quad a \\odot b \\quad a \\bullet b \\quad a \\diamond b",
+    "body": [
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\oslash",
+        "value": "⊘",
+        "verbatimLatex": "\\oslash"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\odot",
+        "value": "⊙",
+        "verbatimLatex": "\\odot"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\bullet",
+        "value": "∙",
+        "verbatimLatex": "\\bullet"
+      },
+      "b",
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      "a",
+      {
+        "type": "mbin",
+        "command": "\\diamond",
+        "value": "⋄",
+        "verbatimLatex": "\\diamond"
+      },
+      "b"
+    ]
+  }
+}

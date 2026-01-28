@@ -1,0 +1,41 @@
+{
+  "format": "mathlive-ast",
+  "latex": "f\\WildCard[(\\WildCard)]",
+  "description": null,
+  "type": "inline",
+  "generatedAt": "2026-01-28T01:48:55.231Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "f\\WildCard[(\\WildCard)]",
+    "body": [
+      "f",
+      {
+        "type": "error",
+        "value": "\\WildCard",
+        "verbatimLatex": "\\WildCard"
+      },
+      {
+        "type": "mopen",
+        "value": "["
+      },
+      {
+        "type": "mopen",
+        "value": "("
+      },
+      {
+        "type": "error",
+        "value": "\\WildCard",
+        "verbatimLatex": "\\WildCard"
+      },
+      {
+        "type": "mclose",
+        "value": ")"
+      },
+      {
+        "type": "mclose",
+        "value": "]"
+      }
+    ]
+  }
+}

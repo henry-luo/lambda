@@ -1,0 +1,37 @@
+{
+  "format": "mathlive-ast",
+  "latex": "a\\phantom{xyz}b",
+  "description": "Phantom (invisible but takes space)",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.159Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "a\\phantom{xyz}b",
+    "body": [
+      "a",
+      {
+        "type": "phantom",
+        "command": "\\phantom",
+        "verbatimLatex": "\\phantom{xyz}",
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "x",
+              "y",
+              "z"
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          "y",
+          "z"
+        ],
+        "isInvisible": true
+      },
+      "b"
+    ]
+  }
+}

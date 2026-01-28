@@ -1,0 +1,76 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\hat{x+y} \\quad \\bar{a+b}",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.172Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\hat{x+y} \\quad \\bar{a+b}",
+    "body": [
+      {
+        "type": "accent",
+        "command": "\\hat",
+        "verbatimLatex": "\\hat{x+y}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "x",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "y"
+            ]
+          }
+        ],
+        "body": [
+          "x",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "y"
+        ],
+        "accentChar": 94
+      },
+      {
+        "type": "spacing",
+        "command": "\\quad",
+        "verbatimLatex": "\\quad",
+        "args": []
+      },
+      {
+        "type": "accent",
+        "command": "\\bar",
+        "verbatimLatex": "\\bar{a+b}",
+        "skipBoundary": true,
+        "captureSelection": true,
+        "args": [
+          {
+            "group": [
+              "a",
+              {
+                "type": "mbin",
+                "value": "+"
+              },
+              "b"
+            ]
+          }
+        ],
+        "body": [
+          "a",
+          {
+            "type": "mbin",
+            "value": "+"
+          },
+          "b"
+        ],
+        "accentChar": 713
+      }
+    ]
+  }
+}

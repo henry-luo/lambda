@@ -1,0 +1,32 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\{a+b\\}",
+  "description": "Curly braces",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.100Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\{a+b\\}",
+    "body": [
+      {
+        "type": "mopen",
+        "command": "\\{",
+        "value": "{",
+        "verbatimLatex": "\\{"
+      },
+      "a",
+      {
+        "type": "mbin",
+        "value": "+"
+      },
+      "b",
+      {
+        "type": "mclose",
+        "command": "\\}",
+        "value": "}",
+        "verbatimLatex": "\\}"
+      }
+    ]
+  }
+}

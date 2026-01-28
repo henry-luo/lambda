@@ -1,0 +1,62 @@
+{
+  "format": "mathlive-ast",
+  "latex": "\\not\\in",
+  "description": "Not in",
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.136Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "\\not\\in",
+    "body": [
+      {
+        "command": "\\not",
+        "verbatimLatex": "\\not\\in",
+        "captureSelection": true,
+        "args": [
+          {
+            "atoms": [
+              {
+                "type": "mrel",
+                "command": "\\in",
+                "value": "∈",
+                "verbatimLatex": "\\in"
+              }
+            ]
+          }
+        ],
+        "body": [
+          {
+            "type": "overlap",
+            "command": "\\not",
+            "skipBoundary": true,
+            "args": [
+              {
+                "atoms": [
+                  {
+                    "type": "mrel",
+                    "command": "\\in",
+                    "value": "∈",
+                    "verbatimLatex": "\\in"
+                  }
+                ]
+              }
+            ],
+            "body": [
+              {
+                "value": ""
+              }
+            ],
+            "align": "right"
+          },
+          {
+            "type": "mrel",
+            "command": "\\in",
+            "value": "∈",
+            "verbatimLatex": "\\in"
+          }
+        ]
+      }
+    ]
+  }
+}

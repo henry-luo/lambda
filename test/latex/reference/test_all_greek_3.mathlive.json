@@ -1,0 +1,93 @@
+{
+  "format": "mathlive-ast",
+  "latex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega",
+  "description": null,
+  "type": "display",
+  "generatedAt": "2026-01-28T01:48:55.295Z",
+  "generator": "MathLive toJson()",
+  "ast": {
+    "type": "root",
+    "verbatimLatex": "A B \\Gamma \\Delta E Z H \\Theta I K \\Lambda M N \\Xi O \\Pi P \\Sigma T \\Upsilon \\Phi X \\Psi \\Omega",
+    "body": [
+      "A",
+      "B",
+      {
+        "type": "mord",
+        "command": "\\Gamma",
+        "value": "Γ",
+        "verbatimLatex": "\\Gamma"
+      },
+      {
+        "type": "mord",
+        "command": "\\Delta",
+        "value": "Δ",
+        "verbatimLatex": "\\Delta"
+      },
+      "E",
+      "Z",
+      "H",
+      {
+        "type": "mord",
+        "command": "\\Theta",
+        "value": "Θ",
+        "verbatimLatex": "\\Theta"
+      },
+      "I",
+      "K",
+      {
+        "type": "mord",
+        "command": "\\Lambda",
+        "value": "Λ",
+        "verbatimLatex": "\\Lambda"
+      },
+      "M",
+      "N",
+      {
+        "type": "mord",
+        "command": "\\Xi",
+        "value": "Ξ",
+        "verbatimLatex": "\\Xi"
+      },
+      "O",
+      {
+        "type": "mord",
+        "command": "\\Pi",
+        "value": "Π",
+        "verbatimLatex": "\\Pi"
+      },
+      "P",
+      {
+        "type": "mord",
+        "command": "\\Sigma",
+        "value": "Σ",
+        "verbatimLatex": "\\Sigma"
+      },
+      "T",
+      {
+        "type": "mord",
+        "command": "\\Upsilon",
+        "value": "Υ",
+        "verbatimLatex": "\\Upsilon"
+      },
+      {
+        "type": "mord",
+        "command": "\\Phi",
+        "value": "Φ",
+        "verbatimLatex": "\\Phi"
+      },
+      "X",
+      {
+        "type": "mord",
+        "command": "\\Psi",
+        "value": "Ψ",
+        "verbatimLatex": "\\Psi"
+      },
+      {
+        "type": "mord",
+        "command": "\\Omega",
+        "value": "Ω",
+        "verbatimLatex": "\\Omega"
+      }
+    ]
+  }
+}
