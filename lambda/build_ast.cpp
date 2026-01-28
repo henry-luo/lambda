@@ -3406,10 +3406,24 @@ AstNode* build_primary_pattern(Transpiler* tp, TSNode node) {
     } else if (symbol == SYM_PATTERN_CHAR_CLASS) {
         return build_pattern_char_class(tp, child);
     } else if (symbol == SYM_PATTERN_ANY) {
-        // Build a char class node for '.'
+        // Build a char class node for '\.'
         AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
         ast_node->char_class = PATTERN_ANY;
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        return (AstNode*)ast_node;
+    } else if (symbol == SYM_PATTERN_ANY_STAR) {
+        // Build a unary node for '...' (equivalent to \.*)
+        AstUnaryNode* ast_node = (AstUnaryNode*)
+            alloc_ast_node(tp, AST_NODE_UNARY, child, sizeof(AstUnaryNode));
+        // Create the operand (PATTERN_ANY)
+        AstPatternCharClassNode* any_node = (AstPatternCharClassNode*)
+            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
+        any_node->char_class = PATTERN_ANY;
+        any_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        ast_node->operand = (AstNode*)any_node;
+        ast_node->op = OPERATOR_ZERO_MORE;
+        ast_node->op_str = {.str = "*", .length = 1};
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
         return (AstNode*)ast_node;
     }
@@ -3501,6 +3515,20 @@ AstNode* build_pattern_expr(Transpiler* tp, TSNode node) {
         AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
         ast_node->char_class = PATTERN_ANY;
+        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        return (AstNode*)ast_node;
+    }
+    else if (symbol == SYM_PATTERN_ANY_STAR) {
+        // Build a unary node for '...' (equivalent to \.*)
+        AstUnaryNode* ast_node = (AstUnaryNode*)
+            alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
+        AstPatternCharClassNode* any_node = (AstPatternCharClassNode*)
+            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
+        any_node->char_class = PATTERN_ANY;
+        any_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        ast_node->operand = (AstNode*)any_node;
+        ast_node->op = OPERATOR_ZERO_MORE;
+        ast_node->op_str = {.str = "*", .length = 1};
         ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
         return (AstNode*)ast_node;
     }
