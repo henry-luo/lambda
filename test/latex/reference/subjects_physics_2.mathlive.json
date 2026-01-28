@@ -3,7 +3,6 @@
   "latex": "\\hat{H} = -\\frac{\\hbar^2}{2m}\\nabla^2 + V(r)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.144Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

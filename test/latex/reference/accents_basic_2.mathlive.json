@@ -3,7 +3,6 @@
   "latex": "\\bar{i} \\quad \\vec{v} \\quad \\mathring{o}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.481Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

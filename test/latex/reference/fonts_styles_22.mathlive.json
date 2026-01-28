@@ -3,7 +3,6 @@
   "latex": "\\lim_{n \\to \\infty} a_n, \\limsup a_n, \\liminf a_n",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.535Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

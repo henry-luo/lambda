@@ -3,7 +3,6 @@
   "latex": "G \\times H = \\{(g, h) : g \\in G, h \\in H\\}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.086Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

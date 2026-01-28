@@ -3,7 +3,6 @@
   "latex": "z(a+b), \\widehat{z}(a)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.010Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

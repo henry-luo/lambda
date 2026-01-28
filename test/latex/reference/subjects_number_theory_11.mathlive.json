@@ -3,7 +3,6 @@
   "latex": "g(n) = \\sum_{d|n} f(d) \\implies f(n) = \\sum_{d|n} \\mu\\left(\\frac{n}{d}\\right) g(d)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.142Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

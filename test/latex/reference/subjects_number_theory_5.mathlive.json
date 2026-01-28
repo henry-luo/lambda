@@ -3,7 +3,6 @@
   "latex": "a^{p-1} \\equiv 1 \\pmod{p}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.139Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

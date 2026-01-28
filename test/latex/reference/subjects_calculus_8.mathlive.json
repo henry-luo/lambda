@@ -3,7 +3,6 @@
   "latex": "\\iiint_V f(x,y,z)\\,dV = \\int_a^b \\int_c^d \\int_e^f f(x,y,z)\\,dz\\,dy\\,dx",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.098Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

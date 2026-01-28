@@ -3,7 +3,6 @@
   "latex": "\\mathcal{T}_\\WildCard",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:41.024Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

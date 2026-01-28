@@ -3,7 +3,6 @@
   "latex": "\\htmlData{foo=green}{2+\\frac{1}{x}}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.952Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

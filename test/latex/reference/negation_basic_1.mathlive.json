@@ -3,7 +3,6 @@
   "latex": "\\not\\equiv, \\not>,\\not\\ge,\\not\\gg,\n   \\not\\succ,\\not\\succeq,\n   \\not\\supset,\\not\\supseteq,\\not\\sqsupseteq,\n   \\not\\rhd,\\not\\unrhd,\n   \\not\\approx,",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.034Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

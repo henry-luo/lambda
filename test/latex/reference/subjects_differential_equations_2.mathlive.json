@@ -3,7 +3,6 @@
   "latex": "y = \\frac{1}{\\mu(x)} \\int \\mu(x) Q(x) \\, dx",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.121Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
