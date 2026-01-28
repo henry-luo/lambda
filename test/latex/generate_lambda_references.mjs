@@ -46,7 +46,7 @@ async function runLambda(latex) {
         const dviFile = path.join(tempDir, `${tempId}.dvi`);
 
         const args = [
-            'typeset-math',
+            'math',
             latex,
             '--output-ast', astFile,
             '--output-html', htmlFile,

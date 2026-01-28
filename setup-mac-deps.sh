@@ -634,6 +634,7 @@ build_woff2_for_mac() {
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DBROTLIDEC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
         -DBROTLIDEC_LIBRARIES="$BROTLI_DIR/out/libbrotlidec.a;$BROTLI_DIR/out/libbrotlicommon.a" \
         -DBROTLIENC_INCLUDE_DIRS="$BROTLI_DIR/c/include" \
