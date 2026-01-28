@@ -25,61 +25,63 @@ String patterns are defined using the `string` keyword followed by a pattern nam
 
 ```lambda
 // Basic pattern definitions
-string identifier = ('a' to 'z' | 'A' to 'Z' | '_') ('a' to 'z' | 'A' to 'Z' | '0' to '9' | '_')*
+string identifier = ("a" to "z" | "A" to "Z" | "_") ("a" to "z" | "A" to "Z" | "0" to "9" | "_")*
 
-string digit = '0' to '9'
-string hex_digit = digit | 'a' to 'f' | 'A' to 'F'
+string digit = "0" to "9"
+string hex_digit = digit | "a" to "f" | "A" to "F"
 
-string email = identifier '@' identifier '.' identifier
+string email = identifier "@" identifier "." identifier
 
 // Using occurrence operators
-string phone_us = digit{3} '-' digit{3} '-' digit{4}
+string phone_us = digit{3} "-" digit{3} "-" digit{4}
 ```
 
 ### 1.2 Pattern Operators
 
 String patterns reuse Lambda's existing type pattern operators:
 
-| Operator | Meaning | Example | Matches |
-|----------|---------|---------|---------|
-| `\|` | Alternation | `"a" \| "b"` | "a" or "b" |
-| `*` | Zero or more | `"a"*` | "", "a", "aa", ... |
-| `+` | One or more | `"a"+` | "a", "aa", "aaa", ... |
-| `?` | Optional (0 or 1) | `"a"?` | "" or "a" |
-| `&` | Concatenation (implicit) | `"a" "b"` | "ab" |
-| `to` | Character range | `'a' to 'z'` | a, b, c, ..., z |
-| `{n}` | Exactly n times | `digit{3}` | "000" to "999" |
-| `{n,m}` | Between n and m times | `digit{2,4}` | "00" to "9999" |
+| Operator | Meaning                 | Example      | Matches               |
+| -------- | ----------------------- | ------------ | --------------------- |
+| `\|`     | Alternation             | `"a" \| "b"` | "a" or "b"            |
+| `*`      | Zero or more            | `"a"*`       | "", "a", "aa", ...    |
+| `+`      | One or more             | `"a"+`       | "a", "aa", "aaa", ... |
+| `?`      | Optional (0 or 1)       | `"a"?`       | "" or "a"             |
+| (space)  | Concatenation (implicit)| `"a" "b"`    | "ab"                  |
+| `&`      | Intersection            | `\w & !"_"`  | word char except "_"  |
+| `to`     | Character range         | `"a" to "z"` | a, b, c, ..., z       |
+| `{n}`    | Exactly n times         | `digit{3}`   | "000" to "999"        |
+| `{n,m}`  | Between n and m times   | `digit{2,4}` | "00" to "9999"        |
+| `!`      | Negation                | `!\d`        | any non-digit char    |
 
 ### 1.3 Pattern Examples
 
 ```lambda
 // Simple patterns
-string binary = ('0' | '1')+                     // Binary number
-string octal = '0' ('0' to '7')*                 // Octal number
+string binary = ("0" | "1")+                     // Binary number
+string octal = "0" ("0" to "7")*                 // Octal number
 string hex = "0x" hex_digit+                     // Hex number
 
 // Common formats
-string alpha = ('a' to 'z' | 'A' to 'Z')+
-string alphanumeric = ('a' to 'z' | 'A' to 'Z' | '0' to '9')+
-string whitespace = (' ' | '\t' | '\n' | '\r')+
+string alpha = ("a" to "z" | "A" to "Z")+
+string alphanumeric = ("a" to "z" | "A" to "Z" | "0" to "9")+
+string whitespace = (" " | "\t" | "\n" | "\r")+
 
 // Real-world patterns
-string ip_octet = digit | digit digit | ('0' to '1') digit digit | '2' ('0' to '4') digit | "25" ('0' to '5')
-string ipv4 = ip_octet '.' ip_octet '.' ip_octet '.' ip_octet
+string ip_octet = digit | digit digit | ("0" to "1") digit digit | "2" ("0" to "4") digit | "25" ("0" to "5")
+string ipv4 = ip_octet "." ip_octet "." ip_octet "." ip_octet
 
-string date_iso = digit{4} '-' digit{2} '-' digit{2}
-string time_24h = ('0' to '1') digit | '2' ('0' to '3') ':' ('0' to '5') digit
+string date_iso = digit{4} "-" digit{2} "-" digit{2}
+string time_24h = ("0" to "1") digit | "2" ("0" to "3") ":" ("0" to "5") digit
 
 // URL pattern
 string scheme = alpha alphanumeric*
-string url_path = ('/' alphanumeric*)*
-string url = scheme "://" alphanumeric+ ('.' alphanumeric+)* url_path?
+string url_path = ("/" alphanumeric*)*
+string url = scheme "://" alphanumeric+ ("." alphanumeric+)* url_path?
 
 // Email (simplified)
-string local_part = (alphanumeric | '.' | '_' | '-')+
-string domain = alphanumeric+ ('.' alphanumeric+)+
-string email = local_part '@' domain
+string local_part = (alphanumeric | "." | "_" | "-")+
+string domain = alphanumeric+ ("." alphanumeric+)+
+string email = local_part "@" domain
 ```
 
 ### 1.4 Character Classes (Syntactic Sugar)
@@ -88,19 +90,19 @@ For convenience, predefined character classes:
 
 ```lambda
 // Built-in character classes
-\d     // digit: '0' to '9'
-\w     // word: 'a' to 'z' | 'A' to 'Z' | '0' to '9' | '_'
-\s     // whitespace: ' ' | '\t' | '\n' | '\r'
-\a     // alpha: 'a' to 'z' | 'A' to 'Z'
+\d     // digit: "0" to "9"
+\w     // word: "a" to "z" | "A" to "Z" | "0" to "9" | "_"
+\s     // whitespace: " " | "\t" | "\n" | "\r"
+\a     // alpha: "a" to "z" | "A" to "Z"
 
-// Negation
-\D     // non-digit
-\W     // non-word
-\S     // non-whitespace
+// Negation (using ! operator)
+!\d    // non-digit (any character except 0-9)
+!\w    // non-word (any character except letters, digits, underscore)
+!\s    // non-whitespace
 
 // Usage
 string identifier = \a \w*
-string trimmed = \S (\s* \S)*
+string trimmed = !\s (\s* !\s)*
 ```
 
 ### 1.5 Special Patterns
@@ -185,15 +187,15 @@ match (code) {
 Patterns can reference other patterns:
 
 ```lambda
-string digit = '0' to '9'
-string letter = 'a' to 'z' | 'A' to 'Z'
+string digit = "0" to "9"
+string letter = "a" to "z" | "A" to "Z"
 
 // Compose patterns
 string alphanumeric = letter | digit
-string identifier = (letter | '_') (alphanumeric | '_')*
+string identifier = (letter | "_") (alphanumeric | "_")*
 
 // Extend patterns with intersection
-string positive_int = digit+ & !('0' digit*)  // no leading zeros
+string positive_int = digit+ & !("0" digit*)  // no leading zeros
 
 // Pattern aliases
 string varchar50 = . {1,50}   // any string 1-50 chars
@@ -205,56 +207,31 @@ string varchar50 = . {1,50}   // any string 1-50 chars
 
 ### 3.1 Core Pattern Functions
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `match(s, p)` | `(string, pattern) -> bool` | Check if entire string matches pattern |
-| `find(s, p)` | `(string, pattern) -> string?` | Find first match, return matched substring |
-| `find_all(s, p)` | `(string, pattern) -> [string]` | Find all non-overlapping matches |
-| `find_at(s, p)` | `(string, pattern) -> (int, int)?` | Find first match position (start, end) |
-| `find_all_at(s, p)` | `(string, pattern) -> [(int, int)]` | Find all match positions |
+| Function         | Signature                          | Description                             |
+| ---------------- | ---------------------------------- | --------------------------------------- |
+| `find(s, p)`     | `(string, pattern) -> [string]`    | Find all non-overlapping matches        |
+| `find_at(s, p)`  | `(string, pattern) -> [(int, int)]`| Find all match positions (start, end)   |
 
 ```lambda
 // Examples
-match("hello123", alphanumeric+)           // true
-match("hello 123", alphanumeric+)          // false (space)
+// Use 'is' operator to check if string matches pattern
+"hello123" is alphanumeric+                // true
+"hello 123" is alphanumeric+               // false (space)
 
-find("The price is $42.50", digit+)        // "42"
-find_all("a1b2c3", digit)                  // ["1", "2", "3"]
+find("The price is $42.50", digit+)        // ["42", "50"]
+find("a1b2c3", digit)                      // ["1", "2", "3"]
 
-find_at("hello world", "world")            // (6, 11)
-find_all_at("abab", "ab")                  // [(0, 2), (2, 4)]
+find_at("hello world", "o")                // [(4, 5), (7, 8)]
+find_at("abab", "ab")                      // [(0, 2), (2, 4)]
 ```
 
-### 3.2 Pattern Extraction (Capture Groups)
+### 3.2 Pattern Replacement
 
-Patterns can define named capture groups:
+| Function            | Signature                                                   | Description                |
+| ------------------- | ----------------------------------------------------------- | -------------------------- |
+| `replace(s, p, r)`  | `(string, pattern, string \| (string)->string) -> string`   | Replace all matches        |
 
-```lambda
-// Named captures with @
-string email_parts = @local:(alphanumeric | '.' | '_')+ '@' @domain:alphanumeric+ ('.' alphanumeric+)+
-
-// Extract captures
-let result = capture("john.doe@example.com", email_parts)
-// result = {local: "john.doe", domain: "example"}
-
-// Multiple captures
-string date = @year:digit{4} '-' @month:digit{2} '-' @day:digit{2}
-capture("2024-01-27", date)
-// {year: "2024", month: "01", day: "27"}
-```
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `capture(s, p)` | `(string, pattern) -> {string: string}?` | Extract named captures |
-| `capture_all(s, p)` | `(string, pattern) -> [{string: string}]` | Extract all matches with captures |
-
-### 3.3 Pattern Replacement
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `replace(s, p, r)` | `(string, pattern, string) -> string` | Replace all matches |
-| `replace_first(s, p, r)` | `(string, pattern, string) -> string` | Replace first match |
-| `replace_with(s, p, fn)` | `(string, pattern, (string)->string) -> string` | Replace with function |
+When the third argument is a string, it replaces all matches with that string. When the third argument is a function, the function is called for each match and its return value is used as the replacement.
 
 ```lambda
 // Simple replacement
@@ -263,29 +240,33 @@ replace("hello world", "o", "0")           // "hell0 w0rld"
 // Pattern replacement
 replace("a1b2c3", digit, "X")              // "aXbXcX"
 
-// With capture references
-string swap = @a:\w+ ' ' @b:\w+
-replace("hello world", swap, "$b $a")      // "world hello"
-
-// With function
-replace_with("hello", '.', \c -> upper(c)) // "HELLO"
+// With function (dynamic replacement)
+replace("hello", ".", \c -> upper(c))      // "HELLO"
+replace("a1b2", digit, \d -> string(int(d) * 2))  // "a2b4"
 ```
 
-### 3.4 Pattern Splitting
+> **KIV**: `replace_first(s, p, r)` - Replace only the first match. Can be added if needed.
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `split(s, p)` | `(string, pattern) -> [string]` | Split by pattern |
-| `split_keep(s, p)` | `(string, pattern) -> [string]` | Split, keeping delimiters |
+### 3.3 Pattern Splitting
+
+| Function                  | Signature                                 | Description                     |
+| ------------------------- | ----------------------------------------- | ------------------------------- |
+| `split(s, p, keep?)`      | `(string, pattern, bool?) -> [string]`    | Split by pattern                |
+
+The optional third argument `keep` (default: `false`) determines whether to keep the delimiters in the result.
 
 ```lambda
-split("a,b;c:d", ',' | ';' | ':')          // ["a", "b", "c", "d"]
+split("a,b;c:d", "," | ";" | ":")           // ["a", "b", "c", "d"]
 split("hello   world", \s+)                 // ["hello", "world"]
 
-split_keep("a1b2c3", digit)                 // ["a", "1", "b", "2", "c", "3"]
+// With keep_delimiter = true
+split("a1b2c3", digit, true)                // ["a", "1", "b", "2", "c", "3"]
+split("hello world", " ", true)             // ["hello", " ", "world"]
 ```
 
-### 3.5 Pattern Validation
+### 3.4 Pattern Validation - KIV
+
+> **Status**: Keep In View - planned but not yet implemented.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
@@ -306,19 +287,32 @@ let result = validate("hello@", email)
 
 ---
 
-## 4. Additional Features
+## 4. Additional Features (for future)
 
-### 4.1 Case-Insensitive Patterns
+### 4.1 Pattern Extraction (Capture Groups)
+
+> **Status**: Deferred to future release.
+
+Capture groups allow extracting named parts of a pattern match. This feature is planned but not yet implemented.
+
+```lambda
+// Future syntax (deferred)
+string email_parts = @local:(alphanumeric | "." | "_")+ "@" @domain:alphanumeric+ ("." alphanumeric+)+
+let result = capture("john.doe@example.com", email_parts)
+// result = {local: "john.doe", domain: "example"}
+```
+
+### 4.2 Case-Insensitive Patterns
 
 ```lambda
 // Case-insensitive modifier
 string http_method = /i ("GET" | "POST" | "PUT" | "DELETE")
 
 // Or using character ranges
-string http_method = ('G'|'g')('E'|'e')('T'|'t') | ...
+string http_method = ("G"|"g")("E"|"e")("T"|"t") | ...
 ```
 
-### 4.2 Pattern Literals in Expressions
+### 4.3 Pattern Literals in Expressions
 
 Allow inline pattern literals:
 
@@ -333,7 +327,7 @@ string phone_short = digit{3} '-' digit{4}
 if (s is phone_short) { ... }
 ```
 
-### 4.3 Unicode Support
+### 4.4 Unicode Support
 
 ```lambda
 // Unicode character classes
@@ -348,7 +342,7 @@ string cjk_text = \p{Han}+
 string mixed = (\p{Letter} | \p{Number})+
 ```
 
-### 4.4 Pattern Type Coercion
+### 4.5 Pattern Type Coercion
 
 When a string is assigned to a pattern type, implicit validation occurs:
 
@@ -367,7 +361,7 @@ let e: email = s as email            // Throws if invalid
 let e: email? = s as? email          // Returns null if invalid
 ```
 
-### 4.5 Pattern Debugging
+### 4.6 Pattern Debugging
 
 ```lambda
 // Get regex representation
@@ -394,7 +388,7 @@ Lambda Pattern → Pattern AST → Regex String → Compiled Regex
 
 ```lambda
 // Lambda pattern
-string identifier = ('a' to 'z' | 'A' to 'Z' | '_') ('a' to 'z' | 'A' to 'Z' | '0' to '9' | '_')*
+string identifier = ("a" to "z" | "A" to "Z" | "_") ("a" to "z" | "A" to "Z" | "0" to "9" | "_")*
 
 // Compiled to regex
 "^[a-zA-Z_][a-zA-Z0-9_]*$"
@@ -509,7 +503,7 @@ _pattern_expr: $ => choice(
 ),
 
 pattern_char: $ => choice(
-    $.string,      // "abc" or 'x'
+    $.string,      // "abc" or "x"
     $.char_class,  // \d, \w, \s, etc.
 ),
 
@@ -540,7 +534,7 @@ pattern_capture: $ => seq(
 ),
 
 char_class: $ => token(choice(
-    '\\d', '\\D', '\\w', '\\W', '\\s', '\\S', '\\a', '.',
+    '\\d', '\\w', '\\s', '\\a', '.',
     seq('\\p{', /[A-Za-z_]+/, '}'),
 )),
 ```
@@ -606,9 +600,9 @@ parse("123")     // calls decimal version
 
 ```lambda
 // Define config patterns
-string semver = digit+ '.' digit+ '.' digit+ ('-' alphanumeric+)?
-string env_var = ('A' to 'Z' | '_')+
-string file_path = ('/' | './')? (alphanumeric | '_' | '-' | '/')+ ('.' alphanumeric+)?
+string semver = digit+ "." digit+ "." digit+ ("-" alphanumeric+)?
+string env_var = ("A" to "Z" | "_")+
+string file_path = ("/" | "./")? (alphanumeric | "_" | "-" | "/")+ ("." alphanumeric+)?
 
 type Config = {
     version: semver,
@@ -622,9 +616,9 @@ type Config = {
 ### 7.2 Log Parsing
 
 ```lambda
-string timestamp = digit{4} '-' digit{2} '-' digit{2} ' ' digit{2} ':' digit{2} ':' digit{2}
+string timestamp = digit{4} "-" digit{2} "-" digit{2} " " digit{2} ":" digit{2} ":" digit{2}
 string log_level = "DEBUG" | "INFO" | "WARN" | "ERROR"
-string log_line = @ts:timestamp ' ' @level:log_level ' ' @msg:.+
+string log_line = @ts:timestamp " " @level:log_level " " @msg:.+
 
 fn parse_log(line: string) {
     match capture(line, log_line) {
@@ -637,12 +631,12 @@ fn parse_log(line: string) {
 ### 7.3 Input Sanitization
 
 ```lambda
-string safe_html = (!('<' | '>' | '&' | '"' | "'"))+
+string safe_html = (!("<" | ">" | "&" | '"' | "'"))+
 
 fn sanitize(input: string) -> safe_html {
-    replace(input, '<', "&lt;")
-    |> replace(_, '>', "&gt;")
-    |> replace(_, '&', "&amp;")
+    replace(input, "<", "&lt;")
+    |> replace(_, ">", "&gt;")
+    |> replace(_, "&", "&amp;")
     |> replace(_, '"', "&quot;")
     |> replace(_, "'", "&#39;")
 }
@@ -685,17 +679,160 @@ type User = { email: email_pattern }
 
 ## 10. Summary
 
+### 10.1 String Patterns
+
+| Feature    | Syntax                  | Description                            |
+| ---------- | ----------------------- | -------------------------------------- |
+| Definition | `string name = pattern` | Define named string pattern            |
+| Matching   | `s is pattern`          | Check if string matches                |
+| As type    | `fn f(p: pattern)`      | Use pattern as type constraint         |
+| Find       | `find(s, p)`            | Find all matches                       |
+| Find At    | `find_at(s, p)`         | Find all match positions               |
+| Replace    | `replace(s, p, r)`      | Replace matches (r: string or function)|
+| Split      | `split(s, p, keep?)`    | Split by pattern                       |
+
+### 10.2 Symbol Patterns
+
 | Feature | Syntax | Description |
 |---------|--------|-------------|
-| Definition | `string name = pattern` | Define named string pattern |
-| Matching | `s is pattern` | Check if string matches |
+| Definition | `symbol name = pattern` | Define named symbol pattern |
+| Matching | `sym is pattern` | Check if symbol matches |
 | As type | `fn f(p: pattern)` | Use pattern as type constraint |
-| Find | `find(s, p)` | Find first match |
-| Replace | `replace(s, p, r)` | Replace matches |
-| Capture | `capture(s, p)` | Extract named groups |
-| Split | `split(s, p)` | Split by pattern |
+| Range | `'a to 'z` | Character range for symbols |
 
 **Recommended regex library: RE2** for its linear-time guarantee, safety, and Unicode support.
+
+---
+
+## 11. Symbol Pattern Extension
+
+### 11.1 Motivation
+
+Lambda distinguishes between **strings** (double-quoted, for content data) and **symbols** (single-quoted, for identifiers and structural values). Just as string patterns provide type-safe validation for string content, **symbol patterns** can provide the same benefits for symbol values.
+
+**Use cases for symbol patterns:**
+- Validating identifier naming conventions
+- Ensuring consistent key formats in maps/elements
+- Type-safe enum-like symbol constraints
+- API field name validation
+
+### 11.2 Symbol Pattern Syntax
+
+Symbol patterns use the `symbol` keyword instead of `string`:
+
+```lambda
+// Basic symbol pattern definitions
+symbol identifier = ('a to 'z | 'A to 'Z | '_) ('a to 'z | 'A to 'Z | '0 to '9 | '_)*
+
+symbol snake_case = ('a to 'z) ('a to 'z | '0 to '9 | '_)*
+symbol camelCase = ('a to 'z) ('a to 'z | 'A to 'Z | '0 to '9)*
+symbol SCREAMING_SNAKE = ('A to 'Z) ('A to 'Z | '0 to '9 | '_)*
+
+// HTML/XML element names
+symbol html_tag = ('a to 'z)+ ('-('a to 'z)+)*
+symbol xml_name = ('a to 'z | 'A to 'Z | '_) ('a to 'z | 'A to 'Z | '0 to '9 | '_ | '- | '.)*
+```
+
+### 11.3 Pattern Operators for Symbols
+
+Symbol patterns use the same operators as string patterns, but with symbol literals:
+
+| Operator | Meaning | Example | Matches |
+|----------|---------|---------|---------|
+| `\|` | Alternation | `'a \| 'b` | 'a or 'b |
+| `*` | Zero or more | `'a*` | ', 'a, 'aa, ... |
+| `+` | One or more | `'a+` | 'a, 'aa, 'aaa, ... |
+| `?` | Optional (0 or 1) | `'a?` | ' or 'a |
+| `to` | Character range | `'a to 'z` | 'a, 'b, 'c, ..., 'z |
+| `{n}` | Exactly n times | `('a to 'z){3}` | 'aaa to 'zzz |
+
+### 11.4 Using Symbol Patterns as Types
+
+```lambda
+// Type definition
+symbol field_name = snake_case
+
+// Parameter type
+fn validate_field(name: field_name) -> bool {
+    // name is guaranteed to match snake_case pattern
+    true
+}
+
+// Schema field validation
+type APIResponse = {
+    status: 'success | 'error | 'pending,
+    data: any,
+    @keys: snake_case    // all keys must match snake_case pattern
+}
+
+// Element attribute names
+element Config {
+    @attrs: SCREAMING_SNAKE   // attribute names must be SCREAMING_SNAKE
+}
+```
+
+### 11.5 Symbol Pattern Matching
+
+```lambda
+// Check if symbol matches pattern
+'myVariable is camelCase        // true
+'my_variable is snake_case      // true
+'MY_CONSTANT is SCREAMING_SNAKE // true
+
+// In conditionals
+if (field_name is snake_case) {
+    // field_name type-narrowed to snake_case
+    process_field(field_name)
+}
+
+// Pattern-based dispatch
+match (naming_convention) {
+    is snake_case => format_snake(name),
+    is camelCase => format_camel(name),
+    is SCREAMING_SNAKE => format_screaming(name),
+    _ => name
+}
+```
+
+### 11.6 Differences from String Patterns
+
+| Aspect | String Pattern | Symbol Pattern |
+|--------|----------------|----------------|
+| **Keyword** | `string` | `symbol` |
+| **Literals** | `"a"`, `"abc"` | `'a`, `'abc` |
+| **Range** | `"a" to "z"` | `'a to 'z` |
+| **Use case** | Content validation | Identifier validation |
+| **Typical length** | Variable, often long | Short (identifiers) |
+| **Pooling** | Never | ≤32 chars pooled |
+
+### 11.7 Shared Functions
+
+Most pattern functions work for both string and symbol patterns:
+
+| Function | String Pattern | Symbol Pattern |
+|----------|----------------|----------------|
+| `match(s, p)` | ✅ | ✅ |
+| `find(s, p)` | ✅ | ✅ |
+| `capture(s, p)` | ✅ | ✅ (returns symbols) |
+| `validate(s, p)` | ✅ | ✅ |
+
+### 11.8 Implementation Notes
+
+Symbol patterns can share the same compilation infrastructure as string patterns:
+
+```cpp
+typedef struct TypeSymbolPattern {
+    TypeId type_id;  // LMD_TYPE_SYMBOL_PATTERN
+    StrView* name;
+    Type* pattern;         // Pattern AST (shared with string patterns)
+    void* compiled_regex;  // Same RE2 backend
+} TypeSymbolPattern;
+```
+
+The only difference is:
+1. Input/output types are symbols instead of strings
+2. The grammar accepts symbol literals (`'x'`) instead of string literals (`"x"`)
+3. Capture groups return symbol values
 
 ---
 
