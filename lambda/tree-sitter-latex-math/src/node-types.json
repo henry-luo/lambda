@@ -342,6 +342,10 @@
           "named": true
         },
         {
+          "type": "extensible_arrow",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -358,6 +362,10 @@
           "named": true
         },
         {
+          "type": "overunder_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -367,6 +375,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
           "named": true
         },
         {
@@ -485,6 +497,10 @@
           "named": true
         },
         {
+          "type": "extensible_arrow",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -501,6 +517,10 @@
           "named": true
         },
         {
+          "type": "overunder_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -510,6 +530,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
           "named": true
         },
         {
@@ -576,6 +600,10 @@
           "named": true
         },
         {
+          "type": "extensible_arrow",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -592,6 +620,10 @@
           "named": true
         },
         {
+          "type": "overunder_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -605,6 +637,10 @@
         },
         {
           "type": "row_sep",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
           "named": true
         },
         {
@@ -705,6 +741,74 @@
     }
   },
   {
+    "type": "extensible_arrow",
+    "named": true,
+    "fields": {
+      "above": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "below": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brack_group",
+            "named": true
+          }
+        ]
+      },
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\xLeftarrow",
+            "named": false
+          },
+          {
+            "type": "\\xLeftrightarrow",
+            "named": false
+          },
+          {
+            "type": "\\xRightarrow",
+            "named": false
+          },
+          {
+            "type": "\\xhookleftarrow",
+            "named": false
+          },
+          {
+            "type": "\\xhookrightarrow",
+            "named": false
+          },
+          {
+            "type": "\\xleftarrow",
+            "named": false
+          },
+          {
+            "type": "\\xleftrightarrow",
+            "named": false
+          },
+          {
+            "type": "\\xmapsto",
+            "named": false
+          },
+          {
+            "type": "\\xrightarrow",
+            "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "fraction",
     "named": true,
     "fields": {
@@ -785,6 +889,10 @@
           "named": true
         },
         {
+          "type": "extensible_arrow",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -801,6 +909,10 @@
           "named": true
         },
         {
+          "type": "overunder_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -810,6 +922,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
           "named": true
         },
         {
@@ -873,6 +989,10 @@
           "named": true
         },
         {
+          "type": "extensible_arrow",
+          "named": true
+        },
+        {
           "type": "fraction",
           "named": true
         },
@@ -889,6 +1009,10 @@
           "named": true
         },
         {
+          "type": "overunder_command",
+          "named": true
+        },
+        {
           "type": "punctuation",
           "named": true
         },
@@ -898,6 +1022,10 @@
         },
         {
           "type": "relation",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
           "named": true
         },
         {
@@ -931,6 +1059,50 @@
     "type": "operator",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "overunder_command",
+    "named": true,
+    "fields": {
+      "annotation": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "base": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\overset",
+            "named": false
+          },
+          {
+            "type": "\\stackrel",
+            "named": false
+          },
+          {
+            "type": "\\underset",
+            "named": false
+          }
+        ]
+      }
+    }
   },
   {
     "type": "punctuation",
@@ -967,6 +1139,92 @@
     "type": "relation",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "sized_delimiter",
+    "named": true,
+    "fields": {
+      "delim": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "delimiter",
+            "named": true
+          }
+        ]
+      },
+      "size": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\Big",
+            "named": false
+          },
+          {
+            "type": "\\Bigg",
+            "named": false
+          },
+          {
+            "type": "\\Biggl",
+            "named": false
+          },
+          {
+            "type": "\\Biggm",
+            "named": false
+          },
+          {
+            "type": "\\Biggr",
+            "named": false
+          },
+          {
+            "type": "\\Bigl",
+            "named": false
+          },
+          {
+            "type": "\\Bigm",
+            "named": false
+          },
+          {
+            "type": "\\Bigr",
+            "named": false
+          },
+          {
+            "type": "\\big",
+            "named": false
+          },
+          {
+            "type": "\\bigg",
+            "named": false
+          },
+          {
+            "type": "\\biggl",
+            "named": false
+          },
+          {
+            "type": "\\biggm",
+            "named": false
+          },
+          {
+            "type": "\\biggr",
+            "named": false
+          },
+          {
+            "type": "\\bigl",
+            "named": false
+          },
+          {
+            "type": "\\bigm",
+            "named": false
+          },
+          {
+            "type": "\\bigr",
+            "named": false
+          }
+        ]
+      }
+    }
   },
   {
     "type": "space_command",
@@ -1084,6 +1342,10 @@
             "named": true
           },
           {
+            "type": "extensible_arrow",
+            "named": true
+          },
+          {
             "type": "fraction",
             "named": true
           },
@@ -1096,6 +1358,10 @@
             "named": true
           },
           {
+            "type": "overunder_command",
+            "named": true
+          },
+          {
             "type": "punctuation",
             "named": true
           },
@@ -1105,6 +1371,10 @@
           },
           {
             "type": "relation",
+            "named": true
+          },
+          {
+            "type": "sized_delimiter",
             "named": true
           },
           {
@@ -1342,6 +1612,38 @@
     "named": false
   },
   {
+    "type": "\\Big",
+    "named": false
+  },
+  {
+    "type": "\\Bigg",
+    "named": false
+  },
+  {
+    "type": "\\Biggl",
+    "named": false
+  },
+  {
+    "type": "\\Biggm",
+    "named": false
+  },
+  {
+    "type": "\\Biggr",
+    "named": false
+  },
+  {
+    "type": "\\Bigl",
+    "named": false
+  },
+  {
+    "type": "\\Bigm",
+    "named": false
+  },
+  {
+    "type": "\\Bigr",
+    "named": false
+  },
+  {
     "type": "\\Pr",
     "named": false
   },
@@ -1366,6 +1668,10 @@
     "named": false
   },
   {
+    "type": "\\big",
+    "named": false
+  },
+  {
     "type": "\\bigcap",
     "named": false
   },
@@ -1374,11 +1680,39 @@
     "named": false
   },
   {
+    "type": "\\bigg",
+    "named": false
+  },
+  {
+    "type": "\\biggl",
+    "named": false
+  },
+  {
+    "type": "\\biggm",
+    "named": false
+  },
+  {
+    "type": "\\biggr",
+    "named": false
+  },
+  {
+    "type": "\\bigl",
+    "named": false
+  },
+  {
+    "type": "\\bigm",
+    "named": false
+  },
+  {
     "type": "\\bigoplus",
     "named": false
   },
   {
     "type": "\\bigotimes",
+    "named": false
+  },
+  {
+    "type": "\\bigr",
     "named": false
   },
   {
@@ -1734,6 +2068,10 @@
     "named": false
   },
   {
+    "type": "\\overset",
+    "named": false
+  },
+  {
     "type": "\\parallel",
     "named": false
   },
@@ -1834,6 +2172,10 @@
     "named": false
   },
   {
+    "type": "\\stackrel",
+    "named": false
+  },
+  {
     "type": "\\star",
     "named": false
   },
@@ -1922,6 +2264,10 @@
     "named": false
   },
   {
+    "type": "\\underset",
+    "named": false
+  },
+  {
     "type": "\\vdash",
     "named": false
   },
@@ -1947,6 +2293,42 @@
   },
   {
     "type": "\\widetilde",
+    "named": false
+  },
+  {
+    "type": "\\xLeftarrow",
+    "named": false
+  },
+  {
+    "type": "\\xLeftrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\xRightarrow",
+    "named": false
+  },
+  {
+    "type": "\\xhookleftarrow",
+    "named": false
+  },
+  {
+    "type": "\\xhookrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\xleftarrow",
+    "named": false
+  },
+  {
+    "type": "\\xleftrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\xmapsto",
+    "named": false
+  },
+  {
+    "type": "\\xrightarrow",
     "named": false
   },
   {

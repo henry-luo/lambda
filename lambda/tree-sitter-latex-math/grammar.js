@@ -59,6 +59,9 @@ module.exports = grammar({
       $.binomial,
       $.radical,
       $.delimiter_group,
+      $.sized_delimiter,    // \big, \Big, \bigg, \Bigg delimiters
+      $.overunder_command,  // \overset, \underset, \stackrel
+      $.extensible_arrow,   // \xrightarrow, \xleftarrow
       $.accent,
       $.symbol_command,  // Symbol commands like \infty - before big_operator
       $.big_operator,
@@ -193,6 +196,17 @@ module.exports = grammar({
       '\\right', field('right_delim', $.delimiter),
     ),
 
+    // Sized delimiters: \big, \Big, \bigg, \Bigg
+    sized_delimiter: $ => seq(
+      field('size', choice(
+        '\\big', '\\Big', '\\bigg', '\\Bigg',
+        '\\bigl', '\\Bigl', '\\biggl', '\\Biggl',
+        '\\bigr', '\\Bigr', '\\biggr', '\\Biggr',
+        '\\bigm', '\\Bigm', '\\biggm', '\\Biggm',
+      )),
+      field('delim', $.delimiter),
+    ),
+
     delimiter: $ => choice(
       '(', ')', '[', ']',
       '\\{', '\\}',
@@ -203,6 +217,33 @@ module.exports = grammar({
       '\\lvert', '\\rvert',
       '\\lVert', '\\rVert',
       '.',  // Null delimiter
+    ),
+
+    // ========================================================================
+    // Over/Under Set Commands (amsmath)
+    // ========================================================================
+
+    overunder_command: $ => seq(
+      field('cmd', choice(
+        '\\overset',     // Place first arg over second
+        '\\underset',    // Place first arg under second
+        '\\stackrel',    // Like overset with relation spacing
+      )),
+      field('annotation', $.group),  // What goes over/under
+      field('base', $.group),        // The base symbol
+    ),
+
+    // Extensible arrows with optional annotations
+    extensible_arrow: $ => seq(
+      field('cmd', choice(
+        '\\xrightarrow', '\\xleftarrow',
+        '\\xRightarrow', '\\xLeftarrow',
+        '\\xleftrightarrow', '\\xLeftrightarrow',
+        '\\xhookleftarrow', '\\xhookrightarrow',
+        '\\xmapsto',
+      )),
+      optional(field('below', $.brack_group)),  // Optional subscript annotation
+      field('above', $.group),                   // Superscript annotation
     ),
 
     // ========================================================================
