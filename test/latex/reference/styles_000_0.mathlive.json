@@ -3,7 +3,6 @@
   "latex": "\\binom12 \\textstyle \\binom34 \\scriptstyle \\binom56 \\displaystyle \\binom78 \\scriptstyle \\binom90",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.997Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

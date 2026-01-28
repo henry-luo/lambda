@@ -3,7 +3,6 @@
   "latex": "\\text{Rate} = k[\\text{A}]^m[\\text{B}]^n",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.107Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

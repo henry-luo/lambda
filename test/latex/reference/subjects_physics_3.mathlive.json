@@ -3,7 +3,6 @@
   "latex": "R_{\\mu\\nu} - \\frac{1}{2}Rg_{\\mu\\nu} + \\Lambda g_{\\mu\\nu} = \\frac{8\\pi G}{c^4}T_{\\mu\\nu}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.144Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

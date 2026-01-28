@@ -3,7 +3,6 @@
   "latex": "\\pi(x) \\sim \\frac{x}{\\ln x}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.138Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

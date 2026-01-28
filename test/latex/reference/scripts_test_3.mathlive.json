@@ -3,7 +3,6 @@
   "latex": "\\mathop{\\mathop{A}\\limits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\limits^C \\qquad\n   \\mathop{\\mathop{A}\\limits_B}\\nolimits^C \\qquad\n   \\mathop{\\mathop{A}\\nolimits_B}\\nolimits^C",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.075Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

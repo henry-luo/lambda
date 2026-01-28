@@ -3,7 +3,6 @@
   "latex": "a + b \\quad a - b \\quad a \\times b \\quad a \\div b",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.048Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

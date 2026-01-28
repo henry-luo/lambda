@@ -3,7 +3,6 @@
   "latex": "+-a+b=c+-d=x^{2-\\frac{1}{2}}",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.976Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

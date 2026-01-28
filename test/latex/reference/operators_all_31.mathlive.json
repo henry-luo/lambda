@@ -3,7 +3,6 @@
   "latex": "\\aleph \\quad \\hbar \\quad \\ell \\quad \\imath \\quad \\jmath",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.062Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

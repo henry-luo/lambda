@@ -3,7 +3,6 @@
   "latex": "\\textcolor{red}{a=}+b",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:40.969Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

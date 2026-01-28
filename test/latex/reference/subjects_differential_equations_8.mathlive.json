@@ -3,7 +3,6 @@
   "latex": "\\mathcal{L}\\{f''\\} = s^2 F(s) - sf(0) - f'(0)",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.124Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

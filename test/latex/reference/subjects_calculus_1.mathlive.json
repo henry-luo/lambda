@@ -3,7 +3,6 @@
   "latex": "\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n = e",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.093Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
