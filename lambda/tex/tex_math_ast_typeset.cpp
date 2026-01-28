@@ -395,14 +395,14 @@ struct TypesetContext {
         roman5_tfm = ctx.fonts ? ctx.fonts->get_font("cmr5") : nullptr;
         italic5_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi5") : nullptr;
         symbol5_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy5") : nullptr;
-        
+
         log_debug("[TYPESET] TypesetContext loaded script fonts: cmr7=%p cmmi7=%p cmsy7=%p lasy10=%p",
                   roman7_tfm, italic7_tfm, symbol7_tfm, lasy_tfm);
     }
 
     float font_size() const { return math_ctx.font_size(); }
     Arena* arena() const { return math_ctx.arena; }
-    
+
     // Style-aware font name selection
     const char* get_roman_font_name() const {
         if (is_script(math_ctx.style)) {
@@ -411,7 +411,7 @@ struct TypesetContext {
         }
         return "cmr10";
     }
-    
+
     const char* get_italic_font_name() const {
         if (is_script(math_ctx.style)) {
             if (math_ctx.style >= MathStyle::ScriptScript) return "cmmi5";
@@ -419,7 +419,7 @@ struct TypesetContext {
         }
         return "cmmi10";
     }
-    
+
     const char* get_symbol_font_name() const {
         if (is_script(math_ctx.style)) {
             if (math_ctx.style >= MathStyle::ScriptScript) return "cmsy5";
@@ -427,7 +427,7 @@ struct TypesetContext {
         }
         return "cmsy10";
     }
-    
+
     // Style-aware TFM font selection
     TFMFont* get_roman_tfm() const {
         if (is_script(math_ctx.style)) {
@@ -436,7 +436,7 @@ struct TypesetContext {
         }
         return roman_tfm;
     }
-    
+
     TFMFont* get_italic_tfm() const {
         if (is_script(math_ctx.style)) {
             if (math_ctx.style >= MathStyle::ScriptScript) return italic5_tfm ? italic5_tfm : italic_tfm;
@@ -444,7 +444,7 @@ struct TypesetContext {
         }
         return italic_tfm;
     }
-    
+
     TFMFont* get_symbol_tfm() const {
         if (is_script(math_ctx.style)) {
             if (math_ctx.style >= MathStyle::ScriptScript) return symbol5_tfm ? symbol5_tfm : symbol_tfm;
@@ -452,25 +452,25 @@ struct TypesetContext {
         }
         return symbol_tfm;
     }
-    
+
     TFMFont* get_extension_tfm() const {
         // cmex10 has no size variants - always use extension_tfm
         return extension_tfm;
     }
-    
+
     // Style-aware FontSpec creation
     FontSpec make_roman_font() const {
         return FontSpec(get_roman_font_name(), font_size(), nullptr, 0);
     }
-    
+
     FontSpec make_italic_font() const {
         return FontSpec(get_italic_font_name(), font_size(), nullptr, 0);
     }
-    
+
     FontSpec make_symbol_font() const {
         return FontSpec(get_symbol_font_name(), font_size(), nullptr, 0);
     }
-    
+
     FontSpec make_extension_font() const {
         return FontSpec("cmex10", font_size(), nullptr, 0);
     }
@@ -486,7 +486,7 @@ TexNode* typeset_math_ast(MathASTNode* ast, MathContext& ctx) {
         return make_hbox(ctx.arena);
     }
 
-    log_info("[TYPESET] typeset_math_ast: BEGIN ast_type=%s style=%d", 
+    log_info("[TYPESET] typeset_math_ast: BEGIN ast_type=%s style=%d",
              math_node_type_name(ast->type), (int)ctx.style);
 
     TexNode* result = typeset_node(ast, ctx);
@@ -495,7 +495,7 @@ TexNode* typeset_math_ast(MathASTNode* ast, MathContext& ctx) {
         result = make_hbox(ctx.arena);
     }
 
-    log_info("[TYPESET] typeset_math_ast: END width=%.2fpt height=%.2fpt depth=%.2fpt", 
+    log_info("[TYPESET] typeset_math_ast: END width=%.2fpt height=%.2fpt depth=%.2fpt",
              result->width, result->height, result->depth);
     return result;
 }
@@ -557,6 +557,12 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
             return typeset_array_node(node, ctx);
 
         case MathNodeType::INNER:
+            // INNER nodes (from boxes like \bbox, \fbox) - just typeset the body
+            if (node->body) {
+                return typeset_node(node->body, ctx);
+            }
+            return make_hbox(ctx.arena);
+
         case MathNodeType::ARRAY_ROW:
         case MathNodeType::ARRAY_CELL:
         case MathNodeType::ERROR:
@@ -665,7 +671,7 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
             bool is_cdots = (cmd_len == 5 && strncmp(cmd, "cdots", 5) == 0);
             bool is_vdots = (cmd_len == 5 && strncmp(cmd, "vdots", 5) == 0);
             // bool is_ddots = (cmd_len == 5 && strncmp(cmd, "ddots", 5) == 0);
-            
+
             if (is_vdots) {
                 // Single vertical dots character from cmsy10
                 font = tc.make_symbol_font();
@@ -691,16 +697,16 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                     tfm = tc.get_symbol_tfm();
                     cp = 1;  // cdot in cmsy10
                 }
-                
+
                 float thin_space = size * 0.166f;  // thin space ~ mu/18
-                
+
                 TexNode* first_n = nullptr;
                 TexNode* last_n = nullptr;
-                
+
                 for (int i = 0; i < 3; i++) {
                     TexNode* dot = make_char_with_metrics(tc.arena(), cp, AtomType::Ord, font, tfm, size);
                     link_node(first_n, last_n, dot);
-                    
+
                     if (i < 2) {
                         TexNode* kern = make_kern(tc.arena(), thin_space);
                         link_node(first_n, last_n, kern);
@@ -720,27 +726,27 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                 font = tc.make_symbol_font();
                 font.size_pt = size;
                 tfm = tc.get_symbol_tfm();
-                
+
                 TexNode* first_n = nullptr;
                 TexNode* last_n = nullptr;
-                
+
                 // NOT slash (cmsy10 position 61, same as \neq which shows as '=')
                 // Note: TeX uses 61 for the negation stroke, not 54
                 TexNode* not_char = make_char_with_metrics(tc.arena(), 61, AtomType::Rel, font, tfm, size);
                 link_node(first_n, last_n, not_char);
-                
+
                 // Negative kern to overlap the characters
                 float kern_amount = -0.55f * size / 10.0f;
                 TexNode* kern = make_kern(tc.arena(), kern_amount);
                 link_node(first_n, last_n, kern);
-                
+
                 // IN symbol (cmsy10 position 50)
                 TexNode* in_char = make_char_with_metrics(tc.arena(), 50, AtomType::Rel, font, tfm, size);
                 link_node(first_n, last_n, in_char);
-                
+
                 return wrap_hbox(tc.arena(), first_n, last_n);
             }
-            
+
             // Select font based on symbol's font type
             switch (sym->font) {
                 case SymFont::CMSY:
@@ -784,12 +790,12 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
             (cmd_len == 5 && strncmp(cmd, "iiint", 5) == 0)) {
             bool is_display = (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime);
             int int_count = (cmd_len == 4) ? 2 : 3;  // iint=2, iiint=3
-            
+
             font = tc.make_extension_font();
             font.size_pt = size;
             tfm = tc.extension_tfm;
             int32_t int_code = is_display ? 90 : 82;  // large/small integral
-            
+
             // Build HBox with multiple integral symbols
             TexNode* first_n = nullptr;
             TexNode* last_n = nullptr;
@@ -813,7 +819,7 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
         if (bigop) {
             // Use large code in display style, small otherwise
             bool is_display = (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime);
-            
+
             // Text operators like \lim, \max use roman font
             if (bigop->small_code == 0) {
                 // Build text operator from roman font
@@ -951,7 +957,7 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
 // ============================================================================
 
 static TexNode* typeset_frac(MathASTNode* node, MathContext& ctx) {
-    log_debug("[TYPESET] typeset_frac: BEGIN style=%d rule_thickness=%.2f", 
+    log_debug("[TYPESET] typeset_frac: BEGIN style=%d rule_thickness=%.2f",
               (int)ctx.style, node->frac.rule_thickness);
 
     // Typeset numerator and denominator in reduced style
@@ -1039,23 +1045,23 @@ static TexNode* typeset_delimited_node(MathASTNode* node, MathContext& ctx) {
 
 static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx) {
     TypesetContext tc(ctx);
-    
+
     TexNode* base = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
 
     // Get accent character
     int32_t accent_cp = node->accent.accent_char;
-    
+
     // Default to cmmi10 for most math accents (TeXBook p. 443)
     // Note: TeX uses cmmi10 for most accents, cmr10 for some, cmex10 for wide accents
     FontSpec accent_font = tc.make_italic_font();
     TFMFont* accent_tfm = tc.get_italic_tfm();
     bool is_wide = false;
-    
+
     // Lookup accent code if command given
     if (node->accent.command) {
         const char* cmd = node->accent.command;
         size_t len = strlen(cmd);
-        
+
         // Map command to cmmi10 accent codes (TeX convention)
         // Reference: TeXBook Appendix F, cmmi10 character table
         if (len == 3 && strncmp(cmd, "hat", 3) == 0) {
@@ -1231,12 +1237,12 @@ static TexNode* typeset_space_node(MathASTNode* node, MathContext& ctx) {
 static TexNode* typeset_phantom_node(MathASTNode* node, MathContext& ctx) {
     // Typeset the content to get its dimensions
     TexNode* content = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
-    
+
     uint8_t phantom_type = node->phantom.phantom_type;
-    
+
     // Create an empty box with appropriate dimensions
     TexNode* phantom = make_hbox(ctx.arena);
-    
+
     switch (phantom_type) {
         case 0:  // \phantom - full box, no rendering
             phantom->width = content->width;
@@ -1272,10 +1278,10 @@ static TexNode* typeset_phantom_node(MathASTNode* node, MathContext& ctx) {
             phantom->depth = content->depth;
             break;
     }
-    
-    log_debug("[TYPESET] phantom type=%d: w=%.2f h=%.2f d=%.2f", 
+
+    log_debug("[TYPESET] phantom type=%d: w=%.2f h=%.2f d=%.2f",
               phantom_type, phantom->width, phantom->height, phantom->depth);
-    
+
     return phantom;
 }
 
@@ -1287,40 +1293,40 @@ static TexNode* typeset_not_node(MathASTNode* node, MathContext& ctx) {
     TypesetContext tc(ctx);
     Arena* arena = tc.arena();
     float size = tc.font_size();
-    
+
     // Typeset the operand
     TexNode* operand = node->body ? typeset_node(node->body, ctx) : nullptr;
-    
+
     // Create the negation slash character from cmsy10 at position 54 (character '6')
     // This is the standard TeX negation slash
     FontSpec slash_font = tc.make_symbol_font();
     slash_font.size_pt = size;
     TFMFont* slash_tfm = tc.get_symbol_tfm();
-    
+
     TexNode* slash = make_char_with_metrics(arena, 54, AtomType::Rel, slash_font, slash_tfm, size);
-    
+
     if (!operand) {
         // No operand - just return the slash
         return slash;
     }
-    
+
     // Create composite box - overlay slash on operand
     // Position slash centered horizontally and vertically on the operand
     TexNode* result = make_hbox(arena);
     result->width = operand->width;
     result->height = fmax(operand->height, slash->height);
     result->depth = fmax(operand->depth, slash->depth);
-    
+
     // Position operand at x=0
     operand->x = 0;
     operand->y = 0;
-    
+
     // Position slash centered over operand
     // Use a negative kern to overlay the slash on the operand
     float slash_offset = (operand->width - slash->width) / 2.0f;
     slash->x = slash_offset;
     slash->y = 0;
-    
+
     // Add children in order: slash FIRST, then operand
     // TeX outputs the negation slash before the operand character in DVI
     result->first_child = slash;
@@ -1329,11 +1335,11 @@ static TexNode* typeset_not_node(MathASTNode* node, MathContext& ctx) {
     operand->prev_sibling = slash;
     operand->parent = result;
     result->last_child = operand;
-    
+
     // The width is just the operand width (slash overlays, doesn't add width)
-    log_debug("[TYPESET] not: operand_w=%.2f slash_w=%.2f result_w=%.2f", 
+    log_debug("[TYPESET] not: operand_w=%.2f slash_w=%.2f result_w=%.2f",
               operand->width, slash->width, result->width);
-    
+
     return result;
 }
 
@@ -1345,22 +1351,22 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
     TypesetContext tc(ctx);
     Arena* arena = tc.arena();
     float size = tc.font_size();
-    
+
     // Array node contains ARRAY_ROW children, each containing ARRAY_CELL children
     int num_rows = node->array.num_rows;
     int num_cols = node->array.num_cols;
-    
+
     log_debug("tex_math_ast_typeset: array %d rows x %d cols", num_rows, num_cols);
-    
+
     if (num_rows == 0) {
         return make_hbox(arena);
     }
-    
+
     // Spacing parameters (TeXBook values)
     float col_sep = size * 0.8f;     // Column separation (about 1em)
     float row_sep = size * 0.3f;     // Row separation (baseline skip adjustment)
     float baseline_skip = size * 1.2f;  // Base line spacing
-    
+
     // First pass: typeset all cells and measure column widths
     // Build a 2D array of typeset cells
     struct CellInfo {
@@ -1369,11 +1375,11 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
         float height;
         float depth;
     };
-    
+
     // Allocate cell info array
     CellInfo* cells = (CellInfo*)arena_alloc(arena, num_rows * num_cols * sizeof(CellInfo));
     memset(cells, 0, num_rows * num_cols * sizeof(CellInfo));
-    
+
     // Track column widths and row heights
     float* col_widths = (float*)arena_alloc(arena, num_cols * sizeof(float));
     float* row_heights = (float*)arena_alloc(arena, num_rows * sizeof(float));
@@ -1381,31 +1387,31 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
     memset(col_widths, 0, num_cols * sizeof(float));
     memset(row_heights, 0, num_rows * sizeof(float));
     memset(row_depths, 0, num_rows * sizeof(float));
-    
+
     // Iterate through rows
     int row_idx = 0;
     for (MathASTNode* row = node->body; row && row_idx < num_rows; row = row->next_sibling) {
         if (row->type != MathNodeType::ARRAY_ROW) continue;
-        
+
         // Iterate through cells in this row
         int col_idx = 0;
         for (MathASTNode* cell = row->body; cell && col_idx < num_cols; cell = cell->next_sibling) {
             if (cell->type != MathNodeType::ARRAY_CELL) continue;
-            
+
             // Typeset cell content
             TexNode* cell_content = cell->body ? typeset_node(cell->body, ctx) : make_hbox(arena);
-            
+
             CellInfo& info = cells[row_idx * num_cols + col_idx];
             info.node = cell_content;
             info.width = cell_content ? cell_content->width : 0;
             info.height = cell_content ? cell_content->height : 0;
             info.depth = cell_content ? cell_content->depth : 0;
-            
+
             // Update column width
             if (info.width > col_widths[col_idx]) {
                 col_widths[col_idx] = info.width;
             }
-            
+
             // Update row height/depth
             if (info.height > row_heights[row_idx]) {
                 row_heights[row_idx] = info.height;
@@ -1413,61 +1419,61 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
             if (info.depth > row_depths[row_idx]) {
                 row_depths[row_idx] = info.depth;
             }
-            
+
             col_idx++;
         }
         row_idx++;
     }
-    
+
     // Calculate total dimensions
     float total_width = 0;
     for (int c = 0; c < num_cols; c++) {
         total_width += col_widths[c];
         if (c < num_cols - 1) total_width += col_sep;
     }
-    
+
     float total_height = 0;
     for (int r = 0; r < num_rows; r++) {
         total_height += row_heights[r] + row_depths[r];
         if (r < num_rows - 1) total_height += row_sep;
     }
-    
+
     // Build the VBox containing all rows
     // Each row is an HBox of cells
     TexNode* vbox_first = nullptr;
     TexNode* vbox_last = nullptr;
-    
+
     float y_pos = 0;  // Track vertical position from top
-    
+
     for (int r = 0; r < num_rows; r++) {
         // Build this row's HBox
         TexNode* hbox_first = nullptr;
         TexNode* hbox_last = nullptr;
         float x_pos = 0;
-        
+
         for (int c = 0; c < num_cols; c++) {
             CellInfo& info = cells[r * num_cols + c];
             TexNode* cell_node = info.node ? info.node : make_hbox(arena);
-            
+
             // Center cell horizontally within column
             float cell_width = info.width;
             float padding = (col_widths[c] - cell_width) / 2.0f;
-            
+
             if (padding > 0) {
                 TexNode* pre_kern = make_kern(arena, padding);
                 link_node(hbox_first, hbox_last, pre_kern);
             }
-            
+
             cell_node->x = x_pos + padding;
             link_node(hbox_first, hbox_last, cell_node);
-            
+
             if (padding > 0) {
                 TexNode* post_kern = make_kern(arena, padding);
                 link_node(hbox_first, hbox_last, post_kern);
             }
-            
+
             x_pos += col_widths[c];
-            
+
             // Add column separator glue (except after last column)
             if (c < num_cols - 1) {
                 TexNode* sep = make_glue(arena, Glue::fixed(col_sep), "arraycolsep");
@@ -1475,18 +1481,18 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
                 x_pos += col_sep;
             }
         }
-        
+
         // Create HBox for this row
         TexNode* row_hbox = wrap_hbox(arena, hbox_first, hbox_last);
         row_hbox->width = total_width;
         row_hbox->height = row_heights[r];
         row_hbox->depth = row_depths[r];
         row_hbox->y = y_pos;
-        
+
         link_node(vbox_first, vbox_last, row_hbox);
-        
+
         y_pos += row_heights[r] + row_depths[r];
-        
+
         // Add row separator (except after last row)
         if (r < num_rows - 1) {
             TexNode* row_glue = make_glue(arena, Glue::fixed(row_sep), "arrayrowsep");
@@ -1494,26 +1500,26 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
             y_pos += row_sep;
         }
     }
-    
+
     // Create the containing VBox
     TexNode* result = (TexNode*)arena_alloc(arena, sizeof(TexNode));
     new (result) TexNode(NodeClass::VBox);
     result->width = total_width;
-    
+
     // Center the array vertically around the math axis
     float axis_height = size * 0.25f;  // Approximate math axis height
     float half_height = total_height / 2.0f;
     result->height = half_height + axis_height;
     result->depth = half_height - axis_height;
-    
+
     result->first_child = vbox_first;
     result->last_child = vbox_last;
-    
+
     // Set parent pointers
     for (TexNode* child = vbox_first; child; child = child->next_sibling) {
         child->parent = result;
     }
-    
+
     return result;
 }
 
