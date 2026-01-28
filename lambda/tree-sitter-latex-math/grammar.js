@@ -59,7 +59,13 @@ module.exports = grammar({
       $.binomial,
       $.radical,
       $.delimiter_group,
+      $.sized_delimiter,    // \big, \Big, \bigg, \Bigg delimiters
+      $.overunder_command,  // \overset, \underset, \stackrel
+      $.extensible_arrow,   // \xrightarrow, \xleftarrow
       $.accent,
+      $.box_command,        // \bbox, \fbox, \boxed
+      $.rule_command,       // \rule with dimensions
+      $.phantom_command,    // \phantom, \hphantom, \vphantom, \smash
       $.symbol_command,  // Symbol commands like \infty - before big_operator
       $.big_operator,
       $.environment,
@@ -107,13 +113,14 @@ module.exports = grammar({
 
     // Punctuation (including standalone delimiters)
     // Lower precedence than brack_group so optional args parse correctly
+    // Note: \lbrace and \rbrace are NOT included here - they should be treated
+    // as delimiters via the command fallback, not punctuation
     punctuation: $ => prec(-1, choice(
       ',', ';', ':', '.', '?',
       '(', ')',                    // Parentheses
       '[', ']',                    // Square brackets
       '|',                         // Vertical bar (absolute value, divides)
       '\\{', '\\}',                // Escaped braces
-      '\\lbrace', '\\rbrace',      // Alternative brace commands
       '\'',                        // Prime (for derivatives like f')
     )),
 
@@ -187,22 +194,75 @@ module.exports = grammar({
     // Delimiters: \left( ... \right)
     // ========================================================================
 
-    delimiter_group: $ => seq(
+    delimiter_group: $ => prec(10, seq(
       '\\left', field('left_delim', $.delimiter),
-      repeat($._expression),
+      repeat(choice($._expression, $.middle_delim)),
       '\\right', field('right_delim', $.delimiter),
+    )),
+
+    // \middle delimiter inside \left...\right
+    middle_delim: $ => seq(
+      '\\middle',
+      field('delim', $.delimiter),
     ),
 
+    // Sized delimiters: \big, \Big, \bigg, \Bigg
+    sized_delimiter: $ => seq(
+      field('size', choice(
+        '\\big', '\\Big', '\\bigg', '\\Bigg',
+        '\\bigl', '\\Bigl', '\\biggl', '\\Biggl',
+        '\\bigr', '\\Bigr', '\\biggr', '\\Biggr',
+        '\\bigm', '\\Bigm', '\\biggm', '\\Biggm',
+      )),
+      field('delim', $.delimiter),
+    ),
+
+    // Delimiter token: command delimiters are keywords via the word setting
     delimiter: $ => choice(
       '(', ')', '[', ']',
       '\\{', '\\}',
+      '\\lbrace', '\\rbrace',  // Brace aliases
+      '\\lbrack', '\\rbrack',  // Bracket aliases
       '|', '\\|',
+      '\\vert', '\\Vert',      // Vertical bar commands
       '\\langle', '\\rangle',
       '\\lfloor', '\\rfloor',
       '\\lceil', '\\rceil',
       '\\lvert', '\\rvert',
       '\\lVert', '\\rVert',
+      '\\lgroup', '\\rgroup',
+      '\\lmoustache', '\\rmoustache',
+      '\\backslash',
+      '\\uparrow', '\\downarrow', '\\updownarrow',
+      '\\Uparrow', '\\Downarrow', '\\Updownarrow',
       '.',  // Null delimiter
+    ),
+
+    // ========================================================================
+    // Over/Under Set Commands (amsmath)
+    // ========================================================================
+
+    overunder_command: $ => seq(
+      field('cmd', choice(
+        '\\overset',     // Place first arg over second
+        '\\underset',    // Place first arg under second
+        '\\stackrel',    // Like overset with relation spacing
+      )),
+      field('annotation', $.group),  // What goes over/under
+      field('base', $.group),        // The base symbol
+    ),
+
+    // Extensible arrows with optional annotations
+    extensible_arrow: $ => seq(
+      field('cmd', choice(
+        '\\xrightarrow', '\\xleftarrow',
+        '\\xRightarrow', '\\xLeftarrow',
+        '\\xleftrightarrow', '\\xLeftrightarrow',
+        '\\xhookleftarrow', '\\xhookrightarrow',
+        '\\xmapsto',
+      )),
+      optional(field('below', $.brack_group)),  // Optional subscript annotation
+      field('above', $.group),                   // Superscript annotation
     ),
 
     // ========================================================================
@@ -324,6 +384,47 @@ module.exports = grammar({
     )),
 
     // ========================================================================
+    // Box commands: \bbox, \fbox, \boxed
+    // ========================================================================
+
+    box_command: $ => seq(
+      field('cmd', choice(
+        '\\bbox',   // AMS box with optional styling
+        '\\fbox',   // Framed box
+        '\\boxed',  // AMS boxed (like fbox)
+        '\\colorbox', // Color background box
+      )),
+      optional(field('options', $.brack_group)),  // Optional [color] for bbox
+      field('content', $.group),
+    ),
+
+    // ========================================================================
+    // Rule command: \rule[raise]{width}{height}
+    // ========================================================================
+
+    rule_command: $ => seq(
+      '\\rule',
+      optional(field('raise', $.brack_group)),  // Optional raise amount
+      field('width', $.group),
+      field('height', $.group),
+    ),
+
+    // ========================================================================
+    // Phantom commands: \phantom, \hphantom, \vphantom, \smash
+    // ========================================================================
+
+    phantom_command: $ => seq(
+      field('cmd', choice(
+        '\\phantom',   // Full phantom
+        '\\hphantom',  // Horizontal phantom (width only)
+        '\\vphantom',  // Vertical phantom (height/depth only)
+        '\\smash',     // Smash height/depth
+      )),
+      optional(field('options', $.brack_group)),  // [t] or [b] for smash
+      field('content', $.group),
+    ),
+
+    // ========================================================================
     // Spacing commands
     // ========================================================================
 
@@ -331,7 +432,6 @@ module.exports = grammar({
       '\\,', '\\:', '\\;', '\\!',  // Thin, medium, thick, negative thin
       '\\quad', '\\qquad',
       '\\hspace', '\\hspace*',
-      '\\phantom', '\\hphantom', '\\vphantom',
     ),
 
     // ========================================================================
@@ -344,6 +444,8 @@ module.exports = grammar({
     )),
 
     // Command name: backslash followed by letters
-    command_name: $ => /\\[a-zA-Z@]+\*?/,
+    // Note: This regex should not match command keywords like \left, \right, etc.
+    // But tree-sitter handles this through explicit string literals taking precedence
+    command_name: $ => token(prec(-1, /\\[a-zA-Z@]+\*?/)),
   },
 });
