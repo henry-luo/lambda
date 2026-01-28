@@ -3,7 +3,6 @@
   "latex": "\\text{tr}(A) = \\sum_{i=1}^{n} a_{ii}, \\quad \\det(A) = \\prod_{i=1}^{n} \\lambda_i",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.129Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

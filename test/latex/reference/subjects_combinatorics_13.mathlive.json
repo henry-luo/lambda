@@ -3,7 +3,6 @@
   "latex": "\\hat{F}(x) = \\sum_{n=0}^{\\infty} a_n \\frac{x^n}{n!}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:41.113Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

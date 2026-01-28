@@ -3,7 +3,6 @@
   "latex": "\\nabla \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t}",
   "description": null,
   "type": "display",
-  "generatedAt": "2026-01-28T02:51:40.579Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",

@@ -3,7 +3,6 @@
   "latex": "\\exists \\nexists \\imath \\alpha \\Omega i x fg \\imaginaryI",
   "description": null,
   "type": "inline",
-  "generatedAt": "2026-01-28T02:51:41.003Z",
   "generator": "MathLive toJson()",
   "ast": {
     "type": "root",
