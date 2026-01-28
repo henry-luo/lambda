@@ -836,3 +836,80 @@ The only difference is:
 - [Lambda String Type](./Lambda_Type_String.md)
 - [RE2 Documentation](https://github.com/google/re2)
 - [Unicode Technical Standard #18: Unicode Regular Expressions](https://unicode.org/reports/tr18/)
+
+---
+
+## Appendix: Implementation Summary
+
+### A.1 Architecture Overview
+
+```
+Lambda Pattern Source → Tree-sitter Parser → Pattern AST → RE2 Regex → Compiled Pattern
+```
+
+**Key Components:**
+- **Grammar**: `lambda/tree-sitter-lambda/grammar.js` - pattern syntax rules
+- **AST**: `lambda/ast.hpp` - node types (`AstPatternDefNode`, `AstPatternCharClassNode`, `AstPatternRangeNode`)
+- **Builder**: `lambda/build_ast.cpp` - AST construction from parse tree
+- **Compiler**: `lambda/re2_wrapper.cpp` - pattern-to-regex conversion and RE2 compilation
+- **Runtime**: `lambda/lambda-eval.cpp` - `fn_is()` pattern matching
+
+### A.2 Type System Integration
+
+```cpp
+// New type ID
+LMD_TYPE_PATTERN = 21
+
+// Pattern type structure
+typedef struct TypePattern : Type {
+    int pattern_index;   // index in type_list for runtime lookup
+    bool is_symbol;      // symbol vs string pattern
+} TypePattern;
+
+// Character classes
+enum PatternCharClass { PATTERN_DIGIT, PATTERN_WORD, PATTERN_SPACE, PATTERN_ALPHA, PATTERN_ANY };
+```
+
+### A.3 Pattern-to-Regex Mapping
+
+| Lambda Pattern | Regex Output |
+|----------------|--------------|
+| `"abc"` | `abc` (escaped) |
+| `\d` | `[0-9]` |
+| `\w` | `[a-zA-Z0-9_]` |
+| `\s` | `\s` |
+| `\a` | `[a-zA-Z]` |
+| `\.` | `.` |
+| `...` | `.*` |
+| `"a" to "z"` | `[a-z]` |
+| `a \| b` | `(?:a\|b)` |
+| `a?` | `(?:a)?` |
+| `a+` | `(?:a)+` |
+| `a*` | `(?:a)*` |
+| `a{3}` | `(?:a){3}` |
+| `a{2,4}` | `(?:a){2,4}` |
+
+Full-match anchors (`^...$`) are automatically added.
+
+### A.4 Key Files
+
+| File | Purpose |
+|------|---------|
+| `lambda/re2_wrapper.hpp/cpp` | RE2 integration, pattern compilation |
+| `lambda/ast.hpp` | AST node types, symbol macros |
+| `lambda/build_ast.cpp` | Pattern AST building |
+| `lambda/lambda-eval.cpp` | `fn_is()` runtime matching |
+| `lambda/mir.c` | `const_pattern()` registration |
+| `build_lambda_config.json` | RE2 library linking |
+
+### A.5 Runtime Flow
+
+1. **Compile-time**: Pattern AST → regex string → RE2 compilation → stored in `type_list`
+2. **Runtime**: `const_pattern(index)` retrieves compiled pattern
+3. **Matching**: `fn_is(string, pattern)` calls `RE2::FullMatch()`
+
+### A.6 Limitations
+
+- **No backreferences**: RE2 guarantees linear-time matching
+- **No lookahead/lookbehind**: RE2 limitation (intersection `&` uses workaround)
+- **Empty string**: Lambda treats `""` as null, pattern match returns error
