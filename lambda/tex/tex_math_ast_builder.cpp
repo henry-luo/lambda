@@ -440,6 +440,42 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"Box", 0x25A1, AtomType::Ord}, {"Diamond", 0x25C7, AtomType::Ord}, // □, ◇
     {"leadsto", 0x21DD, AtomType::Rel},                               // ⇝
     {"sqsubset", 0x228F, AtomType::Rel}, {"sqsupset", 0x2290, AtomType::Rel}, // ⊏, ⊐
+    // AMS symbols - negated relations
+    {"nleqslant", 0x2A7D, AtomType::Rel}, {"ngeqslant", 0x2A7E, AtomType::Rel}, // ⩽̸, ⩾̸
+    {"nless", 0x226E, AtomType::Rel}, {"ngtr", 0x226F, AtomType::Rel}, // ≮, ≯
+    {"nleq", 0x2270, AtomType::Rel}, {"ngeq", 0x2271, AtomType::Rel}, // ≰, ≱
+    {"nshortparallel", 0x2226, AtomType::Rel}, {"nparallel", 0x2226, AtomType::Rel}, // ∦
+    {"nmid", 0x2224, AtomType::Rel},                                   // ∤
+    {"nprec", 0x2280, AtomType::Rel}, {"nsucc", 0x2281, AtomType::Rel}, // ⊀, ⊁
+    {"nsubseteq", 0x2288, AtomType::Rel}, {"nsupseteq", 0x2289, AtomType::Rel}, // ⊈, ⊉
+    {"nsubseteqq", 0x2288, AtomType::Rel}, {"nsupseteqq", 0x2289, AtomType::Rel},
+    {"nVdash", 0x22AE, AtomType::Rel}, {"nvdash", 0x22AC, AtomType::Rel}, // ⊮, ⊬
+    {"nvDash", 0x22AD, AtomType::Rel}, {"nVDash", 0x22AF, AtomType::Rel}, // ⊭, ⊯
+    {"ntriangleleft", 0x22EA, AtomType::Rel}, {"ntriangleright", 0x22EB, AtomType::Rel}, // ⋪, ⋫
+    {"ntrianglelefteq", 0x22EC, AtomType::Rel}, {"ntrianglerighteq", 0x22ED, AtomType::Rel}, // ⋬, ⋭
+    // AMS arrows
+    {"leftrightarrows", 0x21C6, AtomType::Rel}, {"rightleftarrows", 0x21C4, AtomType::Rel}, // ⇆, ⇄
+    {"curvearrowleft", 0x21B6, AtomType::Rel}, {"curvearrowright", 0x21B7, AtomType::Rel}, // ↶, ↷
+    {"circlearrowleft", 0x21BA, AtomType::Rel}, {"circlearrowright", 0x21BB, AtomType::Rel}, // ↺, ↻
+    {"looparrowleft", 0x21AB, AtomType::Rel}, {"looparrowright", 0x21AC, AtomType::Rel}, // ↫, ↬
+    {"leftrightsquigarrow", 0x21AD, AtomType::Rel}, {"twoheadleftarrow", 0x219E, AtomType::Rel}, // ↭, ↞
+    {"twoheadrightarrow", 0x21A0, AtomType::Rel}, {"rightsquigarrow", 0x21DD, AtomType::Rel}, // ↠, ⇝
+    {"Lleftarrow", 0x21DA, AtomType::Rel}, {"Rrightarrow", 0x21DB, AtomType::Rel}, // ⇚, ⇛
+    // AMS ordinary symbols
+    {"measuredangle", 0x2221, AtomType::Ord}, {"sphericalangle", 0x2222, AtomType::Ord}, // ∡, ∢
+    {"blacklozenge", 0x29EB, AtomType::Ord}, {"lozenge", 0x25CA, AtomType::Ord}, // ⧫, ◊
+    {"blacksquare", 0x25A0, AtomType::Ord}, {"square", 0x25A1, AtomType::Ord}, // ■, □
+    {"blacktriangle", 0x25B4, AtomType::Ord}, {"blacktriangledown", 0x25BE, AtomType::Ord}, // ▴, ▾
+    {"triangle", 0x25B3, AtomType::Ord}, {"triangledown", 0x25BD, AtomType::Ord}, // △, ▽
+    {"Finv", 0x2132, AtomType::Ord}, {"Game", 0x2141, AtomType::Ord}, // Ⅎ, ⅁
+    {"maltese", 0x2720, AtomType::Ord}, {"clubsuit", 0x2663, AtomType::Ord}, // ✠, ♣
+    {"diamondsuit", 0x2662, AtomType::Ord}, {"heartsuit", 0x2661, AtomType::Ord}, // ◊, ♡
+    {"spadesuit", 0x2660, AtomType::Ord}, {"checkmark", 0x2713, AtomType::Ord}, // ♠, ✓
+    {"circledS", 0x24C8, AtomType::Ord}, {"yen", 0x00A5, AtomType::Ord}, // Ⓢ, ¥
+    {"eth", 0x00F0, AtomType::Ord}, {"complement", 0x2201, AtomType::Ord}, // ð, ∁
+    {"Bbbk", 0x1D55C, AtomType::Ord}, {"hbar", 0x210F, AtomType::Ord}, // 𝕜, ℏ
+    {"hslash", 0x210F, AtomType::Ord}, {"nexists", 0x2204, AtomType::Ord}, // ℏ, ∄
+    {"diagup", 0x2571, AtomType::Ord}, {"diagdown", 0x2572, AtomType::Ord}, // ╱, ╲
     {nullptr, 0, AtomType::Ord}
 };
 
@@ -952,13 +988,15 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
             return make_math_ord(arena, greek->code, arena_copy_str(cmd, cmd_len));
         }
 
-        // Symbols (binary/relation operators)
+        // Symbols (binary/relation/ordinary operators)
         const SymbolEntry* sym = lookup_symbol(cmd, cmd_len);
         if (sym) {
             if (sym->atom == AtomType::Bin) {
                 return make_math_bin(arena, sym->code, arena_copy_str(cmd, cmd_len));
             } else if (sym->atom == AtomType::Rel) {
                 return make_math_rel(arena, sym->code, arena_copy_str(cmd, cmd_len));
+            } else if (sym->atom == AtomType::Ord) {
+                return make_math_ord(arena, sym->code, arena_copy_str(cmd, cmd_len));
             }
         }
 
