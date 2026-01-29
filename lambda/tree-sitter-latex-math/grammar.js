@@ -59,6 +59,7 @@ module.exports = grammar({
       $.fraction,
       $.binomial,
       $.radical,
+      $.symbol_command,  // Symbol commands that could conflict - must be before delimiter_group
       $.delimiter_group,
       $.sized_delimiter,    // \big, \Big, \bigg, \Bigg delimiters
       $.overunder_command,  // \overset, \underset, \stackrel
@@ -68,7 +69,6 @@ module.exports = grammar({
       $.color_command,      // \textcolor, \color
       $.rule_command,       // \rule with dimensions
       $.phantom_command,    // \phantom, \hphantom, \vphantom, \smash
-      $.symbol_command,  // Symbol commands like \infty - before big_operator
       $.big_operator,
       $.environment,
       $.text_command,
@@ -126,6 +126,18 @@ module.exports = grammar({
       '\\ll', '\\gg', '\\prec', '\\succ', '\\preceq', '\\succeq',
       '\\perp', '\\parallel', '\\mid',
       '\\vdash', '\\dashv', '\\models',
+      // Arrows - important arrows that are commonly used
+      '\\rightarrow', '\\Rightarrow', '\\nrightarrow', '\\nRightarrow',
+      '\\nearrow', '\\searrow', '\\nwarrow', '\\swarrow',
+      '\\uparrow', '\\downarrow', '\\updownarrow',
+      '\\Uparrow', '\\Downarrow', '\\Updownarrow',
+      '\\hookrightarrow',
+      '\\mapsto', '\\longmapsto',
+      '\\to', '\\gets',
+      '\\curvearrowright', '\\curvearrowleft',
+      '\\looparrowright', '\\looparrowleft',
+      '\\circlearrowright', '\\circlearrowleft',
+      '\\rightrightarrows', '\\rightharpoonup', '\\rightharpoondown',
     ),
 
     // Punctuation (including standalone delimiters)
@@ -324,6 +336,9 @@ module.exports = grammar({
         '\\overbrace', '\\underbrace',
         '\\overrightarrow', '\\overleftarrow',
         '\\overleftrightarrow',
+        '\\underrightarrow', '\\underleftarrow',
+        '\\underleftrightarrow',
+        '\\xleftarrow', '\\xrightarrow',
       )),
       optional(field('base', choice($.group, $.symbol))),
     )),

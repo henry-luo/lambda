@@ -126,10 +126,10 @@ MathASTNode* make_math_close(Arena* arena, int32_t codepoint) {
     return node;
 }
 
-MathASTNode* make_math_punct(Arena* arena, int32_t codepoint) {
+MathASTNode* make_math_punct(Arena* arena, int32_t codepoint, const char* command) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::PUNCT);
     node->atom.codepoint = codepoint;
-    node->atom.command = nullptr;
+    node->atom.command = command;
     node->atom.atom_class = (uint8_t)AtomType::Punct;
     return node;
 }
@@ -229,9 +229,10 @@ MathASTNode* make_math_text(Arena* arena, const char* text, size_t len, bool is_
     return node;
 }
 
-MathASTNode* make_math_space(Arena* arena, float width_mu) {
+MathASTNode* make_math_space(Arena* arena, float width_mu, const char* command) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::SPACE);
     node->space.width_mu = width_mu;
+    node->space.command = command;
     return node;
 }
 
@@ -493,6 +494,55 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"copyright", 0x00A9, AtomType::Ord}, {"pounds", 0x00A3, AtomType::Ord}, // ©, £
     // Special negation operator
     {"not", 0x0338, AtomType::Rel}, // ̸ (combining long solidus overlay)
+    // Punctuation
+    {"colon", 0x003A, AtomType::Punct}, // : (colon as punctuation)
+    {"ldotp", 0x002E, AtomType::Punct}, // . (low dot as punctuation)
+    {"cdotp", 0x22C5, AtomType::Punct}, // ⋅ (centered dot as punctuation)
+    {"comma", 0x002C, AtomType::Punct}, // ,
+    {"semicolon", 0x003B, AtomType::Punct}, // ;
+    // Colon-related (AMS)
+    {"coloneq", 0x2254, AtomType::Rel}, // ≔ (colon equals)
+    {"Coloneq", 0x2A74, AtomType::Rel}, // ⩴ (double colon equals)
+    {"eqcolon", 0x2255, AtomType::Rel}, // ≕ (equals colon)
+    {"coloneqq", 0x2254, AtomType::Rel}, // ≔
+    {"Coloneqq", 0x2A74, AtomType::Rel}, // ⩴
+    {"coloncolon", 0x2237, AtomType::Rel}, // ∷ (proportion)
+    {"vcentcolon", 0x003A, AtomType::Rel}, // : (vertically centered colon)
+    // Additional AMS relations
+    {"triangleq", 0x225C, AtomType::Rel}, // ≜
+    {"eqsim", 0x2242, AtomType::Rel}, // ≂
+    {"simeq", 0x2243, AtomType::Rel}, // ≃
+    {"cong", 0x2245, AtomType::Rel}, // ≅
+    {"doteq", 0x2250, AtomType::Rel}, // ≐
+    {"doteqdot", 0x2251, AtomType::Rel}, // ≑
+    {"lesssim", 0x2272, AtomType::Rel}, // ≲
+    {"gtrsim", 0x2273, AtomType::Rel}, // ≳
+    {"lessgtr", 0x2276, AtomType::Rel}, // ≶
+    {"gtrless", 0x2277, AtomType::Rel}, // ≷
+    {"vdash", 0x22A2, AtomType::Rel}, // ⊢
+    {"dashv", 0x22A3, AtomType::Rel}, // ⊣
+    {"models", 0x22A7, AtomType::Rel}, // ⊧
+    {"Vdash", 0x22A9, AtomType::Rel}, // ⊩
+    {"vDash", 0x22A8, AtomType::Rel}, // ⊨
+    {"propto", 0x221D, AtomType::Rel}, // ∝
+    {"therefore", 0x2234, AtomType::Rel}, // ∴
+    {"because", 0x2235, AtomType::Rel}, // ∵
+    // Additional AMS binary operators
+    {"dotplus", 0x2214, AtomType::Bin}, // ∔
+    {"ltimes", 0x22C9, AtomType::Bin}, // ⋉
+    {"rtimes", 0x22CA, AtomType::Bin}, // ⋊
+    {"bowtie", 0x22C8, AtomType::Rel}, // ⋈
+    {"leftthreetimes", 0x22CB, AtomType::Bin}, // ⋋
+    {"rightthreetimes", 0x22CC, AtomType::Bin}, // ⋌
+    {"curlyvee", 0x22CE, AtomType::Bin}, // ⋎
+    {"curlywedge", 0x22CF, AtomType::Bin}, // ⋏
+    {"circledast", 0x229B, AtomType::Bin}, // ⊛
+    {"circledcirc", 0x229A, AtomType::Bin}, // ⊚
+    {"circleddash", 0x229D, AtomType::Bin}, // ⊝
+    {"boxplus", 0x229E, AtomType::Bin}, // ⊞
+    {"boxminus", 0x229F, AtomType::Bin}, // ⊟
+    {"boxtimes", 0x22A0, AtomType::Bin}, // ⊠
+    {"boxdot", 0x22A1, AtomType::Bin}, // ⊡
     {nullptr, 0, AtomType::Ord}
 };
 
@@ -513,60 +563,61 @@ struct BigOpEntry {
     const char* name;
     int small_code;
     int large_code;
+    int unicode_code;  // Unicode codepoint for AST output
     bool uses_limits;
 };
 
 static const BigOpEntry BIG_OP_TABLE[] = {
-    {"sum", 80, 88, true},
-    {"prod", 81, 89, true},
-    {"coprod", 96, 97, true},
-    {"int", 82, 90, false},
-    {"oint", 72, 73, false},
-    {"iint", 82, 90, false},
-    {"iiint", 82, 90, false},
-    {"bigcap", 84, 92, true},
-    {"bigcup", 83, 91, true},
-    {"bigvee", 87, 95, true},
-    {"bigwedge", 86, 94, true},
-    {"bigoplus", 76, 77, true},
-    {"bigotimes", 78, 79, true},
-    {"bigodot", 74, 75, true},
-    {"biguplus", 85, 93, true},
-    {"bigsqcup", 70, 71, true},
-    // Limit-style operators
-    {"lim", 0, 0, true},
-    {"liminf", 0, 0, true},
-    {"limsup", 0, 0, true},
-    {"max", 0, 0, true},
-    {"min", 0, 0, true},
-    {"sup", 0, 0, true},
-    {"inf", 0, 0, true},
-    // Trig and log operators
-    {"sin", 0, 0, false},
-    {"cos", 0, 0, false},
-    {"tan", 0, 0, false},
-    {"cot", 0, 0, false},
-    {"sec", 0, 0, false},
-    {"csc", 0, 0, false},
-    {"sinh", 0, 0, false},
-    {"cosh", 0, 0, false},
-    {"tanh", 0, 0, false},
-    {"coth", 0, 0, false},
-    {"arcsin", 0, 0, false},
-    {"arccos", 0, 0, false},
-    {"arctan", 0, 0, false},
-    {"log", 0, 0, false},
-    {"ln", 0, 0, false},
-    {"exp", 0, 0, false},
-    {"det", 0, 0, true},
-    {"dim", 0, 0, false},
-    {"ker", 0, 0, false},
-    {"hom", 0, 0, false},
-    {"arg", 0, 0, false},
-    {"deg", 0, 0, false},
-    {"gcd", 0, 0, true},
-    {"Pr", 0, 0, true},
-    {nullptr, 0, 0, false}
+    {"sum", 80, 88, 0x2211, true},        // ∑
+    {"prod", 81, 89, 0x220F, true},       // ∏
+    {"coprod", 96, 97, 0x2210, true},     // ∐
+    {"int", 82, 90, 0x222B, false},       // ∫
+    {"oint", 72, 73, 0x222E, false},      // ∮
+    {"iint", 82, 90, 0x222C, false},      // ∬
+    {"iiint", 82, 90, 0x222D, false},     // ∭
+    {"bigcap", 84, 92, 0x22C2, true},     // ⋂
+    {"bigcup", 83, 91, 0x22C3, true},     // ⋃
+    {"bigvee", 87, 95, 0x22C1, true},     // ⋁
+    {"bigwedge", 86, 94, 0x22C0, true},   // ⋀
+    {"bigoplus", 76, 77, 0x2A01, true},   // ⨁
+    {"bigotimes", 78, 79, 0x2A02, true},  // ⨂
+    {"bigodot", 74, 75, 0x2A00, true},    // ⨀
+    {"biguplus", 85, 93, 0x2A04, true},   // ⨄
+    {"bigsqcup", 70, 71, 0x2A06, true},   // ⨆
+    // Limit-style operators (text operators, no special symbol)
+    {"lim", 0, 0, 0, true},
+    {"liminf", 0, 0, 0, true},
+    {"limsup", 0, 0, 0, true},
+    {"max", 0, 0, 0, true},
+    {"min", 0, 0, 0, true},
+    {"sup", 0, 0, 0, true},
+    {"inf", 0, 0, 0, true},
+    // Trig and log operators (text operators, no special symbol)
+    {"sin", 0, 0, 0, false},
+    {"cos", 0, 0, 0, false},
+    {"tan", 0, 0, 0, false},
+    {"cot", 0, 0, 0, false},
+    {"sec", 0, 0, 0, false},
+    {"csc", 0, 0, 0, false},
+    {"sinh", 0, 0, 0, false},
+    {"cosh", 0, 0, 0, false},
+    {"tanh", 0, 0, 0, false},
+    {"coth", 0, 0, 0, false},
+    {"arcsin", 0, 0, 0, false},
+    {"arccos", 0, 0, 0, false},
+    {"arctan", 0, 0, 0, false},
+    {"log", 0, 0, 0, false},
+    {"ln", 0, 0, 0, false},
+    {"exp", 0, 0, 0, false},
+    {"det", 0, 0, 0, true},
+    {"dim", 0, 0, 0, false},
+    {"ker", 0, 0, 0, false},
+    {"hom", 0, 0, 0, false},
+    {"arg", 0, 0, 0, false},
+    {"deg", 0, 0, 0, false},
+    {"gcd", 0, 0, 0, true},
+    {"Pr", 0, 0, 0, true},
+    {nullptr, 0, 0, 0, false}
 };
 
 static const BigOpEntry* lookup_big_op(const char* name, size_t len) {
@@ -993,7 +1044,7 @@ MathASTNode* MathASTBuilder::build_punctuation(TSNode node) {
         }
     }
 
-    return make_math_punct(arena, text[0]);
+    return make_math_punct(arena, (int32_t)text[0]);
 }
 
 MathASTNode* MathASTBuilder::build_command(TSNode node) {
@@ -1018,6 +1069,8 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
                 return make_math_bin(arena, sym->code, arena_copy_str(cmd, cmd_len));
             } else if (sym->atom == AtomType::Rel) {
                 return make_math_rel(arena, sym->code, arena_copy_str(cmd, cmd_len));
+            } else if (sym->atom == AtomType::Punct) {
+                return make_math_punct(arena, (int32_t)sym->code, arena_copy_str(cmd, cmd_len));
             } else if (sym->atom == AtomType::Ord) {
                 return make_math_ord(arena, sym->code, arena_copy_str(cmd, cmd_len));
             }
@@ -1026,22 +1079,13 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
         // Big operators
         const BigOpEntry* bigop = lookup_big_op(cmd, cmd_len);
         if (bigop) {
-            MathASTNode* op = make_math_op(arena, bigop->large_code, arena_copy_str(cmd, cmd_len));
+            // Use unicode_code for AST output (use large_code as fallback for text operators)
+            int codepoint = bigop->unicode_code ? bigop->unicode_code : bigop->large_code;
+            MathASTNode* op = make_math_op(arena, codepoint, arena_copy_str(cmd, cmd_len));
             if (bigop->uses_limits) {
                 op->flags |= MathASTNode::FLAG_LIMITS;
             }
             return op;
-        }
-
-        // Common commands with no arguments
-        if (cmd_len == 5 && strncmp(cmd, "infty", 5) == 0) {
-            return make_math_ord(arena, 49, arena_copy_str(cmd, cmd_len));  // cmsy10 infinity
-        }
-        if (cmd_len == 6 && strncmp(cmd, "partial", 7) == 0) {
-            return make_math_ord(arena, 64, arena_copy_str(cmd, cmd_len));  // cmmi10 partial
-        }
-        if (cmd_len == 5 && strncmp(cmd, "nabla", 5) == 0) {
-            return make_math_ord(arena, 114, arena_copy_str(cmd, cmd_len)); // cmsy10 nabla
         }
 
         // Unknown command - return as ordinary with command name
@@ -1765,13 +1809,22 @@ MathASTNode* MathASTBuilder::build_big_operator(TSNode node) {
 
     // Create an OP node for the big operator
     MathASTNode* op = alloc_math_node(arena, MathNodeType::OP);
+    const char* cmd_name = nullptr;
     if (op_text && len > 1 && op_text[0] == '\\') {
         // Store the command name without backslash
-        op->atom.command = arena_copy_str(op_text + 1, len - 1);
+        cmd_name = arena_copy_str(op_text + 1, len - 1);
     } else {
-        op->atom.command = op_text ? arena_copy_str(op_text, len) : "sum";
+        cmd_name = op_text ? arena_copy_str(op_text, len) : "sum";
     }
-    op->atom.codepoint = 0;  // Will be set during typesetting based on command
+    op->atom.command = cmd_name;
+
+    // Look up Unicode codepoint from big operator table
+    const BigOpEntry* bigop = lookup_big_op(cmd_name, strlen(cmd_name));
+    if (bigop && bigop->unicode_code != 0) {
+        op->atom.codepoint = bigop->unicode_code;
+    } else {
+        op->atom.codepoint = 0;  // Text operators like lim, sin, etc.
+    }
     op->atom.atom_class = (uint8_t)AtomType::Op;
 
     // Only set FLAG_LIMITS for operators that use limits by default (not integrals)
@@ -1956,26 +2009,32 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
     const char* text = node_text(node, &len);
 
     float width_mu = 3.0f;  // default thin space
+    const char* command = nullptr;
 
     if (text[0] == '\\' && len >= 2) {
         char cmd = text[1];
         switch (cmd) {
-            case ',': width_mu = 3.0f; break;   // thinmuskip
-            case ':': width_mu = 4.0f; break;   // medmuskip
-            case ';': width_mu = 5.0f; break;   // thickmuskip
-            case '!': width_mu = -3.0f; break;  // negative thin space
+            case ',': width_mu = 3.0f; command = ","; break;   // thinmuskip
+            case ':': width_mu = 4.0f; command = ":"; break;   // medmuskip
+            case ';': width_mu = 5.0f; command = ";"; break;   // thickmuskip
+            case '!': width_mu = -3.0f; command = "!"; break;  // negative thin space
             default:
                 // Check for \quad, \qquad
                 if (len >= 5 && strncmp(text + 1, "quad", 4) == 0) {
                     width_mu = 18.0f;  // 1em
+                    command = "quad";
                     if (len >= 6 && text[5] == 'q') {
                         width_mu = 36.0f;  // 2em
+                        command = "qquad";
                     }
+                } else {
+                    // Store the full command name
+                    command = arena_copy_str(text + 1, len - 1);
                 }
         }
     }
 
-    return make_math_space(arena, width_mu);
+    return make_math_space(arena, width_mu, command);
 }
 
 MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
@@ -2283,8 +2342,13 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
             break;
 
         case MathNodeType::SPACE:
+            if (node->space.command) {
+                ::strbuf_append_str(out, ",\"command\":\"");
+                ::strbuf_append_str(out, node->space.command);
+                ::strbuf_append_str(out, "\"");
+            }
             ::strbuf_append_str(out, ",\"width\":");
-            ::strbuf_append_format(out, "%.2f", node->space.width_mu);
+            ::strbuf_append_format(out, "%.1f", node->space.width_mu);
             break;
 
         case MathNodeType::FRAC:
