@@ -475,6 +475,78 @@
         },
         {
           "type": "STRING",
+          "value": "\\leftrightarrows"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftleftarrows"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Leftrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nleftrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nLeftrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftrightharpoons"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rightleftharpoons"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftrightsquigarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftharpoonup"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftharpoondown"
+        },
+        {
+          "type": "STRING",
+          "value": "\\leftarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Leftarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\longleftarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Longleftarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\longleftrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Longleftrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\hookleftarrow"
+        },
+        {
+          "type": "STRING",
           "value": "\\rightarrow"
         },
         {
@@ -584,6 +656,14 @@
         {
           "type": "STRING",
           "value": "\\rightharpoondown"
+        },
+        {
+          "type": "STRING",
+          "value": "\\longrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Longrightarrow"
         }
       ]
     },
@@ -1581,14 +1661,6 @@
                 {
                   "type": "STRING",
                   "value": "\\underleftrightarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\xleftarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\xrightarrow"
                 }
               ]
             }
@@ -2248,6 +2320,30 @@
               {
                 "type": "STRING",
                 "value": "\\colorbox"
+              },
+              {
+                "type": "STRING",
+                "value": "\\llap"
+              },
+              {
+                "type": "STRING",
+                "value": "\\rlap"
+              },
+              {
+                "type": "STRING",
+                "value": "\\clap"
+              },
+              {
+                "type": "STRING",
+                "value": "\\mathllap"
+              },
+              {
+                "type": "STRING",
+                "value": "\\mathrlap"
+              },
+              {
+                "type": "STRING",
+                "value": "\\mathclap"
               }
             ]
           }

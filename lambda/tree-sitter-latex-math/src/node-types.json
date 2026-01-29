@@ -116,14 +116,6 @@
           {
             "type": "\\widetilde",
             "named": false
-          },
-          {
-            "type": "\\xleftarrow",
-            "named": false
-          },
-          {
-            "type": "\\xrightarrow",
-            "named": false
           }
         ]
       }
@@ -366,11 +358,35 @@
             "named": false
           },
           {
+            "type": "\\clap",
+            "named": false
+          },
+          {
             "type": "\\colorbox",
             "named": false
           },
           {
             "type": "\\fbox",
+            "named": false
+          },
+          {
+            "type": "\\llap",
+            "named": false
+          },
+          {
+            "type": "\\mathclap",
+            "named": false
+          },
+          {
+            "type": "\\mathllap",
+            "named": false
+          },
+          {
+            "type": "\\mathrlap",
+            "named": false
+          },
+          {
+            "type": "\\rlap",
             "named": false
           }
         ]
@@ -2280,6 +2296,26 @@
     "named": false
   },
   {
+    "type": "\\Leftarrow",
+    "named": false
+  },
+  {
+    "type": "\\Leftrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\Longleftarrow",
+    "named": false
+  },
+  {
+    "type": "\\Longleftrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\Longrightarrow",
+    "named": false
+  },
+  {
     "type": "\\Pr",
     "named": false
   },
@@ -2460,6 +2496,10 @@
     "named": false
   },
   {
+    "type": "\\clap",
+    "named": false
+  },
+  {
     "type": "\\color",
     "named": false
   },
@@ -2596,6 +2636,10 @@
     "named": false
   },
   {
+    "type": "\\hookleftarrow",
+    "named": false
+  },
+  {
     "type": "\\hookrightarrow",
     "named": false
   },
@@ -2676,6 +2720,38 @@
     "named": false
   },
   {
+    "type": "\\leftarrow",
+    "named": false
+  },
+  {
+    "type": "\\leftharpoondown",
+    "named": false
+  },
+  {
+    "type": "\\leftharpoonup",
+    "named": false
+  },
+  {
+    "type": "\\leftleftarrows",
+    "named": false
+  },
+  {
+    "type": "\\leftrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\leftrightarrows",
+    "named": false
+  },
+  {
+    "type": "\\leftrightharpoons",
+    "named": false
+  },
+  {
+    "type": "\\leftrightsquigarrow",
+    "named": false
+  },
+  {
     "type": "\\leq",
     "named": false
   },
@@ -2704,11 +2780,27 @@
     "named": false
   },
   {
+    "type": "\\llap",
+    "named": false
+  },
+  {
     "type": "\\lmoustache",
     "named": false
   },
   {
+    "type": "\\longleftarrow",
+    "named": false
+  },
+  {
+    "type": "\\longleftrightarrow",
+    "named": false
+  },
+  {
     "type": "\\longmapsto",
+    "named": false
+  },
+  {
+    "type": "\\longrightarrow",
     "named": false
   },
   {
@@ -2740,11 +2832,23 @@
     "named": false
   },
   {
+    "type": "\\mathclap",
+    "named": false
+  },
+  {
     "type": "\\mathfrak",
     "named": false
   },
   {
     "type": "\\mathit",
+    "named": false
+  },
+  {
+    "type": "\\mathllap",
+    "named": false
+  },
+  {
+    "type": "\\mathrlap",
     "named": false
   },
   {
@@ -2792,6 +2896,10 @@
     "named": false
   },
   {
+    "type": "\\nLeftrightarrow",
+    "named": false
+  },
+  {
     "type": "\\nRightarrow",
     "named": false
   },
@@ -2817,6 +2925,10 @@
   },
   {
     "type": "\\ni",
+    "named": false
+  },
+  {
+    "type": "\\nleftrightarrow",
     "named": false
   },
   {
@@ -2976,7 +3088,15 @@
     "named": false
   },
   {
+    "type": "\\rightleftharpoons",
+    "named": false
+  },
+  {
     "type": "\\rightrightarrows",
+    "named": false
+  },
+  {
+    "type": "\\rlap",
     "named": false
   },
   {
