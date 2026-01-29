@@ -126,6 +126,17 @@ module.exports = grammar({
       '\\ll', '\\gg', '\\prec', '\\succ', '\\preceq', '\\succeq',
       '\\perp', '\\parallel', '\\mid',
       '\\vdash', '\\dashv', '\\models',
+      // Arrows that start with \left - MUST be before \left is seen by delimiter_group
+      '\\leftrightarrows', '\\leftleftarrows',
+      '\\leftrightarrow', '\\Leftrightarrow',
+      '\\nleftrightarrow', '\\nLeftrightarrow',
+      '\\leftrightharpoons', '\\rightleftharpoons',
+      '\\leftrightsquigarrow',
+      '\\leftharpoonup', '\\leftharpoondown',
+      '\\leftarrow', '\\Leftarrow',
+      '\\longleftarrow', '\\Longleftarrow',
+      '\\longleftrightarrow', '\\Longleftrightarrow',
+      '\\hookleftarrow',
       // Arrows - important arrows that are commonly used
       '\\rightarrow', '\\Rightarrow', '\\nrightarrow', '\\nRightarrow',
       '\\nearrow', '\\searrow', '\\nwarrow', '\\swarrow',
@@ -138,6 +149,7 @@ module.exports = grammar({
       '\\looparrowright', '\\looparrowleft',
       '\\circlearrowright', '\\circlearrowleft',
       '\\rightrightarrows', '\\rightharpoonup', '\\rightharpoondown',
+      '\\longrightarrow', '\\Longrightarrow',
     ),
 
     // Punctuation (including standalone delimiters)
@@ -338,7 +350,7 @@ module.exports = grammar({
         '\\overleftrightarrow',
         '\\underrightarrow', '\\underleftarrow',
         '\\underleftrightarrow',
-        '\\xleftarrow', '\\xrightarrow',
+        // NOTE: \xleftarrow, \xrightarrow are in extensible_arrow rule, not here
       )),
       optional(field('base', choice($.group, $.symbol))),
     )),
@@ -450,6 +462,12 @@ module.exports = grammar({
         '\\fbox',   // Framed box
         '\\boxed',  // AMS boxed (like fbox)
         '\\colorbox', // Color background box
+        '\\llap',   // Left overlap
+        '\\rlap',   // Right overlap
+        '\\clap',   // Center overlap (mathtools)
+        '\\mathllap', // Math mode left overlap
+        '\\mathrlap', // Math mode right overlap
+        '\\mathclap', // Math mode center overlap
       )),
       optional(field('options', $.brack_group)),  // Optional [color] for bbox
       field('content', $.group),
