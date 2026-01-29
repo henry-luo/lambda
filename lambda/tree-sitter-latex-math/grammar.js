@@ -33,7 +33,8 @@ module.exports = grammar({
     // Entry point
     // ========================================================================
 
-    math: $ => repeat($._expression),
+    // Math can be a sequence of expressions OR an infix fraction at top level
+    math: $ => choice($.infix_frac, repeat($._expression)),
 
     // ========================================================================
     // Expressions
@@ -64,6 +65,7 @@ module.exports = grammar({
       $.extensible_arrow,   // \xrightarrow, \xleftarrow
       $.accent,
       $.box_command,        // \bbox, \fbox, \boxed
+      $.color_command,      // \textcolor, \color
       $.rule_command,       // \rule with dimensions
       $.phantom_command,    // \phantom, \hphantom, \vphantom, \smash
       $.symbol_command,  // Symbol commands like \infty - before big_operator
@@ -77,9 +79,24 @@ module.exports = grammar({
 
     // Symbol commands that could conflict with big operator prefixes
     // Must be listed before big_operator to take precedence
+    // Also includes symbols that are prefixes of other commands (e.g., \nexists before \ne)
     symbol_command: $ => choice(
-      '\\infty',   // Must match before \inf (big_operator)
+      '\\infty',     // Must match before \inf (big_operator)
       '\\infinity',
+      '\\nexists',   // Must match before \ne (relation)
+      '\\exists',    // Logic quantifier
+      '\\forall',    // Universal quantifier
+      '\\imath',     // Dotless i
+      '\\jmath',     // Dotless j
+      '\\ell',       // Script l
+      '\\Re',        // Real part
+      '\\Im',        // Imaginary part
+      '\\partial',   // Partial derivative
+      '\\nabla',     // Nabla/del
+      '\\aleph',     // Aleph
+      '\\hbar',      // h-bar
+      '\\emptyset',  // Empty set
+      '\\varnothing', // Empty set variant
     ),
 
     // Single letter variable (a-z, A-Z, Greek via commands, @ symbol)
@@ -128,11 +145,19 @@ module.exports = grammar({
     // Groups
     // ========================================================================
 
-    // Curly brace group
-    group: $ => seq('{', repeat($._expression), '}'),
+    // Curly brace group - may contain infix fraction command
+    group: $ => seq('{', choice($.infix_frac, repeat($._expression)), '}'),
 
     // Bracket group (for optional arguments)
     brack_group: $ => seq('[', repeat($._expression), ']'),
+
+    // Infix fraction commands: x \over y, n \choose k, etc.
+    // These split the content at the command, with left becoming numerator and right denominator
+    infix_frac: $ => seq(
+      field('numer', repeat1($._expression)),
+      field('cmd', choice('\\over', '\\atop', '\\above', '\\choose', '\\brace', '\\brack')),
+      field('denom', repeat($._expression)),
+    ),
 
     // ========================================================================
     // Sub/Superscript (TeXBook Rules 18)
@@ -188,7 +213,7 @@ module.exports = grammar({
 
     // Binomial coefficients
     binomial: $ => seq(
-      field('cmd', choice('\\binom', '\\dbinom', '\\tbinom', '\\choose')),
+      field('cmd', choice('\\binom', '\\dbinom', '\\tbinom')),
       field('top', $._frac_arg),
       field('bottom', $._frac_arg),
     ),
@@ -416,6 +441,16 @@ module.exports = grammar({
     ),
 
     // ========================================================================
+    // Color commands: \textcolor, \color
+    // ========================================================================
+
+    color_command: $ => prec.right(seq(
+      field('cmd', choice('\\textcolor', '\\color')),
+      field('color', $.group),           // Color specification {red} or {rgb}{...}
+      optional(field('content', $.group)),  // Content to color (for \textcolor)
+    )),
+
+    // ========================================================================
     // Rule command: \rule[raise]{width}{height}
     // ========================================================================
 
@@ -449,6 +484,8 @@ module.exports = grammar({
       '\\,', '\\:', '\\;', '\\!',  // Thin, medium, thick, negative thin
       '\\quad', '\\qquad',
       '\\hspace', '\\hspace*',
+      // Note: \hskip, \kern, etc. with dimensions fall through to 'command'
+      // and are handled in the AST builder
     ),
 
     // ========================================================================

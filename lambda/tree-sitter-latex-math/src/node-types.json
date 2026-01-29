@@ -296,10 +296,6 @@
             "named": false
           },
           {
-            "type": "\\choose",
-            "named": false
-          },
-          {
             "type": "\\dbinom",
             "named": false
           },
@@ -406,6 +402,10 @@
           "named": true
         },
         {
+          "type": "color_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -493,6 +493,46 @@
     }
   },
   {
+    "type": "color_command",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\color",
+            "named": false
+          },
+          {
+            "type": "\\textcolor",
+            "named": false
+          }
+        ]
+      },
+      "color": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      },
+      "content": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "command",
     "named": true,
     "fields": {
@@ -570,6 +610,10 @@
         },
         {
           "type": "box_command",
+          "named": true
+        },
+        {
+          "type": "color_command",
           "named": true
         },
         {
@@ -689,6 +733,10 @@
         },
         {
           "type": "col_sep",
+          "named": true
+        },
+        {
+          "type": "color_command",
           "named": true
         },
         {
@@ -1017,6 +1065,10 @@
           "named": true
         },
         {
+          "type": "color_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -1038,6 +1090,10 @@
         },
         {
           "type": "group",
+          "named": true
+        },
+        {
+          "type": "infix_frac",
           "named": true
         },
         {
@@ -1104,6 +1160,262 @@
     }
   },
   {
+    "type": "infix_frac",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\above",
+            "named": false
+          },
+          {
+            "type": "\\atop",
+            "named": false
+          },
+          {
+            "type": "\\brace",
+            "named": false
+          },
+          {
+            "type": "\\brack",
+            "named": false
+          },
+          {
+            "type": "\\choose",
+            "named": false
+          },
+          {
+            "type": "\\over",
+            "named": false
+          }
+        ]
+      },
+      "denom": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "accent",
+            "named": true
+          },
+          {
+            "type": "big_operator",
+            "named": true
+          },
+          {
+            "type": "binomial",
+            "named": true
+          },
+          {
+            "type": "box_command",
+            "named": true
+          },
+          {
+            "type": "color_command",
+            "named": true
+          },
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "delimiter_group",
+            "named": true
+          },
+          {
+            "type": "environment",
+            "named": true
+          },
+          {
+            "type": "extensible_arrow",
+            "named": true
+          },
+          {
+            "type": "fraction",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "overunder_command",
+            "named": true
+          },
+          {
+            "type": "phantom_command",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "radical",
+            "named": true
+          },
+          {
+            "type": "relation",
+            "named": true
+          },
+          {
+            "type": "rule_command",
+            "named": true
+          },
+          {
+            "type": "sized_delimiter",
+            "named": true
+          },
+          {
+            "type": "space_command",
+            "named": true
+          },
+          {
+            "type": "style_command",
+            "named": true
+          },
+          {
+            "type": "subsup",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "symbol_command",
+            "named": true
+          },
+          {
+            "type": "text_command",
+            "named": true
+          }
+        ]
+      },
+      "numer": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "accent",
+            "named": true
+          },
+          {
+            "type": "big_operator",
+            "named": true
+          },
+          {
+            "type": "binomial",
+            "named": true
+          },
+          {
+            "type": "box_command",
+            "named": true
+          },
+          {
+            "type": "color_command",
+            "named": true
+          },
+          {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "delimiter_group",
+            "named": true
+          },
+          {
+            "type": "environment",
+            "named": true
+          },
+          {
+            "type": "extensible_arrow",
+            "named": true
+          },
+          {
+            "type": "fraction",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "operator",
+            "named": true
+          },
+          {
+            "type": "overunder_command",
+            "named": true
+          },
+          {
+            "type": "phantom_command",
+            "named": true
+          },
+          {
+            "type": "punctuation",
+            "named": true
+          },
+          {
+            "type": "radical",
+            "named": true
+          },
+          {
+            "type": "relation",
+            "named": true
+          },
+          {
+            "type": "rule_command",
+            "named": true
+          },
+          {
+            "type": "sized_delimiter",
+            "named": true
+          },
+          {
+            "type": "space_command",
+            "named": true
+          },
+          {
+            "type": "style_command",
+            "named": true
+          },
+          {
+            "type": "subsup",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "symbol_command",
+            "named": true
+          },
+          {
+            "type": "text_command",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "math",
     "named": true,
     "root": true,
@@ -1129,6 +1441,10 @@
           "named": true
         },
         {
+          "type": "color_command",
+          "named": true
+        },
+        {
           "type": "command",
           "named": true
         },
@@ -1150,6 +1466,10 @@
         },
         {
           "type": "group",
+          "named": true
+        },
+        {
+          "type": "infix_frac",
           "named": true
         },
         {
@@ -1606,6 +1926,10 @@
             "named": true
           },
           {
+            "type": "color_command",
+            "named": true
+          },
+          {
             "type": "command",
             "named": true
           },
@@ -1932,7 +2256,15 @@
     "named": false
   },
   {
+    "type": "\\Im",
+    "named": false
+  },
+  {
     "type": "\\Pr",
+    "named": false
+  },
+  {
+    "type": "\\Re",
     "named": false
   },
   {
@@ -1948,7 +2280,15 @@
     "named": false
   },
   {
+    "type": "\\above",
+    "named": false
+  },
+  {
     "type": "\\acute",
+    "named": false
+  },
+  {
+    "type": "\\aleph",
     "named": false
   },
   {
@@ -1961,6 +2301,10 @@
   },
   {
     "type": "\\asymp",
+    "named": false
+  },
+  {
+    "type": "\\atop",
     "named": false
   },
   {
@@ -2044,6 +2388,14 @@
     "named": false
   },
   {
+    "type": "\\brace",
+    "named": false
+  },
+  {
+    "type": "\\brack",
+    "named": false
+  },
+  {
     "type": "\\breve",
     "named": false
   },
@@ -2073,6 +2425,10 @@
   },
   {
     "type": "\\circ",
+    "named": false
+  },
+  {
+    "type": "\\color",
     "named": false
   },
   {
@@ -2136,11 +2492,27 @@
     "named": false
   },
   {
+    "type": "\\ell",
+    "named": false
+  },
+  {
+    "type": "\\emptyset",
+    "named": false
+  },
+  {
     "type": "\\equiv",
     "named": false
   },
   {
+    "type": "\\exists",
+    "named": false
+  },
+  {
     "type": "\\fbox",
+    "named": false
+  },
+  {
+    "type": "\\forall",
     "named": false
   },
   {
@@ -2172,6 +2544,10 @@
     "named": false
   },
   {
+    "type": "\\hbar",
+    "named": false
+  },
+  {
     "type": "\\hbox",
     "named": false
   },
@@ -2196,6 +2572,10 @@
     "named": false
   },
   {
+    "type": "\\imath",
+    "named": false
+  },
+  {
     "type": "\\in",
     "named": false
   },
@@ -2213,6 +2593,10 @@
   },
   {
     "type": "\\int",
+    "named": false
+  },
+  {
+    "type": "\\jmath",
     "named": false
   },
   {
@@ -2344,11 +2728,19 @@
     "named": false
   },
   {
+    "type": "\\nabla",
+    "named": false
+  },
+  {
     "type": "\\ne",
     "named": false
   },
   {
     "type": "\\neq",
+    "named": false
+  },
+  {
+    "type": "\\nexists",
     "named": false
   },
   {
@@ -2388,6 +2780,10 @@
     "named": false
   },
   {
+    "type": "\\over",
+    "named": false
+  },
+  {
     "type": "\\overbrace",
     "named": false
   },
@@ -2413,6 +2809,10 @@
   },
   {
     "type": "\\parallel",
+    "named": false
+  },
+  {
+    "type": "\\partial",
     "named": false
   },
   {
@@ -2584,6 +2984,10 @@
     "named": false
   },
   {
+    "type": "\\textcolor",
+    "named": false
+  },
+  {
     "type": "\\textit",
     "named": false
   },
@@ -2633,6 +3037,10 @@
   },
   {
     "type": "\\updownarrow",
+    "named": false
+  },
+  {
+    "type": "\\varnothing",
     "named": false
   },
   {
