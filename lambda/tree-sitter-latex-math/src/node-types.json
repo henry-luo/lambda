@@ -270,7 +270,19 @@
         "required": true,
         "types": [
           {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "digit",
+            "named": true
+          },
+          {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -302,7 +314,19 @@
         "required": true,
         "types": [
           {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "digit",
+            "named": true
+          },
+          {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -927,7 +951,19 @@
         "required": true,
         "types": [
           {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "digit",
+            "named": true
+          },
+          {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -937,7 +973,19 @@
         "required": true,
         "types": [
           {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "digit",
+            "named": true
+          },
+          {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -1304,7 +1352,19 @@
         "required": true,
         "types": [
           {
+            "type": "command",
+            "named": true
+          },
+          {
+            "type": "digit",
+            "named": true
+          },
+          {
             "type": "group",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -2706,6 +2766,10 @@
   {
     "type": "dcases",
     "named": false
+  },
+  {
+    "type": "digit",
+    "named": true
   },
   {
     "type": "end_cmd",
