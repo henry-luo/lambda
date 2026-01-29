@@ -138,20 +138,14 @@ true
 '# Nested let expressions'
 95
 "# Complex nested statements"
-1
-20
-3
-40
-5
-60
-7
-80
-9
+[1, 20, 3]
+[40, 5, 60]
+[7, 80, 9]
 "# Let statement with complex initialization"
 {
-  numbers_squared: (1, 4, 9, 16, 25),
-  strings_doubled: "aabbcc",
-  conditions: (false, false, true, true)
+  numbers_squared: [1, 4, 9, 16, 25],
+  strings_doubled: ["aa", "bb", "cc"],
+  conditions: [false, false, true, true]
 }
 "# If statement with for expressions in branches"
 101

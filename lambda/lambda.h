@@ -121,10 +121,11 @@ struct Container {
     union {
         uint8_t flags;
         struct {
-            uint8_t is_content:1;  // whether it is a content list, or value list
+            uint8_t is_content:1;    // whether it is a content list, or value list
+            uint8_t is_spreadable:1; // whether this array should be spread when added to collections
             // uint8_t is_const:1;  // is a constant expr
             // uint8_t is_pooled:1; // is allocated from a memory pool
-            uint8_t reserved:7;
+            uint8_t reserved:6;
         };
     };
     uint16_t ref_cnt;  // reference count
@@ -185,6 +186,14 @@ struct Container {
         int64_t capacity;  // allocated capacity
     };
 
+    // ArrayList definition for MIR runtime (item_keys return type)
+    typedef void *ArrayListValue;
+    struct _ArrayList {
+        ArrayListValue *data;
+        int length;
+        int _alloced;
+    };
+
 #endif
 
 Range* range();
@@ -193,7 +202,14 @@ long range_get(Range *range, int index);
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
+void list_push_spread(List *list, Item item);  // push item, spreading if spreadable array
 Item list_end(List *list);
+
+// Spreadable array functions for for-expression results
+Array* array_spreadable();  // constructs a spreadable empty array
+void array_push(Array* arr, Item item);  // push item to array
+void array_push_spread(Array* arr, Item item);  // push item, spreading if spreadable array
+Item array_end(Array* arr);  // finalize and return array as Item
 
 typedef void* (*fn_ptr)();
 
@@ -272,8 +288,10 @@ typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
 
 typedef struct Url Url;
-typedef struct _ArrayList ArrayList;
 typedef struct Pool Pool;
+
+// Forward declaration of ArrayList (defined in lib/arraylist.h)
+typedef struct _ArrayList ArrayList;
 
 typedef struct Context {
     Pool* pool;
@@ -307,6 +325,8 @@ typedef struct Context {
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
     Item item_at(Item data, int index);
+    Item item_attr(Item data, const char* key);  // get attribute by name
+    struct _ArrayList* item_keys(Item data);     // get list of attribute names
 
     Bool is_truthy(Item item);
     Item v2it(List *list);
