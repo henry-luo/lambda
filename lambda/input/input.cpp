@@ -35,6 +35,9 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 // New modular markup parser (replaces old input_markup)
 extern "C" Item input_markup_modular(Input *input, const char* content);
 
+// CommonMark-specific parser (no GFM extensions)
+extern "C" Item input_markup_commonmark(Input *input, const char* content);
+
 // Old markup parser - kept for backward compatibility during transition
 Item input_markup(Input *input, const char* content);
 
@@ -602,6 +605,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
             const char* markup_flavor = (flavor && flavor->chars) ? flavor->chars : "markdown";
+            log_debug("input_from_source markup: flavor='%s'", markup_flavor);
             if (strcmp(markup_flavor, "rst") == 0) {
                 input->root = input_markup_with_format(input, source, MARKUP_RST);
             } else if (strcmp(markup_flavor, "wiki") == 0) {
@@ -614,8 +618,13 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
                 input->root = input_markup_with_format(input, source, MARKUP_ORG);
             } else if (strcmp(markup_flavor, "textile") == 0) {
                 input->root = input_markup_with_format(input, source, MARKUP_TEXTILE);
+            } else if (strcmp(markup_flavor, "commonmark") == 0) {
+                // Strict CommonMark mode - no GFM extensions
+                log_debug("input_from_source: using commonmark mode");
+                input->root = input_markup_commonmark(input, source);
             } else {
-                // Default to markdown
+                // Default to markdown with GFM extensions
+                log_debug("input_from_source: using default markdown mode");
                 input->root = input_markup_modular(input, source);
             }
         }
