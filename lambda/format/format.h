@@ -34,6 +34,8 @@ void format_org(StringBuf* sb, Item root_item);
 String* format_org_string(Pool* pool, Item root_item);
 void format_wiki(StringBuf* sb, Item root_item);
 String* format_wiki_string(Pool* pool, Item root_item);
+void format_textile(StringBuf* sb, Item root_item);
+String* format_textile_string(Pool* pool, Item root_item);
 void format_text(StringBuf* sb, Item root_item);
 String* format_text_string(Pool* pool, Item root_item);
 

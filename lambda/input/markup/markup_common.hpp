@@ -153,6 +153,8 @@ enum class InlineType {
     EMOJI,              // Emoji shortcode
     FOOTNOTE_REF,       // Footnote reference
     CITATION,           // Citation reference
+    CITE,               // Inline citation (Textile ??)
+    SPAN,               // Generic span with modifiers (Textile %)
     TEMPLATE,           // Wiki template, variable expansion
     LINE_BREAK,         // Hard line break
     ESCAPE              // Escaped character
@@ -392,6 +394,8 @@ inline const char* inline_type_to_tag(InlineType type) {
         case InlineType::EMOJI: return "span";
         case InlineType::FOOTNOTE_REF: return "sup";
         case InlineType::CITATION: return "cite";
+        case InlineType::CITE: return "cite";
+        case InlineType::SPAN: return "span";
         default: return "span";
     }
 }

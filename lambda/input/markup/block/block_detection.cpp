@@ -316,6 +316,36 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             }
         }
 
+        // Textile-specific detection
+        if (parser->config.format == Format::TEXTILE) {
+            // Textile definition lists: - term := definition
+            if (*line == '-' && *(line+1) == ' ') {
+                const char* p = line + 2;
+                while (*p && *p != '\n' && *p != '\r') {
+                    if (*p == ':' && *(p+1) == '=') {
+                        return BlockType::DEFINITION_LIST;
+                    }
+                    p++;
+                }
+            }
+
+            // Textile comment blocks: ###.
+            if (strncmp(line, "###", 3) == 0 && (line[3] == '.' || (line[3] == '.' && line[4] == '.'))) {
+                return BlockType::BLANK;  // Skip comments
+            }
+
+            // Textile footnote definitions: fn1. text
+            if (line[0] == 'f' && line[1] == 'n' && isdigit((unsigned char)line[2])) {
+                const char* p = line + 3;
+                while (isdigit((unsigned char)*p)) p++;
+                // Skip modifiers if present
+                while (*p && *p != '.' && *p != '\n') p++;
+                if (*p == '.') {
+                    return BlockType::DIRECTIVE;  // Use DIRECTIVE for footnote defs
+                }
+            }
+        }
+
         // Indented code block detection (only if not in list context)
         // Check via adapter first
         const char* code_start = nullptr;
