@@ -696,6 +696,8 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_org_string(input->pool, input->root);
         } else if (strcmp(to_format, "wiki") == 0) {
             formatted_output = format_wiki_string(input->pool, input->root);
+        } else if (strcmp(to_format, "textile") == 0) {
+            formatted_output = format_textile_string(input->pool, input->root);
         } else if (strcmp(to_format, "text") == 0) {
             formatted_output = format_text_string(input->pool, input->root);
         } else if (strcmp(to_format, "jsx") == 0) {
@@ -724,7 +726,7 @@ int exec_convert(int argc, char* argv[]) {
             strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
+            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
             pool_destroy(temp_pool);
             return 1;
         }
