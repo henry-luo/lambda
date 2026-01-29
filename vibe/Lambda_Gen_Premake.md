@@ -75,7 +75,7 @@ This addresses the critical **platform detection** requirement!
 | Feature | Status | Workaround |
 |---------|--------|------------|
 | CLI arguments | No `argv` access | Could use config file or environment |
-| String interpolation | No f-strings | Use `+` concatenation |
+| String interpolation | No f-strings | Use functional statements or `+` concatenation |
 | Classes/OOP | Not supported | Pass state maps through functions |
 
 ### ✅ Available via Directory Input
@@ -506,17 +506,31 @@ args(0)                        // Get specific argument
 
 **Implementation**: Pass `argc`/`argv` to runtime, expose via `SYSFUNC_ARGS`.
 
-### Priority 3: Template Strings (Medium Value)
+### Priority 3: Functional Statement String Composition (Already Available)
+
+Lambda's **functional statement syntax** is designed for dynamic string composition. A function body with semicolon-separated expressions automatically concatenates string results:
 
 ```lambda
-// Current (verbose)
-"project \"" + name + "\""
+// Using functional statements for string composition
+fn lua_project(name: string, kind: string) => {
+    "project \""; name; "\"\n";
+    "    kind \""; kind; "\""
+}
 
-// Proposed template syntax
-`project "${name}"`
+// Usage
+lua_project("mylib", "StaticLib")
+// Returns: 'project "mylib"\n    kind "StaticLib"'
+
+// More complex example with conditionals
+fn generate_filter(platform: string, settings: [string]) => {
+    "filter \""; platform; "\"\n";
+    for s in settings {
+        "    "; s; "\n"
+    }
+}
 ```
 
-This would significantly improve code generation scripts.
+This is **more powerful than template strings** because it integrates seamlessly with Lambda's control flow (conditionals, loops, etc.) and maintains the functional paradigm.
 
 ### Priority 4: Path Manipulation Functions (Medium Value)
 
@@ -548,7 +562,7 @@ state with {content: state.content ++ new_lines}
 | Config parsing | ✅ Excellent | ✅ Excellent |
 | Platform detection | ✅ Via `sys://` | ✅ Excellent |
 | Directory listing | ✅ Via `input()` | ✅ Excellent |
-| String generation | ⚠️ Verbose | ✅ Good (with templates) |
+| String generation | ✅ Functional statements | ✅ Excellent |
 | State management | ⚠️ Manual | ⚠️ Acceptable |
 | File output | ✅ Available | ✅ Available |
 | CLI args | ❌ Blocked | ✅ Feasible |
@@ -560,11 +574,11 @@ state with {content: state.content ++ new_lines}
 - Reads config from JSON file
 - Auto-detects platform via `sys://system/info`
 - Generates Lua output to a file
+- Uses functional statements for clean string composition
 
 **Full parity with Python** requires:
 1. `env()` function for environment variables
 2. `args()` function for CLI argument parsing
-3. (Optional) Template strings for cleaner code generation
 
 ---
 
@@ -582,9 +596,8 @@ state with {content: state.content ++ new_lines}
 3. Update documentation
 
 ### Phase 3: Full Feature Parity
-1. Add template string syntax
-2. Add `file_exists()` 
-3. Add path manipulation functions
+1. Add `file_exists()` function
+2. Add path manipulation functions
 
 ---
 
@@ -593,7 +606,7 @@ state with {content: state.content ++ new_lines}
 Converting `generate_premake.py` to Lambda Script is **largely feasible** with Lambda's current features, especially with the `sys://system/info` input providing platform detection. The main challenges are:
 
 1. **No classes** → Use state maps (acceptable workaround)
-2. **Verbose string building** → Manageable with helper functions
+2. **String composition** → Functional statements provide elegant solution
 3. **No CLI args** → Needs language extension
 4. **No env vars** → Needs language extension
 
