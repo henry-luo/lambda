@@ -82,11 +82,11 @@ module.exports = grammar({
       '\\infinity',
     ),
 
-    // Single letter variable (a-z, A-Z, Greek via commands)
-    symbol: $ => /[a-zA-Z]/,
+    // Single letter variable (a-z, A-Z, Greek via commands, @ symbol)
+    symbol: $ => /[a-zA-Z@]/,
 
-    // Numeric literal
-    number: $ => /[0-9]+\.?[0-9]*/,
+    // Numeric literal - lower precedence so 'digit' can match first in _frac_arg
+    number: $ => token(prec(-1, /[0-9]+\.?[0-9]*/)),
 
     // Binary operators: +, -, *, etc.
     operator: $ => choice(
@@ -162,6 +162,7 @@ module.exports = grammar({
     // Fractions (TeXBook Rule 15)
     // ========================================================================
 
+    // Note: arguments can be braced groups {x} or single tokens like \frac12
     fraction: $ => seq(
       field('cmd', choice(
         '\\frac',     // Standard fraction
@@ -169,25 +170,38 @@ module.exports = grammar({
         '\\tfrac',    // Text style fraction
         '\\cfrac',    // Continued fraction
       )),
-      field('numer', $.group),
-      field('denom', $.group),
+      field('numer', $._frac_arg),
+      field('denom', $._frac_arg),
     ),
+
+    // Fraction argument: either a braced group or a single token
+    // Note: digit is used for \frac12 cases; number would be too greedy
+    _frac_arg: $ => choice(
+      $.group,
+      $.symbol,
+      $.digit,  // Single digit for \frac12
+      $.command,
+    ),
+
+    // Single digit (for \frac57 style) - higher precedence than number
+    digit: $ => token(prec(1, /[0-9]/)),
 
     // Binomial coefficients
     binomial: $ => seq(
       field('cmd', choice('\\binom', '\\dbinom', '\\tbinom', '\\choose')),
-      field('top', $.group),
-      field('bottom', $.group),
+      field('top', $._frac_arg),
+      field('bottom', $._frac_arg),
     ),
 
     // ========================================================================
     // Radicals (Square roots, etc.)
     // ========================================================================
 
+    // Note: radicand can be braced group {x} or single token like \sqrt2
     radical: $ => seq(
       '\\sqrt',
       optional(field('index', $.brack_group)),  // Optional root index
-      field('radicand', $.group),
+      field('radicand', $._frac_arg),
     ),
 
     // ========================================================================
