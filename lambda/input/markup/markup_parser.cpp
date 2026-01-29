@@ -772,6 +772,42 @@ extern "C" Item input_markup_modular(Input* input, const char* content) {
     return result;
 }
 
+/**
+ * input_markup_commonmark - Parse strict CommonMark (no GFM extensions)
+ *
+ * This function parses markdown using strict CommonMark rules without
+ * GFM extensions like tables, task lists, and strikethrough.
+ */
+extern "C" Item input_markup_commonmark(Input* input, const char* content) {
+    if (!input || !content) {
+        log_error("input_markup_commonmark: null input or content");
+        return Item{.item = ITEM_ERROR};
+    }
+
+    log_debug("input_markup_commonmark: ENTRY - using COMMONMARK flavor");
+
+    // Create parser config with COMMONMARK flavor
+    ParseConfig cfg;
+    cfg.format = Format::MARKDOWN;
+    cfg.flavor = Flavor::COMMONMARK;
+    cfg.strict_mode = false;
+    cfg.collect_metadata = true;
+    cfg.resolve_refs = true;
+
+
+
+    // Create and run parser
+    MarkupParser parser(input, cfg);
+    
+    Item result = parser.parseContent(content);
+
+    if (result.item == ITEM_ERROR) {
+        log_error("input_markup_commonmark: parsing failed");
+    }
+
+    return result;
+}
+
 // Helper to convert MarkupFormat (C enum) to Format (C++ enum class)
 static Format markup_format_to_format(MarkupFormat mf) {
     switch (mf) {
