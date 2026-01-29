@@ -43,12 +43,15 @@ const NORMALIZED_NODE_TYPES = {
     'msubsup': 'scripts',
     'msup': 'superscript',
     'msub': 'subscript',
+    'scripts': 'scripts',
 
     // Layout
     'mrow': 'row',
     'group': 'row',
+    'row': 'row',
     'mspace': 'space',
     'spacing': 'space',
+    'space': 'space',
     'mphantom': 'phantom',
     'phantom': 'phantom',
 
@@ -59,11 +62,30 @@ const NORMALIZED_NODE_TYPES = {
     // Delimiters
     'leftright': 'delimited',
     'delim': 'delimited',
+    'delimited': 'delimited',
+    'sized_delim': 'sized_delim',
+
+    // Accents
+    'accent': 'accent',
+    'overunder': 'overunder',
+
+    // Boxes
+    'box': 'box',
+    'bbox': 'box',
+    'fbox': 'box',
+    'mbox': 'box',
+    'colorbox': 'box',
+    'boxed': 'box',
+
+    // Style commands
+    'style': 'style',
 
     // Arrays/matrices
     'array': 'array',
     'matrix': 'array',
     'environment': 'environment',
+    'array_row': 'array_row',
+    'array_cell': 'array_cell',
 
     // Text
     'text': 'text',

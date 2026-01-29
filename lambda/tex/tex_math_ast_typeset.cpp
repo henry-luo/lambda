@@ -563,6 +563,37 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
             }
             return make_hbox(ctx.arena);
 
+        case MathNodeType::BOX:
+            // BOX nodes (\bbox, \fbox, \mbox, \colorbox, \boxed)
+            // For now, just typeset the content without special box rendering
+            if (node->body) {
+                return typeset_node(node->body, ctx);
+            }
+            return make_hbox(ctx.arena);
+
+        case MathNodeType::STYLE: {
+            // STYLE nodes (\displaystyle, \textstyle, etc.)
+            // Save current style and apply the new one
+            MathStyle old_style = ctx.style;
+            switch (node->style.style_type) {
+                case 0: ctx.style = MathStyle::Display; break;  // displaystyle
+                case 1: ctx.style = MathStyle::Text; break;     // textstyle
+                case 2: ctx.style = MathStyle::Script; break;   // scriptstyle
+                case 3: ctx.style = MathStyle::ScriptScript; break;  // scriptscriptstyle
+            }
+            TexNode* result = nullptr;
+            if (node->body) {
+                result = typeset_node(node->body, ctx);
+            }
+            ctx.style = old_style;  // restore style
+            return result ? result : make_hbox(ctx.arena);
+        }
+
+        case MathNodeType::SIZED_DELIM:
+            // SIZED_DELIM nodes (\big, \Big, \bigg, \Bigg variants)
+            // Create a delimiter with fixed size based on size_level
+            return typeset_atom(node, ctx);  // Treated as atom for now
+
         case MathNodeType::ARRAY_ROW:
         case MathNodeType::ARRAY_CELL:
         case MathNodeType::ERROR:
@@ -631,6 +662,27 @@ static TexNode* typeset_row(MathASTNode* node, MathContext& ctx) {
 static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
     TypesetContext tc(ctx);
     float size = tc.font_size();
+
+    // Handle SIZED_DELIM specially - it uses sized_delim struct, not atom
+    if (node->type == MathNodeType::SIZED_DELIM) {
+        // Apply size scaling based on size_level (1=big, 2=Big, 3=bigg, 4=Bigg)
+        float scale = 1.0f + node->sized_delim.size_level * 0.5f;
+        size *= scale;
+
+        // Determine atom type from delim_type
+        AtomType atom = AtomType::Ord;
+        if (node->sized_delim.delim_type == 0) atom = AtomType::Open;
+        else if (node->sized_delim.delim_type == 1) atom = AtomType::Close;
+
+        int32_t cp = node->sized_delim.delim_char;
+        FontSpec font = tc.make_symbol_font();
+        font.size_pt = size;
+
+        log_debug("[TYPESET] typeset_atom SIZED_DELIM: cp=%d size_level=%d size=%.1fpt",
+                  cp, node->sized_delim.size_level, size);
+
+        return make_char_with_metrics(tc.arena(), cp, atom, font, tc.get_symbol_tfm(), size);
+    }
 
     // Determine font and codepoint based on command or codepoint
     FontSpec font;
