@@ -82,8 +82,8 @@ module.exports = grammar({
       '\\infinity',
     ),
 
-    // Single letter variable (a-z, A-Z, Greek via commands)
-    symbol: $ => /[a-zA-Z]/,
+    // Single letter variable (a-z, A-Z, Greek via commands, @ symbol)
+    symbol: $ => /[a-zA-Z@]/,
 
     // Numeric literal - lower precedence so 'digit' can match first in _frac_arg
     number: $ => token(prec(-1, /[0-9]+\.?[0-9]*/)),
