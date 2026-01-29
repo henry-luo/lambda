@@ -476,6 +476,23 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"Bbbk", 0x1D55C, AtomType::Ord}, {"hbar", 0x210F, AtomType::Ord}, // 𝕜, ℏ
     {"hslash", 0x210F, AtomType::Ord}, {"nexists", 0x2204, AtomType::Ord}, // ℏ, ∄
     {"diagup", 0x2571, AtomType::Ord}, {"diagdown", 0x2572, AtomType::Ord}, // ╱, ╲
+    // Common math symbols - need proper Unicode mappings
+    {"forall", 0x2200, AtomType::Ord}, {"exists", 0x2203, AtomType::Ord}, // ∀, ∃
+    {"imath", 0x0131, AtomType::Ord}, {"jmath", 0x0237, AtomType::Ord}, // ı, ȷ
+    {"ell", 0x2113, AtomType::Ord}, {"Re", 0x211C, AtomType::Ord}, // ℓ, ℜ
+    {"Im", 0x2111, AtomType::Ord}, {"partial", 0x2202, AtomType::Ord}, // ℑ, ∂
+    {"nabla", 0x2207, AtomType::Ord}, {"aleph", 0x2135, AtomType::Ord}, // ∇, ℵ
+    {"emptyset", 0x2205, AtomType::Ord}, {"varnothing", 0x2205, AtomType::Ord}, // ∅
+    {"prime", 0x2032, AtomType::Ord}, {"dprime", 0x2033, AtomType::Ord}, // ′, ″
+    {"infty", 0x221E, AtomType::Ord}, {"wp", 0x2118, AtomType::Ord}, // ∞, ℘
+    {"angle", 0x2220, AtomType::Ord}, {"top", 0x22A4, AtomType::Ord}, // ∠, ⊤
+    {"bot", 0x22A5, AtomType::Ord}, {"flat", 0x266D, AtomType::Ord}, // ⊥, ♭
+    {"natural", 0x266E, AtomType::Ord}, {"sharp", 0x266F, AtomType::Ord}, // ♮, ♯
+    {"dag", 0x2020, AtomType::Ord}, {"ddag", 0x2021, AtomType::Ord}, // †, ‡
+    {"S", 0x00A7, AtomType::Ord}, {"P", 0x00B6, AtomType::Ord}, // §, ¶
+    {"copyright", 0x00A9, AtomType::Ord}, {"pounds", 0x00A3, AtomType::Ord}, // ©, £
+    // Special negation operator
+    {"not", 0x0338, AtomType::Rel}, // ̸ (combining long solidus overlay)
     {nullptr, 0, AtomType::Ord}
 };
 
@@ -590,12 +607,14 @@ private:
     MathASTNode* build_subsup(TSNode node);
     MathASTNode* build_fraction(TSNode node);
     MathASTNode* build_binomial(TSNode node);
+    MathASTNode* build_infix_frac(TSNode node);
     MathASTNode* build_radical(TSNode node);
     MathASTNode* build_delimiter_group(TSNode node);
     MathASTNode* build_sized_delimiter(TSNode node);
     MathASTNode* build_brack_group(TSNode node);
     MathASTNode* build_accent(TSNode node);
     MathASTNode* build_box_command(TSNode node);
+    MathASTNode* build_color_command(TSNode node);
     MathASTNode* build_rule_command(TSNode node);
     MathASTNode* build_phantom_command(TSNode node);
     MathASTNode* build_big_operator(TSNode node);
@@ -629,6 +648,8 @@ MathASTNode* MathASTBuilder::build() {
     if (!source || source_len == 0) {
         return make_math_row(arena);
     }
+
+    log_debug("tex_math_ast: parsing source='%.*s' len=%zu", (int)source_len, source, source_len);
 
     // Create tree-sitter parser
     TSParser* parser = ts_parser_new();
@@ -685,6 +706,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "subsup") == 0) return build_subsup(node);
     if (strcmp(type, "fraction") == 0) return build_fraction(node);
     if (strcmp(type, "binomial") == 0) return build_binomial(node);
+    if (strcmp(type, "infix_frac") == 0) return build_infix_frac(node);
     if (strcmp(type, "radical") == 0) return build_radical(node);
     if (strcmp(type, "delimiter_group") == 0) return build_delimiter_group(node);
     if (strcmp(type, "sized_delimiter") == 0) return build_sized_delimiter(node);
@@ -692,6 +714,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "extensible_arrow") == 0) return build_extensible_arrow(node);
     if (strcmp(type, "accent") == 0) return build_accent(node);
     if (strcmp(type, "box_command") == 0) return build_box_command(node);
+    if (strcmp(type, "color_command") == 0) return build_color_command(node);
     if (strcmp(type, "rule_command") == 0) return build_rule_command(node);
     if (strcmp(type, "phantom_command") == 0) return build_phantom_command(node);
     if (strcmp(type, "big_operator") == 0) return build_big_operator(node);
@@ -1115,6 +1138,101 @@ MathASTNode* MathASTBuilder::build_binomial(TSNode node) {
     return binom;
 }
 
+MathASTNode* MathASTBuilder::build_infix_frac(TSNode node) {
+    // Infix fractions: n \over k, n \choose k, n \atop k, etc.
+    // The numer field contains all expressions before the command
+    // The denom field contains all expressions after the command
+
+    // Get command name from cmd field
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    const char* cmd = "over";  // default
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text && text[0] == '\\' && len > 1) {
+            cmd = arena_copy_str(text + 1, len - 1);
+        }
+    }
+
+    // Collect numerator and denominator items from fields
+    // Pre-allocate reasonable sizes since these are typically short
+    MathASTNode* numer_items[32];
+    MathASTNode* denom_items[32];
+    int numer_count = 0;
+    int denom_count = 0;
+
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        const char* field = ts_node_field_name_for_named_child(node, i);
+        if (!field) continue;
+
+        if (strcmp(field, "numer") == 0 && numer_count < 32) {
+            MathASTNode* item = build_ts_node(child);
+            if (item) numer_items[numer_count++] = item;
+        } else if (strcmp(field, "denom") == 0 && denom_count < 32) {
+            MathASTNode* item = build_ts_node(child);
+            if (item) denom_items[denom_count++] = item;
+        }
+    }
+
+    // Build numerator
+    MathASTNode* numer = nullptr;
+    if (numer_count == 1) {
+        numer = numer_items[0];
+    } else if (numer_count > 1) {
+        numer = make_math_row(arena);
+        for (int i = 0; i < numer_count; i++) {
+            math_row_append(numer, numer_items[i]);
+        }
+    }
+
+    // Build denominator
+    MathASTNode* denom = nullptr;
+    if (denom_count == 1) {
+        denom = denom_items[0];
+    } else if (denom_count > 1) {
+        denom = make_math_row(arena);
+        for (int i = 0; i < denom_count; i++) {
+            math_row_append(denom, denom_items[i]);
+        }
+    }
+
+    // Determine properties based on command
+    float rule_thickness = -1.0f;  // Default: use default bar line
+    char left_delim = 0;
+    char right_delim = 0;
+
+    if (strcmp(cmd, "choose") == 0) {
+        // \choose: parentheses, no bar line
+        rule_thickness = 0.0f;
+        left_delim = '(';
+        right_delim = ')';
+    } else if (strcmp(cmd, "brace") == 0) {
+        // \brace: braces, no bar line
+        rule_thickness = 0.0f;
+        left_delim = '{';
+        right_delim = '}';
+    } else if (strcmp(cmd, "brack") == 0) {
+        // \brack: brackets, no bar line
+        rule_thickness = 0.0f;
+        left_delim = '[';
+        right_delim = ']';
+    } else if (strcmp(cmd, "atop") == 0) {
+        // \atop: no delimiters, no bar line
+        rule_thickness = 0.0f;
+    }
+    // \over and \above: normal fraction with bar line, no delimiters
+
+    MathASTNode* frac = make_math_frac(arena, numer, denom, rule_thickness);
+    if (frac) {
+        frac->frac.command = cmd;
+        frac->frac.left_delim = left_delim;
+        frac->frac.right_delim = right_delim;
+    }
+    return frac;
+}
+
 MathASTNode* MathASTBuilder::build_radical(TSNode node) {
     uint32_t child_count = ts_node_named_child_count(node);
     if (child_count < 1) return nullptr;
@@ -1486,6 +1604,59 @@ MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
     return box;
 }
 
+MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
+    // color_command: \textcolor{color}{content} or \color{color}
+    // Get the full node text to extract the command
+    int full_len;
+    const char* full_text = node_text(node, &full_len);
+
+    // Find the command name - starts with \ and ends before the {
+    const char* cmd = nullptr;
+    int cmd_len = 0;
+    if (full_text && full_text[0] == '\\') {
+        for (int i = 1; i < full_len; i++) {
+            if (!((full_text[i] >= 'a' && full_text[i] <= 'z') ||
+                  (full_text[i] >= 'A' && full_text[i] <= 'Z'))) {
+                cmd_len = i;
+                break;
+            }
+        }
+        if (cmd_len > 0) {
+            cmd = arena_copy_str(full_text + 1, cmd_len - 1);  // skip backslash
+        }
+    }
+
+    TSNode color_node = ts_node_child_by_field_name(node, "color", 5);
+    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+
+    // Get the color specification
+    const char* color_str = nullptr;
+    if (!ts_node_is_null(color_node)) {
+        int len;
+        const char* text = node_text(color_node, &len);
+        // Strip braces
+        if (len >= 2 && text[0] == '{') {
+            color_str = arena_copy_str(text + 1, len - 2);
+        }
+    }
+
+    // Build content
+    MathASTNode* content = nullptr;
+    if (!ts_node_is_null(content_node)) {
+        content = build_group(content_node);
+    }
+
+    log_debug("tex_math_ast_builder: build_color_command cmd=%s color=%s",
+              cmd ? cmd : "", color_str ? color_str : "");
+
+    // Wrap content in a STYLE node with the color command
+    if (content) {
+        return make_math_style(arena, 6, cmd ? cmd : "textcolor", content);  // 6=color style
+    }
+
+    return nullptr;
+}
+
 MathASTNode* MathASTBuilder::build_rule_command(TSNode node) {
     // rule_command: \rule[raise]{width}{height}
     TSNode width_node = ts_node_child_by_field_name(node, "width", 5);
@@ -1836,19 +2007,13 @@ MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
     }
 
     // For math variants (\mathbf, \mathrm, etc.), we need to change the font
-    // for each character in the body. For now, just mark it with a text node
-    // that the typesetter can recognize.
+    // for each character in the body.
     if (cmd && name_len > 0) {
-        // Check for style commands that should change rendering
-        if (name_len == 6 && strncmp(cmd, "mathrm", 6) == 0) {
-            // Roman text - wrap in TEXT node
-            if (body && body->type == MathNodeType::ROW) {
-                // Collect all letters in the body
-                MathASTNode* text = make_math_text(arena, "", 0, true);
-                // For now, just return the body as-is since we need font support
-                return body;
-            }
-            return body;
+        // Check for math font variants - wrap in STYLE node
+        if (strncmp(cmd, "math", 4) == 0) {
+            // This covers \mathbf, \mathrm, \mathit, \mathfrak, \mathbb, \mathcal, \mathscr, \mathsf, \mathtt
+            const char* cmd_str = arena_copy_str(cmd, name_len);
+            return make_math_style(arena, 4, cmd_str, body);  // 4=font variant
         }
         // Math style commands - create STYLE node
         if (name_len == 12 && strncmp(cmd, "displaystyle", 12) == 0) {
@@ -1868,11 +2033,9 @@ MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
             return make_math_style(arena, 3, cmd_str, body);  // 3=scriptscript
         }
         if (name_len == 12 && strncmp(cmd, "operatorname", 12) == 0) {
-            // Operator name - convert to OP
-            if (body) {
-                body->type = MathNodeType::OP;
-            }
-            return body;
+            // Operator name - wrap in STYLE with operatorname command
+            const char* cmd_str = arena_copy_str(cmd, name_len);
+            return make_math_style(arena, 5, cmd_str, body);  // 5=operatorname
         }
     }
 
