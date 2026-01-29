@@ -4,74 +4,208 @@ This document tests all supported Textile markup features in the unified parser.
 
 h2. Headings
 
+h3. Basic Headings
+
 h1. Heading Level 1
-h2. Heading Level 2  
+h2. Heading Level 2
 h3. Heading Level 3
 h4. Heading Level 4
 h5. Heading Level 5
 h6. Heading Level 6
 
+h3. Headings with Modifiers
+
+h1(highlight). Heading with Class
+h2(intro#section-intro). Heading with Class and ID
+h3{color: blue}. Heading with Style
+h4[fr]. Heading with Language
+h5<. Left-Aligned Heading
+h5>. Right-Aligned Heading
+h5=. Center-Aligned Heading
+
 h2. Text Formatting
 
-This paragraph demonstrates *strong text* and _emphasis text_.
+h3. Basic Emphasis
 
-Double markers: **bold text** and __italic text__.
+This paragraph demonstrates *strong text* (bold) and _emphasis text_ (italic).
 
-Code spans: @inline code@ and @variable_name@.
+Double markers for stronger emphasis: **double bold** and __double italic__.
 
-Superscript: E=mc^2^ and H~2~O demonstrates subscript.
+h3. Code Spans
+
+Code spans: @inline code@ and @variable_name@ and @printf("Hello")@.
+
+h3. Additional Text Formatting
+
+Superscript: E=mc^2^ and x^n^ demonstrates superscript.
+
+Subscript: H~2~O and CO~2~ demonstrates subscript.
+
+-Deleted text- shows strikethrough.
+
++Inserted text+ shows underlined/inserted text.
+
+??Citation text?? shows a citation element.
+
+%Generic span% can have modifiers applied.
+
+%(highlight)Span with class% demonstrates spans with CSS classes.
+
+h3. Combined Formatting
+
+This paragraph has *strong _with nested emphasis_ inside* for complex formatting.
+
+Here is @code with *formatting* inside@ though code typically preserves literally.
 
 h2. Lists
 
-h3. Bulleted Lists
+h3. Unordered Lists (Bulleted)
 
 * First item
 * Second item
-* Third item
-** Nested item
+* Third item with *bold text*
+** Nested item level 2
 ** Another nested item
+*** Deeply nested level 3
 * Back to main level
 
-h3. Numbered Lists
+h3. Unordered Lists with Modifiers
+
+*(highlight) Item with class
+* Regular item
+*(important#first-item) Item with class and ID
+
+h3. Ordered Lists (Numbered)
 
 # First numbered item
 # Second numbered item
 # Third numbered item
-## Nested numbered item
-## Another nested item
+## Nested numbered item 2.1
+## Nested numbered item 2.2
+### Deep nested 2.2.1
 # Back to main level
+
+h3. Mixed List Types
+
+* Unordered item
+*# Ordered inside unordered
+*# Another ordered
+* Back to unordered
+** Nested unordered
+**# Ordered inside nested unordered
 
 h3. Definition Lists
 
-- Term 1 := Definition for term 1
-- Term 2 := Definition for term 2 with more content
+- Term One := This is the definition for term one
+- Term Two := This is the definition for term two with more content
 - Complex Term := A definition that spans multiple words and explains something in detail
+- *Bold Term* := Definition with a _formatted_ term
+- Code Term := @variable@ and @function()@ in definition
+
+h2. Links and References
+
+h3. Basic Links
+
+Visit "Google":http://www.google.com for searching.
+
+"Link with title(The Google Search Engine)":http://www.google.com
+
+Internal "anchor link":#section-intro to jump within document.
+
+h3. Reference Links
+
+[1] is a footnote reference in text.
+
+Here is another reference [note] for named footnotes.
+
+h2. Footnotes
+
+fn1. This is the first footnote definition.
+
+fn2. This is the second footnote with *formatted* content and @code@.
+
+fn3(footnote-class). Footnote with CSS class modifier.
+
+h2. Images
+
+h3. Basic Images
+
+!http://example.com/image.jpg!
+
+!http://example.com/photo.png(Alt text for image)!
+
+h3. Images with Modifiers
+
+!(thumbnail)http://example.com/thumb.jpg!
+
+!(photo#main-image)http://example.com/main.jpg(Main Photo)!
+
+!{border: 1px solid black}http://example.com/framed.jpg!
+
+h3. Linked Images
+
+!http://example.com/logo.png!:http://example.com/
 
 h2. Code Blocks
 
-h3. Basic Code Block
+h3. Basic Code Block (bc.)
 
 bc. function hello() {
     return "Hello, World!";
 }
 
-h3. Extended Code Block
+h3. Code Block with Language
+
+bc(javascript). const greeting = () => {
+    console.log("Hello!");
+};
+
+h3. Extended Code Block (bc..)
 
 bc.. This is an extended code block
 that can span multiple lines
 without needing special markers.
 
 It continues until another block element is encountered.
-console.log("JavaScript code");
-let x = 42;
 
-p. This paragraph ends the code block.
+function multiline() {
+    let x = 1;
+    let y = 2;
+    return x + y;
+}
+
+p. This paragraph ends the extended code block.
+
+h3. Preformatted Text (pre.)
+
+pre. This is pre-formatted text
+    with preserved spacing
+        and indentation
+var code = "example";
+
+h3. Extended Pre Block
+
+pre.. Extended pre block
+    preserves all whitespace
+        and indentation
+    across multiple paragraphs
+
+    Even blank lines within
+    are preserved here.
+
+p. Paragraph ends the pre block.
 
 h2. Block Quotes
 
 h3. Basic Block Quote
 
 bq. This is a simple block quote that demonstrates quoted text.
+
+h3. Block Quote with Modifiers
+
+bq(quote-highlight). This quote has a CSS class applied.
+
+bq{font-style: italic}. This quote has inline styles.
 
 h3. Extended Block Quote
 
@@ -81,26 +215,17 @@ that can span multiple lines.
 It continues until another block element.
 "Quote within a quote" - Author
 
+Second paragraph of the block quote
+with continued content.
+
 p. This paragraph ends the block quote.
 
-h2. Pre-formatted Text
-
-pre. This is pre-formatted text
-    with preserved spacing
-        and indentation
-var code = "example";
-
-h2. Comments
-
-###. This is a Textile comment that should not appear in the output
-
-p. Regular paragraph after comment.
-
-h2. No-textile Blocks
+h2. No-Textile Blocks
 
 h3. Basic No-textile
 
 notextile. This <em>HTML</em> will not be processed as Textile markup.
+*Asterisks* remain as asterisks.
 
 h3. Extended No-textile
 
@@ -108,37 +233,150 @@ notextile.. This is an extended no-textile block.
 <strong>HTML tags</strong> are preserved.
 *Textile markup* is ignored here.
 
+Even across multiple paragraphs
+_underscores_ stay as underscores.
+
 p. Back to normal Textile processing.
+
+h2. Comments
+
+###. This is a Textile comment block that should not appear in the output.
+
+p. Regular paragraph after comment.
+
+###.. Extended comment block
+spans multiple lines
+none of this should appear.
+
+p. Paragraph after extended comment.
+
+h2. Tables
+
+h3. Basic Table
+
+|_. Header 1 |_. Header 2 |_. Header 3 |
+| Cell 1.1 | Cell 1.2 | Cell 1.3 |
+| Cell 2.1 | Cell 2.2 | Cell 2.3 |
+| Cell 3.1 | Cell 3.2 | Cell 3.3 |
+
+h3. Table with Cell Alignment
+
+|_<. Left Header |_=. Center Header |_>. Right Header |
+|<. Left aligned |=. Center aligned |>. Right aligned |
+| Default | Default | Default |
+
+h3. Table with Cell Spanning
+
+|\2. Spans 2 columns | Single |
+| A | B | C |
+|/2. Spans 2 rows | D | E |
+| F | G |
+
+h3. Table with Formatting
+
+|_. Name |_. Description |_. Status |
+| *Project Alpha* | First major release | @active@ |
+| _Project Beta_ | Testing phase | @pending@ |
+| +New Project+ | Just started | @new@ |
+
+h3. Complex Table
+
+|_. Feature |_. Markdown |_. Textile |_. Supported |
+| *Bold* | `**text**` | @*text*@ | Yes |
+| _Italic_ | `*text*` | @_text_@ | Yes |
+| @Code@ | `` `code` `` | @`@code@`@ | Yes |
+| Links | `[text](url)` | @"text":url@ | Yes |
+| Images | `![alt](url)` | @!url!@ | Yes |
 
 h2. Textile Modifiers
 
-h3. CSS Classes and Styles
+h3. CSS Classes and IDs
 
 p(highlight). This paragraph has a CSS class.
 
-p{color: red}. This paragraph has inline styles.
+p(intro#welcome). This paragraph has both class and ID.
 
-p[en]. This paragraph has a language attribute.
+p(#unique-id). This paragraph has only an ID.
 
-h1<. Left-aligned heading
+h3. Inline Styles
 
-h1>. Right-aligned heading
+p{color: red}. This paragraph has red text.
 
-h1=. Center-aligned heading
+p{color: blue; font-weight: bold}. Blue bold text.
+
+p{background: #f0f0f0; padding: 10px}. Styled background.
+
+h3. Language Attributes
+
+p[en]. This paragraph is marked as English.
+
+p[fr]. Ce paragraphe est marqué comme français.
+
+p[de]. Dieser Absatz ist als Deutsch markiert.
+
+h3. Alignment
+
+p<. Left-aligned paragraph text.
+
+p>. Right-aligned paragraph text.
+
+p=. Center-aligned paragraph text.
+
+p<>. Justified paragraph text that spans the full width.
+
+h3. Combined Modifiers
+
+p(important#notice){color: red; font-weight: bold}[en]<. This paragraph combines class, ID, style, language, and alignment!
+
+h2. Paragraph Blocks
+
+h3. Explicit Paragraphs
+
+p. This is an explicit paragraph.
+
+p. This is another explicit paragraph.
+
+p(intro). Paragraph with class modifier.
 
 h2. Mixed Content Paragraph
 
-This paragraph contains *strong text*, _emphasized text_, @code spans@, 
-superscript^text^, subscript~text~, and regular text all mixed together.
+This paragraph contains *strong text*, _emphasized text_, @code spans@,
+superscript^text^, subscript~text~, -deleted-, +inserted+, and regular text all mixed together.
+
+Here is a "link":http://example.com and an image !http://example.com/tiny.gif! inline.
 
 h2. Complex Nested Formatting
 
-This paragraph has *strong text with _nested emphasis_ inside* and 
-@code with *bold inside*@ to test parser robustness.
+This paragraph has *strong text with _nested emphasis_ inside* and
+_emphasis with *nested strong* inside_ to test parser robustness.
+
+Complex nesting: *bold _italic @code@ italic_ bold* works correctly.
 
 h2. Special Characters
 
-Testing special characters: & < > " ' and unicode: café, naïve, résumé.
+h3. HTML Entities
+
+Testing HTML entities: &amp; &lt; &gt; &quot; &apos;
+
+Numeric entities: &#169; &#8212; &#x2014;
+
+h3. Unicode Characters
+
+Unicode text: café, naïve, résumé, señor, über.
+
+Symbols: © ™ ® € £ ¥ ¢
+
+Arrows: → ← ↑ ↓ ↔ ⇒ ⇐
+
+Math: × ÷ ± ≠ ≤ ≥ ∞ √ ∑ ∏
+
+h3. Escaped Characters
+
+Literal asterisks: \*not bold\*
+
+Literal underscores: \_not italic\_
+
+Literal at-signs: \@not code\@
 
 h2. Whitespace and Line Breaks
 
@@ -154,7 +392,7 @@ h2. Edge Cases
 
 h3. Empty Elements
 
-p. 
+p.
 
 p. Regular paragraph after empty one.
 
@@ -166,50 +404,65 @@ p. B
 
 h3. Special Character Edge Cases
 
-* Item with @@ double at-signs
-* Item with ** double asterisks  
-* Item with __ double underscores
-* Item with ^^ double carets
-* Item with ~~ double tildes
+* Item with @@ double at-signs @@
+* Item with ** double asterisks **
+* Item with __ double underscores __
+* Item with ^^ double carets ^^
+* Item with ~~ double tildes ~~
+* Item with -- double dashes --
+* Item with ++ double plusses ++
+* Item with "" double quotes ""
+* Item with !! double exclamations !!
 
-h2. Tables
+h3. Long Lines
 
-h3. Basic Table
+p. This is a very long line of text that goes on and on and on and on and on and on and on and on and on and on and on and on and on and should be handled correctly by the parser without any issues.
 
-|_. Header 1 |_. Header 2 |_. Header 3 |
-| Cell 1.1 | Cell 1.2 | Cell 1.3 |
-| Cell 2.1 | Cell 2.2 | Cell 2.3 |
+h2. Block Type Transitions
 
-h3. Table with Alignment
+h3. List to Code
 
-|_<. Left Header |_=. Center Header |_>. Right Header |
-|<. Left aligned | =. Center aligned | >. Right aligned |
-| Normal cell | Another cell | Last cell |
+* List item before code
 
-h3. Complex Table
+bc. Code after list
 
-|_. Name |_. Age |_. Occupation |_. Location |
-| Alice | 30 | Engineer | New York |
-| Bob | 25 | Designer | California |
-| Charlie | 35 | Manager | Texas |
-| Diana | 28 | Developer | Florida |
+h3. Code to Quote
+
+bc. Code before quote
+
+bq. Quote after code
+
+h3. Quote to Table
+
+bq. Quote before table
+
+|_. A |_. B |
+| 1 | 2 |
+
+h3. Table to List
+
+|_. X |_. Y |
+| a | b |
+
+* List after table
 
 h2. Final Test Section
 
 This concludes the comprehensive Textile test document. It covers:
 
-* All heading levels (h1-h6)
-* Text formatting (strong, emphasis, code, superscript, subscript)
-* All list types (bulleted, numbered, definition)
-* Code blocks (basic and extended)
-* Block quotes (basic and extended)  
-* Pre-formatted text
-* Comments
-* No-textile blocks
-* Tables (basic, with alignment, and complex layouts)
-* Textile modifiers (classes, styles, alignment, language)
-* Mixed and nested formatting
-* Special characters and edge cases
-* Various whitespace scenarios
+* All heading levels (h1-h6) with modifiers
+* Text formatting: *bold*, _italic_, @code@, ^super^, ~sub~, -strike-, +insert+, ??cite??
+* All list types: bulleted, numbered, definition, nested, mixed
+* Links with and without titles
+* Images with alt text and modifiers
+* Footnote references and definitions
+* Code blocks: bc., pre., extended (bc.., pre..)
+* Block quotes: bq., extended (bq..)
+* No-textile blocks for raw content
+* Comment blocks (###.)
+* Tables with headers, alignment, spanning, formatting
+* Textile modifiers: (class#id), {style}, [lang], <>= alignment
+* Special characters, entities, and escaping
+* Edge cases and transitions between block types
 
 The unified parser should handle all of these Textile features correctly.
