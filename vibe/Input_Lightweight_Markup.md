@@ -44,9 +44,9 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
 
 ---
 
-## Supported Markup Languages
+## Supported Markup Formats
 
-The parser supports six lightweight markup language families:
+The parser supports 7 lightweight markup formats:
 
 ### Primary: Markdown
 - **Extensions**: `.md`, `.markdown`
@@ -73,28 +73,17 @@ The parser supports six lightweight markup language families:
 - **Flavor**: `standard`
 - **Features**: `h1.` headings, block quotes (`bq.`), pre blocks, inline formatting
 
-### AsciiDoc ✓ (Unified)
+### AsciiDoc
 - **Extensions**: `.adoc`, `.asciidoc`, `.asc`
 - **Flavor**: `standard`
 - **Status**: Fully integrated into modular parser (January 2026)
 - **Features**: `= Headings`, listing blocks (`----`), admonitions (NOTE:, TIP:, WARNING:, CAUTION:, IMPORTANT:), definition lists (`term:: definition`), tables (`|===`), inline links (`link:url[text]`), inline images (`image:path[alt]`), cross-references (`<<anchor>>`), `[source,lang]` code blocks
 
-### Man Page ✓ (Unified)
-
-Unix man pages (`input-man.cpp`) can be unified into the markup parser. Analysis shows significant overlap with existing features:
-
-#### Feature Mapping
-
-| Man Page Feature | Existing Markup Equivalent | Shared Function |
-|------------------|---------------------------|-----------------|
-| `.SH SECTION` | `# Header` / `== Header ==` | `parse_header()` |
-| `.SS Subsection` | `## Header` | `parse_header()` |
-| `.PP` paragraph | Paragraph break | `parse_paragraph()` |
-| `.B bold` | `**bold**` | `parse_bold_italic()` → `<strong>` |
-| `.I italic` | `*italic*` | `parse_bold_italic()` → `<em>` |
-| `.IP item` | `- item` | `parse_list_item()` |
-| `.TP term` | Definition list | `parse_definition_list()` |
-| `\fB...\fR` | Inline bold | `parse_inline_spans()` |
+### Man Page
+- **Extensions**: `.1` - `.9`, `.man`
+- **Flavor**: `standard`
+- **Status**: Fully integrated into modular parser (January 2026)
+- **Features**: `.SH`/`.SS` section headers, `.B`/`.I` bold/italic, `.PP` paragraphs, `.IP`/`.TP` lists and definition lists, `\fB...\fR` inline escapes
 
 ### Other Similar Markup Languages
 
@@ -782,7 +771,7 @@ To add support for a new markup format:
    - ~~Split 6200-line file into format-specific modules~~ Modular structure implemented
    - ~~Create shared base for block/inline parsers~~ FormatAdapter pattern in place
    - [x] AsciiDoc fully modularized (January 2026)
-   - [ ] Migrate remaining formats from legacy `input-markup.cpp`
+   - [x] Migrate remaining formats from legacy `input-markup.cpp`
 
 3. ~~**Add CommonMark Spec Tests**~~ ✓ **Completed**
    - [x] CommonMark spec.txt integrated (662 tests)
@@ -856,14 +845,9 @@ The Lambda lightweight markup parser provides a solid foundation for parsing mul
 - ✅ **CommonMark Compliance**: 662/662 tests passing (100%)
 - ✅ **Modular Architecture**: FormatAdapter pattern with separate block/inline parsers
 - ✅ **AsciiDoc Integration**: Full unification completed (January 2026)
-  - Legacy `input-adoc.cpp` removed
-  - Admonitions, definition lists, tables, inline links/images/cross-refs supported
-
-### Remaining Work
-
-1. **Format Migration**: Move remaining formats from legacy `input-markup.cpp` to modular parser
-2. **Error Reporting**: Leverage existing infrastructure for structured errors
-3. **Man Page Unification**: Migrate `input-man.cpp` to modular parser
+- ✅ Legacy `input-adoc.cpp` removed
+-  ✅ Legacy `input-man.cpp` migrated
+- Admonitions, definition lists, tables, inline links/images/cross-refs supported
 
 The parser successfully balances flexibility (multiple formats) with consistency (unified output schema), making it suitable for document processing, transformation, and validation workflows.
 
