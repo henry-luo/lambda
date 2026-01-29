@@ -6,6 +6,8 @@
  * - Inline parsers (emphasis, code, link, image, math, special)
  * - Format adapters (markdown, rst, wiki, textile, org, asciidoc, man)
  * - Error handling and recovery
+ * - Task list support (GFM extension)
+ * - Pathological input handling (linear time performance)
  *
  * Phase 7 of markup parser refactoring
  */
@@ -16,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <string>
+#include <chrono>
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/log.h"
@@ -670,6 +674,274 @@ TEST_F(ComplexDocumentTest, AllInlineTypes) {
 
     // All inline elements should be parsed
     EXPECT_TRUE(json_contains(json->chars, "\"$\":\"p\""));
+}
+
+// =============================================================================
+// Task List Tests (GFM Extension)
+// =============================================================================
+
+class TaskListTest : public MarkupModularTest {};
+
+// Test basic task list with unchecked items
+TEST_F(TaskListTest, UncheckedTaskItems) {
+    const char* content =
+        "- [ ] Unchecked task 1\n"
+        "- [ ] Unchecked task 2\n";
+
+    String* json = parse_to_json(content, "test.md");
+    ASSERT_NE(json, nullptr);
+
+    // Should have task-list-item class on li elements
+    EXPECT_TRUE(json_contains(json->chars, "task-list-item"));
+    // Should have checkbox input elements
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"input\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"type\":\"checkbox\""));
+}
+
+// Test basic task list with checked items
+TEST_F(TaskListTest, CheckedTaskItems) {
+    const char* content =
+        "- [x] Checked task 1\n"
+        "- [X] Checked task 2 (capital X)\n";
+
+    String* json = parse_to_json(content, "test.md");
+    ASSERT_NE(json, nullptr);
+
+    // Should have checked attribute
+    EXPECT_TRUE(json_contains(json->chars, "\"checked\":\"checked\""));
+}
+
+// Test mixed task list
+TEST_F(TaskListTest, MixedTaskList) {
+    const char* content =
+        "- [ ] Unchecked\n"
+        "- [x] Checked\n"
+        "- [ ] Another unchecked\n";
+
+    String* json = parse_to_json(content, "test.md");
+    ASSERT_NE(json, nullptr);
+
+    // Should have contains-task-list class on ul
+    EXPECT_TRUE(json_contains(json->chars, "contains-task-list"));
+}
+
+// Test task list with formatted content
+TEST_F(TaskListTest, TaskListWithFormattedContent) {
+    const char* content =
+        "- [ ] Task with **bold** text\n"
+        "- [x] Task with `code` and *italic*\n";
+
+    String* json = parse_to_json(content, "test.md");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "task-list-item"));
+    // Should preserve formatting within task items
+    EXPECT_TRUE(json_contains(json->chars, "bold") ||
+                json_contains(json->chars, "\"$\":\"strong\""));
+}
+
+// Test regular list items (not task list)
+TEST_F(TaskListTest, RegularListNotTask) {
+    const char* content =
+        "- Regular item 1\n"
+        "- Regular item 2\n";
+
+    String* json = parse_to_json(content, "test.md");
+    ASSERT_NE(json, nullptr);
+
+    // Should NOT have task-list-item class
+    EXPECT_FALSE(json_contains(json->chars, "task-list-item"));
+    EXPECT_FALSE(json_contains(json->chars, "contains-task-list"));
+}
+
+// =============================================================================
+// Pathological Input Tests
+// =============================================================================
+
+class PathologicalTest : public MarkupModularTest {};
+
+// Test deeply nested emphasis - should not cause exponential parsing time
+TEST_F(PathologicalTest, DeeplyNestedEmphasis) {
+    // Build a string with many nested emphasis markers
+    // This could cause O(2^n) parsing in naive implementations
+    std::string content;
+    for (int i = 0; i < 100; i++) {
+        content += "*foo **bar ";
+    }
+    for (int i = 0; i < 100; i++) {
+        content += "baz** qux* ";
+    }
+    content += "\n";
+
+    // Time the parsing - should complete quickly (linear time)
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    // Should complete in reasonable time (< 1 second for 100 iterations)
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test many unclosed emphasis markers
+TEST_F(PathologicalTest, ManyUnclosedEmphasis) {
+    // Many unclosed markers could cause quadratic time in naive implementations
+    std::string content;
+    for (int i = 0; i < 500; i++) {
+        content += "*a ";
+    }
+    content += "\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test alternating emphasis markers
+TEST_F(PathologicalTest, AlternatingEmphasisMarkers) {
+    // Interleaved * and _ could stress the emphasis matching algorithm
+    std::string content;
+    for (int i = 0; i < 200; i++) {
+        content += "*_";
+    }
+    content += "text";
+    for (int i = 0; i < 200; i++) {
+        content += "_*";
+    }
+    content += "\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test many nested brackets (link-like patterns)
+TEST_F(PathologicalTest, ManyNestedBrackets) {
+    // Deep bracket nesting could cause exponential backtracking
+    std::string content;
+    for (int i = 0; i < 100; i++) {
+        content += "[";
+    }
+    content += "text";
+    for (int i = 0; i < 100; i++) {
+        content += "](url)";
+    }
+    content += "\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test many backticks (code span edge cases)
+TEST_F(PathologicalTest, ManyBackticks) {
+    // Various backtick patterns
+    std::string content;
+    for (int i = 0; i < 200; i++) {
+        content += "` ";
+    }
+    content += "\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test rule of 3 edge cases with many delimiters
+TEST_F(PathologicalTest, RuleOfThreeStress) {
+    // Test patterns that stress the CommonMark "rule of 3" for emphasis
+    std::string content;
+    for (int i = 0; i < 100; i++) {
+        content += "***foo***bar";
+    }
+    content += "\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test deeply nested blockquotes
+TEST_F(PathologicalTest, DeeplyNestedBlockquotes) {
+    std::string content;
+    for (int i = 0; i < 50; i++) {
+        content += "> ";
+    }
+    content += "nested text\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test deeply nested lists
+TEST_F(PathologicalTest, DeeplyNestedLists) {
+    std::string content;
+    for (int i = 0; i < 30; i++) {
+        for (int j = 0; j < i; j++) {
+            content += "  ";
+        }
+        content += "- item\n";
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 1000) << "Parsing took too long: " << duration.count() << "ms";
+}
+
+// Test many link reference definitions
+TEST_F(PathologicalTest, ManyLinkReferences) {
+    std::string content;
+    for (int i = 0; i < 500; i++) {
+        content += "[ref" + std::to_string(i) + "]: http://example.com/" + std::to_string(i) + "\n";
+    }
+    content += "\nText with [ref250] link.\n";
+
+    auto start = std::chrono::high_resolution_clock::now();
+    String* json = parse_to_json(content.c_str(), "test.md");
+    auto end = std::chrono::high_resolution_clock::now();
+
+    ASSERT_NE(json, nullptr);
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    EXPECT_LT(duration.count(), 2000) << "Parsing took too long: " << duration.count() << "ms";
 }
 
 int main(int argc, char** argv) {
