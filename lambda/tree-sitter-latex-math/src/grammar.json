@@ -139,11 +139,18 @@
     },
     "symbol": {
       "type": "PATTERN",
-      "value": "[a-zA-Z]"
+      "value": "[a-zA-Z@]"
     },
     "number": {
-      "type": "PATTERN",
-      "value": "[0-9]+\\.?[0-9]*"
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": -1,
+        "content": {
+          "type": "PATTERN",
+          "value": "[0-9]+\\.?[0-9]*"
+        }
+      }
     },
     "operator": {
       "type": "CHOICE",
@@ -668,7 +675,7 @@
           "name": "numer",
           "content": {
             "type": "SYMBOL",
-            "name": "group"
+            "name": "_frac_arg"
           }
         },
         {
@@ -676,10 +683,42 @@
           "name": "denom",
           "content": {
             "type": "SYMBOL",
-            "name": "group"
+            "name": "_frac_arg"
           }
         }
       ]
+    },
+    "_frac_arg": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "group"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "symbol"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "digit"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "command"
+        }
+      ]
+    },
+    "digit": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "PATTERN",
+          "value": "[0-9]"
+        }
+      }
     },
     "binomial": {
       "type": "SEQ",
@@ -714,7 +753,7 @@
           "name": "top",
           "content": {
             "type": "SYMBOL",
-            "name": "group"
+            "name": "_frac_arg"
           }
         },
         {
@@ -722,7 +761,7 @@
           "name": "bottom",
           "content": {
             "type": "SYMBOL",
-            "name": "group"
+            "name": "_frac_arg"
           }
         }
       ]
@@ -755,7 +794,7 @@
           "name": "radicand",
           "content": {
             "type": "SYMBOL",
-            "name": "group"
+            "name": "_frac_arg"
           }
         }
       ]

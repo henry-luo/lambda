@@ -353,24 +353,24 @@ struct GreekEntry {
 };
 
 static const GreekEntry GREEK_TABLE[] = {
-    // Uppercase
-    {"Gamma", 0, true}, {"Delta", 1, true}, {"Theta", 2, true},
-    {"Lambda", 3, true}, {"Xi", 4, true}, {"Pi", 5, true},
-    {"Sigma", 6, true}, {"Upsilon", 7, true}, {"Phi", 8, true},
-    {"Psi", 9, true}, {"Omega", 10, true},
-    // Lowercase
-    {"alpha", 11, false}, {"beta", 12, false}, {"gamma", 13, false},
-    {"delta", 14, false}, {"epsilon", 15, false}, {"zeta", 16, false},
-    {"eta", 17, false}, {"theta", 18, false}, {"iota", 19, false},
-    {"kappa", 20, false}, {"lambda", 21, false}, {"mu", 22, false},
-    {"nu", 23, false}, {"xi", 24, false}, {"pi", 25, false},
-    {"rho", 26, false}, {"sigma", 27, false}, {"tau", 28, false},
-    {"upsilon", 29, false}, {"phi", 30, false}, {"chi", 31, false},
-    {"psi", 32, false}, {"omega", 33, false},
+    // Uppercase Greek - Unicode codepoints
+    {"Gamma", 0x0393, true}, {"Delta", 0x0394, true}, {"Theta", 0x0398, true},    // Γ, Δ, Θ
+    {"Lambda", 0x039B, true}, {"Xi", 0x039E, true}, {"Pi", 0x03A0, true},          // Λ, Ξ, Π
+    {"Sigma", 0x03A3, true}, {"Upsilon", 0x03A5, true}, {"Phi", 0x03A6, true},     // Σ, Υ, Φ
+    {"Psi", 0x03A8, true}, {"Omega", 0x03A9, true},                                // Ψ, Ω
+    // Lowercase Greek - Unicode codepoints
+    {"alpha", 0x03B1, false}, {"beta", 0x03B2, false}, {"gamma", 0x03B3, false},  // α, β, γ
+    {"delta", 0x03B4, false}, {"epsilon", 0x03B5, false}, {"zeta", 0x03B6, false}, // δ, ε, ζ
+    {"eta", 0x03B7, false}, {"theta", 0x03B8, false}, {"iota", 0x03B9, false},    // η, θ, ι
+    {"kappa", 0x03BA, false}, {"lambda", 0x03BB, false}, {"mu", 0x03BC, false},   // κ, λ, μ
+    {"nu", 0x03BD, false}, {"xi", 0x03BE, false}, {"pi", 0x03C0, false},          // ν, ξ, π
+    {"rho", 0x03C1, false}, {"sigma", 0x03C3, false}, {"tau", 0x03C4, false},     // ρ, σ, τ
+    {"upsilon", 0x03C5, false}, {"phi", 0x03C6, false}, {"chi", 0x03C7, false},   // υ, φ, χ
+    {"psi", 0x03C8, false}, {"omega", 0x03C9, false},                             // ψ, ω
     // Variants
-    {"varepsilon", 34, false}, {"vartheta", 35, false}, {"varpi", 36, false},
-    {"varrho", 37, false}, {"varsigma", 38, false}, {"varphi", 39, false},
-    {"varkappa", 123, false},
+    {"varepsilon", 0x03B5, false}, {"vartheta", 0x03D1, false}, {"varpi", 0x03D6, false}, // ε, ϑ, ϖ
+    {"varrho", 0x03F1, false}, {"varsigma", 0x03C2, false}, {"varphi", 0x03D5, false},    // ϱ, ς, ϕ
+    {"varkappa", 0x03F0, false},                                                  // ϰ
     {nullptr, 0, false}
 };
 
@@ -394,52 +394,88 @@ struct SymbolEntry {
 };
 
 static const SymbolEntry SYMBOL_TABLE[] = {
-    // Relations
-    {"leq", 20, AtomType::Rel}, {"le", 20, AtomType::Rel},
-    {"geq", 21, AtomType::Rel}, {"ge", 21, AtomType::Rel},
-    {"equiv", 17, AtomType::Rel}, {"sim", 24, AtomType::Rel},
-    {"approx", 25, AtomType::Rel}, {"subset", 26, AtomType::Rel},
-    {"supset", 27, AtomType::Rel}, {"subseteq", 18, AtomType::Rel},
-    {"supseteq", 19, AtomType::Rel}, {"in", 50, AtomType::Rel},
-    {"ni", 51, AtomType::Rel}, {"notin", 54, AtomType::Rel},
-    {"neq", 54, AtomType::Rel}, {"ne", 54, AtomType::Rel},
-    {"prec", 30, AtomType::Rel}, {"succ", 31, AtomType::Rel},   // 0x1E, 0x1F
-    {"ll", 28, AtomType::Rel}, {"gg", 29, AtomType::Rel},       // 0x1C, 0x1D
-    {"perp", 63, AtomType::Rel}, {"mid", 106, AtomType::Rel},
-    {"parallel", 107, AtomType::Rel},
-    {"preceq", 22, AtomType::Rel}, {"succeq", 23, AtomType::Rel},
-    {"sqsubseteq", 118, AtomType::Rel}, {"sqsupseteq", 119, AtomType::Rel}, // 0x76, 0x77
-    {"asymp", 16, AtomType::Rel},
-    // Arrows (cmsy10 positions)
-    {"to", 33, AtomType::Rel}, {"rightarrow", 33, AtomType::Rel},
-    {"leftarrow", 32, AtomType::Rel}, {"gets", 32, AtomType::Rel},
-    {"leftrightarrow", 36, AtomType::Rel},
-    {"uparrow", 34, AtomType::Rel}, {"downarrow", 35, AtomType::Rel},
-    {"Rightarrow", 41, AtomType::Rel}, {"Leftarrow", 40, AtomType::Rel},
-    {"Leftrightarrow", 44, AtomType::Rel}, {"iff", 44, AtomType::Rel},
-    {"Uparrow", 42, AtomType::Rel}, {"Downarrow", 43, AtomType::Rel},
-    {"mapsto", 55, AtomType::Rel}, {"hookleftarrow", 45, AtomType::Rel},
-    {"hookrightarrow", 44, AtomType::Rel}, {"nearrow", 37, AtomType::Rel},
-    {"searrow", 38, AtomType::Rel}, {"swarrow", 46, AtomType::Rel},
-    {"nwarrow", 47, AtomType::Rel},
+    // Relations - using Unicode codepoints for AST JSON output
+    {"leq", 0x2264, AtomType::Rel}, {"le", 0x2264, AtomType::Rel},    // ≤
+    {"geq", 0x2265, AtomType::Rel}, {"ge", 0x2265, AtomType::Rel},    // ≥
+    {"equiv", 0x2261, AtomType::Rel}, {"sim", 0x223C, AtomType::Rel}, // ≡, ∼
+    {"approx", 0x2248, AtomType::Rel}, {"subset", 0x2282, AtomType::Rel},  // ≈, ⊂
+    {"supset", 0x2283, AtomType::Rel}, {"subseteq", 0x2286, AtomType::Rel}, // ⊃, ⊆
+    {"supseteq", 0x2287, AtomType::Rel}, {"in", 0x2208, AtomType::Rel},    // ⊇, ∈
+    {"ni", 0x220B, AtomType::Rel}, {"notin", 0x2209, AtomType::Rel},  // ∋, ∉
+    {"neq", 0x2260, AtomType::Rel}, {"ne", 0x2260, AtomType::Rel},    // ≠
+    {"prec", 0x227A, AtomType::Rel}, {"succ", 0x227B, AtomType::Rel}, // ≺, ≻
+    {"ll", 0x226A, AtomType::Rel}, {"gg", 0x226B, AtomType::Rel},     // ≪, ≫
+    {"perp", 0x22A5, AtomType::Rel}, {"mid", 0x2223, AtomType::Rel},  // ⊥, ∣
+    {"parallel", 0x2225, AtomType::Rel},                              // ∥
+    {"preceq", 0x227C, AtomType::Rel}, {"succeq", 0x227D, AtomType::Rel}, // ≼, ≽
+    {"sqsubseteq", 0x2291, AtomType::Rel}, {"sqsupseteq", 0x2292, AtomType::Rel}, // ⊑, ⊒
+    {"asymp", 0x224D, AtomType::Rel},                                 // ≍
+    // Arrows
+    {"to", 0x2192, AtomType::Rel}, {"rightarrow", 0x2192, AtomType::Rel},    // →
+    {"leftarrow", 0x2190, AtomType::Rel}, {"gets", 0x2190, AtomType::Rel},   // ←
+    {"leftrightarrow", 0x2194, AtomType::Rel},                              // ↔
+    {"uparrow", 0x2191, AtomType::Rel}, {"downarrow", 0x2193, AtomType::Rel}, // ↑, ↓
+    {"Rightarrow", 0x21D2, AtomType::Rel}, {"Leftarrow", 0x21D0, AtomType::Rel}, // ⇒, ⇐
+    {"Leftrightarrow", 0x21D4, AtomType::Rel}, {"iff", 0x21D4, AtomType::Rel}, // ⇔
+    {"Uparrow", 0x21D1, AtomType::Rel}, {"Downarrow", 0x21D3, AtomType::Rel}, // ⇑, ⇓
+    {"mapsto", 0x21A6, AtomType::Rel}, {"hookleftarrow", 0x21A9, AtomType::Rel}, // ↦, ↩
+    {"hookrightarrow", 0x21AA, AtomType::Rel}, {"nearrow", 0x2197, AtomType::Rel}, // ↪, ↗
+    {"searrow", 0x2198, AtomType::Rel}, {"swarrow", 0x2199, AtomType::Rel}, // ↘, ↙
+    {"nwarrow", 0x2196, AtomType::Rel},                                    // ↖
     // Binary operators
-    {"pm", 6, AtomType::Bin}, {"mp", 7, AtomType::Bin},
-    {"times", 2, AtomType::Bin}, {"div", 4, AtomType::Bin},
-    {"cdot", 1, AtomType::Bin}, {"ast", 3, AtomType::Bin},
-    {"star", 5, AtomType::Bin}, {"circ", 14, AtomType::Bin},
-    {"bullet", 15, AtomType::Bin}, {"cap", 92, AtomType::Bin},
-    {"cup", 91, AtomType::Bin}, {"vee", 95, AtomType::Bin},
-    {"lor", 95, AtomType::Bin}, {"wedge", 94, AtomType::Bin},
-    {"land", 94, AtomType::Bin}, {"setminus", 110, AtomType::Bin},
-    {"oplus", 8, AtomType::Bin}, {"ominus", 9, AtomType::Bin},
-    {"otimes", 10, AtomType::Bin}, {"oslash", 11, AtomType::Bin},
-    // LaTeX symbols (lasy10) - positions from latexsym.sty
-    {"lhd", 0x01, AtomType::Bin}, {"unlhd", 0x02, AtomType::Bin},
-    {"rhd", 0x03, AtomType::Bin}, {"unrhd", 0x04, AtomType::Bin},
-    {"mho", 0x30, AtomType::Ord}, {"Join", 0x31, AtomType::Rel},
-    {"Box", 0x32, AtomType::Ord}, {"Diamond", 0x33, AtomType::Ord},
-    {"leadsto", 0x3B, AtomType::Rel},
-    {"sqsubset", 0x3C, AtomType::Rel}, {"sqsupset", 0x3D, AtomType::Rel},
+    {"pm", 0x00B1, AtomType::Bin}, {"mp", 0x2213, AtomType::Bin},     // ±, ∓
+    {"times", 0x00D7, AtomType::Bin}, {"div", 0x00F7, AtomType::Bin}, // ×, ÷
+    {"cdot", 0x22C5, AtomType::Bin}, {"ast", 0x2217, AtomType::Bin},  // ⋅, ∗
+    {"star", 0x22C6, AtomType::Bin}, {"circ", 0x2218, AtomType::Bin}, // ⋆, ∘
+    {"bullet", 0x2219, AtomType::Bin}, {"cap", 0x2229, AtomType::Bin}, // ∙, ∩
+    {"cup", 0x222A, AtomType::Bin}, {"vee", 0x2228, AtomType::Bin},   // ∪, ∨
+    {"lor", 0x2228, AtomType::Bin}, {"wedge", 0x2227, AtomType::Bin}, // ∨, ∧
+    {"land", 0x2227, AtomType::Bin}, {"setminus", 0x2216, AtomType::Bin}, // ∧, ∖
+    {"oplus", 0x2295, AtomType::Bin}, {"ominus", 0x2296, AtomType::Bin}, // ⊕, ⊖
+    {"otimes", 0x2297, AtomType::Bin}, {"oslash", 0x2298, AtomType::Bin}, // ⊗, ⊘
+    // LaTeX symbols - using Unicode
+    {"lhd", 0x22B2, AtomType::Bin}, {"unlhd", 0x22B4, AtomType::Bin}, // ⊲, ⊴
+    {"rhd", 0x22B3, AtomType::Bin}, {"unrhd", 0x22B5, AtomType::Bin}, // ⊳, ⊵
+    {"mho", 0x2127, AtomType::Ord}, {"Join", 0x2A1D, AtomType::Rel},  // ℧, ⨝
+    {"Box", 0x25A1, AtomType::Ord}, {"Diamond", 0x25C7, AtomType::Ord}, // □, ◇
+    {"leadsto", 0x21DD, AtomType::Rel},                               // ⇝
+    {"sqsubset", 0x228F, AtomType::Rel}, {"sqsupset", 0x2290, AtomType::Rel}, // ⊏, ⊐
+    // AMS symbols - negated relations
+    {"nleqslant", 0x2A7D, AtomType::Rel}, {"ngeqslant", 0x2A7E, AtomType::Rel}, // ⩽̸, ⩾̸
+    {"nless", 0x226E, AtomType::Rel}, {"ngtr", 0x226F, AtomType::Rel}, // ≮, ≯
+    {"nleq", 0x2270, AtomType::Rel}, {"ngeq", 0x2271, AtomType::Rel}, // ≰, ≱
+    {"nshortparallel", 0x2226, AtomType::Rel}, {"nparallel", 0x2226, AtomType::Rel}, // ∦
+    {"nmid", 0x2224, AtomType::Rel},                                   // ∤
+    {"nprec", 0x2280, AtomType::Rel}, {"nsucc", 0x2281, AtomType::Rel}, // ⊀, ⊁
+    {"nsubseteq", 0x2288, AtomType::Rel}, {"nsupseteq", 0x2289, AtomType::Rel}, // ⊈, ⊉
+    {"nsubseteqq", 0x2288, AtomType::Rel}, {"nsupseteqq", 0x2289, AtomType::Rel},
+    {"nVdash", 0x22AE, AtomType::Rel}, {"nvdash", 0x22AC, AtomType::Rel}, // ⊮, ⊬
+    {"nvDash", 0x22AD, AtomType::Rel}, {"nVDash", 0x22AF, AtomType::Rel}, // ⊭, ⊯
+    {"ntriangleleft", 0x22EA, AtomType::Rel}, {"ntriangleright", 0x22EB, AtomType::Rel}, // ⋪, ⋫
+    {"ntrianglelefteq", 0x22EC, AtomType::Rel}, {"ntrianglerighteq", 0x22ED, AtomType::Rel}, // ⋬, ⋭
+    // AMS arrows
+    {"leftrightarrows", 0x21C6, AtomType::Rel}, {"rightleftarrows", 0x21C4, AtomType::Rel}, // ⇆, ⇄
+    {"curvearrowleft", 0x21B6, AtomType::Rel}, {"curvearrowright", 0x21B7, AtomType::Rel}, // ↶, ↷
+    {"circlearrowleft", 0x21BA, AtomType::Rel}, {"circlearrowright", 0x21BB, AtomType::Rel}, // ↺, ↻
+    {"looparrowleft", 0x21AB, AtomType::Rel}, {"looparrowright", 0x21AC, AtomType::Rel}, // ↫, ↬
+    {"leftrightsquigarrow", 0x21AD, AtomType::Rel}, {"twoheadleftarrow", 0x219E, AtomType::Rel}, // ↭, ↞
+    {"twoheadrightarrow", 0x21A0, AtomType::Rel}, {"rightsquigarrow", 0x21DD, AtomType::Rel}, // ↠, ⇝
+    {"Lleftarrow", 0x21DA, AtomType::Rel}, {"Rrightarrow", 0x21DB, AtomType::Rel}, // ⇚, ⇛
+    // AMS ordinary symbols
+    {"measuredangle", 0x2221, AtomType::Ord}, {"sphericalangle", 0x2222, AtomType::Ord}, // ∡, ∢
+    {"blacklozenge", 0x29EB, AtomType::Ord}, {"lozenge", 0x25CA, AtomType::Ord}, // ⧫, ◊
+    {"blacksquare", 0x25A0, AtomType::Ord}, {"square", 0x25A1, AtomType::Ord}, // ■, □
+    {"blacktriangle", 0x25B4, AtomType::Ord}, {"blacktriangledown", 0x25BE, AtomType::Ord}, // ▴, ▾
+    {"triangle", 0x25B3, AtomType::Ord}, {"triangledown", 0x25BD, AtomType::Ord}, // △, ▽
+    {"Finv", 0x2132, AtomType::Ord}, {"Game", 0x2141, AtomType::Ord}, // Ⅎ, ⅁
+    {"maltese", 0x2720, AtomType::Ord}, {"clubsuit", 0x2663, AtomType::Ord}, // ✠, ♣
+    {"diamondsuit", 0x2662, AtomType::Ord}, {"heartsuit", 0x2661, AtomType::Ord}, // ◊, ♡
+    {"spadesuit", 0x2660, AtomType::Ord}, {"checkmark", 0x2713, AtomType::Ord}, // ♠, ✓
+    {"circledS", 0x24C8, AtomType::Ord}, {"yen", 0x00A5, AtomType::Ord}, // Ⓢ, ¥
+    {"eth", 0x00F0, AtomType::Ord}, {"complement", 0x2201, AtomType::Ord}, // ð, ∁
+    {"Bbbk", 0x1D55C, AtomType::Ord}, {"hbar", 0x210F, AtomType::Ord}, // 𝕜, ℏ
+    {"hslash", 0x210F, AtomType::Ord}, {"nexists", 0x2204, AtomType::Ord}, // ℏ, ∄
+    {"diagup", 0x2571, AtomType::Ord}, {"diagdown", 0x2572, AtomType::Ord}, // ╱, ╲
     {nullptr, 0, AtomType::Ord}
 };
 
@@ -553,6 +589,7 @@ private:
     MathASTNode* build_command(TSNode node);
     MathASTNode* build_subsup(TSNode node);
     MathASTNode* build_fraction(TSNode node);
+    MathASTNode* build_binomial(TSNode node);
     MathASTNode* build_radical(TSNode node);
     MathASTNode* build_delimiter_group(TSNode node);
     MathASTNode* build_sized_delimiter(TSNode node);
@@ -639,6 +676,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "group") == 0) return build_group(node);
     if (strcmp(type, "symbol") == 0) return build_symbol(node);
     if (strcmp(type, "number") == 0) return build_number(node);
+    if (strcmp(type, "digit") == 0) return build_number(node);  // Single digit like \frac12
     if (strcmp(type, "operator") == 0) return build_operator(node);
     if (strcmp(type, "relation") == 0) return build_relation(node);
     if (strcmp(type, "punctuation") == 0) return build_punctuation(node);
@@ -646,6 +684,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "symbol_command") == 0) return build_command(node);  // Handle symbol_command like command
     if (strcmp(type, "subsup") == 0) return build_subsup(node);
     if (strcmp(type, "fraction") == 0) return build_fraction(node);
+    if (strcmp(type, "binomial") == 0) return build_binomial(node);
     if (strcmp(type, "radical") == 0) return build_radical(node);
     if (strcmp(type, "delimiter_group") == 0) return build_delimiter_group(node);
     if (strcmp(type, "sized_delimiter") == 0) return build_sized_delimiter(node);
@@ -688,6 +727,68 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         const char* type = ts_node_type(child);
+
+        // Check for style commands without braced argument - they scope to rest of row
+        if (strcmp(type, "style_command") == 0) {
+            TSNode arg_node = ts_node_child_by_field_name(child, "arg", 3);
+            if (ts_node_is_null(arg_node)) {
+                // No braced arg - style applies to remaining children
+                int len;
+                const char* full_text = node_text(child, &len);
+
+                // Extract command name
+                const char* cmd_name = nullptr;
+                int name_len = 0;
+                if (full_text && full_text[0] == '\\') {
+                    cmd_name = full_text + 1;
+                    for (int j = 1; j < len; j++) {
+                        if (!((full_text[j] >= 'a' && full_text[j] <= 'z') ||
+                              (full_text[j] >= 'A' && full_text[j] <= 'Z'))) {
+                            name_len = j - 1;
+                            break;
+                        }
+                        if (j == len - 1) name_len = j;
+                    }
+                }
+
+                // Determine style type
+                uint8_t style_type = 0;
+                if (name_len == 12 && strncmp(cmd_name, "displaystyle", 12) == 0) style_type = 0;
+                else if (name_len == 9 && strncmp(cmd_name, "textstyle", 9) == 0) style_type = 1;
+                else if (name_len == 11 && strncmp(cmd_name, "scriptstyle", 11) == 0) style_type = 2;
+                else if (name_len == 17 && strncmp(cmd_name, "scriptscriptstyle", 17) == 0) style_type = 3;
+                else {
+                    // Not a math style command - process normally
+                    MathASTNode* child_node = build_ts_node(child);
+                    if (child_node) math_row_append(row, child_node);
+                    continue;
+                }
+
+                // Build a ROW for all remaining children
+                MathASTNode* body_row = make_math_row(arena);
+                for (uint32_t j = i + 1; j < child_count; j++) {
+                    TSNode remaining = ts_node_named_child(node, j);
+                    MathASTNode* remaining_node = build_ts_node(remaining);
+                    if (remaining_node) math_row_append(body_row, remaining_node);
+                }
+
+                // Unwrap single-element body
+                MathASTNode* body = body_row;
+                if (body_row->row.child_count == 1) {
+                    body = body_row->body;  // First child
+                } else if (body_row->row.child_count == 0) {
+                    body = nullptr;
+                }
+
+                const char* cmd_str = arena_copy_str(cmd_name, name_len);
+                MathASTNode* style_node = make_math_style(arena, style_type, cmd_str, body);
+                math_row_append(row, style_node);
+
+                // Skip all remaining children (we've consumed them)
+                i = child_count;
+                break;
+            }
+        }
 
         // Check for \not command followed by an operand
         if (strcmp(type, "command") == 0 || strcmp(type, "symbol_command") == 0) {
@@ -887,13 +988,15 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
             return make_math_ord(arena, greek->code, arena_copy_str(cmd, cmd_len));
         }
 
-        // Symbols (binary/relation operators)
+        // Symbols (binary/relation/ordinary operators)
         const SymbolEntry* sym = lookup_symbol(cmd, cmd_len);
         if (sym) {
             if (sym->atom == AtomType::Bin) {
                 return make_math_bin(arena, sym->code, arena_copy_str(cmd, cmd_len));
             } else if (sym->atom == AtomType::Rel) {
                 return make_math_rel(arena, sym->code, arena_copy_str(cmd, cmd_len));
+            } else if (sym->atom == AtomType::Ord) {
+                return make_math_ord(arena, sym->code, arena_copy_str(cmd, cmd_len));
             }
         }
 
@@ -955,11 +1058,61 @@ MathASTNode* MathASTBuilder::build_fraction(TSNode node) {
     uint32_t child_count = ts_node_named_child_count(node);
     if (child_count < 2) return nullptr;
 
-    // First two children are numerator and denominator
-    MathASTNode* numer = build_ts_node(ts_node_named_child(node, 0));
-    MathASTNode* denom = build_ts_node(ts_node_named_child(node, 1));
+    // Get command name from cmd field
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    const char* cmd = "frac";  // default
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text && text[0] == '\\' && len > 1) {
+            cmd = arena_copy_str(text + 1, len - 1);
+        }
+    }
 
-    return make_math_frac(arena, numer, denom);
+    // Get numerator and denominator from numer/denom fields
+    TSNode numer_node = ts_node_child_by_field_name(node, "numer", 5);
+    TSNode denom_node = ts_node_child_by_field_name(node, "denom", 5);
+
+    MathASTNode* numer = !ts_node_is_null(numer_node) ? build_ts_node(numer_node) : nullptr;
+    MathASTNode* denom = !ts_node_is_null(denom_node) ? build_ts_node(denom_node) : nullptr;
+
+    MathASTNode* frac = make_math_frac(arena, numer, denom);
+    if (frac) {
+        frac->frac.command = cmd;
+    }
+    return frac;
+}
+
+MathASTNode* MathASTBuilder::build_binomial(TSNode node) {
+    // Binomial: \binom{n}{k}, \dbinom, \tbinom
+    // Parsed like fraction but with parentheses delimiters and no bar line
+
+    // Get command name from cmd field
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    const char* cmd = "binom";  // default
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text && text[0] == '\\' && len > 1) {
+            cmd = arena_copy_str(text + 1, len - 1);
+        }
+    }
+
+    // Get top and bottom from fields
+    TSNode top_node = ts_node_child_by_field_name(node, "top", 3);
+    TSNode bottom_node = ts_node_child_by_field_name(node, "bottom", 6);
+
+    MathASTNode* top = !ts_node_is_null(top_node) ? build_ts_node(top_node) : nullptr;
+    MathASTNode* bottom = !ts_node_is_null(bottom_node) ? build_ts_node(bottom_node) : nullptr;
+
+    // Create as FRAC node with delimiters and no bar line
+    MathASTNode* binom = make_math_frac(arena, top, bottom, 0.0f);  // rule_thickness=0 means no bar
+    if (binom) {
+        binom->frac.command = cmd;
+        binom->frac.left_delim = '(';
+        binom->frac.right_delim = ')';
+    }
+    return binom;
 }
 
 MathASTNode* MathASTBuilder::build_radical(TSNode node) {
@@ -1972,19 +2125,33 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
             break;
 
         case MathNodeType::FRAC:
-            ::strbuf_append_str(out, ",\"ruleThickness\":");
-            ::strbuf_append_format(out, "%.2f", node->frac.rule_thickness);
+            // Command name (frac, dfrac, tfrac, binom, etc.)
+            if (node->frac.command) {
+                ::strbuf_append_str(out, ",\"command\":\"\\\\");
+                ::strbuf_append_str(out, node->frac.command);
+                ::strbuf_append_str(out, "\"");
+            }
             // hasBarLine: true if rule thickness is not 0 (for \atop, thickness is 0)
             ::strbuf_append_str(out, ",\"hasBarLine\":");
             ::strbuf_append_str(out, (node->frac.rule_thickness != 0.0f) ? "true" : "false");
             // Delimiter info for \binom, \genfrac
             if (node->frac.left_delim != 0) {
+                char delim_char[8];
+                int len = 0;
+                uint32_t cp = (uint32_t)node->frac.left_delim;
+                if (cp < 0x80) delim_char[len++] = (char)cp;
+                delim_char[len] = '\0';
                 ::strbuf_append_str(out, ",\"leftDelim\":");
-                ::strbuf_append_int(out, node->frac.left_delim);
+                json_escape_string(delim_char, out);
             }
             if (node->frac.right_delim != 0) {
+                char delim_char[8];
+                int len = 0;
+                uint32_t cp = (uint32_t)node->frac.right_delim;
+                if (cp < 0x80) delim_char[len++] = (char)cp;
+                delim_char[len] = '\0';
                 ::strbuf_append_str(out, ",\"rightDelim\":");
-                ::strbuf_append_int(out, node->frac.right_delim);
+                json_escape_string(delim_char, out);
             }
             break;
 
@@ -2074,9 +2241,23 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
             break;
 
         case MathNodeType::BOX:
+            // MathLive expects: command field matching the box command
             // Box type: 0=bbox, 1=fbox, 2=mbox, 3=colorbox, 4=boxed
-            ::strbuf_append_str(out, ",\"boxType\":");
-            ::strbuf_append_int(out, node->box.box_type);
+            {
+                const char* box_cmd = nullptr;
+                switch (node->box.box_type) {
+                    case 0: box_cmd = "bbox"; break;
+                    case 1: box_cmd = "fbox"; break;
+                    case 2: box_cmd = "mbox"; break;
+                    case 3: box_cmd = "colorbox"; break;
+                    case 4: box_cmd = "boxed"; break;
+                }
+                if (box_cmd) {
+                    ::strbuf_append_str(out, ",\"command\":\"\\\\");
+                    ::strbuf_append_str(out, box_cmd);
+                    ::strbuf_append_str(out, "\"");
+                }
+            }
             if (node->box.color) {
                 ::strbuf_append_str(out, ",\"color\":");
                 json_escape_string(node->box.color, out);
@@ -2088,12 +2269,12 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
             break;
 
         case MathNodeType::STYLE:
-            // Style type: 0=display, 1=text, 2=script, 3=scriptscript
-            ::strbuf_append_str(out, ",\"styleType\":");
-            ::strbuf_append_int(out, node->style.style_type);
+            // MathLive expects: command, body fields
+            // body is handled by generic branch output below
             if (node->style.command) {
-                ::strbuf_append_str(out, ",\"command\":");
-                json_escape_string(node->style.command, out);
+                ::strbuf_append_str(out, ",\"command\":\"\\\\");
+                ::strbuf_append_str(out, node->style.command);
+                ::strbuf_append_str(out, "\"");
             }
             break;
 
@@ -2164,12 +2345,14 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
     }
 
     if (node->above) {
-        ::strbuf_append_str(out, ",\"numer\":");
+        // Use "above" for MathLive compatibility (also matches "numer" semantically)
+        ::strbuf_append_str(out, ",\"above\":");
         math_ast_to_json_impl(node->above, out, true);
     }
 
     if (node->below) {
-        ::strbuf_append_str(out, ",\"denom\":");
+        // Use "below" for MathLive compatibility (also matches "denom" semantically)
+        ::strbuf_append_str(out, ",\"below\":");
         math_ast_to_json_impl(node->below, out, true);
     }
 
