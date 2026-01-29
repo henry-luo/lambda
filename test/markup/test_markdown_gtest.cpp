@@ -55,7 +55,7 @@ static String* create_test_string(const char* text) {
 }
 
 // Structure to hold a single CommonMark test case
-struct CommonMarkExample {
+struct MarkdownExample {
     int example_number;
     std::string section;
     std::string markdown;
@@ -66,8 +66,8 @@ struct CommonMarkExample {
 };
 
 // Parse CommonMark spec.txt and extract all examples
-static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_path, const char* spec_name = nullptr) {
-    std::vector<CommonMarkExample> examples;
+static std::vector<MarkdownExample> parse_commonmark_spec(const char* spec_path, const char* spec_name = nullptr) {
+    std::vector<MarkdownExample> examples;
 
     std::ifstream file(spec_path);
     if (!file.is_open()) {
@@ -101,7 +101,7 @@ static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_pat
             line.find("example") != std::string::npos) {
 
             example_number++;
-            CommonMarkExample example;
+            MarkdownExample example;
             example.example_number = example_number;
             example.section = current_section;
             example.line_number = line_number;
@@ -167,16 +167,60 @@ static std::string normalize_html(const std::string& html) {
     size_t end = result.find_last_not_of(" \t\n\r");
     result = result.substr(start, end - start + 1);
 
-    // Normalize multiple whitespace to single space (optional, can be refined)
-    // For now, just trim and return
+    // Normalize whitespace between consecutive closing tags
+    // e.g., "</ul>\n</li>" and "</ul></li>" should be treated as equivalent
+    // This handles formatting differences between spec files
+    std::string normalized;
+    normalized.reserve(result.size());
+    
+    for (size_t i = 0; i < result.size(); i++) {
+        char c = result[i];
+        
+        // Check for whitespace after a closing tag
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t') {
+            // Look back to see if we just had a closing tag
+            bool after_close_tag = false;
+            if (normalized.size() >= 1 && normalized.back() == '>') {
+                // Check if this is a closing tag (look for </)
+                size_t tag_start = normalized.rfind('<');
+                if (tag_start != std::string::npos && tag_start + 1 < normalized.size() && 
+                    normalized[tag_start + 1] == '/') {
+                    after_close_tag = true;
+                }
+            }
+            
+            // Look forward to see if next non-whitespace is another closing tag
+            bool before_close_tag = false;
+            size_t j = i + 1;
+            while (j < result.size() && (result[j] == '\n' || result[j] == '\r' || 
+                   result[j] == ' ' || result[j] == '\t')) {
+                j++;
+            }
+            if (j + 1 < result.size() && result[j] == '<' && result[j + 1] == '/') {
+                before_close_tag = true;
+            }
+            
+            // Skip whitespace between consecutive closing tags
+            if (after_close_tag && before_close_tag) {
+                // Skip all whitespace
+                while (i + 1 < result.size() && (result[i + 1] == '\n' || result[i + 1] == '\r' ||
+                       result[i + 1] == ' ' || result[i + 1] == '\t')) {
+                    i++;
+                }
+                continue;
+            }
+        }
+        
+        normalized += c;
+    }
 
-    return result;
+    return normalized;
 }
 
 // Test fixture for CommonMark spec tests
-class CommonMarkSpecTest : public ::testing::Test {
+class MarkdownSpecTest : public ::testing::Test {
 protected:
-    static std::vector<CommonMarkExample> examples;
+    static std::vector<MarkdownExample> examples;
     static bool examples_loaded;
 
     void SetUp() override {
@@ -240,7 +284,7 @@ protected:
                 }
                 check_file.close();
                 
-                std::vector<CommonMarkExample> file_examples = 
+                std::vector<MarkdownExample> file_examples = 
                     parse_commonmark_spec(spec_path.c_str(), spec_files[i].name);
                 
                 if (!file_examples.empty()) {
@@ -288,11 +332,11 @@ protected:
 };
 
 // Static member initialization
-std::vector<CommonMarkExample> CommonMarkSpecTest::examples;
-bool CommonMarkSpecTest::examples_loaded = false;
+std::vector<MarkdownExample> MarkdownSpecTest::examples;
+bool MarkdownSpecTest::examples_loaded = false;
 
 // Test that we can load the spec file
-TEST_F(CommonMarkSpecTest, LoadSpec) {
+TEST_F(MarkdownSpecTest, LoadSpec) {
     ASSERT_FALSE(examples.empty()) << "Failed to load CommonMark spec examples";
     printf("Total examples loaded: %zu\n", examples.size());
 }
@@ -307,12 +351,12 @@ struct TestStats {
 static TestStats global_stats;
 
 // Parameterized test for individual examples
-class CommonMarkExampleTest : public CommonMarkSpecTest,
+class MarkdownExampleTest : public MarkdownSpecTest,
                                public ::testing::WithParamInterface<int> {
 };
 
 // Run a specific example by index
-TEST_P(CommonMarkExampleTest, Example) {
+TEST_P(MarkdownExampleTest, Example) {
     int index = GetParam();
 
     if (index >= (int)examples.size()) {
@@ -320,7 +364,7 @@ TEST_P(CommonMarkExampleTest, Example) {
         return;
     }
 
-    const CommonMarkExample& ex = examples[index];
+    const MarkdownExample& ex = examples[index];
 
     // Parse markdown and get HTML output
     // Pass cmdline_options to determine flavor (GFM vs CommonMark)
@@ -353,7 +397,7 @@ TEST_P(CommonMarkExampleTest, Example) {
 // The tests will handle out-of-range indices gracefully
 INSTANTIATE_TEST_SUITE_P(
     AllExamples,
-    CommonMarkExampleTest,
+    MarkdownExampleTest,
     ::testing::Range(0, 2000),  // Large enough to cover all examples from all spec files
     [](const ::testing::TestParamInfo<int>& info) {
         return "Example_" + std::to_string(info.param + 1);
@@ -361,7 +405,7 @@ INSTANTIATE_TEST_SUITE_P(
 );
 
 // Test specific categories
-TEST_F(CommonMarkSpecTest, CountExamplesBySection) {
+TEST_F(MarkdownSpecTest, CountExamplesBySection) {
     if (examples.empty()) {
         GTEST_SKIP() << "No examples loaded";
         return;
@@ -386,7 +430,7 @@ TEST_F(CommonMarkSpecTest, CountExamplesBySection) {
 }
 
 // Test basic headers (examples typically in "ATX headings" section)
-TEST_F(CommonMarkSpecTest, ATXHeadings) {
+TEST_F(MarkdownSpecTest, ATXHeadings) {
     int passed = 0, failed = 0;
 
     for (const auto& ex : examples) {
@@ -413,7 +457,7 @@ TEST_F(CommonMarkSpecTest, ATXHeadings) {
 }
 
 // Test paragraphs
-TEST_F(CommonMarkSpecTest, Paragraphs) {
+TEST_F(MarkdownSpecTest, Paragraphs) {
     int passed = 0, failed = 0;
 
     for (const auto& ex : examples) {
@@ -434,7 +478,7 @@ TEST_F(CommonMarkSpecTest, Paragraphs) {
 }
 
 // Test code blocks
-TEST_F(CommonMarkSpecTest, CodeBlocks) {
+TEST_F(MarkdownSpecTest, CodeBlocks) {
     int passed = 0, failed = 0;
 
     for (const auto& ex : examples) {
@@ -456,7 +500,7 @@ TEST_F(CommonMarkSpecTest, CodeBlocks) {
 }
 
 // Comprehensive statistics by section
-TEST_F(CommonMarkSpecTest, ComprehensiveStats) {
+TEST_F(MarkdownSpecTest, ComprehensiveStats) {
     if (examples.empty()) {
         GTEST_SKIP() << "No examples loaded";
         return;
@@ -527,7 +571,7 @@ TEST_F(CommonMarkSpecTest, ComprehensiveStats) {
 }
 
 // Print final statistics
-TEST_F(CommonMarkSpecTest, FinalStatistics) {
+TEST_F(MarkdownSpecTest, FinalStatistics) {
     printf("\n========================================\n");
     printf("CommonMark Spec Test Summary\n");
     printf("========================================\n");
