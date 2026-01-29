@@ -45,8 +45,8 @@ import { compareASTToMathLive } from './comparators/mathlive_ast_comparator.js';
 const CONFIG = {
     weights: {
         ast: 0.50,   // 50% - semantic structure
-        html: 0.40,  // 40% - visual representation
-        dvi: 0.10    // 10% - precise typographics
+        html: 0.49,  // 49% - visual representation
+        dvi: 0.01    // 1% - precise typographics
     },
     defaultThreshold: 80,
     dviTolerance: 0.5

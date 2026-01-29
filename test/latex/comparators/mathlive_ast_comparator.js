@@ -38,9 +38,10 @@ const LAMBDA_TO_MATHLIVE_TYPE = {
 
     // Delimiters and fences
     'DELIMITED': 'leftright',   // Delimited expression
+    'SIZED_DELIM': 'sizeddelim', // Sized delimiters (\big, \Big, etc.)
 
     // Accents and decorations
-    'ACCENT': 'overunder',      // Accent marks (handled with above/below)
+    'ACCENT': 'accent',         // Accent marks (hat, bar, etc.)
     'OVERUNDER': 'overunder',   // Under/over operators
 
     // Arrays and matrices
@@ -56,6 +57,8 @@ const LAMBDA_TO_MATHLIVE_TYPE = {
     'TEXT': 'text',             // Text mode
     'PHANTOM': 'phantom',       // Phantom element
     'BOX': 'box',               // Box wrapper
+    'STYLE': 'style',           // Style commands (\displaystyle, etc.)
+    'NOT': 'not',               // Negation overlay
 };
 
 /**
@@ -122,6 +125,9 @@ function areTypesCompatible(lambdaType, mathliveType) {
         ['op', 'mop'],
         ['delimited', 'leftright'],
         ['scripts', 'subsup'],
+        ['box', 'minner'],
+        ['style', 'group'],
+        ['sized_delim', 'sizeddelim', 'mopen', 'mclose'],
     ];
 
     for (const group of equivalentTypes) {

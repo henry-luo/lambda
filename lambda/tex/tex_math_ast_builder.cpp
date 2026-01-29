@@ -55,6 +55,9 @@ const char* math_node_type_name(MathNodeType type) {
         case MathNodeType::SPACE:     return "SPACE";
         case MathNodeType::PHANTOM:   return "PHANTOM";
         case MathNodeType::NOT:       return "NOT";
+        case MathNodeType::BOX:       return "BOX";
+        case MathNodeType::STYLE:     return "STYLE";
+        case MathNodeType::SIZED_DELIM: return "SIZED_DELIM";
         case MathNodeType::ERROR:     return "ERROR";
         default:                      return "UNKNOWN";
     }
@@ -242,6 +245,32 @@ MathASTNode* make_math_phantom(Arena* arena, MathASTNode* content, uint8_t phant
 MathASTNode* make_math_not(Arena* arena, MathASTNode* operand) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::NOT);
     node->body = operand;
+    return node;
+}
+
+MathASTNode* make_math_box(Arena* arena, MathASTNode* content, uint8_t box_type,
+                           const char* color, const char* padding) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::BOX);
+    node->box.box_type = box_type;
+    node->box.color = color;
+    node->box.padding = padding;
+    node->body = content;
+    return node;
+}
+
+MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::STYLE);
+    node->style.style_type = style_type;
+    node->style.command = command;
+    node->body = content;
+    return node;
+}
+
+MathASTNode* make_math_sized_delim(Arena* arena, int32_t delim_char, uint8_t size_level, uint8_t delim_type) {
+    MathASTNode* node = alloc_math_node(arena, MathNodeType::SIZED_DELIM);
+    node->sized_delim.delim_char = delim_char;
+    node->sized_delim.size_level = size_level;
+    node->sized_delim.delim_type = delim_type;
     return node;
 }
 
@@ -1072,7 +1101,7 @@ MathASTNode* MathASTBuilder::build_brack_group(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_sized_delimiter(TSNode node) {
-    // sized_delimiter has fields: size, delim
+    // sized_delimiter has fields: size, delim (delim is optional - bare \bigl, \bigr, etc. are valid)
     TSNode size_node = ts_node_child_by_field_name(node, "size", 4);
     TSNode delim_node = ts_node_child_by_field_name(node, "delim", 5);
 
@@ -1081,7 +1110,8 @@ MathASTNode* MathASTBuilder::build_sized_delimiter(TSNode node) {
     const char* delim_text = ts_node_is_null(delim_node) ? nullptr : node_text(delim_node, &len);
 
     // Determine delimiter character
-    int32_t delim_cp = '(';  // default
+    // When no delimiter specified (bare \bigl, \bigr, etc.), use '.' as null delimiter (per MathLive)
+    int32_t delim_cp = '.';  // default to null delimiter
     if (delim_text) {
         if (delim_text[0] == '\\') {
             // Handle \{ \} etc.
@@ -1126,18 +1156,16 @@ MathASTNode* MathASTBuilder::build_sized_delimiter(TSNode node) {
     log_debug("tex_math_ast_builder: sized_delimiter size=%d delim=%d atom=%d",
               size_level, delim_cp, (int)atom_type);
 
-    // Create a DELIMITED node with fixed size (not extensible)
-    MathASTNode* result;
-    if (atom_type == AtomType::Open) {
-        result = make_math_open(arena, delim_cp);
-    } else if (atom_type == AtomType::Close) {
-        result = make_math_close(arena, delim_cp);
-    } else {
-        result = make_math_ord(arena, delim_cp, nullptr);
+    // Create a SIZED_DELIM node for explicit sized delimiters
+    // delim_type: 0=left, 1=right, 2=middle
+    uint8_t delim_type = 0;  // default to left
+    if (atom_type == AtomType::Close) {
+        delim_type = 1;  // right
+    } else if (atom_type == AtomType::Ord) {
+        delim_type = 2;  // middle (for \bigm etc.)
     }
 
-    // Store size level in flags for typesetting
-    result->flags = size_level;
+    MathASTNode* result = make_math_sized_delim(arena, delim_cp, size_level, delim_type);
 
     return result;
 }
@@ -1266,17 +1294,28 @@ MathASTNode* MathASTBuilder::build_accent(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
-    // box_command: \bbox, \fbox, \boxed with content
+    // box_command: \bbox, \fbox, \boxed, \mbox, \colorbox with content
     TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
     TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
 
-    // Get command name
+    // Get command name and determine box type
     const char* cmd = "box";
+    uint8_t box_type = 0;  // default: bbox
     if (!ts_node_is_null(cmd_node)) {
         int len;
         const char* text = node_text(cmd_node, &len);
         if (text[0] == '\\') {
             cmd = arena_copy_str(text + 1, len - 1);
+        }
+        // Determine box type from command name
+        if (strstr(cmd, "fbox")) {
+            box_type = 1;  // fbox
+        } else if (strstr(cmd, "mbox")) {
+            box_type = 2;  // mbox
+        } else if (strstr(cmd, "colorbox")) {
+            box_type = 3;  // colorbox
+        } else if (strstr(cmd, "boxed")) {
+            box_type = 4;  // boxed
         }
     }
 
@@ -1286,13 +1325,10 @@ MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
         content = build_ts_node(content_node);
     }
 
-    // Create an INNER node (boxes are like delimited subformulas)
-    MathASTNode* box = alloc_math_node(arena, MathNodeType::INNER);
-    box->body = content;
-    // Store command name in atom union for reference
-    box->atom.command = cmd;
+    // Create a BOX node
+    MathASTNode* box = make_math_box(arena, content, box_type, nullptr, nullptr);
 
-    log_debug("tex_math_ast_builder: build_box_command cmd=%s", cmd);
+    log_debug("tex_math_ast_builder: build_box_command cmd=%s type=%d", cmd, box_type);
 
     return box;
 }
@@ -1661,18 +1697,22 @@ MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
             }
             return body;
         }
+        // Math style commands - create STYLE node
         if (name_len == 12 && strncmp(cmd, "displaystyle", 12) == 0) {
-            // Display style - just return the body
-            return body;
+            const char* cmd_str = arena_copy_str(cmd, name_len);
+            return make_math_style(arena, 0, cmd_str, body);  // 0=display
         }
         if (name_len == 9 && strncmp(cmd, "textstyle", 9) == 0) {
-            return body;
+            const char* cmd_str = arena_copy_str(cmd, name_len);
+            return make_math_style(arena, 1, cmd_str, body);  // 1=text
         }
         if (name_len == 11 && strncmp(cmd, "scriptstyle", 11) == 0) {
-            return body;
+            const char* cmd_str = arena_copy_str(cmd, name_len);
+            return make_math_style(arena, 2, cmd_str, body);  // 2=script
         }
         if (name_len == 17 && strncmp(cmd, "scriptscriptstyle", 17) == 0) {
-            return body;
+            const char* cmd_str = arena_copy_str(cmd, name_len);
+            return make_math_style(arena, 3, cmd_str, body);  // 3=scriptscript
         }
         if (name_len == 12 && strncmp(cmd, "operatorname", 12) == 0) {
             // Operator name - convert to OP
@@ -1934,6 +1974,53 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
         case MathNodeType::FRAC:
             ::strbuf_append_str(out, ",\"ruleThickness\":");
             ::strbuf_append_format(out, "%.2f", node->frac.rule_thickness);
+            // hasBarLine: true if rule thickness is not 0 (for \atop, thickness is 0)
+            ::strbuf_append_str(out, ",\"hasBarLine\":");
+            ::strbuf_append_str(out, (node->frac.rule_thickness != 0.0f) ? "true" : "false");
+            // Delimiter info for \binom, \genfrac
+            if (node->frac.left_delim != 0) {
+                ::strbuf_append_str(out, ",\"leftDelim\":");
+                ::strbuf_append_int(out, node->frac.left_delim);
+            }
+            if (node->frac.right_delim != 0) {
+                ::strbuf_append_str(out, ",\"rightDelim\":");
+                ::strbuf_append_int(out, node->frac.right_delim);
+            }
+            break;
+
+        case MathNodeType::ACCENT:
+            // Accent character codepoint
+            if (node->accent.accent_char != 0) {
+                ::strbuf_append_str(out, ",\"accentChar\":");
+                ::strbuf_append_int(out, node->accent.accent_char);
+            }
+            // Command name (e.g., "hat", "bar", "vec")
+            if (node->accent.command) {
+                ::strbuf_append_str(out, ",\"command\":");
+                json_escape_string(node->accent.command, out);
+            }
+            break;
+
+        case MathNodeType::OVERUNDER:
+            // Over/under symbols and command
+            if (node->overunder.over_char != 0) {
+                ::strbuf_append_str(out, ",\"overChar\":");
+                ::strbuf_append_int(out, node->overunder.over_char);
+            }
+            if (node->overunder.under_char != 0) {
+                ::strbuf_append_str(out, ",\"underChar\":");
+                ::strbuf_append_int(out, node->overunder.under_char);
+            }
+            if (node->overunder.command) {
+                ::strbuf_append_str(out, ",\"command\":");
+                json_escape_string(node->overunder.command, out);
+            }
+            break;
+
+        case MathNodeType::PHANTOM:
+            // Phantom type: 0=phantom, 1=hphantom, 2=vphantom, 3=smash
+            ::strbuf_append_str(out, ",\"phantomType\":");
+            ::strbuf_append_int(out, node->phantom.phantom_type);
             break;
 
         case MathNodeType::DELIMITED:
@@ -1984,6 +2071,73 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
                 delim_char[len] = '\0';
                 json_escape_string(delim_char, out);
             }
+            break;
+
+        case MathNodeType::BOX:
+            // Box type: 0=bbox, 1=fbox, 2=mbox, 3=colorbox, 4=boxed
+            ::strbuf_append_str(out, ",\"boxType\":");
+            ::strbuf_append_int(out, node->box.box_type);
+            if (node->box.color) {
+                ::strbuf_append_str(out, ",\"color\":");
+                json_escape_string(node->box.color, out);
+            }
+            if (node->box.padding) {
+                ::strbuf_append_str(out, ",\"padding\":");
+                json_escape_string(node->box.padding, out);
+            }
+            break;
+
+        case MathNodeType::STYLE:
+            // Style type: 0=display, 1=text, 2=script, 3=scriptscript
+            ::strbuf_append_str(out, ",\"styleType\":");
+            ::strbuf_append_int(out, node->style.style_type);
+            if (node->style.command) {
+                ::strbuf_append_str(out, ",\"command\":");
+                json_escape_string(node->style.command, out);
+            }
+            break;
+
+        case MathNodeType::SIZED_DELIM:
+            // Sized delimiter: \big, \Big, \bigg, \Bigg variants
+            // Output delim_char as a UTF-8 character string (MathLive uses "delim" and "value" fields)
+            if (node->sized_delim.delim_char != 0) {
+                char delim_utf8[8];
+                int len = 0;
+                uint32_t cp = (uint32_t)node->sized_delim.delim_char;
+                if (cp < 0x80) {
+                    delim_utf8[len++] = (char)cp;
+                } else if (cp < 0x800) {
+                    delim_utf8[len++] = (char)(0xC0 | (cp >> 6));
+                    delim_utf8[len++] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    delim_utf8[len++] = (char)(0xE0 | (cp >> 12));
+                    delim_utf8[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    delim_utf8[len++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    delim_utf8[len++] = (char)(0xF0 | (cp >> 18));
+                    delim_utf8[len++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    delim_utf8[len++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    delim_utf8[len++] = (char)(0x80 | (cp & 0x3F));
+                }
+                delim_utf8[len] = '\0';
+                // Output as "delim" for MathLive compatibility
+                ::strbuf_append_str(out, ",\"delim\":");
+                json_escape_string(delim_utf8, out);
+                // Also output as "value" for comparator text extraction
+                ::strbuf_append_str(out, ",\"value\":");
+                json_escape_string(delim_utf8, out);
+            }
+            ::strbuf_append_str(out, ",\"size\":");
+            ::strbuf_append_int(out, node->sized_delim.size_level);
+            // Output delimType as string: "mopen", "mclose", or "mrel" (for middle)
+            ::strbuf_append_str(out, ",\"delimType\":\"");
+            switch (node->sized_delim.delim_type) {
+                case 0: ::strbuf_append_str(out, "mopen"); break;
+                case 1: ::strbuf_append_str(out, "mclose"); break;
+                case 2: ::strbuf_append_str(out, "mrel"); break;
+                default: ::strbuf_append_str(out, "minner"); break;
+            }
+            ::strbuf_append_str(out, "\"");
             break;
 
         default:

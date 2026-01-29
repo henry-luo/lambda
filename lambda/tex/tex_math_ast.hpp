@@ -66,6 +66,9 @@ enum class MathNodeType : uint8_t {
     SPACE,          // Math spacing: \, \; \quad \qquad
     PHANTOM,        // Phantom box: \phantom, \hphantom, \vphantom
     NOT,            // Negation overlay: \not
+    BOX,            // Box commands: \bbox, \fbox, \mbox, \colorbox, \boxed
+    STYLE,          // Style commands: \displaystyle, \textstyle, etc.
+    SIZED_DELIM,    // Sized delimiters: \big, \Big, \bigg, \Bigg
     ERROR,          // Parse error recovery
 };
 
@@ -163,6 +166,26 @@ struct MathASTNode {
         struct {
             uint8_t phantom_type;   // 0=phantom, 1=hphantom, 2=vphantom, 3=smash
         } phantom;
+
+        // For BOX (\bbox, \fbox, \mbox, \colorbox, \boxed)
+        struct {
+            uint8_t box_type;       // 0=bbox, 1=fbox, 2=mbox, 3=colorbox, 4=boxed
+            const char* color;      // Background/border color (optional)
+            const char* padding;    // Padding specification (optional)
+        } box;
+
+        // For STYLE (\displaystyle, \textstyle, \scriptstyle, \scriptscriptstyle)
+        struct {
+            uint8_t style_type;     // 0=display, 1=text, 2=script, 3=scriptscript
+            const char* command;    // Original command name
+        } style;
+
+        // For SIZED_DELIM (\big, \Big, \bigg, \Bigg variants)
+        struct {
+            int32_t delim_char;     // Delimiter codepoint
+            uint8_t size_level;     // 0=normal, 1=big, 2=Big, 3=bigg, 4=Bigg
+            uint8_t delim_type;     // 0=l (left), 1=r (right), 2=m (middle)
+        } sized_delim;
     };
 
     // Tree structure (named branches - inspired by MathLive)
@@ -210,6 +233,20 @@ MathASTNode* make_math_text(Arena* arena, const char* text, size_t len, bool is_
 MathASTNode* make_math_space(Arena* arena, float width_mu);
 MathASTNode* make_math_phantom(Arena* arena, MathASTNode* content, uint8_t phantom_type);
 MathASTNode* make_math_not(Arena* arena, MathASTNode* operand);
+
+// Create box node (\bbox, \fbox, \mbox, \colorbox, \boxed)
+// box_type: 0=bbox, 1=fbox, 2=mbox, 3=colorbox, 4=boxed
+MathASTNode* make_math_box(Arena* arena, MathASTNode* content, uint8_t box_type,
+                           const char* color = nullptr, const char* padding = nullptr);
+
+// Create style node (\displaystyle, \textstyle, \scriptstyle, \scriptscriptstyle)
+// style_type: 0=display, 1=text, 2=script, 3=scriptscript
+MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content);
+
+// Create sized delimiter (\big, \Big, \bigg, \Bigg variants)
+// size_level: 0=normal, 1=big, 2=Big, 3=bigg, 4=Bigg
+// delim_type: 0=l (left), 1=r (right), 2=m (middle)
+MathASTNode* make_math_sized_delim(Arena* arena, int32_t delim_char, uint8_t size_level, uint8_t delim_type);
 
 // Create error node
 MathASTNode* make_math_error(Arena* arena, const char* message);
