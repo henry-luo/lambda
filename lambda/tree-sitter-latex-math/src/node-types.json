@@ -90,7 +90,19 @@
             "named": false
           },
           {
+            "type": "\\underleftarrow",
+            "named": false
+          },
+          {
+            "type": "\\underleftrightarrow",
+            "named": false
+          },
+          {
             "type": "\\underline",
+            "named": false
+          },
+          {
+            "type": "\\underrightarrow",
             "named": false
           },
           {
@@ -103,6 +115,14 @@
           },
           {
             "type": "\\widetilde",
+            "named": false
+          },
+          {
+            "type": "\\xleftarrow",
+            "named": false
+          },
+          {
+            "type": "\\xrightarrow",
             "named": false
           }
         ]
@@ -2268,6 +2288,10 @@
     "named": false
   },
   {
+    "type": "\\Rightarrow",
+    "named": false
+  },
+  {
     "type": "\\Uparrow",
     "named": false
   },
@@ -2428,6 +2452,14 @@
     "named": false
   },
   {
+    "type": "\\circlearrowleft",
+    "named": false
+  },
+  {
+    "type": "\\circlearrowright",
+    "named": false
+  },
+  {
     "type": "\\color",
     "named": false
   },
@@ -2445,6 +2477,14 @@
   },
   {
     "type": "\\cup",
+    "named": false
+  },
+  {
+    "type": "\\curvearrowleft",
+    "named": false
+  },
+  {
+    "type": "\\curvearrowright",
     "named": false
   },
   {
@@ -2532,6 +2572,10 @@
     "named": false
   },
   {
+    "type": "\\gets",
+    "named": false
+  },
+  {
     "type": "\\gg",
     "named": false
   },
@@ -2549,6 +2593,10 @@
   },
   {
     "type": "\\hbox",
+    "named": false
+  },
+  {
+    "type": "\\hookrightarrow",
     "named": false
   },
   {
@@ -2660,7 +2708,23 @@
     "named": false
   },
   {
+    "type": "\\longmapsto",
+    "named": false
+  },
+  {
+    "type": "\\looparrowleft",
+    "named": false
+  },
+  {
+    "type": "\\looparrowright",
+    "named": false
+  },
+  {
     "type": "\\lvert",
+    "named": false
+  },
+  {
+    "type": "\\mapsto",
     "named": false
   },
   {
@@ -2728,11 +2792,19 @@
     "named": false
   },
   {
+    "type": "\\nRightarrow",
+    "named": false
+  },
+  {
     "type": "\\nabla",
     "named": false
   },
   {
     "type": "\\ne",
+    "named": false
+  },
+  {
+    "type": "\\nearrow",
     "named": false
   },
   {
@@ -2749,6 +2821,14 @@
   },
   {
     "type": "\\notin",
+    "named": false
+  },
+  {
+    "type": "\\nrightarrow",
+    "named": false
+  },
+  {
+    "type": "\\nwarrow",
     "named": false
   },
   {
@@ -2884,6 +2964,22 @@
     "named": false
   },
   {
+    "type": "\\rightarrow",
+    "named": false
+  },
+  {
+    "type": "\\rightharpoondown",
+    "named": false
+  },
+  {
+    "type": "\\rightharpoonup",
+    "named": false
+  },
+  {
+    "type": "\\rightrightarrows",
+    "named": false
+  },
+  {
     "type": "\\rmoustache",
     "named": false
   },
@@ -2901,6 +2997,10 @@
   },
   {
     "type": "\\scriptstyle",
+    "named": false
+  },
+  {
+    "type": "\\searrow",
     "named": false
   },
   {
@@ -2972,6 +3072,10 @@
     "named": false
   },
   {
+    "type": "\\swarrow",
+    "named": false
+  },
+  {
     "type": "\\tbinom",
     "named": false
   },
@@ -3020,11 +3124,27 @@
     "named": false
   },
   {
+    "type": "\\to",
+    "named": false
+  },
+  {
     "type": "\\underbrace",
     "named": false
   },
   {
+    "type": "\\underleftarrow",
+    "named": false
+  },
+  {
+    "type": "\\underleftrightarrow",
+    "named": false
+  },
+  {
     "type": "\\underline",
+    "named": false
+  },
+  {
+    "type": "\\underrightarrow",
     "named": false
   },
   {

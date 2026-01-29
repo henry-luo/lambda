@@ -161,6 +161,7 @@ struct MathASTNode {
         // For SPACE
         struct {
             float width_mu;         // Width in mu (1/18 em)
+            const char* command;    // Command name (e.g., "quad", ",", ";")
         } space;
 
         // For PHANTOM (phantom_type: 0=full, 1=hphantom, 2=vphantom, 3=smash)
@@ -218,7 +219,7 @@ MathASTNode* make_math_bin(Arena* arena, int32_t codepoint, const char* command 
 MathASTNode* make_math_rel(Arena* arena, int32_t codepoint, const char* command = nullptr);
 MathASTNode* make_math_open(Arena* arena, int32_t codepoint);
 MathASTNode* make_math_close(Arena* arena, int32_t codepoint);
-MathASTNode* make_math_punct(Arena* arena, int32_t codepoint);
+MathASTNode* make_math_punct(Arena* arena, int32_t codepoint, const char* command = nullptr);
 
 // Create structural nodes
 MathASTNode* make_math_row(Arena* arena);
@@ -231,7 +232,7 @@ MathASTNode* make_math_overunder(Arena* arena, MathASTNode* nucleus, MathASTNode
 
 // Create text/space nodes
 MathASTNode* make_math_text(Arena* arena, const char* text, size_t len, bool is_roman);
-MathASTNode* make_math_space(Arena* arena, float width_mu);
+MathASTNode* make_math_space(Arena* arena, float width_mu, const char* command = nullptr);
 MathASTNode* make_math_phantom(Arena* arena, MathASTNode* content, uint8_t phantom_type);
 MathASTNode* make_math_not(Arena* arena, MathASTNode* operand);
 
