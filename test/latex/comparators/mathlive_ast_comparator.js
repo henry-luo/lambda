@@ -427,6 +427,39 @@ function normalizeLambdaAST(node) {
         }
     }
 
+    // Special case: Flatten STYLE nodes that wrap a ROW containing inline elements
+    // Lambda wraps styled content in STYLE, MathLive puts style as attribute on each element
+    // Only flatten when STYLE contains a ROW with multiple simple children (ORD, BIN, REL)
+    if (nodeType === 'row' && result.body && Array.isArray(result.body)) {
+        const expandedBody = [];
+        for (const child of result.body) {
+            if (child && typeof child === 'object' && normalizeType(child.type) === 'style') {
+                const styleBody = child.body;
+                // Only flatten if style wraps a ROW containing simple inline elements
+                if (styleBody && normalizeType(styleBody.type) === 'row' &&
+                    styleBody.body && Array.isArray(styleBody.body)) {
+                    // Check if all children are simple inline elements (ORD, BIN, REL, etc.)
+                    const simpleTypes = ['ord', 'mord', 'bin', 'mbin', 'rel', 'mrel', 'punct', 'mpunct'];
+                    const allSimple = styleBody.body.every(item =>
+                        item && typeof item === 'object' &&
+                        simpleTypes.includes(normalizeType(item.type))
+                    );
+                    if (allSimple) {
+                        expandedBody.push(...styleBody.body);
+                    } else {
+                        expandedBody.push(child);
+                    }
+                } else {
+                    // Keep STYLE wrapper for complex content (FRAC, etc.)
+                    expandedBody.push(child);
+                }
+            } else {
+                expandedBody.push(child);
+            }
+        }
+        result.body = expandedBody;
+    }
+
     // Special case: Flatten nested ROW nodes in body arrays
     // Lambda creates ROW for multi-digit numbers (e.g., "1234"), but MathLive keeps them flat
     if (nodeType === 'row' && result.body && Array.isArray(result.body)) {
@@ -625,6 +658,109 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
             matchedElements++;
             compareNodes(lambda.body, mathlive, path + '.body');
             return;
+        }
+
+        // Special handling: Lambda OVERUNDER with body (big ops) vs MathLive extensible-symbol
+        // Lambda: OVERUNDER { body: OP, above: ..., below: ... }
+        // MathLive: extensible-symbol { value: "∑", subscript: [...], superscript: [...] }
+        if (lambdaType === 'OVERUNDER' && mathliveType === 'extensible-symbol') {
+            // Types are compatible
+            matchedElements++;
+
+            // Compare the operator symbol (Lambda body.value or body.command vs MathLive value)
+            const lambdaOp = lambda.body;
+            if (lambdaOp) {
+                const lambdaValue = lambdaOp.value || '';
+                const lambdaCmd = (lambdaOp.command || '').replace(/^\\/, '');
+                const mathliveValue = mathlive.value || mathlive.symbol || '';
+                const mathliveCmd = (mathlive.command || '').replace(/^\\/, '');
+
+                // Check symbol/command match
+                if (lambdaValue === mathliveValue || lambdaCmd === mathliveCmd) {
+                    matchedElements++;
+                    totalElements++;
+                } else if (lambdaValue || mathliveValue) {
+                    differences.push({
+                        path: path + '.body',
+                        issue: 'Operator symbol mismatch',
+                        lambda: lambdaValue || lambdaCmd,
+                        mathlive: mathliveValue || mathliveCmd,
+                    });
+                    totalElements++;
+                }
+            }
+
+            // Compare limits: Lambda above/below vs MathLive superscript/subscript
+            const lambdaAbove = getBranch(lambda, 'above');
+            const mathliveSuper = getBranch(mathlive, 'superscript');
+            if (lambdaAbove || mathliveSuper) {
+                // Handle MathLive string arrays vs Lambda objects
+                if (Array.isArray(mathliveSuper)) {
+                    const comparison = compareBranchValues(lambdaAbove, mathliveSuper);
+                    totalElements++;
+                    if (comparison.match) {
+                        matchedElements++;
+                    } else {
+                        differences.push({
+                            path: path + '.above',
+                            issue: 'Superscript/above mismatch',
+                            lambda: JSON.stringify(lambdaAbove),
+                            mathlive: JSON.stringify(mathliveSuper),
+                        });
+                    }
+                } else if (lambdaAbove && mathliveSuper) {
+                    compareNodes(lambdaAbove, mathliveSuper, path + '.above');
+                }
+            }
+
+            const lambdaBelow = getBranch(lambda, 'below');
+            const mathliveSub = getBranch(mathlive, 'subscript');
+            if (lambdaBelow || mathliveSub) {
+                if (Array.isArray(mathliveSub)) {
+                    const comparison = compareBranchValues(lambdaBelow, mathliveSub);
+                    totalElements++;
+                    if (comparison.match) {
+                        matchedElements++;
+                    } else {
+                        differences.push({
+                            path: path + '.below',
+                            issue: 'Subscript/below mismatch',
+                            lambda: JSON.stringify(lambdaBelow),
+                            mathlive: JSON.stringify(mathliveSub),
+                        });
+                    }
+                } else if (lambdaBelow && mathliveSub) {
+                    compareNodes(lambdaBelow, mathliveSub, path + '.below');
+                }
+            }
+
+            return;  // Done with this comparison
+        }
+
+        // Special handling: Lambda ORD with command vs MathLive macro
+        // MathLive uses 'macro' type for custom commands, Lambda uses ORD with command field
+        if (lambdaType === 'ORD' && mathliveType === 'macro') {
+            // Compare commands - Lambda command vs MathLive command
+            const lambdaCmd = (lambda.command || '').replace(/^\\/, '');
+            const mathliveCmd = (mathlive.command || '').replace(/^\\/, '');
+
+            if (lambdaCmd && mathliveCmd && lambdaCmd === mathliveCmd) {
+                matchedElements++;
+                // Commands match - consider this a match for unrecognized commands
+                // MathLive expands macros, Lambda stores them as-is
+                return;
+            }
+        }
+
+        // Special handling: Lambda ORD with command vs MathLive mrel (for \not{} etc)
+        if (lambdaType === 'ORD' && mathliveType === 'mrel') {
+            const lambdaCmd = (lambda.command || '').replace(/^\\/, '').replace(/\{\}$/, '');
+            const mathliveCmd = (mathlive.command || '').replace(/^\\/, '');
+
+            if (lambdaCmd && mathliveCmd && lambdaCmd === mathliveCmd) {
+                matchedElements++;
+                return;
+            }
         }
 
         if (areTypesCompatible(lambdaType, mathliveType)) {

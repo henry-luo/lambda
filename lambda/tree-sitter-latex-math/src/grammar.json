@@ -73,6 +73,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "symbol_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "delimiter_group"
         },
         {
@@ -106,10 +110,6 @@
         {
           "type": "SYMBOL",
           "name": "phantom_command"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "symbol_command"
         },
         {
           "type": "SYMBOL",
@@ -472,6 +472,118 @@
         {
           "type": "STRING",
           "value": "\\models"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Rightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nRightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nearrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\searrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nwarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\swarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\uparrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\downarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\updownarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Uparrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Downarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Updownarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\hookrightarrow"
+        },
+        {
+          "type": "STRING",
+          "value": "\\mapsto"
+        },
+        {
+          "type": "STRING",
+          "value": "\\longmapsto"
+        },
+        {
+          "type": "STRING",
+          "value": "\\to"
+        },
+        {
+          "type": "STRING",
+          "value": "\\gets"
+        },
+        {
+          "type": "STRING",
+          "value": "\\curvearrowright"
+        },
+        {
+          "type": "STRING",
+          "value": "\\curvearrowleft"
+        },
+        {
+          "type": "STRING",
+          "value": "\\looparrowright"
+        },
+        {
+          "type": "STRING",
+          "value": "\\looparrowleft"
+        },
+        {
+          "type": "STRING",
+          "value": "\\circlearrowright"
+        },
+        {
+          "type": "STRING",
+          "value": "\\circlearrowleft"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rightrightarrows"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rightharpoonup"
+        },
+        {
+          "type": "STRING",
+          "value": "\\rightharpoondown"
         }
       ]
     },
@@ -1457,6 +1569,26 @@
                 {
                   "type": "STRING",
                   "value": "\\overleftrightarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\underrightarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\underleftarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\underleftrightarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\xleftarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\xrightarrow"
                 }
               ]
             }
