@@ -28,6 +28,9 @@ extern Item parse_rst_definition_list(MarkupParser* parser, const char* line);
 extern Item parse_asciidoc_admonition(MarkupParser* parser, const char* line);
 extern Item parse_asciidoc_definition_list(MarkupParser* parser, const char* line);
 
+// Textile-specific block parsers
+extern Item parse_textile_definition_list(MarkupParser* parser, const char* line);
+
 // Forward declarations for link reference parsing
 extern bool try_parse_link_definition(MarkupParser* parser, const char* line);
 
@@ -116,6 +119,10 @@ Item parse_block_element(MarkupParser* parser) {
             // RST definition lists
             if (parser->config.format == Format::RST) {
                 return parse_rst_definition_list(parser, line);
+            }
+            // Textile definition lists: - term := definition
+            if (parser->config.format == Format::TEXTILE) {
+                return parse_textile_definition_list(parser, line);
             }
             return parse_paragraph(parser, line);
 
