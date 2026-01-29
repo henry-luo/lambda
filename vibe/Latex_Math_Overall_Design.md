@@ -157,12 +157,31 @@ enum class MathNodeType : uint8_t {
     OVERUNDER,  // \sum_{i=0}^n
 
     // Special
-    TEXT, ARRAY, SPACE, PHANTOM, NOT, ERROR
+    TEXT,           // \text{...}, \mathrm{...}
+    ARRAY,          // array/matrix environments
+    ARRAY_ROW,      // Row in array
+    ARRAY_CELL,     // Cell in array
+    SPACE,          // \quad, \;, \,
+    PHANTOM,        // \phantom, \hphantom, \vphantom, \smash
+    NOT,            // \not (negation overlay)
+    BOX,            // \bbox, \fbox, \boxed, \colorbox, overlap boxes
+    STYLE,          // \displaystyle, \textstyle, etc.
+    SIZED_DELIM,    // \big, \Big, \bigg, \Bigg
+    ERROR,          // Parse error recovery
 };
 
 struct MathASTNode {
     MathNodeType type;
-    uint8_t flags;  // FLAG_LIMITS, FLAG_LARGE, FLAG_CRAMPED, etc.
+    uint8_t flags;
+
+    // Flag bits
+    static constexpr uint8_t FLAG_LIMITS = 0x01;      // Display limits (above/below)
+    static constexpr uint8_t FLAG_LARGE = 0x02;       // Large variant requested
+    static constexpr uint8_t FLAG_CRAMPED = 0x04;     // Cramped style
+    static constexpr uint8_t FLAG_NOLIMITS = 0x08;    // Force no-limits
+    static constexpr uint8_t FLAG_LEFT = 0x10;        // Left delimiter in pair
+    static constexpr uint8_t FLAG_RIGHT = 0x20;       // Right delimiter in pair
+    static constexpr uint8_t FLAG_MIDDLE = 0x40;      // Middle delimiter
 
     // Content (type-dependent union)
     union { ... };
@@ -178,6 +197,15 @@ struct MathASTNode {
     MathASTNode* next_sibling;
 };
 ```
+
+**Node Type Categories:**
+
+| Category | Types | Count |
+|----------|-------|-------|
+| Atom types (TeX 8 classes) | ORD, OP, BIN, REL, OPEN, CLOSE, PUNCT, INNER | 8 |
+| Structural types | ROW, FRAC, SQRT, SCRIPTS, DELIMITED, ACCENT, OVERUNDER | 7 |
+| Array types | ARRAY, ARRAY_ROW, ARRAY_CELL | 3 |
+| Special types | TEXT, SPACE, PHANTOM, NOT, BOX, STYLE, SIZED_DELIM, ERROR | 8 |
 
 **Named Branch Convention:**
 
@@ -517,6 +545,7 @@ Generates PDF via DVI intermediate or direct PDF primitives.
 | `tex_svg_out.cpp` | ~715 | SVG string generation |
 | `tex_html_render.cpp` | ~745 | HTML+CSS generation |
 | `tex_pdf_out.cpp` | ~505 | PDF output |
+| `tex_png_out.cpp` | ~200 | PNG rasterization |
 
 ### 7.5 Document Model
 
@@ -525,6 +554,94 @@ Generates PDF via DVI intermediate or direct PDF primitives.
 | `tex_document_model.hpp` | ~825 | DocElement, DocTextStyle |
 | `tex_document_model.cpp` | ~7685 | Full document processing |
 | `tex_doc_model_html.cpp` | ~1350 | DocElement → HTML |
+| `tex_doc_model_builder.cpp` | ~1000 | Document tree building |
+| `tex_doc_model_text.cpp` | ~500 | Text processing |
+
+### 7.6 Text Processing
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `tex_linebreak.cpp` | ~875 | Knuth-Plass line breaking |
+| `tex_hyphen.cpp` | ~975 | Liang hyphenation algorithm |
+| `tex_pagebreak.cpp` | ~950 | Page breaking |
+| `tex_align.cpp` | ~650 | Alignment environments |
+
+### 7.7 Bridge Files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `tex_latex_bridge.cpp` | ~1995 | LaTeX → TexNode conversion |
+| `tex_lambda_bridge.cpp` | ~1075 | Lambda → TeX integration |
+| `tex_math_ts.cpp` | ~400 | Tree-sitter math parsing entry |
+
+### 7.8 Tree-sitter Grammar
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `tree-sitter-latex-math/grammar.js` | ~540 | Math mode grammar definition |
+| `tree-sitter-latex-math/src/parser.c` | (generated) | Tree-sitter parser |
+
+**Grammar Structure:**
+```javascript
+// Entry point
+math: choice($.infix_frac, repeat($._expression))
+
+// Expression types
+_expression: choice($_atom, $.group, $.subsup)
+
+// Atoms (basic building blocks)
+_atom: choice(
+    $.symbol, $.number, $.operator, $.relation, $.punctuation,
+    $.fraction, $.binomial, $.radical, $.symbol_command,
+    $.delimiter_group, $.sized_delimiter, $.overunder_command,
+    $.extensible_arrow, $.accent, $.box_command, $.color_command,
+    $.rule_command, $.phantom_command, $.big_operator,
+    $.environment, $.text_command, $.style_command, $.space_command,
+    $.command  // Generic fallback
+)
+```
+
+### 7.9 Symbol Lookup Tables
+
+**Location:** `lambda/tex/tex_math_ast_builder.cpp`
+
+Three static lookup tables map LaTeX commands to Unicode and font positions:
+
+| Table | Entries | Purpose |
+|-------|---------|---------|
+| `GREEK_TABLE[]` | ~50 | Greek letters → cmmi10 positions |
+| `SYMBOL_TABLE[]` | ~150 | Symbols → font/codepoint/atom class |
+| `BIG_OP_TABLE[]` | ~20 | Big operators → cmex10 positions |
+
+**GREEK_TABLE structure:**
+```cpp
+struct GreekEntry {
+    const char* name;    // "alpha", "beta", etc.
+    int32_t codepoint;   // Unicode: 0x03B1, 0x03B2
+    int tfm_pos;         // cmmi10 position: 11, 12, etc.
+};
+```
+
+**SYMBOL_TABLE structure:**
+```cpp
+struct SymbolEntry {
+    const char* name;    // "leq", "times", etc.
+    int32_t codepoint;   // Unicode codepoint
+    uint8_t atom_type;   // AtomType: BIN, REL, etc.
+    uint8_t font;        // SymFont: ROMAN, SYMBOL, etc.
+};
+```
+
+**BIG_OP_TABLE structure:**
+```cpp
+struct BigOpEntry {
+    const char* name;    // "sum", "int", etc.
+    int32_t codepoint;   // Unicode codepoint
+    int text_pos;        // Small size position in cmex10
+    int display_pos;     // Large size position in cmex10
+    bool uses_limits;    // Default limits behavior
+};
+```
 
 ---
 
@@ -787,7 +904,28 @@ dvitype test/latex/expected/math/test_fraction.dvi > ref.txt
 diff output.dvi.txt ref.txt
 ```
 
-### 12.5 Common Issues
+### 12.5 JSON Serialization
+
+The AST can be serialized to JSON for comparison testing:
+
+```cpp
+// Serialize MathAST to JSON
+StrBuf json;
+strbuf_init(&json);
+math_ast_to_json(ast, &json);
+// Output: {"type":"FRAC","above":{"type":"ORD",...},"below":{...}}
+```
+
+**JSON Output Format:**
+- Each node is an object with `type` field
+- Branches are nested objects: `body`, `above`, `below`, `superscript`, `subscript`
+- Atoms include: `command`, `codepoint`, `value`
+- Special fields per type: `phantom_type`, `box_type`, `style_type`, `size_level`
+
+**MathLive Comparison:**
+The JSON output is designed to be comparable with MathLive's AST structure, enabling automated testing via `test/latex/comparators/mathlive_ast_comparator.js`.
+
+### 12.6 Common Issues
 
 | Symptom | Likely Cause | Debug Approach |
 |---------|--------------|----------------|
