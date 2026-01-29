@@ -563,7 +563,8 @@ void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
             item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
             item = item->next;  continue;
         }
-        strbuf_append_format(tp->code_buf, "\n list_push(%s, ", is_elmt ? "el" : "ls");
+        // use list_push_spread to automatically spread spreadable arrays from for-expressions
+        strbuf_append_format(tp->code_buf, "\n list_push_spread(%s, ", is_elmt ? "el" : "ls");
         transpile_box_item(tp, item);
         strbuf_append_str(tp->code_buf, ");");
         item = item->next;
@@ -1240,25 +1241,70 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     strbuf_append_char(tp->code_buf, ';');
 }
 
+// Transpile decomposition: let a, b = expr OR let a, b at expr
+void transpile_decompose_expr(Transpiler* tp, AstDecomposeNode *dec_node, bool is_global = false) {
+    log_debug("transpile decompose expr, name_count=%d, is_named=%d", dec_node->name_count, dec_node->is_named);
+    
+    if (!dec_node || !dec_node->as || dec_node->name_count == 0) {
+        log_error("Error: invalid decompose node");
+        return;
+    }
+    
+    // For local scope: declare variables first, then use nested scope for temp
+    if (!is_global) {
+        // Declare all variables outside the helper scope
+        for (int i = 0; i < dec_node->name_count; i++) {
+            String* name = dec_node->names[i];
+            strbuf_append_str(tp->code_buf, "\n Item _");
+            strbuf_append_str_n(tp->code_buf, name->chars, name->len);
+            strbuf_append_str(tp->code_buf, ";");
+        }
+    }
+    
+    // Use a nested scope to avoid _dec_src redeclaration conflicts
+    strbuf_append_str(tp->code_buf, "\n {Item _dec_src=");
+    transpile_box_item(tp, dec_node->as);
+    strbuf_append_str(tp->code_buf, ";");
+    
+    // Assign values inside the nested scope
+    for (int i = 0; i < dec_node->name_count; i++) {
+        String* name = dec_node->names[i];
+        strbuf_append_str(tp->code_buf, "\n _");
+        strbuf_append_str_n(tp->code_buf, name->chars, name->len);
+        strbuf_append_char(tp->code_buf, '=');
+        
+        if (dec_node->is_named) {
+            // Named decomposition: get attribute by name
+            strbuf_append_str(tp->code_buf, "item_attr(_dec_src,\"");
+            strbuf_append_str_n(tp->code_buf, name->chars, name->len);
+            strbuf_append_str(tp->code_buf, "\");");
+        } else {
+            // Positional decomposition: get by index
+            strbuf_append_format(tp->code_buf, "item_at(_dec_src,%d);", i);
+        }
+    }
+    strbuf_append_str(tp->code_buf, "}");  // close the nested scope
+}
+
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global = false) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!let_node) { log_error("Error: missing let_node");  return; }
     
     AstNode *declare = let_node->declare;
     while (declare) {
-        // Additional validation for each declaration node
-        if (declare->node_type != AST_NODE_ASSIGN) {
-            log_error("Error: transpile_let_stam found non-assign node in declare chain");
-            // Skip this node and continue - defensive recovery
-            declare = declare->next;
-            continue;
+        // Handle both regular assignments and decompositions
+        if (declare->node_type == AST_NODE_ASSIGN) {
+            transpile_assign_expr(tp, (AstNamedNode*)declare, is_global);
+        } else if (declare->node_type == AST_NODE_DECOMPOSE) {
+            transpile_decompose_expr(tp, (AstDecomposeNode*)declare, is_global);
+        } else {
+            log_error("Error: transpile_let_stam found unexpected node type %d in declare chain", declare->node_type);
         }
-        transpile_assign_expr(tp, (AstNamedNode*)declare, is_global);
         declare = declare->next;
     }
 }
 
-void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
+void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, bool use_array) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!loop_node || !loop_node->as || !loop_node->as->type || !then) {
         log_error("Error: invalid loop_node");
@@ -1266,8 +1312,13 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     }
     Type * expr_type = loop_node->as->type;
     Type *item_type = nullptr;
-    // determine loop item type based on expression type
-    if (expr_type->type_id == LMD_TYPE_ARRAY) {
+    bool is_named = loop_node->is_named;  // 'at' keyword for attribute/named iteration
+    
+    // determine loop item type based on expression type and iteration mode
+    if (is_named) {
+        // 'at' iteration: iterating over attributes/fields
+        item_type = &TYPE_ANY;  // attribute values are always ANY
+    } else if (expr_type->type_id == LMD_TYPE_ARRAY) {
         TypeArray* array_type = (TypeArray*)expr_type;
         // Validate that the cast is safe by checking the nested pointer
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
@@ -1286,38 +1337,79 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         log_error("Error: transpile_loop_expr failed to determine item type");
         item_type = &TYPE_ANY; // fallback to ANY type for safety
     }
-    strbuf_append_str(tp->code_buf, 
-        expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
-        item_type->type_id == LMD_TYPE_INT ? " ArrayInt *arr=" :
-        item_type->type_id == LMD_TYPE_INT64 ? " ArrayInt64 *arr=" :
-        item_type->type_id == LMD_TYPE_FLOAT ? " ArrayFloat *arr=" :
-        expr_type->type_id == LMD_TYPE_ARRAY ? " Array *arr=" : 
-        " Item it=");
-    transpile_expr(tp, loop_node->as);
 
-    // start the loop
-    strbuf_append_str(tp->code_buf, 
-        expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { list_push(ls, ITEM_ERROR); } else { for (long i=rng->start; i<=rng->end; i++) {\n " : 
-        expr_type->type_id == LMD_TYPE_ARRAY ? ";\n if (!arr) { list_push(ls, ITEM_ERROR); } else { for (int i=0; i<arr->length; i++) {\n " :
-        ";\n int ilen = fn_len(it);\n for (int i=0; i<ilen; i++) {\n ");
+    // Helper: generate index variable declaration if present
+    bool has_index = loop_node->index_name != nullptr;
+    
+    if (is_named) {
+        // 'at' iteration: iterate over attributes/fields
+        // for k, v at expr -> k is key name, v is value
+        // for v at expr -> v is key name (single variable form)
+        strbuf_append_str(tp->code_buf, " Item it=");
+        transpile_box_item(tp, loop_node->as);
+        strbuf_append_str(tp->code_buf, ";\n ArrayList* _attr_keys=item_keys(it);\n");
+        strbuf_append_str(tp->code_buf, " for (int _ki=0; _attr_keys && _ki<_attr_keys->length; _ki++) {\n");
+        
+        if (has_index) {
+            // Two-variable form: for k, v at expr
+            // k (index_name) = key name, v (name) = value
+            strbuf_append_str(tp->code_buf, "  String* _");
+            strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+            strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
+            
+            strbuf_append_str(tp->code_buf, "  Item _");
+            strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
+            strbuf_append_str(tp->code_buf, "=item_attr(it, _");
+            strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+            strbuf_append_str(tp->code_buf, "->chars);\n");
+        } else {
+            // Single-variable form: for v at expr -> v is key name
+            strbuf_append_str(tp->code_buf, "  String* _");
+            strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
+            strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
+        }
+    } else {
+        // 'in' iteration: standard indexed iteration
+        strbuf_append_str(tp->code_buf, 
+            expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
+            item_type->type_id == LMD_TYPE_INT ? " ArrayInt *arr=" :
+            item_type->type_id == LMD_TYPE_INT64 ? " ArrayInt64 *arr=" :
+            item_type->type_id == LMD_TYPE_FLOAT ? " ArrayFloat *arr=" :
+            expr_type->type_id == LMD_TYPE_ARRAY ? " Array *arr=" : 
+            " Item it=");
+        transpile_expr(tp, loop_node->as);
 
-    // construct loop variable
-    write_type(tp->code_buf, item_type);
-    strbuf_append_str(tp->code_buf, " _");
-    strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
-    if (expr_type->type_id == LMD_TYPE_RANGE) {
-        strbuf_append_str(tp->code_buf, "=i;\n");
-    } 
-    else if (expr_type->type_id == LMD_TYPE_ARRAY) {
-        if (item_type->type_id == LMD_TYPE_STRING) {
-            strbuf_append_str(tp->code_buf, "=fn_string(arr->items[i]);\n");
+        // start the loop
+        strbuf_append_str(tp->code_buf, 
+            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " : 
+            expr_type->type_id == LMD_TYPE_ARRAY ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
+            ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
+
+        // generate index variable if present (for i, v in expr)
+        if (has_index) {
+            strbuf_append_str(tp->code_buf, "  long _");
+            strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
+            strbuf_append_str(tp->code_buf, "=_idx;\n");
+        }
+
+        // construct loop variable
+        write_type(tp->code_buf, item_type);
+        strbuf_append_str(tp->code_buf, " _");
+        strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
+        if (expr_type->type_id == LMD_TYPE_RANGE) {
+            strbuf_append_str(tp->code_buf, "=_idx;\n");
         } 
+        else if (expr_type->type_id == LMD_TYPE_ARRAY) {
+            if (item_type->type_id == LMD_TYPE_STRING) {
+                strbuf_append_str(tp->code_buf, "=fn_string(arr->items[_idx]);\n");
+            } 
+            else {
+                strbuf_append_str(tp->code_buf, "=arr->items[_idx];\n");
+            }        
+        }
         else {
-            strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
-        }        
-    }
-    else {
-        strbuf_append_str(tp->code_buf, "=item_at(it,i);\n");
+            strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
+        }
     }
 
     // nested loop variables
@@ -1325,18 +1417,24 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     if (next_loop) {
         log_debug("transpile nested loop");
         log_enter();
-        transpile_loop_expr(tp, (AstNamedNode*)next_loop, then);
+        transpile_loop_expr(tp, (AstLoopNode*)next_loop, then, use_array);
         log_leave();
     } 
     else { // loop body
         Type *then_type = then->type;
-        // assuming we are in a list context
-        strbuf_append_str(tp->code_buf, " list_push(ls,");
+        // push to array (spreadable) or list
+        if (use_array) {
+            strbuf_append_str(tp->code_buf, " array_push(arr_out,");
+        } else {
+            strbuf_append_str(tp->code_buf, " list_push(ls,");
+        }
         transpile_box_item(tp, then);
         strbuf_append_str(tp->code_buf, ");");
     }
     // end the loop
-    if (expr_type->type_id == LMD_TYPE_RANGE || expr_type->type_id == LMD_TYPE_ARRAY) strbuf_append_char(tp->code_buf, '}');
+    if (!is_named && (expr_type->type_id == LMD_TYPE_RANGE || expr_type->type_id == LMD_TYPE_ARRAY)) {
+        strbuf_append_char(tp->code_buf, '}');
+    }
     strbuf_append_str(tp->code_buf, " }\n");
 }
 
@@ -1349,14 +1447,14 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         return;
     }
     Type *then_type = for_node->then->type;
-    // init a list
-    strbuf_append_str(tp->code_buf, "({\n List* ls=list(); \n");
+    // init a spreadable array for for-expression results
+    strbuf_append_str(tp->code_buf, "({\n Array* arr_out=array_spreadable(); \n");
     AstNode *loop = for_node->loop;
     if (loop) {
-        transpile_loop_expr(tp, (AstNamedNode*)loop, for_node->then);
+        transpile_loop_expr(tp, (AstLoopNode*)loop, for_node->then, true);
     }
-    // return the list
-    strbuf_append_str(tp->code_buf, " list_end(ls);})");
+    // return the array
+    strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
 }
 
 // while statement (procedural only)
@@ -1485,11 +1583,37 @@ void transpile_items(Transpiler* tp, AstNode *item) {
     }
 }
 
+// check if any item in the list/array needs spreading (for-expression or spread operator)
+static bool has_spreadable_item(AstNode *item) {
+    while (item) {
+        if (item->node_type == AST_NODE_FOR_EXPR) {
+            return true;
+        }
+        // TODO: also check for spread operator when implemented
+        item = item->next;
+    }
+    return false;
+}
+
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     TypeArray *type = (TypeArray*)array_node->type;
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
+    
+    // for arrays with spreadable items (for-expressions), use push path
+    if (!is_int_array && !is_int64_array && !is_float_array && has_spreadable_item(array_node->item)) {
+        strbuf_append_str(tp->code_buf, "({\n Array* arr = array();\n");
+        AstNode* item = array_node->item;
+        while (item) {
+            strbuf_append_str(tp->code_buf, " array_push_spread(arr, ");
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ");\n");
+            item = item->next;
+        }
+        strbuf_append_str(tp->code_buf, " (Item)arr; })");
+        return;
+    }
     
     if (is_int_array) {
         strbuf_append_str(tp->code_buf, "({ArrayInt* arr = array_int(); array_int_fill(arr,");
@@ -1555,7 +1679,8 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, " list_end(ls);})");
         return;
     }
-    if (type->length < 10) {
+    // use push path if there are spreadable items (for-expressions) or many items
+    if (type->length < 10 && !has_spreadable_item(list_node->item)) {
         strbuf_append_str(tp->code_buf, "\n list_fill(ls,");
         strbuf_append_int(tp->code_buf, type->length);
         strbuf_append_char(tp->code_buf, ',');
@@ -1566,8 +1691,6 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         transpile_push_items(tp, list_node->item, false);
     }
 }
-
-// transpile procedural content - sequential statements without list wrapper
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile proc content");
     if (!list_node) { log_error("Error: missing list_node");  return; }
@@ -3254,12 +3377,23 @@ void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
     // declare global vars
     AstNode *decl = let_node->declare;
     while (decl) {
-        AstNamedNode *asn_node = (AstNamedNode*)decl;
-        Type *var_type = asn_node->type;
-        write_type(tp->code_buf, var_type);
-        strbuf_append_char(tp->code_buf, ' ');
-        write_var_name(tp->code_buf, asn_node, NULL);
-        strbuf_append_str(tp->code_buf, ";\n");
+        if (decl->node_type == AST_NODE_DECOMPOSE) {
+            // Handle decomposition - declare all variables as Item
+            AstDecomposeNode* dec_node = (AstDecomposeNode*)decl;
+            for (int i = 0; i < dec_node->name_count; i++) {
+                String* name = dec_node->names[i];
+                strbuf_append_str(tp->code_buf, "Item _");
+                strbuf_append_str_n(tp->code_buf, name->chars, name->len);
+                strbuf_append_str(tp->code_buf, ";\n");
+            }
+        } else {
+            AstNamedNode *asn_node = (AstNamedNode*)decl;
+            Type *var_type = asn_node->type;
+            write_type(tp->code_buf, var_type);
+            strbuf_append_char(tp->code_buf, ' ');
+            write_var_name(tp->code_buf, asn_node, NULL);
+            strbuf_append_str(tp->code_buf, ";\n");
+        }
         decl = decl->next;
     }
 }
@@ -3268,13 +3402,38 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
     // declare global vars
     AstNode *decl = let_node->declare;
     while (decl) {
-        AstNamedNode *asn_node = (AstNamedNode*)decl;
-        strbuf_append_str(tp->code_buf, "\n ");
-        strbuf_append_char(tp->code_buf, ' ');
-        write_var_name(tp->code_buf, asn_node, NULL);
-        strbuf_append_char(tp->code_buf, '=');
-        transpile_expr(tp, asn_node->as);
-        strbuf_append_char(tp->code_buf, ';');
+        if (decl->node_type == AST_NODE_DECOMPOSE) {
+            // Handle decomposition at global level using a nested scope
+            AstDecomposeNode* dec_node = (AstDecomposeNode*)decl;
+            strbuf_append_str(tp->code_buf, "\n {Item _dec_src=");
+            transpile_box_item(tp, dec_node->as);
+            strbuf_append_str(tp->code_buf, ";");
+            
+            // Decompose into individual variables (global - no type declaration)
+            for (int i = 0; i < dec_node->name_count; i++) {
+                String* name = dec_node->names[i];
+                strbuf_append_str(tp->code_buf, "\n  _");
+                strbuf_append_str_n(tp->code_buf, name->chars, name->len);
+                strbuf_append_char(tp->code_buf, '=');
+                
+                if (dec_node->is_named) {
+                    strbuf_append_str(tp->code_buf, "item_attr(_dec_src,\"");
+                    strbuf_append_str_n(tp->code_buf, name->chars, name->len);
+                    strbuf_append_str(tp->code_buf, "\");");
+                } else {
+                    strbuf_append_format(tp->code_buf, "item_at(_dec_src,%d);", i);
+                }
+            }
+            strbuf_append_str(tp->code_buf, "}");  // close nested scope
+        } else {
+            AstNamedNode *asn_node = (AstNamedNode*)decl;
+            strbuf_append_str(tp->code_buf, "\n ");
+            strbuf_append_char(tp->code_buf, ' ');
+            write_var_name(tp->code_buf, asn_node, NULL);
+            strbuf_append_char(tp->code_buf, '=');
+            transpile_expr(tp, asn_node->as);
+            strbuf_append_char(tp->code_buf, ';');
+        }
         decl = decl->next;
     }
 }

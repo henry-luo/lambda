@@ -516,6 +516,24 @@ void list_push(List *list, Item item) {
     // log_item({.list = list}, "list_after_push");
 }
 
+// push item to list, spreading spreadable arrays inline
+void list_push_spread(List *list, Item item) {
+    TypeId type_id = get_type_id(item);
+    // check if this is a spreadable array
+    if (type_id == LMD_TYPE_ARRAY) {
+        Array* arr = item.array;
+        if (arr && arr->is_spreadable) {
+            log_debug("list_push_spread: spreading array of length %ld", arr->length);
+            for (int i = 0; i < arr->length; i++) {
+                list_push(list, arr->items[i]);
+            }
+            return;
+        }
+    }
+    // not spreadable, push as-is
+    list_push(list, item);
+}
+
 ConstItem List::get(int index) const {
     log_debug("list_get_const %p, index: %d", this, index);
     if (!this) { return null_result; }

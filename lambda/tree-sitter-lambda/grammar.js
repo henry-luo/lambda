@@ -563,9 +563,22 @@ module.exports = grammar({
     ),
 
     // use prec.right so the expression is consumed greedily
-    assign_expr: $ => prec.right(seq(
-      field('name', $.identifier),
-      optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
+    // Single assignment: let x = expr
+    // Positional decomposition: let a, b = expr
+    // Named decomposition: let a, b at expr
+    assign_expr: $ => prec.right(choice(
+      // single variable assignment
+      seq(
+        field('name', $.identifier),
+        optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
+      ),
+      // multi-variable decomposition: let a, b = expr OR let a, b at expr
+      seq(
+        field('name', $.identifier),
+        repeat1(seq(',', field('name', $.identifier))),
+        field('decompose', choice('=', 'at')),
+        field('as', $._expression),
+      ),
     )),
 
     let_expr: $ => seq(
@@ -591,8 +604,29 @@ module.exports = grammar({
       optional(seq('else', '{', field('else', $.content), '}')),
     )),
 
-    loop_expr: $ => seq(
-      field('name', $.identifier), 'in', field('as', $._expression),
+    // Loop variable binding with optional index and 'in' or 'at' keyword
+    // Single variable: for v in expr
+    // Indexed: for i, v in expr
+    // Attribute iteration: for v at expr OR for k, v at expr
+    loop_expr: $ => choice(
+      // single variable with 'in': for v in expr
+      seq(
+        field('name', $.identifier), 'in', field('as', $._expression)
+      ),
+      // single variable with 'at': for v at expr
+      seq(
+        field('name', $.identifier), 'at', field('as', $._expression)
+      ),
+      // two variables with 'in': for i, v in expr
+      seq(
+        field('index', $.identifier), ',', field('name', $.identifier),
+        'in', field('as', $._expression)
+      ),
+      // two variables with 'at': for k, v at expr
+      seq(
+        field('index', $.identifier), ',', field('name', $.identifier),
+        'at', field('as', $._expression)
+      ),
     ),
 
     // use prec.right so the body expression is consumed greedily

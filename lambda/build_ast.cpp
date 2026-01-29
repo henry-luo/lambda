@@ -1719,7 +1719,41 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named);
+
 AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definition) {
+    // Check if this is a decomposition (multiple names)
+    // Count name fields to detect decomposition pattern
+    TSTreeCursor cursor = ts_tree_cursor_new(asn_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int name_count = 0;
+    bool has_decompose_field = false;
+    bool is_named_decompose = false;
+    
+    while (has_child) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_NAME) {
+            name_count++;
+        }
+        if (field_id == FIELD_DECOMPOSE) {
+            has_decompose_field = true;
+            // Check if it's 'at' or '='
+            TSNode decompose_node = ts_tree_cursor_current_node(&cursor);
+            TSSymbol sym = ts_node_symbol(decompose_node);
+            if (sym == anon_sym_at) {
+                is_named_decompose = true;
+            }
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    // If multiple names or explicit decompose field, use decomposition
+    if (name_count > 1 || has_decompose_field) {
+        return build_decompose_expr(tp, asn_node, is_named_decompose);
+    }
+    
+    // Single variable assignment (existing logic)
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
@@ -1786,6 +1820,75 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
 
     // push the name to the name stack
     push_name(tp, ast_node, NULL);
+    return (AstNode*)ast_node;
+}
+
+// Build decomposition expression: let a, b = expr OR let a, b at expr
+AstNode* build_decompose_expr(Transpiler* tp, TSNode asn_node, bool is_named) {
+    log_debug("build decompose expr, is_named=%d", is_named);
+    
+    // Count names first
+    TSTreeCursor cursor = ts_tree_cursor_new(asn_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int name_count = 0;
+    while (has_child) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_NAME) {
+            name_count++;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    if (name_count == 0) {
+        log_error("decompose: no variable names found");
+        return nullptr;
+    }
+    
+    AstDecomposeNode* ast_node = (AstDecomposeNode*)alloc_ast_node(tp, AST_NODE_DECOMPOSE, asn_node, sizeof(AstDecomposeNode));
+    ast_node->name_count = name_count;
+    ast_node->is_named = is_named;
+    ast_node->names = (String**)pool_calloc(tp->pool, sizeof(String*) * name_count);
+    
+    // Collect all names
+    cursor = ts_tree_cursor_new(asn_node);
+    has_child = ts_tree_cursor_goto_first_child(&cursor);
+    int idx = 0;
+    while (has_child) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_NAME) {
+            TSNode name_node = ts_tree_cursor_current_node(&cursor);
+            int start_byte = ts_node_start_byte(name_node);
+            StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
+            ast_node->names[idx] = name_pool_create_strview(tp->name_pool, name_view);
+            log_debug("decompose name[%d]: %.*s", idx, (int)name_view.length, name_view.str);
+            idx++;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    // Build the source expression
+    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
+    if (ts_node_is_null(val_node)) {
+        log_error("decompose: missing source expression");
+        ast_node->as = nullptr;
+        ast_node->type = &TYPE_ANY;
+    } else {
+        ast_node->as = build_expr(tp, val_node);
+        ast_node->type = &TYPE_ANY;  // decomposition itself doesn't have a single type
+    }
+    
+    // Push all names to the name stack
+    for (int i = 0; i < name_count; i++) {
+        // Create a temporary named node for each variable
+        AstNamedNode* var_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+        var_node->name = ast_node->names[i];
+        var_node->type = &TYPE_ANY;  // type will be determined at runtime
+        var_node->as = nullptr;
+        push_name(tp, var_node, NULL);
+    }
+    
     return (AstNode*)ast_node;
 }
 
@@ -2414,19 +2517,55 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
 
 AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     log_debug("build loop expr");
-    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstNamedNode));
+    AstLoopNode* ast_node = (AstLoopNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstLoopNode));
+    ast_node->index_name = NULL;  // default: no index variable
+    ast_node->is_named = false;   // default: 'in' keyword (not 'at')
 
+    // Check for optional index variable (first identifier in 'for i, v in/at expr')
+    TSNode index_node = ts_node_child_by_field_id(loop_node, FIELD_INDEX);
+    if (!ts_node_is_null(index_node)) {
+        int start_byte = ts_node_start_byte(index_node);
+        StrView index_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(index_node) - start_byte };
+        ast_node->index_name = name_pool_create_strview(tp->name_pool, index_view);
+        log_debug("loop has index variable: %.*s", (int)index_view.length, index_view.str);
+    }
+
+    // Get the main variable name
     TSNode name = ts_node_child_by_field_id(loop_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+
+    // Check for 'at' keyword by examining the node children
+    // The grammar produces different variants, we detect 'at' by checking if the source contains 'at'
+    // A more robust way: check if the node contains 'at' token
+    TSTreeCursor cursor = ts_tree_cursor_new(loop_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_child) {
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        TSSymbol sym = ts_node_symbol(child);
+        if (sym == anon_sym_at) {
+            ast_node->is_named = true;
+            log_debug("loop uses 'at' keyword (named/attribute iteration)");
+            break;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
 
     TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_AS);
     ast_node->as = build_expr(tp, expr_node);
 
     // determine the type of the variable
     Type* expr_type = ast_node->as->type;
-    if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST) {
+    if (ast_node->is_named) {
+        // 'at' iteration: for elements, iterates attributes; for maps, iterates key-value pairs
+        if (expr_type->type_id == LMD_TYPE_ELEMENT || expr_type->type_id == LMD_TYPE_MAP) {
+            ast_node->type = &TYPE_ANY;  // attribute values can be any type
+        } else {
+            ast_node->type = &TYPE_ANY;
+        }
+    } else if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST) {
         // Safely determine nested type
         TypeArray* array_type = (TypeArray*)expr_type;
         // Validate that the cast is safe by checking the nested pointer
@@ -2445,8 +2584,19 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
         ast_node->type = expr_type;
     }
 
-    // push the name to the name stack
-    push_name(tp, ast_node, NULL);
+    // push the index name to the name stack if present
+    if (ast_node->index_name) {
+        // Create a temporary node for the index variable
+        AstNamedNode* index_entry = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstNamedNode));
+        index_entry->name = ast_node->index_name;
+        // For 'at' iteration, index (first var) is the key name (string)
+        // For 'in' iteration, index (first var) is the numeric index (int)
+        index_entry->type = ast_node->is_named ? &TYPE_STRING : &TYPE_INT;
+        push_name(tp, index_entry, NULL);
+    }
+
+    // push the main name to the name stack
+    push_name(tp, (AstNamedNode*)ast_node, NULL);
     return (AstNode*)ast_node;
 }
 
