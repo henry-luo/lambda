@@ -1,6 +1,6 @@
 # LaTeX Math Typesetting Pipeline - Master Design Document
 
-**Date:** January 23, 2026
+**Date:** January 29, 2026
 **Status:** Living Document
 **Purpose:** Comprehensive reference for math typesetting implementation and development
 
@@ -20,7 +20,8 @@
 10. [Current Status & Known Issues](#10-current-status--known-issues)
 11. [Development Roadmap](#11-development-roadmap)
 12. [Debugging Guide](#12-debugging-guide)
-13. [References](#13-references)
+13. [Supported Commands](#13-supported-commands)
+14. [References](#14-references)
 
 ---
 
@@ -485,11 +486,11 @@ Generates PDF via DVI intermediate or direct PDF primitives.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `tex_math_ast.hpp` | ~290 | MathAST node definitions |
-| `tex_math_ast_builder.cpp` | ~1500 | Phase A: Parse → MathAST |
-| `tex_math_ast_typeset.cpp` | ~1500 | Phase B: MathAST → TexNode |
-| `tex_math_bridge.hpp` | ~400 | MathContext, typesetting API |
-| `tex_math_bridge.cpp` | ~2300 | Core math typesetting functions |
+| `tex_math_ast.hpp` | ~340 | MathAST node definitions |
+| `tex_math_ast_builder.cpp` | ~2630 | Phase A: Parse → MathAST |
+| `tex_math_ast_typeset.cpp` | ~1580 | Phase B: MathAST → TexNode |
+| `tex_math_bridge.hpp` | ~385 | MathContext, typesetting API |
+| `tex_math_bridge.cpp` | ~1460 | Core math typesetting functions |
 
 ### 7.2 TeX Node System
 
@@ -505,59 +506,75 @@ Generates PDF via DVI intermediate or direct PDF primitives.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `tex_tfm.hpp` | ~280 | TFM structures, parameter indices |
-| `tex_tfm.cpp` | ~800 | TFM parsing, delimiter selection |
-| `tex_font_adapter.hpp` | ~200 | Dual font provider interface |
+| `tex_tfm.cpp` | ~1150 | TFM parsing, delimiter selection |
+| `tex_font_adapter.hpp` | ~260 | Dual font provider interface |
 
 ### 7.4 Output Renderers
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `tex_dvi_out.cpp` | ~900 | DVI bytecode generation |
-| `tex_svg_out.cpp` | ~600 | SVG string generation |
-| `tex_html_render.cpp` | ~400 | HTML+CSS generation |
-| `tex_pdf_out.cpp` | ~400 | PDF output |
+| `tex_dvi_out.cpp` | ~1195 | DVI bytecode generation |
+| `tex_svg_out.cpp` | ~715 | SVG string generation |
+| `tex_html_render.cpp` | ~745 | HTML+CSS generation |
+| `tex_pdf_out.cpp` | ~505 | PDF output |
 
 ### 7.5 Document Model
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `tex_document_model.hpp` | ~820 | DocElement, DocTextStyle |
-| `tex_document_model.cpp` | ~7500 | Full document processing |
-| `tex_doc_model_html.cpp` | ~1200 | DocElement → HTML |
+| `tex_document_model.hpp` | ~825 | DocElement, DocTextStyle |
+| `tex_document_model.cpp` | ~7685 | Full document processing |
+| `tex_doc_model_html.cpp` | ~1350 | DocElement → HTML |
 
 ---
 
 ## 8. Testing Infrastructure
 
-### 8.1 DVI Comparison Tests
+### 8.1 MathLive AST Comparison Tests
 
-**Location:** `test/test_latex_dvi_compare_gtest.cpp`
+**Location:** `test/latex/test_math_comparison.js`
 
 **Strategy:**
-- Compare Lambda DVI output against reference DVI from TeX
-- Use **character frequency comparison** (order-independent)
-- Reference files in `test/latex/expected/`
-- Fixtures in `test/latex/fixtures/`
+- Compare Lambda math AST output against MathLive reference
+- Weighted scoring: AST 50%, HTML 49%, DVI 1%
+- Reference data from MathLive's parseLatex() function
+- Fixtures in `test/latex/fixtures/math/` and `test/latex/fixtures/math/mathlive/`
 
-**Test Classes:**
-```cpp
-DVICompareBaselineTest  // Must pass 100% - core functionality
-DVICompareExtendedTest  // Work in progress - advanced features
-```
+**Comparators** (`test/latex/comparators/`):
+- `mathlive_ast_comparator.js` - AST structure comparison
+- `html_comparator.js` - HTML output comparison
+- `dvi_comparator.js` - DVI output comparison
 
 **Current Status (January 2026):**
-- **Baseline Tests:** 18-20 passing
-- **Extended Tests:** ~46 tests for complex constructs
+- **Total Tests:** 248 test cases
+- **Weighted Score:** 67.1%
+- **Category Scores:** radicals 74%, operators 74%, greek 73.3%, delims 72.6%, accents 70.6%
 
 ### 8.2 Test Fixture Categories
 
+**Math-specific fixtures** (`test/latex/fixtures/math/`):
+
+| Category | Files | Description |
+|----------|-------|-------------|
+| `accents_*.tex` | 2 | Accent commands (\hat, \bar, etc.) |
+| `arrays_*.tex` | 2 | Arrays and matrices |
+| `bigops_*.tex` | 2 | Big operators (\sum, \int) |
+| `delims_*.tex` | 2 | Delimiters (\left, \right) |
+| `fracs_*.tex` | 3 | Fractions (\frac, \binom) |
+| `greek_*.tex` | 2 | Greek letters |
+| `scripts_*.tex` | 2 | Sub/superscripts |
+| `symbols_*.tex` | 2 | Relations, arrows, operators |
+| `misc_*.tex` | 4 | Mixed/complex expressions |
+
+**Document fixtures** (`test/latex/fixtures/`):
+
 | Category | Path | Description |
 |----------|------|-------------|
-| `basic/` | Simple text | Plain LaTeX text |
-| `math/` | Math formulas | Fractions, roots, scripts |
-| `primitives/` | TeX primitives | \hskip, \kern, \penalty |
-| `structure/` | Document structure | Sections, headings |
-| `spacing/` | Spacing | Glue, boxes |
+| `basic/` | 3 files | Plain LaTeX text |
+| `fonts/` | 24 files | Font selection and sizing |
+| `graphics/` | 24 files | TikZ, pictures |
+| `math/` | 33 files | Math formulas |
+| `expansion/` | 15 files | Macro expansion |
 
 ### 8.3 Running Tests
 
@@ -565,14 +582,20 @@ DVICompareExtendedTest  // Work in progress - advanced features
 # Build and run all tests
 make build-test && make test
 
-# Run only baseline tests
-./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareBaselineTest.*"
+# Run MathLive comparison tests (recommended)
+node test/latex/test_math_comparison.js
 
-# Run specific test
-./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareBaselineTest.Fraction"
+# Run DVI comparison tests
+./test/test_latex_dvi_compare_gtest.exe
 
-# Verbose output
-./test/test_latex_dvi_compare_gtest.exe --gtest_filter="DVICompareBaselineTest.*" --verbose
+# Run math AST unit tests
+./test/test_math_gtest.exe
+
+# Run extended math tests
+./test/test_tex_math_extended_gtest.exe
+
+# Run specific GTest filter
+./test/test_math_gtest.exe --gtest_filter="MathASTTest.*"
 ```
 
 ### 8.4 Regenerating Reference Files
@@ -634,57 +657,78 @@ node utils/generate_latex_refs.js --output-format=dvi --force
 
 ### 10.1 Working Features (Baseline)
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Simple math | ✅ | Variables, numbers |
-| Greek letters | ✅ | \alpha, \beta, etc. |
-| Fractions | ✅ | \frac, nested |
-| Square roots | ✅ | \sqrt, \sqrt[n] |
-| Sub/superscripts | ✅ | x_i^n |
-| Basic delimiters | ✅ | \left( \right) |
-| Binary operators | ✅ | +, -, \times, \cdot |
-| Relations | ✅ | =, <, >, \leq |
-| Big operators | ✅ | \sum, \int (basic) |
-| Inter-atom spacing | ✅ | TeX spacing rules |
+| Feature | Status | Score | Notes |
+|---------|--------|-------|-------|
+| Radicals | ✅ | 74.0% | \sqrt, \sqrt[n] |
+| Operators | ✅ | 74.0% | \times, \cdot, \pm |
+| Greek letters | ✅ | 73.3% | \alpha, \beta, etc. |
+| Nested expressions | ✅ | 73.0% | Deeply nested structures |
+| Delimiters | ✅ | 72.6% | \left( \right), sizing |
+| Accents | ✅ | 70.6% | \hat, \bar, \vec |
+| Boxes | ✅ | 70.0% | \phantom, \smash, overlaps |
+| Fonts | ✅ | 67.2% | \mathbf, \mathbb, etc. |
+| Fractions | ✅ | 66.9% | \frac, \binom, nested |
+| Symbols | ✅ | 66.2% | Relations, arrows |
+| Big operators | ✅ | 65.7% | \sum, \int with limits |
 
 ### 10.2 In Progress (Extended)
 
-| Feature | Status | Issue |
-|---------|--------|-------|
-| Accents | ⚠️ | Font selection, positioning |
-| Wide accents | ⚠️ | \widehat, \widetilde sizing |
-| Extensible arrows | ⚠️ | \xrightarrow not implemented |
-| Arrays/matrices | ⚠️ | Alignment incomplete |
-| Phantom boxes | ⚠️ | \phantom, \vphantom |
-| Negation | ⚠️ | \not overlay |
-| `\over` primitive | ⚠️ | Grouping issues |
-| Complex limits | ⚠️ | \limits, \nolimits |
+| Feature | Status | Score | Issue |
+|---------|--------|-------|-------|
+| Spacing | ⚠️ | 64.7% | \hskip dimension parsing |
+| Negation | ⚠️ | 64.3% | \not overlay positioning |
+| Styles | ⚠️ | 61.1% | \displaystyle propagation |
+| Scripts | ⚠️ | 56.6% | Complex \limits/\nolimits |
+| Arrays/matrices | ⚠️ | 54.4% | Column alignment incomplete |
+| Misc | ⚠️ | 48.7% | Edge cases, complex nesting |
 
-### 10.3 Known Test Failures
+### 10.3 Test Score Breakdown
 
-See `vibe/Latex_Math_Design5.md` for detailed analysis of extended test failures.
+**By Category (MathLive comparison):**
+```
+radicals      74.0%  ██████████████░░░░░░
+operators     74.0%  ██████████████░░░░░░
+greek         73.3%  ██████████████░░░░░░
+nested        73.0%  ██████████████░░░░░░
+delims        72.6%  ██████████████░░░░░░
+accents       70.6%  ██████████████░░░░░░
+boxes         70.0%  ██████████████░░░░░░
+fonts         67.2%  █████████████░░░░░░░
+fracs         66.9%  █████████████░░░░░░░
+symbols       66.2%  █████████████░░░░░░░
+bigops        65.7%  █████████████░░░░░░░
+spacing       64.7%  ████████████░░░░░░░░
+negation      64.3%  ████████████░░░░░░░░
+subjects      61.5%  ████████████░░░░░░░░
+styles        61.1%  ████████████░░░░░░░░
+scripts       56.6%  ███████████░░░░░░░░░
+arrays        54.4%  ██████████░░░░░░░░░░
+misc          48.7%  █████████░░░░░░░░░░░
+```
+
+See `vibe/Latex_Math_Test.md` for detailed test analysis.
 
 ---
 
 ## 11. Development Roadmap
 
-### Phase 1: Quick Wins (1-2 days each)
+### Phase 1: Quick Wins (Target: 70%+ overall)
 
-1. **Phantom boxes** - `\phantom`, `\hphantom`, `\vphantom`, `\smash`
-2. **`\not` overlay** - Negation slash positioning
-3. **Font scaling** - Fix heading font sizes (cmbx12 vs cmbx10)
+1. **Scripts handling** - Fix `\limits`/`\nolimits` explicit commands (56.6% → 65%+)
+2. **Spacing dimensions** - Parse `\hskip 3em`, `\kern 2pt` (64.7% → 70%+)
+3. **Negation overlay** - Fix `\not` positioning (64.3% → 70%+)
 
-### Phase 2: Core Improvements (3-5 days each)
+### Phase 2: Core Improvements (Target: 75%+ overall)
 
-4. **Accent system** - Font selection, skew correction, wide accents
-5. **`\over`/`\choose`** - Generalized fraction primitives
-6. **Complex scripts** - `\mathop`, `\limits`, `\nolimits`
+4. **Array layout** - Two-pass column width, alignment (54.4% → 65%+)
+5. **Style propagation** - `\displaystyle`, `\textstyle` in nested contexts
+6. **Edge cases** - misc category improvements (48.7% → 60%+)
 
-### Phase 3: Major Features (1-2 weeks each)
+### Phase 3: Advanced Features (Target: 80%+ overall)
 
-7. **Array layout** - Two-pass column width calculation
-8. **Extensible arrows** - `\xrightarrow`, `\xleftarrow`
-9. **Wide accents** - Extensible `\widehat`, `\widetilde`
+7. **Extensible arrows** - `\xrightarrow{text}`, `\xleftarrow{text}` with labels
+8. **Wide accents** - Extensible `\widehat`, `\widetilde` with proper sizing
+9. **Complex environments** - `align`, `gather`, `cases` environments
 
 ### Phase 4: HTML Output Integration
 
@@ -755,29 +799,99 @@ diff output.dvi.txt ref.txt
 
 ---
 
-## 13. References
+## 13. Supported Commands
 
-### 13.1 TeX Documentation
+The math grammar supports **275 unique LaTeX commands**. While most are math-specific (operators, symbols, Greek letters), a subset of general LaTeX typesetting commands are also available within math mode.
+
+### 13.1 General LaTeX Commands in Math Mode
+
+These commands are general-purpose LaTeX constructs that work within math environments:
+
+| Command | Category | Description |
+|---------|----------|-------------|
+| `\begin`, `\end` | Environment | Start/end environments (array, matrix, etc.) |
+| `\text` | Text | Insert text within math |
+| `\textbf`, `\textit`, `\textrm`, `\textsf`, `\texttt` | Text Styling | Bold, italic, roman, sans-serif, typewriter text |
+| `\mbox`, `\hbox`, `\fbox` | Boxes | Text boxes, framed boxes |
+| `\boxed` | Boxes | Box around math expression |
+| `\bbox` | Boxes | Background box with optional color/padding |
+| `\color`, `\textcolor`, `\colorbox` | Color | Text and background coloring |
+| `\hspace` | Spacing | Horizontal space with dimension |
+| `\quad`, `\qquad` | Spacing | Em and 2em horizontal space |
+| `\phantom`, `\hphantom`, `\vphantom` | Phantom | Invisible boxes for spacing |
+| `\smash` | Phantom | Zero height/depth box |
+| `\llap`, `\rlap`, `\clap` | Overlap | Left, right, center overlap boxes |
+| `\mathllap`, `\mathrlap`, `\mathclap` | Overlap | Math-mode overlap boxes |
+| `\rule` | Rules | Draw horizontal/vertical rules |
+| `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle` | Style | Force math style |
+| `\left`, `\right`, `\middle` | Delimiters | Auto-sizing delimiter groups |
+| `\big`, `\Big`, `\bigg`, `\Bigg` | Delimiters | Fixed-size delimiter scaling |
+| `\bigl`, `\bigm`, `\bigr`, etc. | Delimiters | Sized delimiters with atom class |
+| `\overline`, `\underline` | Decorations | Over/under lines |
+| `\overbrace`, `\underbrace` | Decorations | Braces with optional labels |
+
+### 13.2 Font-Switching Commands
+
+These commands change the font family within math mode:
+
+| Command | Font Family | Example |
+|---------|-------------|---------|
+| `\mathrm` | Roman (upright) | $\mathrm{sin}$ |
+| `\mathit` | Italic | $\mathit{diff}$ |
+| `\mathbf` | Bold | $\mathbf{x}$ |
+| `\mathsf` | Sans-serif | $\mathsf{A}$ |
+| `\mathtt` | Typewriter | $\mathtt{code}$ |
+| `\mathbb` | Blackboard bold | $\mathbb{R}$ |
+| `\mathcal` | Calligraphic | $\mathcal{L}$ |
+| `\mathfrak` | Fraktur | $\mathfrak{g}$ |
+| `\mathscr` | Script | $\mathscr{H}$ |
+| `\operatorname` | Operator name | $\operatorname{argmax}$ |
+
+### 13.3 Command Statistics
+
+| Category | Count | Percentage |
+|----------|-------|------------|
+| Math-specific commands | ~240 | ~87% |
+| General LaTeX commands | ~35 | ~13% |
+| **Total** | **275** | **100%** |
+
+**Math-specific categories include:**
+- Greek letters (lowercase and uppercase)
+- Binary operators (+, ×, ⊕, etc.)
+- Relations (=, ≤, ≈, ⊂, etc.)
+- Arrows (→, ⇒, ↔, etc.)
+- Big operators (∑, ∏, ∫, etc.)
+- Fractions and roots (`\frac`, `\sqrt`, `\binom`)
+- Accents (`\hat`, `\bar`, `\vec`, `\dot`)
+- Delimiters (parentheses, brackets, braces)
+- Named functions (`\sin`, `\cos`, `\log`, `\lim`)
+
+---
+
+## 14. References
+
+### 14.1 TeX Documentation
 
 - **TeXBook, Chapter 17** - More About Math (atoms, styles)
 - **TeXBook, Chapter 18** - Fine Points (spacing, \over)
 - **TeXBook, Appendix G** - 21 Rules of math typesetting
 
-### 13.2 Internal Design Documents
+### 14.2 Internal Design Documents
 
 | Document | Focus |
 |----------|-------|
-| `Latex_Math_Design.md` | Initial unified pipeline proposal |
-| `Latex_Math_Design2.md` | DVI pipeline, two-phase design |
-| `Latex_Math_Design3_Html_Output.md` | HTML output integration |
-| `Latex_Math_Design4.md` | Delimiter sizing, test approach |
-| `Latex_Math_Design5.md` | Extended test analysis, roadmap |
+| `Latex_Math_Overall_Design.md` | This document - master reference |
+| `Latex_Math_Test.md` | MathLive comparison test analysis |
+| `Mathlive.md` | MathLive integration notes |
+| `Math_Spacing.md` | TeX spacing rules and implementation |
+| `Math_Input.md` | Math input parsing |
+| `Math_Ascii.md` | ASCII math notation |
 
-### 13.3 External References
+### 14.3 External References
 
 - MathLive source: `./mathlive/src/core/` - Atom, Box, VBox
 - LaTeXML source: Math grammar, operator precedence
 - TFM format: TeX: The Program, Part 30
 - DVI format: TeXBook Appendix A
 
-*Last Updated: January 23, 2026*
+*Last Updated: January 29, 2026*
