@@ -1609,7 +1609,7 @@ MathASTNode* MathASTBuilder::build_accent(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
-    // box_command: \bbox, \fbox, \boxed, \mbox, \colorbox with content
+    // box_command: \bbox, \fbox, \boxed, \mbox, \colorbox, \llap, \rlap, etc. with content
     TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
     TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
 
@@ -1623,6 +1623,8 @@ MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
             cmd = arena_copy_str(text + 1, len - 1);
         }
         // Determine box type from command name
+        // Box types: 0=bbox, 1=fbox, 2=mbox, 3=colorbox, 4=boxed
+        // Overlap types: 5=llap, 6=rlap, 7=clap, 8=mathllap, 9=mathrlap, 10=mathclap
         if (strstr(cmd, "fbox")) {
             box_type = 1;  // fbox
         } else if (strstr(cmd, "mbox")) {
@@ -1631,6 +1633,18 @@ MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
             box_type = 3;  // colorbox
         } else if (strstr(cmd, "boxed")) {
             box_type = 4;  // boxed
+        } else if (strcmp(cmd, "llap") == 0) {
+            box_type = 5;  // llap - left overlap
+        } else if (strcmp(cmd, "rlap") == 0) {
+            box_type = 6;  // rlap - right overlap
+        } else if (strcmp(cmd, "clap") == 0) {
+            box_type = 7;  // clap - center overlap
+        } else if (strcmp(cmd, "mathllap") == 0) {
+            box_type = 8;  // mathllap - math mode left overlap
+        } else if (strcmp(cmd, "mathrlap") == 0) {
+            box_type = 9;  // mathrlap - math mode right overlap
+        } else if (strcmp(cmd, "mathclap") == 0) {
+            box_type = 10; // mathclap - math mode center overlap
         }
     }
 
@@ -2470,18 +2484,32 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
         case MathNodeType::BOX:
             // MathLive expects: command field matching the box command
             // Box type: 0=bbox, 1=fbox, 2=mbox, 3=colorbox, 4=boxed
+            // Overlap types: 5=llap, 6=rlap, 7=clap, 8=mathllap, 9=mathrlap, 10=mathclap
             {
                 const char* box_cmd = nullptr;
+                const char* box_align = nullptr;  // for overlap types
                 switch (node->box.box_type) {
                     case 0: box_cmd = "bbox"; break;
                     case 1: box_cmd = "fbox"; break;
                     case 2: box_cmd = "mbox"; break;
                     case 3: box_cmd = "colorbox"; break;
                     case 4: box_cmd = "boxed"; break;
+                    case 5: box_cmd = "llap"; box_align = "left"; break;
+                    case 6: box_cmd = "rlap"; box_align = "right"; break;
+                    case 7: box_cmd = "clap"; box_align = "center"; break;
+                    case 8: box_cmd = "mathllap"; box_align = "left"; break;
+                    case 9: box_cmd = "mathrlap"; box_align = "right"; break;
+                    case 10: box_cmd = "mathclap"; box_align = "center"; break;
                 }
                 if (box_cmd) {
                     ::strbuf_append_str(out, ",\"command\":\"\\\\");
                     ::strbuf_append_str(out, box_cmd);
+                    ::strbuf_append_str(out, "\"");
+                }
+                // For overlap types, add align field to match MathLive's structure
+                if (box_align) {
+                    ::strbuf_append_str(out, ",\"align\":\"");
+                    ::strbuf_append_str(out, box_align);
                     ::strbuf_append_str(out, "\"");
                 }
             }
