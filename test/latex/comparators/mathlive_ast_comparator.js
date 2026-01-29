@@ -125,10 +125,14 @@ function areTypesCompatible(lambdaType, mathliveType) {
         ['op', 'mop', 'extensible-symbol'],  // big operators
         ['overunder', 'extensible-symbol'],  // big operators with limits
         ['delimited', 'leftright'],
+        ['array', 'array'],  // both use 'array' (case-insensitive)
+        ['array_row', 'array-row'],
+        ['array_cell', 'array-cell'],
         ['scripts', 'subsup'],
         ['box', 'minner'],
         ['style', 'group'],
         ['sized_delim', 'sizeddelim', 'mopen', 'mclose'],
+        ['not', 'overlap'],  // negation/overlay
     ];
 
     for (const group of equivalentTypes) {
@@ -379,6 +383,53 @@ function normalizeMathLiveAST(node) {
 }
 
 /**
+ * Normalize Lambda AST to be more comparable with MathLive's structure.
+ *
+ * Key transformations:
+ * 1. DELIMITED containing ARRAY -> ARRAY with leftDelim/rightDelim (matches MathLive matrices)
+ */
+function normalizeLambdaAST(node) {
+    if (!node) return null;
+
+    if (Array.isArray(node)) {
+        return node.map(normalizeLambdaAST);
+    }
+
+    if (typeof node !== 'object') return node;
+
+    // Special case: DELIMITED with ARRAY body -> flatten to ARRAY with delimiters
+    const nodeType = normalizeType(node.type);
+    if (nodeType === 'delimited' && node.body) {
+        const body = Array.isArray(node.body) ? node.body[0] : node.body;
+        const bodyType = body && typeof body === 'object' ? normalizeType(body.type) : null;
+
+        if (bodyType === 'array') {
+            // Flatten: create ARRAY node with delimiters from parent DELIMITED
+            const flattenedArray = normalizeLambdaAST(body);
+            return {
+                ...flattenedArray,
+                type: 'ARRAY',
+                leftDelim: node.leftDelim,
+                rightDelim: node.rightDelim,
+            };
+        }
+    }
+
+    // Create a new normalized node
+    const result = { ...node };
+
+    // Normalize branches recursively
+    const branches = ['body', 'above', 'below', 'numer', 'denom', 'superscript', 'subscript'];
+    for (const branch of branches) {
+        if (result[branch]) {
+            result[branch] = normalizeLambdaAST(result[branch]);
+        }
+    }
+
+    return result;
+}
+
+/**
  * Compare Lambda AST against MathLive AST reference
  *
  * @param {Object} lambdaAST - Lambda's AST output
@@ -402,8 +453,11 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
     const mathLiveUnwrapped = unwrapMathLiveRoot(mathliveAST);
     const mathLiveStructureNorm = normalizeMathLiveAST(mathLiveUnwrapped);
 
+    // Normalize Lambda AST (flatten DELIMITED+ARRAY, etc.)
+    const lambdaStructureNorm = normalizeLambdaAST(JSON.parse(JSON.stringify(lambdaAST)));
+
     // Normalize both trees (remove trivial wrappers)
-    const lambdaNorm = unwrapTrivialNodes(JSON.parse(JSON.stringify(lambdaAST)));
+    const lambdaNorm = unwrapTrivialNodes(lambdaStructureNorm);
     const mathLiveNorm = unwrapTrivialNodes(JSON.parse(JSON.stringify(mathLiveStructureNorm)));
 
     /**
@@ -425,6 +479,40 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
                 lambda: lambda?.type || null,
                 mathlive: mathlive?.type || null,
             });
+            return;
+        }
+
+        // Handle case where MathLive uses a simple string (e.g., "a") and Lambda uses an object
+        if (typeof mathlive === 'string' && typeof lambda === 'object') {
+            // MathLive's string represents an ordinary symbol
+            // Check if Lambda's value matches the string
+            const lambdaValue = lambda.value || lambda.symbol || lambda.char || '';
+            if (lambdaValue === mathlive) {
+                matchedElements++;  // Value matches - count as compatible
+            } else {
+                differences.push({
+                    path,
+                    issue: 'Value mismatch (string vs object)',
+                    lambda: lambdaValue,
+                    mathlive: mathlive,
+                });
+            }
+            return;  // No further comparison needed for string
+        }
+
+        // Handle case where Lambda uses a simple string (shouldn't happen, but be safe)
+        if (typeof lambda === 'string' && typeof mathlive === 'object') {
+            const mathliveValue = mathlive.value || mathlive.symbol || mathlive.char || '';
+            if (lambda === mathliveValue) {
+                matchedElements++;
+            } else {
+                differences.push({
+                    path,
+                    issue: 'Value mismatch (object vs string)',
+                    lambda: lambda,
+                    mathlive: mathliveValue,
+                });
+            }
             return;
         }
 

@@ -139,7 +139,7 @@
     },
     "symbol": {
       "type": "PATTERN",
-      "value": "[a-zA-Z]"
+      "value": "[a-zA-Z@]"
     },
     "number": {
       "type": "TOKEN",
