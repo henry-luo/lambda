@@ -30,8 +30,8 @@ const LAMBDA_TO_MATHLIVE_TYPE = {
 
     // Structures
     'FRAC': 'genfrac',          // Fraction
-    'SQRT': 'sqrt',             // Square root (also handles nth root)
-    'ROOT': 'sqrt',             // nth root (same as SQRT in MathLive)
+    'SQRT': 'surd',             // Square root (MathLive uses 'surd')
+    'ROOT': 'surd',             // nth root (same as SQRT in MathLive)
     'SCRIPTS': 'subsup',        // Sub/superscript (MathLive uses inline branches)
     'ROW': 'first',             // Row of elements / root
     'GROUP': 'group',           // Grouping
@@ -118,11 +118,12 @@ function areTypesCompatible(lambdaType, mathliveType) {
         ['frac', 'genfrac'],
         ['row', 'first', 'root', 'group'],
         ['accent', 'overunder'],
-        ['sqrt', 'root'],
+        ['sqrt', 'surd', 'root'],
         ['ord', 'mord', 'mi'],
         ['bin', 'mbin', 'mo'],
         ['rel', 'mrel'],
-        ['op', 'mop'],
+        ['op', 'mop', 'extensible-symbol'],  // big operators
+        ['overunder', 'extensible-symbol'],  // big operators with limits
         ['delimited', 'leftright'],
         ['scripts', 'subsup'],
         ['box', 'minner'],
