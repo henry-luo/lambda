@@ -126,8 +126,22 @@
           }
         ]
       },
-      "name": {
+      "decompose": {
         "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "=",
+            "named": false
+          },
+          {
+            "type": "at",
+            "named": false
+          }
+        ]
+      },
+      "name": {
+        "multiple": true,
         "required": true,
         "types": [
           {
@@ -1665,6 +1679,16 @@
           }
         ]
       },
+      "index": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -2934,6 +2958,10 @@
     "named": false
   },
   {
+    "type": "at",
+    "named": false
+  },
+  {
     "type": "b'",
     "named": false
   },
@@ -2967,11 +2995,11 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
@@ -3011,11 +3039,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",

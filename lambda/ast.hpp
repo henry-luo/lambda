@@ -117,6 +117,8 @@ extern "C" {
 #define FIELD_VARIADIC field_variadic
 #define FIELD_TARGET field_target
 #define FIELD_PATTERN field_pattern
+#define FIELD_INDEX field_index
+#define FIELD_DECOMPOSE field_decompose
 
 #ifdef __cplusplus
 }
@@ -156,6 +158,7 @@ typedef enum AstNodeType {
     AST_NODE_ELEMENT,
     AST_NODE_KEY_EXPR,
     AST_NODE_ASSIGN,
+    AST_NODE_DECOMPOSE,     // multi-variable decomposition (let a, b = expr)
     AST_NODE_LOOP,
     AST_NODE_IF_EXPR,
     AST_NODE_IF_STAM,
@@ -248,11 +251,27 @@ typedef struct AstBinaryNode : AstNode {
     Operator op;
 } AstBinaryNode;
 
-// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_LOOP, AST_NODE_PARAM
+// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
 typedef struct AstNamedNode : AstNode {
     String* name;               // Changed from StrView to String* (from name pool)
     AstNode *as;
 } AstNamedNode;
+
+// for AST_NODE_LOOP - extended with index variable and named flag
+typedef struct AstLoopNode : AstNode {
+    String* name;               // primary loop variable (v in 'for v in expr')
+    String* index_name;         // optional index variable (i in 'for i, v in expr'), NULL if not present
+    AstNode *as;                // collection expression
+    bool is_named;              // true if 'at' keyword used (attribute/named iteration)
+} AstLoopNode;
+
+// for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
+typedef struct AstDecomposeNode : AstNode {
+    String** names;             // array of variable names
+    int name_count;             // number of variables
+    AstNode *as;                // source expression
+    bool is_named;              // true if 'at' keyword used (named decomposition)
+} AstDecomposeNode;
 
 typedef struct AstIdentNode : AstNode {
     String* name;               // Changed from StrView to String* (from name pool)
