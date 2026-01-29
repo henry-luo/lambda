@@ -827,90 +827,102 @@
       ]
     },
     "sized_delimiter": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "size",
-          "content": {
+      "type": "PREC_RIGHT",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "size",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "\\big"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Big"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\bigg"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Bigg"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\bigl"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Bigl"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\biggl"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Biggl"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\bigr"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Bigr"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\biggr"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Biggr"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\bigm"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Bigm"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\biggm"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\Biggm"
+                }
+              ]
+            }
+          },
+          {
             "type": "CHOICE",
             "members": [
               {
-                "type": "STRING",
-                "value": "\\big"
+                "type": "FIELD",
+                "name": "delim",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "delimiter"
+                }
               },
               {
-                "type": "STRING",
-                "value": "\\Big"
-              },
-              {
-                "type": "STRING",
-                "value": "\\bigg"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Bigg"
-              },
-              {
-                "type": "STRING",
-                "value": "\\bigl"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Bigl"
-              },
-              {
-                "type": "STRING",
-                "value": "\\biggl"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Biggl"
-              },
-              {
-                "type": "STRING",
-                "value": "\\bigr"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Bigr"
-              },
-              {
-                "type": "STRING",
-                "value": "\\biggr"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Biggr"
-              },
-              {
-                "type": "STRING",
-                "value": "\\bigm"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Bigm"
-              },
-              {
-                "type": "STRING",
-                "value": "\\biggm"
-              },
-              {
-                "type": "STRING",
-                "value": "\\Biggm"
+                "type": "BLANK"
               }
             ]
           }
-        },
-        {
-          "type": "FIELD",
-          "name": "delim",
-          "content": {
-            "type": "SYMBOL",
-            "name": "delimiter"
-          }
-        }
-      ]
+        ]
+      }
     },
     "delimiter": {
       "type": "CHOICE",
@@ -1178,119 +1190,131 @@
       ]
     },
     "accent": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "cmd",
-          "content": {
+      "type": "PREC_RIGHT",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "cmd",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "\\hat"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\check"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\tilde"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\acute"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\grave"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\dot"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\ddot"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\dddot"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\ddddot"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\breve"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\bar"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\vec"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\widehat"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\widetilde"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\overline"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\underline"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\overbrace"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\underbrace"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\overrightarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\overleftarrow"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\overleftrightarrow"
+                }
+              ]
+            }
+          },
+          {
             "type": "CHOICE",
             "members": [
               {
-                "type": "STRING",
-                "value": "\\hat"
+                "type": "FIELD",
+                "name": "base",
+                "content": {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "SYMBOL",
+                      "name": "group"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "symbol"
+                    }
+                  ]
+                }
               },
               {
-                "type": "STRING",
-                "value": "\\check"
-              },
-              {
-                "type": "STRING",
-                "value": "\\tilde"
-              },
-              {
-                "type": "STRING",
-                "value": "\\acute"
-              },
-              {
-                "type": "STRING",
-                "value": "\\grave"
-              },
-              {
-                "type": "STRING",
-                "value": "\\dot"
-              },
-              {
-                "type": "STRING",
-                "value": "\\ddot"
-              },
-              {
-                "type": "STRING",
-                "value": "\\dddot"
-              },
-              {
-                "type": "STRING",
-                "value": "\\ddddot"
-              },
-              {
-                "type": "STRING",
-                "value": "\\breve"
-              },
-              {
-                "type": "STRING",
-                "value": "\\bar"
-              },
-              {
-                "type": "STRING",
-                "value": "\\vec"
-              },
-              {
-                "type": "STRING",
-                "value": "\\widehat"
-              },
-              {
-                "type": "STRING",
-                "value": "\\widetilde"
-              },
-              {
-                "type": "STRING",
-                "value": "\\overline"
-              },
-              {
-                "type": "STRING",
-                "value": "\\underline"
-              },
-              {
-                "type": "STRING",
-                "value": "\\overbrace"
-              },
-              {
-                "type": "STRING",
-                "value": "\\underbrace"
-              },
-              {
-                "type": "STRING",
-                "value": "\\overrightarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\overleftarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\overleftrightarrow"
+                "type": "BLANK"
               }
             ]
           }
-        },
-        {
-          "type": "FIELD",
-          "name": "base",
-          "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "group"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "symbol"
-              }
-            ]
-          }
-        }
-      ]
+        ]
+      }
     },
     "big_operator": {
       "type": "PREC_RIGHT",

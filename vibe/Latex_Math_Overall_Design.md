@@ -1,7 +1,7 @@
 # LaTeX Math Typesetting Pipeline - Master Design Document
 
-**Date:** January 23, 2026  
-**Status:** Living Document  
+**Date:** January 23, 2026
+**Status:** Living Document
 **Purpose:** Comprehensive reference for math typesetting implementation and development
 
 ---
@@ -145,7 +145,7 @@ The MathAST captures semantic math structure without font/size information:
 enum class MathNodeType : uint8_t {
     // Atom types (TeX's 8 classes)
     ORD, OP, BIN, REL, OPEN, CLOSE, PUNCT, INNER,
-    
+
     // Structural types
     ROW,        // Sequence of nodes
     FRAC,       // Fraction: \frac{num}{denom}
@@ -154,7 +154,7 @@ enum class MathNodeType : uint8_t {
     DELIMITED,  // \left( ... \right)
     ACCENT,     // \hat{x}, \bar{x}
     OVERUNDER,  // \sum_{i=0}^n
-    
+
     // Special
     TEXT, ARRAY, SPACE, PHANTOM, NOT, ERROR
 };
@@ -162,17 +162,17 @@ enum class MathNodeType : uint8_t {
 struct MathASTNode {
     MathNodeType type;
     uint8_t flags;  // FLAG_LIMITS, FLAG_LARGE, FLAG_CRAMPED, etc.
-    
+
     // Content (type-dependent union)
     union { ... };
-    
+
     // Named branches (MathLive-inspired)
     MathASTNode* body;          // Main content
     MathASTNode* above;         // Numerator, index, over-content
     MathASTNode* below;         // Denominator, under-content
     MathASTNode* superscript;
     MathASTNode* subscript;
-    
+
     // Siblings (for ROW children)
     MathASTNode* next_sibling;
 };
@@ -199,23 +199,23 @@ TexNode represents typeset boxes with computed dimensions:
 enum class NodeClass : uint8_t {
     // Character nodes
     Char, Ligature,
-    
+
     // Container nodes
     HList, VList, HBox, VBox, VTop,
-    
+
     // Spacing nodes
     Glue, Kern, Penalty,
-    
+
     // Rule nodes
     Rule,
-    
+
     // Math-specific
     MathList, MathChar, MathOp, Fraction, Radical,
     Delimiter, Accent, Scripts,
-    
+
     // Structure
     Paragraph, Page,
-    
+
     // Special
     Mark, Insert, Adjust, Whatsit, Disc, Error
 };
@@ -223,19 +223,19 @@ enum class NodeClass : uint8_t {
 struct TexNode {
     NodeClass node_class;
     uint8_t flags;
-    
+
     // Dimensions (CSS pixels)
     float width, height, depth;
     float italic, shift;
-    
+
     // Position relative to parent
     float x, y;
-    
+
     // Tree structure
     TexNode* parent;
     TexNode* first_child, *last_child;
     TexNode* next_sibling, *prev_sibling;
-    
+
     // Content union (type-dependent)
     union Content { ... } content;
 };
@@ -250,19 +250,19 @@ struct MathContext {
     Arena* arena;
     TFMFontManager* fonts;
     FontProvider* font_provider;  // Optional dual font support
-    
+
     MathStyle style;              // Display, Text, Script, ScriptScript
     float base_size_pt;           // Base font size (10pt default)
-    
+
     // Font specs
     FontSpec roman_font;          // cmr10 for digits, text
     FontSpec italic_font;         // cmmi10 for variables
     FontSpec symbol_font;         // cmsy10 for operators
     FontSpec extension_font;      // cmex10 for large symbols
-    
+
     // Computed parameters
     float x_height, quad, axis_height, rule_thickness;
-    
+
     // Factory methods
     static MathContext create(Arena* arena, TFMFontManager* fonts, float size_pt);
 };
@@ -278,7 +278,7 @@ The document model bridges parsing and typesetting:
 struct DocElement {
     DocElemType type;
     uint8_t flags;
-    
+
     union {
         // For MATH_* types
         struct {
@@ -288,10 +288,10 @@ struct DocElement {
             const char* label;
             const char* number;
         } math;
-        
+
         // Other content types...
     };
-    
+
     // Tree structure
     DocElement* parent;
     DocElement* first_child, *last_child;
@@ -779,50 +779,5 @@ diff output.dvi.txt ref.txt
 - LaTeXML source: Math grammar, operator precedence
 - TFM format: TeX: The Program, Part 30
 - DVI format: TeXBook Appendix A
-
----
-
-## Appendix A: Symbol Tables Quick Reference
-
-### Greek Letters (cmmi10)
-
-| Command | Code | | Command | Code |
-|---------|------|---|---------|------|
-| \alpha | 11 | | \nu | 23 |
-| \beta | 12 | | \xi | 24 |
-| \gamma | 13 | | \pi | 25 |
-| \delta | 14 | | \rho | 26 |
-| \epsilon | 15 | | \sigma | 27 |
-| \zeta | 16 | | \tau | 28 |
-| \eta | 17 | | \upsilon | 29 |
-| \theta | 18 | | \phi | 30 |
-| \iota | 19 | | \chi | 31 |
-| \kappa | 20 | | \psi | 32 |
-| \lambda | 21 | | \omega | 33 |
-| \mu | 22 | | | |
-
-### Big Operators (cmex10)
-
-| Command | Small | Large | Has Limits |
-|---------|-------|-------|------------|
-| \sum | 80 | 88 | Yes |
-| \prod | 81 | 89 | Yes |
-| \int | 82 | 90 | No |
-| \bigcup | 83 | 91 | Yes |
-| \bigcap | 84 | 92 | Yes |
-
-### Common Symbols (cmsy10)
-
-| Command | Code | Type |
-|---------|------|------|
-| \leq | 20 | Rel |
-| \geq | 21 | Rel |
-| \times | 2 | Bin |
-| \cdot | 1 | Bin |
-| \rightarrow | 33 | Rel |
-| \leftarrow | 32 | Rel |
-| \Rightarrow | 41 | Rel |
-
----
 
 *Last Updated: January 23, 2026*
