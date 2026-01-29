@@ -70,6 +70,7 @@ Item input_ascii_math(Input* input, const char* ascii_math);
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
+Item input_markup_commonmark(Input *input, const char* content);  // Strict CommonMark (no GFM extensions)
 
 // JSX parsing functions (from input-jsx.cpp)
 Item input_jsx(Input* input, const char* jsx_string);

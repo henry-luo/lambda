@@ -230,6 +230,15 @@ public:
                 while (*p == ' ' || *p == '\t') p++;
                 info.text_start = p;
 
+                // Check for task list: [ ] or [x] or [X]
+                if (*p == '[' && (*(p+1) == ' ' || *(p+1) == 'x' || *(p+1) == 'X') && *(p+2) == ']') {
+                    info.is_task = true;
+                    info.task_checked = (*(p+1) != ' ');
+                    p += 3;
+                    while (*p == ' ' || *p == '\t') p++;
+                    info.text_start = p;
+                }
+
                 info.valid = true;
             }
         }
@@ -420,6 +429,7 @@ public:
         {"*", "*", InlineType::ITALIC, true, true},
         {"_", "_", InlineType::ITALIC, true, true},
         {"~~", "~~", InlineType::STRIKETHROUGH, true, false},
+        {"~", "~", InlineType::STRIKETHROUGH, true, false},  // Single tilde strikethrough (md4c extension)
         {"``", "``", InlineType::CODE, false, false},
         {"`", "`", InlineType::CODE, false, false},
     };

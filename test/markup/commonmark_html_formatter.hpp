@@ -258,7 +258,13 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
         stringbuf_append_str(sb, "</ol>\n");
     }
     else if (strcmp(tag, "li") == 0) {
-        stringbuf_append_str(sb, "<li>");
+        // Check for task-list-item class attribute
+        String* class_attr = elem.get_string_attr("class");
+        if (class_attr && class_attr->len > 0 && strstr(class_attr->chars, "task-list-item")) {
+            stringbuf_append_str(sb, "<li class=\"task-list-item\">");
+        } else {
+            stringbuf_append_str(sb, "<li>");
+        }
 
         // Check if li contains only text/inline or block elements
         bool has_block = false;
@@ -300,8 +306,21 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
 
         if (has_block) {
             // CommonMark: For loose lists and mixed content, handle formatting carefully
-            bool previous_was_text = false;
+            bool previous_was_inline = false;  // Track if previous child was inline (text or inline element)
             bool first_child = true;
+            
+            // Helper to check if a tag is an inline element
+            auto is_inline_tag = [](const char* tag) {
+                return tag && (strcmp(tag, "span") == 0 ||
+                              strcmp(tag, "a") == 0 ||
+                              strcmp(tag, "em") == 0 ||
+                              strcmp(tag, "strong") == 0 ||
+                              strcmp(tag, "code") == 0 ||
+                              strcmp(tag, "del") == 0 ||
+                              strcmp(tag, "s") == 0 ||
+                              strcmp(tag, "img") == 0 ||
+                              strcmp(tag, "br") == 0);
+            };
 
             for (int i = 0; i < elem.childCount(); i++) {
                 ItemReader child = elem.childAt(i);
@@ -309,28 +328,40 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                     ElementReader child_elem = child.asElement();
                     const char* child_tag = child_elem.tagName();
                     bool is_block = is_block_tag(child_tag);
+                    bool is_inline = is_inline_tag(child_tag);
+                    bool is_list = child_tag && (strcmp(child_tag, "ul") == 0 || strcmp(child_tag, "ol") == 0);
 
                     // For tight lists with nested sublists: <li>foo\n<ul>
-                    // Add newline only if this block follows inline text
-                    if (is_block && previous_was_text) {
+                    // Add newline only if this block follows inline content
+                    if (is_block && previous_was_inline) {
                         stringbuf_append_char(sb, '\n');
                     }
-                    // For first block element, just add newline (loose list case)
+                    // For first block element in loose list, add newline
                     else if (is_block && first_child) {
                         stringbuf_append_char(sb, '\n');
                     }
 
                     format_cm_element(ctx, child_elem);
-                    previous_was_text = false;
+                    
+                    // Update previous_was_inline based on current element type
+                    if (is_inline) {
+                        previous_was_inline = true;
+                    } else {
+                        previous_was_inline = false;
+                    }
+                    
+                    // Check if this is the last child and is a nested list (ul/ol)
+                    // Only for nested lists do we want </ul></li> or </ol></li> on same line
+                    // (Note: Currently disabled to match CommonMark spec expectations)
                 } else if (child.isString()) {
                     String* str = child.asString();
                     if (has_valid_content(str)) {
                         format_cm_text(ctx, str->chars, str->len);
-                        previous_was_text = true;
+                        previous_was_inline = true;
                     }
                 } else {
                     format_cm_item(ctx, child);
-                    previous_was_text = false;
+                    previous_was_inline = false;
                 }
                 first_child = false;
             }
@@ -342,6 +373,81 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
     }
     else if (strcmp(tag, "hr") == 0 || strcmp(tag, "thematic_break") == 0) {
         stringbuf_append_str(sb, "<hr />\n");
+    }
+    // Table elements - GFM style
+    else if (strcmp(tag, "table") == 0) {
+        stringbuf_append_str(sb, "<table>\n");
+        format_cm_children(ctx, elem);
+        stringbuf_append_str(sb, "</table>\n");
+    }
+    else if (strcmp(tag, "thead") == 0) {
+        stringbuf_append_str(sb, "<thead>\n");
+        format_cm_children(ctx, elem);
+        stringbuf_append_str(sb, "</thead>\n");
+    }
+    else if (strcmp(tag, "tbody") == 0) {
+        stringbuf_append_str(sb, "<tbody>\n");
+        format_cm_children(ctx, elem);
+        stringbuf_append_str(sb, "</tbody>\n");
+    }
+    else if (strcmp(tag, "tr") == 0) {
+        stringbuf_append_str(sb, "<tr>");
+        format_cm_children(ctx, elem);
+        stringbuf_append_str(sb, "</tr>\n");
+    }
+    else if (strcmp(tag, "th") == 0) {
+        String* align = elem.get_string_attr("align");
+        if (has_valid_content(align)) {
+            stringbuf_append_str(sb, "<th align=\"");
+            format_cm_raw_text(ctx, align->chars, align->len);
+            stringbuf_append_str(sb, "\">");
+        } else {
+            stringbuf_append_str(sb, "<th>");
+        }
+        format_cm_text_children(ctx, elem);
+        stringbuf_append_str(sb, "</th>");
+    }
+    else if (strcmp(tag, "td") == 0) {
+        String* align = elem.get_string_attr("align");
+        if (has_valid_content(align)) {
+            stringbuf_append_str(sb, "<td align=\"");
+            format_cm_raw_text(ctx, align->chars, align->len);
+            stringbuf_append_str(sb, "\">");
+        } else {
+            stringbuf_append_str(sb, "<td>");
+        }
+        format_cm_text_children(ctx, elem);
+        stringbuf_append_str(sb, "</td>");
+    }
+    // Task list checkbox - void element (self-closing)
+    else if (strcmp(tag, "input") == 0) {
+        String* type_attr = elem.get_string_attr("type");
+        String* checked_attr = elem.get_string_attr("checked");
+        String* disabled_attr = elem.get_string_attr("disabled");
+        
+        stringbuf_append_str(sb, "<input");
+        if (has_valid_content(type_attr)) {
+            stringbuf_append_str(sb, " type=\"");
+            format_cm_raw_text(ctx, type_attr->chars, type_attr->len);
+            stringbuf_append_str(sb, "\"");
+        }
+        // Add class for GFM tasklist
+        if (type_attr && strcmp(type_attr->chars, "checkbox") == 0) {
+            stringbuf_append_str(sb, " class=\"task-list-item-checkbox\"");
+        }
+        if (has_valid_content(disabled_attr)) {
+            stringbuf_append_str(sb, " disabled");
+        }
+        if (has_valid_content(checked_attr)) {
+            stringbuf_append_str(sb, " checked");
+        }
+        stringbuf_append_str(sb, ">");
+    }
+    // Strikethrough
+    else if (strcmp(tag, "s") == 0 || strcmp(tag, "del") == 0 || strcmp(tag, "strike") == 0) {
+        stringbuf_append_str(sb, "<del>");
+        format_cm_text_children(ctx, elem);
+        stringbuf_append_str(sb, "</del>");
     }
     // Inline elements
     else if (strcmp(tag, "em") == 0 || strcmp(tag, "i") == 0) {
