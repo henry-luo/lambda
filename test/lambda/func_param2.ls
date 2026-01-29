@@ -63,6 +63,16 @@ fn opt_typed(a: int, b?: int) => if (b) a + b else a * 2
 let o1 = opt_typed(5)      // 10 (b=0 which is falsy, so a*2=10)
 let o2 = opt_typed(5, 3)   // 8 (5 + 3)
 
+// Test 11b: Optional typed parameter with 'and'/'or' operators
+// Regression test: ensures optional typed params are correctly boxed when used with truthy operators
+fn opt_and(a: int, b?: int) => a and b
+fn opt_or(a: int, b?: int) => a or b
+
+let oa1 = opt_and(5, 3)    // 3 (and returns second operand)
+let oa2 = opt_and(0, 3)    // 3 (and returns second operand)
+let oo1 = opt_or(5, 3)     // 5 (or returns first operand)
+let oo2 = opt_or(0, 3)     // 0 (or returns first operand)
+
 // Test 12: Variadic function - sum with varg()
 fn sum_all(...) => sum(varg())
 
@@ -103,6 +113,7 @@ let v11 = varg_len(1, 2, 3)       // 3
     "test9_expr_default": [s1, s2],
     "test10_typed_default": [m1, m2],
     "test11_optional_typed": [o1, o2],
+    "test11b_optional_and_or": [oa1, oa2, oo1, oo2],
     "test12_variadic_sum": [v1, v2, v3, v4],
     "test13_variadic_with_params": [v5, v6, v7],
     "test14_variadic_first": [v8, v9],
