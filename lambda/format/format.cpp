@@ -142,6 +142,9 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
     else if (strcmp(type->chars, "wiki") == 0) {
         result = format_wiki_string(pool, item);
     }
+    else if (strcmp(type->chars, "textile") == 0) {
+        result = format_textile_string(pool, item);
+    }
     else if (strcmp(type->chars, "text") == 0) {
         result = format_text_string(pool, item);
     }
@@ -175,6 +178,12 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         }
         else if (strcmp(flavor->chars, "org") == 0) {
             result = format_org_string(pool, item);
+        }
+        else if (strcmp(flavor->chars, "textile") == 0) {
+            result = format_textile_string(pool, item);
+        }
+        else if (strcmp(flavor->chars, "wiki") == 0) {
+            result = format_wiki_string(pool, item);
         }
         else {
             printf("Unsupported markup flavor: %s, defaulting to markdown\n", flavor->chars);
