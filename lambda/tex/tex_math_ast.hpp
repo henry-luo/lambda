@@ -111,6 +111,7 @@ struct MathASTNode {
             float rule_thickness;   // 0 for \atop, -1 for default
             int32_t left_delim;     // For \binom: ( or 0 for none
             int32_t right_delim;    // For \binom: ) or 0 for none
+            const char* command;    // Command name: "frac", "dfrac", "binom", etc.
         } frac;
 
         // For SQRT
