@@ -4,11 +4,20 @@
   "word": "command_name",
   "rules": {
     "math": {
-      "type": "REPEAT",
-      "content": {
-        "type": "SYMBOL",
-        "name": "_expression"
-      }
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "infix_frac"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
+        }
+      ]
     },
     "_expression": {
       "type": "CHOICE",
@@ -88,6 +97,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "color_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "rule_command"
         },
         {
@@ -134,6 +147,62 @@
         {
           "type": "STRING",
           "value": "\\infinity"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nexists"
+        },
+        {
+          "type": "STRING",
+          "value": "\\exists"
+        },
+        {
+          "type": "STRING",
+          "value": "\\forall"
+        },
+        {
+          "type": "STRING",
+          "value": "\\imath"
+        },
+        {
+          "type": "STRING",
+          "value": "\\jmath"
+        },
+        {
+          "type": "STRING",
+          "value": "\\ell"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Re"
+        },
+        {
+          "type": "STRING",
+          "value": "\\Im"
+        },
+        {
+          "type": "STRING",
+          "value": "\\partial"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nabla"
+        },
+        {
+          "type": "STRING",
+          "value": "\\aleph"
+        },
+        {
+          "type": "STRING",
+          "value": "\\hbar"
+        },
+        {
+          "type": "STRING",
+          "value": "\\emptyset"
+        },
+        {
+          "type": "STRING",
+          "value": "\\varnothing"
         }
       ]
     },
@@ -475,11 +544,20 @@
           "value": "{"
         },
         {
-          "type": "REPEAT",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_expression"
-          }
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "infix_frac"
+            },
+            {
+              "type": "REPEAT",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_expression"
+              }
+            }
+          ]
         },
         {
           "type": "STRING",
@@ -504,6 +582,66 @@
         {
           "type": "STRING",
           "value": "]"
+        }
+      ]
+    },
+    "infix_frac": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "numer",
+          "content": {
+            "type": "REPEAT1",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
+            }
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "cmd",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\\over"
+              },
+              {
+                "type": "STRING",
+                "value": "\\atop"
+              },
+              {
+                "type": "STRING",
+                "value": "\\above"
+              },
+              {
+                "type": "STRING",
+                "value": "\\choose"
+              },
+              {
+                "type": "STRING",
+                "value": "\\brace"
+              },
+              {
+                "type": "STRING",
+                "value": "\\brack"
+              }
+            ]
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "denom",
+          "content": {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
+            }
+          }
         }
       ]
     },
@@ -740,10 +878,6 @@
               {
                 "type": "STRING",
                 "value": "\\tbinom"
-              },
-              {
-                "type": "STRING",
-                "value": "\\choose"
               }
             ]
           }
@@ -2011,6 +2145,56 @@
           }
         }
       ]
+    },
+    "color_command": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "cmd",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "\\textcolor"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\color"
+                }
+              ]
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "color",
+            "content": {
+              "type": "SYMBOL",
+              "name": "group"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "content",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "group"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
     },
     "rule_command": {
       "type": "SEQ",
