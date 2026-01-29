@@ -207,15 +207,17 @@ module.exports = grammar({
     ),
 
     // Sized delimiters: \big, \Big, \bigg, \Bigg
-    sized_delimiter: $ => seq(
+    // Note: delimiter is optional - bare \bigl, \bigr, etc. are valid
+    // Use prec.right to prefer consuming the delimiter when present
+    sized_delimiter: $ => prec.right(1, seq(
       field('size', choice(
         '\\big', '\\Big', '\\bigg', '\\Bigg',
         '\\bigl', '\\Bigl', '\\biggl', '\\Biggl',
         '\\bigr', '\\Bigr', '\\biggr', '\\Biggr',
         '\\bigm', '\\Bigm', '\\biggm', '\\Biggm',
       )),
-      field('delim', $.delimiter),
-    ),
+      optional(field('delim', $.delimiter)),
+    )),
 
     // Delimiter token: command delimiters are keywords via the word setting
     delimiter: $ => choice(
@@ -269,7 +271,8 @@ module.exports = grammar({
     // Accents
     // ========================================================================
 
-    accent: $ => seq(
+    // Note: base is optional - bare \vec, \hat, etc. are valid (per MathLive)
+    accent: $ => prec.right(1, seq(
       field('cmd', choice(
         // Standard accents
         '\\hat', '\\check', '\\tilde', '\\acute', '\\grave',
@@ -283,8 +286,8 @@ module.exports = grammar({
         '\\overrightarrow', '\\overleftarrow',
         '\\overleftrightarrow',
       )),
-      field('base', choice($.group, $.symbol)),
-    ),
+      optional(field('base', choice($.group, $.symbol))),
+    )),
 
     // ========================================================================
     // Big Operators (with limits)
