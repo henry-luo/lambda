@@ -833,6 +833,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
     // Track if the list is "loose" (has blank lines between items)
     bool is_loose = false;
     bool had_blank_before_item = false;
+    bool has_task_items = false;  // Track if any task list items were added
 
     // Track content column for the most recent item - used to determine nesting
     // For "- foo", content_column is 2 (marker takes 2 chars: "- ")
@@ -901,9 +902,30 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 break; // Different marker type, end current list
             }
 
+            // Use format adapter to detect task list items ([ ], [x], [X])
+            ListItemInfo item_info;
+            if (adapter) {
+                item_info = adapter->detectListItem(line);
+            }
+
             // Create list item
             Element* item = create_element(parser, "li");
             if (!item) break;
+
+            // Add task list attributes if this is a task item
+            if (item_info.valid && item_info.is_task) {
+                has_task_items = true;  // Mark list as containing task items
+
+                // Add class="task-list-item" for styling
+                String* class_key = parser->builder.createName("class");
+                String* class_val = parser->builder.createString("task-list-item");
+                parser->builder.putToElement(item, class_key, Item{.item = s2it(class_val)});
+
+                // Add data-checked attribute to indicate checkbox state
+                String* checked_key = parser->builder.createName("data-checked");
+                String* checked_val = parser->builder.createString(item_info.task_checked ? "true" : "false");
+                parser->builder.putToElement(item, checked_key, Item{.item = s2it(checked_val)});
+            }
 
             // Calculate content column first - needed for proper stripping
             int content_column = get_list_item_content_column(line);
@@ -1100,6 +1122,33 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     bool had_blank_in_content = false;
                     bool had_blank_before_block = false;
                     bool found_blank_between_direct_blocks = false;
+
+                    // For task list items, add checkbox as first child
+                    // This creates: <li class="task-list-item"><input type="checkbox" checked/> content...</li>
+                    if (item_info.valid && item_info.is_task) {
+                        Element* checkbox = create_element(parser, "input");
+                        if (checkbox) {
+                            // Set type="checkbox"
+                            String* type_key = parser->builder.createName("type");
+                            String* type_val = parser->builder.createString("checkbox");
+                            parser->builder.putToElement(checkbox, type_key, Item{.item = s2it(type_val)});
+
+                            // Set disabled attribute (GFM spec: checkboxes are typically disabled)
+                            String* disabled_key = parser->builder.createName("disabled");
+                            String* disabled_val = parser->builder.createString("disabled");
+                            parser->builder.putToElement(checkbox, disabled_key, Item{.item = s2it(disabled_val)});
+
+                            // Set checked attribute if task is checked
+                            if (item_info.task_checked) {
+                                String* checked_key = parser->builder.createName("checked");
+                                String* checked_val = parser->builder.createString("checked");
+                                parser->builder.putToElement(checkbox, checked_key, Item{.item = s2it(checked_val)});
+                            }
+
+                            list_push((List*)item, Item{.item = (uint64_t)checkbox});
+                            increment_element_content_length(item);
+                        }
+                    }
 
                     // Parse blocks
                     while (parser->current_line < parser->line_count) {
@@ -1402,6 +1451,13 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 }
             }
         }
+    }
+
+    // Add class="contains-task-list" to the list if it has task items
+    if (has_task_items) {
+        String* class_key = parser->builder.createName("class");
+        String* class_val = parser->builder.createString("contains-task-list");
+        parser->builder.putToElement(list, class_key, Item{.item = s2it(class_val)});
     }
 
     return Item{.item = (uint64_t)list};
