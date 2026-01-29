@@ -123,17 +123,17 @@ function areTypesCompatible(lambdaType, mathliveType) {
         ['ord', 'mord', 'mi'],
         ['bin', 'mbin', 'mo'],
         ['rel', 'mrel'],
-        ['op', 'mop', 'extensible-symbol'],  // big operators
+        ['op', 'mop', 'extensible-symbol', 'operator'],  // big operators and function operators
         ['overunder', 'extensible-symbol'],  // big operators with limits
+        ['scripts', 'subsup', 'extensible-symbol'],  // scripts can match extensible-symbol for big ops
         ['delimited', 'leftright'],
         ['array', 'array'],  // both use 'array' (case-insensitive)
         ['array_row', 'array-row'],
         ['array_cell', 'array-cell'],
-        ['scripts', 'subsup'],
-        ['box', 'minner'],
+        ['box', 'minner', 'overlap'],  // box types including overlap (llap/rlap/clap)
         ['style', 'group'],
         ['sized_delim', 'sizeddelim', 'mopen', 'mclose'],
-        ['not', 'overlap', 'mrel'],  // negation/overlay - bare \not is mrel
+        ['not', 'mrel'],  // negation - bare \not is mrel
     ];
 
     for (const group of equivalentTypes) {
@@ -388,6 +388,7 @@ function normalizeMathLiveAST(node) {
  *
  * Key transformations:
  * 1. DELIMITED containing ARRAY -> ARRAY with leftDelim/rightDelim (matches MathLive matrices)
+ * 2. SCRIPTS wrapping ACCENT/OVERUNDER -> Move scripts to inner node (matches MathLive)
  */
 function normalizeLambdaAST(node) {
     if (!node) return null;
@@ -398,8 +399,27 @@ function normalizeLambdaAST(node) {
 
     if (typeof node !== 'object') return node;
 
-    // Special case: DELIMITED with ARRAY body -> flatten to ARRAY with delimiters
     const nodeType = normalizeType(node.type);
+
+    // Special case: SCRIPTS wrapping ACCENT or OVERUNDER -> flatten by moving scripts to inner node
+    // Lambda: SCRIPTS { body: ACCENT {...}, superscript: x }
+    // MathLive: overunder { ..., superscript: x }
+    if (nodeType === 'scripts' && node.body) {
+        const innerBody = node.body;
+        const innerType = innerBody && typeof innerBody === 'object' ? normalizeType(innerBody.type) : null;
+
+        if (innerType === 'accent' || innerType === 'overunder') {
+            // Flatten: move scripts from outer SCRIPTS to inner ACCENT/OVERUNDER
+            const flattenedNode = normalizeLambdaAST({
+                ...innerBody,
+                superscript: node.superscript || innerBody.superscript,
+                subscript: node.subscript || innerBody.subscript,
+            });
+            return flattenedNode;
+        }
+    }
+
+    // Special case: DELIMITED with ARRAY body -> flatten to ARRAY with delimiters
     if (nodeType === 'delimited' && node.body) {
         const body = Array.isArray(node.body) ? node.body[0] : node.body;
         const bodyType = body && typeof body === 'object' ? normalizeType(body.type) : null;
@@ -851,6 +871,18 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
                     // MathLive is array, Lambda is single
                     if (mathliveBranch.length === 1) {
                         compareNodes(lambdaBranch, mathliveBranch[0], `${path}.${branch}`);
+                    } else if (lambdaBranch && typeof lambdaBranch === 'object' &&
+                               normalizeType(lambdaBranch.type) === 'row' &&
+                               Array.isArray(lambdaBranch.body)) {
+                        // Lambda has ROW wrapper, MathLive has flat array - unwrap and compare
+                        const maxLen = Math.max(lambdaBranch.body.length, mathliveBranch.length);
+                        for (let i = 0; i < maxLen; i++) {
+                            compareNodes(
+                                lambdaBranch.body[i],
+                                mathliveBranch[i],
+                                `${path}.${branch}[${i}]`
+                            );
+                        }
                     } else {
                         differences.push({
                             path: `${path}.${branch}`,
