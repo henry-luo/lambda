@@ -1474,8 +1474,8 @@
                         "icon": "\ud83c\udf10"
                     },
                     {
-                        "source": "markup/test_commonmark_spec_gtest.cpp",
-                        "name": "CommonMark Spec Tests",
+                        "source": "markup/test_markdown_gtest.cpp",
+                        "name": "Markdown Spec Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1484,7 +1484,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_commonmark_spec_gtest.exe",
+                        "binary": "test_markdown_gtest.exe",
                         "icon": "📝"
                     },
                     {

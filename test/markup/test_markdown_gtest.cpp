@@ -205,9 +205,9 @@ protected:
             
             // base paths to try
             const char* base_paths[] = {
-                "test/markup/commonmark/",
-                "../test/markup/commonmark/",
-                "markup/commonmark/",
+                "test/markup/md/",
+                "../test/markup/md/",
+                "markup/md/",
                 NULL
             };
 
