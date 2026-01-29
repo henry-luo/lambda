@@ -367,6 +367,33 @@ bool emit_captured_var_item(Transpiler* tp, AstNode* item) {
     return false;
 }
 
+// emit param reference as Item (without unboxing) for optional/default/closure params
+// these params are stored as Item type at runtime, so emit _paramname directly
+bool emit_param_item(Transpiler* tp, AstNode* item) {
+    // unwrap nested PRIMARY nodes
+    while (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (!pri->expr) return false;
+        if (pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident_node = (AstIdentNode*)pri->expr;
+            if (!ident_node->entry || !ident_node->entry->node) return false;
+            if (ident_node->entry->node->node_type != AST_NODE_PARAM) return false;
+            TypeParam* param_type = (TypeParam*)ident_node->entry->node->type;
+            // check if this param needs to be treated as Item (optional, default, or closure param)
+            bool is_item_param = param_type->is_optional || param_type->default_value || tp->current_closure;
+            if (is_item_param) {
+                // emit _paramname directly (this is already an Item)
+                strbuf_append_char(tp->code_buf, '_');
+                strbuf_append_str_n(tp->code_buf, ident_node->name->chars, ident_node->name->len);
+                return true;
+            }
+            return false;
+        }
+        item = pri->expr;
+    }
+    return false;
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
@@ -386,7 +413,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_BOOL:
         // Check if this is a closure parameter (already Item type at runtime)
         if (is_closure_param_ref(tp, item)) {
-            transpile_expr(tp, item);
+            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
             break;
         }
         // Check if this is a captured variable reference (already Item in closure env)
@@ -401,7 +428,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_INT: {
         // Check if this is an optional parameter or closure parameter (already Item type at runtime)
         if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            transpile_expr(tp, item);
+            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
             break;
         }
         // Check if this is a captured variable reference (already Item in closure env)
@@ -429,7 +456,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_INT64: 
         // Check if this is an optional parameter or closure parameter (already Item type at runtime)
         if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            transpile_expr(tp, item);
+            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
             break;
         }
         // Check if this is a captured variable reference (already Item in closure env)
@@ -455,7 +482,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_FLOAT: 
         // Check if this is an optional parameter or closure parameter (already Item type at runtime)
         if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
-            transpile_expr(tp, item);
+            emit_param_item(tp, item);  // emit _paramname directly (already an Item)
             break;
         }
         // Check if this is a captured variable reference (already Item in closure env)
