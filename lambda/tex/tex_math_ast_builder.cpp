@@ -673,8 +673,11 @@ private:
     MathASTNode* build_overunder_command(TSNode node);
     MathASTNode* build_extensible_arrow(TSNode node);
     MathASTNode* build_environment(TSNode node);
+    MathASTNode* build_matrix_command(TSNode node);
     MathASTNode* build_text_command(TSNode node);
     MathASTNode* build_space_command(TSNode node);
+    MathASTNode* build_hspace_command(TSNode node);
+    MathASTNode* build_skip_command(TSNode node);
     MathASTNode* build_style_command(TSNode node);
     MathASTNode* build_mathop_command(TSNode node);
 
@@ -780,8 +783,11 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "phantom_command") == 0) return build_phantom_command(node);
     if (strcmp(type, "big_operator") == 0) return build_big_operator(node);
     if (strcmp(type, "environment") == 0) return build_environment(node);
+    if (strcmp(type, "matrix_command") == 0) return build_matrix_command(node);
     if (strcmp(type, "text_command") == 0) return build_text_command(node);
     if (strcmp(type, "space_command") == 0) return build_space_command(node);
+    if (strcmp(type, "hspace_command") == 0) return build_hspace_command(node);
+    if (strcmp(type, "skip_command") == 0) return build_skip_command(node);
     if (strcmp(type, "style_command") == 0) return build_style_command(node);
     if (strcmp(type, "brack_group") == 0) return build_brack_group(node);
     if (strcmp(type, "mathop_command") == 0) return build_mathop_command(node);
@@ -937,6 +943,20 @@ MathASTNode* MathASTBuilder::build_math(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_group(TSNode node) {
+    uint32_t child_count = ts_node_named_child_count(node);
+
+    // Empty group {} - return an empty ROW node (MathLive treats {} as empty group)
+    // Important for spacing: a+{}b becomes a + {} + b, not a + b
+    if (child_count == 0) {
+        return make_math_row(arena);  // Return empty row to preserve group presence
+    }
+
+    // Single child - return the child directly (unwrap trivial group)
+    if (child_count == 1) {
+        return build_ts_node(ts_node_named_child(node, 0));
+    }
+
+    // Multiple children - build as ROW
     return build_math(node);
 }
 
@@ -1789,7 +1809,7 @@ MathASTNode* MathASTBuilder::build_box_command(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
-    // color_command: \textcolor{color}{content} or \color{color}
+    // color_command: \textcolor{color}{content}, \color{color}, or \colorbox{color}{content}
     // Get the full node text to extract the command
     int full_len;
     const char* full_text = node_text(node, &full_len);
@@ -1832,6 +1852,18 @@ MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
 
     log_debug("tex_math_ast_builder: build_color_command cmd=%s color=%s",
               cmd ? cmd : "", color_str ? color_str : "");
+
+    // Handle \colorbox as a BOX node with color
+    if (cmd && strcmp(cmd, "colorbox") == 0) {
+        if (content) {
+            MathASTNode* box = alloc_math_node(arena, MathNodeType::BOX);
+            box->box.box_type = 3;  // 3=colorbox
+            box->box.color = color_str;
+            box->body = content;
+            return box;
+        }
+        return nullptr;
+    }
 
     // Wrap content in a STYLE node with the color command
     if (content) {
@@ -2126,6 +2158,100 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     return array_node;
 }
 
+// build_matrix_command - plain TeX \matrix{...} with \cr as row separator
+MathASTNode* MathASTBuilder::build_matrix_command(TSNode node) {
+    // Get command name to determine delimiters
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    int cmd_len;
+    const char* cmd = node_text(cmd_node, &cmd_len);
+
+    int32_t left_delim = 0;
+    int32_t right_delim = 0;
+
+    // \pmatrix uses parentheses, \matrix has no delimiters
+    if (strncmp(cmd, "\\pmatrix", 8) == 0) {
+        left_delim = '(';
+        right_delim = ')';
+    }
+    // \bordermatrix is more complex - skip for now
+
+    // Get body which is a group containing content with & and \cr
+    TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
+    if (ts_node_is_null(body_node)) {
+        return make_math_array(arena, "c", 0);
+    }
+
+    // Build ARRAY node
+    MathASTNode* array_node = make_math_array(arena, "c", 0);
+    MathASTNode* current_row = make_math_array_row(arena);
+    MathASTNode* current_cell_content = make_math_row(arena);
+    int num_cols = 0;
+    int max_cols = 0;
+    int num_rows = 0;
+
+    // Parse group children
+    uint32_t child_count = ts_node_named_child_count(body_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(body_node, i);
+        const char* type = ts_node_type(child);
+
+        log_debug("tex_math_ast: matrix_command body child %d: type=%s", i, type);
+
+        if (strcmp(type, "row_sep") == 0) {
+            // End current cell and row
+            MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
+            math_row_append(current_row, cell);
+            num_cols++;
+            if (num_cols > max_cols) max_cols = num_cols;
+
+            math_row_append(array_node, current_row);
+            num_rows++;
+
+            current_row = make_math_array_row(arena);
+            current_cell_content = make_math_row(arena);
+            num_cols = 0;
+        } else if (strcmp(type, "col_sep") == 0) {
+            // End current cell, continue row
+            MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
+            math_row_append(current_row, cell);
+            num_cols++;
+
+            current_cell_content = make_math_row(arena);
+        } else {
+            // Regular expression
+            MathASTNode* expr = build_ts_node(child);
+            if (expr) {
+                math_row_append(current_cell_content, expr);
+            }
+        }
+    }
+
+    // Add final cell and row
+    if (math_row_count(current_cell_content) > 0 || num_cols > 0) {
+        MathASTNode* cell = make_math_array_cell(arena, current_cell_content);
+        math_row_append(current_row, cell);
+        num_cols++;
+        if (num_cols > max_cols) max_cols = num_cols;
+    }
+
+    if (math_row_count(current_row) > 0) {
+        math_row_append(array_node, current_row);
+        num_rows++;
+    }
+
+    array_node->array.num_cols = max_cols;
+    array_node->array.num_rows = num_rows;
+
+    log_debug("tex_math_ast: built matrix_command array with %d rows, %d cols", num_rows, max_cols);
+
+    // Wrap with delimiters if needed
+    if (left_delim != 0 || right_delim != 0) {
+        return make_math_delimited(arena, left_delim, array_node, right_delim, false);
+    }
+
+    return array_node;
+}
+
 MathASTNode* MathASTBuilder::build_text_command(TSNode node) {
     // Get the content field which contains text_group
     TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
@@ -2175,6 +2301,163 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
     }
 
     return make_math_space(arena, width_mu, command);
+}
+
+MathASTNode* MathASTBuilder::build_hspace_command(TSNode node) {
+    // hspace_command: \hspace{3em}, \hspace*{2pt}
+    // Grammar: cmd '{' sign? value unit '}'
+
+    // Get the command name
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    const char* cmd = "hspace";
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text && text[0] == '\\' && len > 1) {
+            cmd = arena_copy_str(text + 1, len - 1);  // skip backslash
+        }
+    }
+
+    // Get sign if present
+    TSNode sign_node = ts_node_child_by_field_name(node, "sign", 4);
+    bool negative = false;
+    if (!ts_node_is_null(sign_node)) {
+        int len;
+        const char* text = node_text(sign_node, &len);
+        if (text && len > 0 && text[0] == '-') {
+            negative = true;
+        }
+    }
+
+    // Get value
+    TSNode value_node = ts_node_child_by_field_name(node, "value", 5);
+    float value = 1.0f;
+    if (!ts_node_is_null(value_node)) {
+        int len;
+        const char* text = node_text(value_node, &len);
+        if (text && len > 0) {
+            value = atof(text);
+        }
+    }
+
+    // Get unit
+    TSNode unit_node = ts_node_child_by_field_name(node, "unit", 4);
+    float width_mu = 0.0f;
+    if (!ts_node_is_null(unit_node)) {
+        int len;
+        const char* text = node_text(unit_node, &len);
+        if (text) {
+            // Convert to math units (mu). 1em = 18mu, 1pt ≈ 0.54mu (at 10pt base)
+            if (strncmp(text, "em", 2) == 0) {
+                width_mu = value * 18.0f;  // 1em = 18mu
+            } else if (strncmp(text, "ex", 2) == 0) {
+                width_mu = value * 9.0f;   // 1ex ≈ 0.5em ≈ 9mu
+            } else if (strncmp(text, "pt", 2) == 0) {
+                width_mu = value * 0.55f;  // 1pt ≈ 0.55mu at 10pt
+            } else if (strncmp(text, "mu", 2) == 0) {
+                width_mu = value;          // already in mu
+            } else if (strncmp(text, "mm", 2) == 0) {
+                width_mu = value * 1.56f;  // 1mm ≈ 2.84pt ≈ 1.56mu
+            } else if (strncmp(text, "cm", 2) == 0) {
+                width_mu = value * 15.6f;  // 1cm = 10mm
+            } else if (strncmp(text, "in", 2) == 0) {
+                width_mu = value * 39.6f;  // 1in = 72.27pt
+            } else if (strncmp(text, "pc", 2) == 0) {
+                width_mu = value * 6.6f;   // 1pc = 12pt
+            } else {
+                width_mu = value * 0.55f;  // default: treat as pt
+            }
+        }
+    }
+
+    if (negative) {
+        width_mu = -width_mu;
+    }
+
+    log_debug("tex_math_ast_builder: build_hspace_command cmd=%s value=%.2f width_mu=%.2f",
+              cmd, value, width_mu);
+
+    return make_math_space(arena, width_mu, cmd);
+}
+
+MathASTNode* MathASTBuilder::build_skip_command(TSNode node) {
+    // skip_command: \hskip 3em, \kern 2pt, \mskip 3mu, \mkern 5mu
+    // Grammar: cmd sign? value unit
+
+    int full_len;
+    const char* full_text = node_text(node, &full_len);
+
+    // Get the command name
+    TSNode cmd_node = ts_node_child_by_field_name(node, "cmd", 3);
+    const char* cmd = "hskip";
+    if (!ts_node_is_null(cmd_node)) {
+        int len;
+        const char* text = node_text(cmd_node, &len);
+        if (text && text[0] == '\\' && len > 1) {
+            cmd = arena_copy_str(text + 1, len - 1);  // skip backslash
+        }
+    }
+
+    // Get sign if present
+    TSNode sign_node = ts_node_child_by_field_name(node, "sign", 4);
+    bool negative = false;
+    if (!ts_node_is_null(sign_node)) {
+        int len;
+        const char* text = node_text(sign_node, &len);
+        if (text && len > 0 && text[0] == '-') {
+            negative = true;
+        }
+    }
+
+    // Get value
+    TSNode value_node = ts_node_child_by_field_name(node, "value", 5);
+    float value = 1.0f;
+    if (!ts_node_is_null(value_node)) {
+        int len;
+        const char* text = node_text(value_node, &len);
+        if (text && len > 0) {
+            value = atof(text);
+        }
+    }
+
+    // Get unit
+    TSNode unit_node = ts_node_child_by_field_name(node, "unit", 4);
+    float width_mu = 0.0f;
+    if (!ts_node_is_null(unit_node)) {
+        int len;
+        const char* text = node_text(unit_node, &len);
+        if (text) {
+            // Convert to math units (mu). 1em = 18mu, 1pt ≈ 0.54mu (at 10pt base)
+            if (strncmp(text, "em", 2) == 0) {
+                width_mu = value * 18.0f;  // 1em = 18mu
+            } else if (strncmp(text, "ex", 2) == 0) {
+                width_mu = value * 9.0f;   // 1ex ≈ 0.5em ≈ 9mu
+            } else if (strncmp(text, "pt", 2) == 0) {
+                width_mu = value * 0.55f;  // 1pt ≈ 0.55mu at 10pt
+            } else if (strncmp(text, "mu", 2) == 0) {
+                width_mu = value;          // already in mu
+            } else if (strncmp(text, "mm", 2) == 0) {
+                width_mu = value * 1.56f;  // 1mm ≈ 2.84pt ≈ 1.56mu
+            } else if (strncmp(text, "cm", 2) == 0) {
+                width_mu = value * 15.6f;  // 1cm = 10mm
+            } else if (strncmp(text, "in", 2) == 0) {
+                width_mu = value * 39.6f;  // 1in = 72.27pt
+            } else if (strncmp(text, "pc", 2) == 0) {
+                width_mu = value * 6.6f;   // 1pc = 12pt
+            } else {
+                width_mu = value * 0.55f;  // default: treat as pt
+            }
+        }
+    }
+
+    if (negative) {
+        width_mu = -width_mu;
+    }
+
+    log_debug("tex_math_ast_builder: build_skip_command cmd=%s value=%.2f width_mu=%.2f",
+              cmd, value, width_mu);
+
+    return make_math_space(arena, width_mu, cmd);
 }
 
 MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
@@ -2382,8 +2665,10 @@ void math_ast_dump(MathASTNode* node, ::StrBuf* out, int depth) {
         for (int i = 0; i < depth + 1; i++) ::strbuf_append_str(out, "  ");
         ::strbuf_append_str(out, "body:\n");
 
-        if (node->type == MathNodeType::ROW) {
-            // For ROW, iterate through siblings
+        if (node->type == MathNodeType::ROW ||
+            node->type == MathNodeType::ARRAY ||
+            node->type == MathNodeType::ARRAY_ROW) {
+            // For ROW, ARRAY, ARRAY_ROW, iterate through siblings
             for (MathASTNode* child = node->body; child; child = child->next_sibling) {
                 math_ast_dump(child, out, depth + 2);
             }
