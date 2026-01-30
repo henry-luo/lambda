@@ -248,7 +248,7 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int32_t*)field_ptr = value.int_val;
+        *(int64_t*)field_ptr = value.get_int56();  // write full int64 to preserve 56-bit value
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
@@ -867,7 +867,7 @@ Item MarkEditor::map_rename(Item map, const char* old_key, const char* new_key) 
         old_value.bool_val = *(bool*)old_field_ptr;
         break;
     case LMD_TYPE_INT:
-        old_value.int_val = *(int32_t*)old_field_ptr;
+        old_value = {.item = i2it(*(int64_t*)old_field_ptr)};  // read full int64 to preserve 56-bit value
         break;
     default:
         old_value.string_ptr = *(uint64_t*)old_field_ptr;

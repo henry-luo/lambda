@@ -1,4 +1,4 @@
-"===== BASIC ASCII COMPARISON TESTS ====="
+'===== BASIC ASCII COMPARISON TESTS ====='
 "hello equals hello:"
 true
 "hello equals world:"
@@ -16,7 +16,7 @@ true
 "hello less than world:"
 true
 "Basic ASCII tests completed"
-"===== UNICODE NORMALIZATION TESTS ====="
+'===== UNICODE NORMALIZATION TESTS ====='
 "café equals café (normalization):"
 true
 "naïve equals naïve:"
@@ -24,7 +24,7 @@ true
 "résumé equals résumé:"
 true
 "Unicode normalization tests completed"
-"===== LATIN EXTENDED CHARACTER TESTS ====="
+'===== LATIN EXTENDED CHARACTER TESTS ====='
 "café not equals cafe:"
 true
 "naïve not equals naive:"
@@ -40,7 +40,7 @@ true
 "Göteborg not equals Goteborg:"
 true
 "Latin extended tests completed"
-"===== UNICODE RELATIONAL COMPARISON TESTS ====="
+'===== UNICODE RELATIONAL COMPARISON TESTS ====='
 "a less than á:"
 true
 "á less than b:"
@@ -54,7 +54,7 @@ true
 "Hello less than hello:"
 true
 "Unicode relational tests completed"
-"===== EMOJI AND SYMBOL TESTS ====="
+'===== EMOJI AND SYMBOL TESTS ====='
 "apple emoji equals apple emoji:"
 true
 "apple not equals banana emoji:"
@@ -70,7 +70,7 @@ true
 "registered not equals copyright:"
 true
 "Emoji and symbol tests completed"
-"===== NON-LATIN SCRIPT TESTS ====="
+'===== NON-LATIN SCRIPT TESTS ====='
 "alpha equals alpha:"
 true
 "alpha not equals beta:"
@@ -84,13 +84,13 @@ true
 "Moscow equals Moscow:"
 true
 "Non-Latin script tests completed"
-"===== EDGE CASES AND ERROR HANDLING ====="
+'===== EDGE CASES AND ERROR HANDLING ====='
 "hello equals 42 (type error):"
 error
 "hello less than true (type error):"
 error
 "Edge case tests completed"
-"===== COMPLEX UNICODE TESTS ====="
+'===== COMPLEX UNICODE TESTS ====='
 "Hello世界 equals Hello世界:"
 true
 "café東京 equals café東京:"
@@ -104,7 +104,7 @@ true
 "fullwidth 123 not equals ascii 123:"
 true
 "Complex Unicode tests completed"
-"===== PERFORMANCE TESTS (ASCII FAST PATH) ====="
+'===== PERFORMANCE TESTS (ASCII FAST PATH) ====='
 "long ASCII string equals same:"
 true
 "long Unicode string equals same:"

@@ -1,7 +1,7 @@
 // Lambda Unicode String Comparison Test Suite
 // Tests comprehensive Unicode support across different levels
 
-"===== BASIC ASCII COMPARISON TESTS ====="
+'===== BASIC ASCII COMPARISON TESTS ====='
 
 // String equality - ASCII
 "hello equals hello:"; ("hello" == "hello")
@@ -17,7 +17,7 @@
 
 "Basic ASCII tests completed"
 
-"===== UNICODE NORMALIZATION TESTS ====="
+'===== UNICODE NORMALIZATION TESTS ====='
 
 // NFC vs NFD normalization (café with different encodings)
 // Note: These may appear identical but have different byte representations
@@ -29,7 +29,7 @@
 
 "Unicode normalization tests completed"
 
-"===== LATIN EXTENDED CHARACTER TESTS ====="
+'===== LATIN EXTENDED CHARACTER TESTS ====='
 
 // Basic Latin extended characters
 "café not equals cafe:"; ("café" != "cafe")
@@ -46,7 +46,7 @@
 
 "Latin extended tests completed"
 
-"===== UNICODE RELATIONAL COMPARISON TESTS ====="
+'===== UNICODE RELATIONAL COMPARISON TESTS ====='
 
 // Unicode characters in proper collation order
 "a less than á:"; ("a" < "á")
@@ -60,7 +60,7 @@
 
 "Unicode relational tests completed"
 
-"===== EMOJI AND SYMBOL TESTS ====="
+'===== EMOJI AND SYMBOL TESTS ====='
 
 // Basic emoji comparison
 "apple emoji equals apple emoji:"; ("🍎" == "🍎")
@@ -77,7 +77,7 @@
 
 "Emoji and symbol tests completed"
 
-"===== NON-LATIN SCRIPT TESTS ====="
+'===== NON-LATIN SCRIPT TESTS ====='
 
 // Greek characters
 "alpha equals alpha:"; ("α" == "α")
@@ -91,7 +91,7 @@
 
 "Non-Latin script tests completed"
 
-"===== EDGE CASES AND ERROR HANDLING ====="
+'===== EDGE CASES AND ERROR HANDLING ====='
 
 // String vs other types (should still error)
 // These operations should return error, not crash
@@ -100,7 +100,7 @@
 
 "Edge case tests completed"
 
-"===== COMPLEX UNICODE TESTS ====="
+'===== COMPLEX UNICODE TESTS ====='
 
 // Mixed scripts in same string
 "Hello世界 equals Hello世界:"; ("Hello世界" == "Hello世界")
@@ -119,7 +119,7 @@
 
 "Complex Unicode tests completed"
 
-"===== PERFORMANCE TESTS (ASCII FAST PATH) ====="
+'===== PERFORMANCE TESTS (ASCII FAST PATH) ====='
 
 // These should use the fast ASCII path
 "long ASCII string equals same:"; ("abcdefghijklmnopqrstuvwxyz" == "abcdefghijklmnopqrstuvwxyz")

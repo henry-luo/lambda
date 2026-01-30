@@ -1,0 +1,58 @@
+"===== INPUT LARGE INTEGER JSON TEST =====Large integers section:"
+{
+  billion: 1000000000,
+  ten_billion: 10000000000,
+  scientific: 12300000000,
+  max_safe: 9007199254740991,
+  min_safe: -9007199254740991
+}
+"Individual large integer values:"
+1000000000
+10000000000
+12300000000
+9007199254740991
+-9007199254740991
+"With nulls section (tests null field memory alignment):"
+{
+  first: 42,
+  second: null,
+  third: 12300000000,
+  fourth: null,
+  fifth: "test"
+}
+"Nested section:"
+{
+  level1: {
+    level2: {
+      big_value: 12300000000,
+      null_value: null,
+      small_value: 123
+    }
+  }
+}
+12300000000
+"Many fields section:"
+{
+  f1: 1,
+  f2: 2,
+  f3: null,
+  f4: 4,
+  f5: 5,
+  f6: null,
+  f7: 7,
+  f8: 8,
+  f9: null,
+  f10: 10,
+  f11: 11,
+  f12: 12,
+  f13: null,
+  f14: 14,
+  f15: 15
+}
+"Arithmetic with loaded large integers:"
+10000000001
+24600000000
+"Comparison tests:"
+true
+true
+"===== INPUT LARGE INTEGER JSON TEST COMPLETE ====="

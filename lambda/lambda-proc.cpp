@@ -361,8 +361,7 @@ String* format_cmd_args(String* cmd, Item args) {
                 value_item.bool_val = *(bool*)field_ptr;
                 break;
             case LMD_TYPE_INT:
-                value_item._type_id = LMD_TYPE_INT;
-                value_item.int_val = *(int*)field_ptr;
+                value_item = {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
                 break;
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
                 String* str = *(String**)field_ptr;
