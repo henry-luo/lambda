@@ -55,17 +55,19 @@ static String* create_test_string(const char* text) {
 }
 
 // Structure to hold a single CommonMark test case
-struct CommonMarkExample {
+struct MarkdownExample {
     int example_number;
     std::string section;
     std::string markdown;
     std::string expected_html;
     int line_number;
+    std::string spec_file;       // which spec file this came from
+    std::string cmdline_options; // md4c-style command line options (e.g., "--ftables")
 };
 
 // Parse CommonMark spec.txt and extract all examples
-static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_path) {
-    std::vector<CommonMarkExample> examples;
+static std::vector<MarkdownExample> parse_commonmark_spec(const char* spec_path, const char* spec_name = nullptr) {
+    std::vector<MarkdownExample> examples;
 
     std::ifstream file(spec_path);
     if (!file.is_open()) {
@@ -73,6 +75,9 @@ static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_pat
         return examples;
     }
 
+    // determine spec file name for tracking
+    std::string spec_file_name = spec_name ? spec_name : spec_path;
+    
     std::string line;
     std::string current_section = "Unknown";
     int line_number = 0;
@@ -91,19 +96,21 @@ static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_pat
             continue;
         }
 
-        // Check for example start (40 backticks followed by " example")
+        // Check for example start (32 backticks followed by " example")
         if (line.find("````````````````````````````````") == 0 &&
             line.find("example") != std::string::npos) {
 
             example_number++;
-            CommonMarkExample example;
+            MarkdownExample example;
             example.example_number = example_number;
             example.section = current_section;
             example.line_number = line_number;
+            example.spec_file = spec_file_name;
 
             std::string markdown_content;
             std::string html_content;
-            bool in_html = false;
+            std::string cmdline_options;
+            int state = 0; // 0 = markdown, 1 = html, 2 = cmdline options
 
             // Read example content
             while (std::getline(file, line)) {
@@ -116,7 +123,7 @@ static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_pat
 
                 // Check for separator between markdown and HTML
                 if (line == ".") {
-                    in_html = true;
+                    state++;
                     continue;
                 }
 
@@ -127,17 +134,22 @@ static std::vector<CommonMarkExample> parse_commonmark_spec(const char* spec_pat
                     processed_line.replace(pos, strlen("→"), "\t");
                 }
 
-                if (in_html) {
+                if (state == 0) {
+                    if (!markdown_content.empty()) markdown_content += "\n";
+                    markdown_content += processed_line;
+                } else if (state == 1) {
                     if (!html_content.empty()) html_content += "\n";
                     html_content += processed_line;
                 } else {
-                    if (!markdown_content.empty()) markdown_content += "\n";
-                    markdown_content += processed_line;
+                    // state >= 2 means cmdline options (md4c format)
+                    if (!cmdline_options.empty()) cmdline_options += " ";
+                    cmdline_options += processed_line;
                 }
             }
 
             example.markdown = markdown_content;
             example.expected_html = html_content;
+            example.cmdline_options = cmdline_options;
             examples.push_back(example);
         }
     }
@@ -155,46 +167,151 @@ static std::string normalize_html(const std::string& html) {
     size_t end = result.find_last_not_of(" \t\n\r");
     result = result.substr(start, end - start + 1);
 
-    // Normalize multiple whitespace to single space (optional, can be refined)
-    // For now, just trim and return
+    // Normalize whitespace between consecutive closing tags
+    // e.g., "</ul>\n</li>" and "</ul></li>" should be treated as equivalent
+    // This handles formatting differences between spec files
+    std::string normalized;
+    normalized.reserve(result.size());
+    
+    for (size_t i = 0; i < result.size(); i++) {
+        char c = result[i];
+        
+        // Check for whitespace after a closing tag
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t') {
+            // Look back to see if we just had a closing tag
+            bool after_close_tag = false;
+            if (normalized.size() >= 1 && normalized.back() == '>') {
+                // Check if this is a closing tag (look for </)
+                size_t tag_start = normalized.rfind('<');
+                if (tag_start != std::string::npos && tag_start + 1 < normalized.size() && 
+                    normalized[tag_start + 1] == '/') {
+                    after_close_tag = true;
+                }
+            }
+            
+            // Look forward to see if next non-whitespace is another closing tag
+            bool before_close_tag = false;
+            size_t j = i + 1;
+            while (j < result.size() && (result[j] == '\n' || result[j] == '\r' || 
+                   result[j] == ' ' || result[j] == '\t')) {
+                j++;
+            }
+            if (j + 1 < result.size() && result[j] == '<' && result[j + 1] == '/') {
+                before_close_tag = true;
+            }
+            
+            // Skip whitespace between consecutive closing tags
+            if (after_close_tag && before_close_tag) {
+                // Skip all whitespace
+                while (i + 1 < result.size() && (result[i + 1] == '\n' || result[i + 1] == '\r' ||
+                       result[i + 1] == ' ' || result[i + 1] == '\t')) {
+                    i++;
+                }
+                continue;
+            }
+        }
+        
+        normalized += c;
+    }
 
-    return result;
+    return normalized;
 }
 
 // Test fixture for CommonMark spec tests
-class CommonMarkSpecTest : public ::testing::Test {
+class MarkdownSpecTest : public ::testing::Test {
 protected:
-    static std::vector<CommonMarkExample> examples;
+    static std::vector<MarkdownExample> examples;
     static bool examples_loaded;
 
     void SetUp() override {
         log_init(NULL);
 
         if (!examples_loaded) {
-            // Try multiple paths to find the spec file
-            const char* spec_paths[] = {
-                "test/markup/commonmark/spec.txt",
-                "../test/markup/commonmark/spec.txt",
-                "markup/commonmark/spec.txt",
+            // list of spec files to load (md4c test specs)
+            // format: {relative_path_suffix, display_name}
+            struct SpecFile {
+                const char* path_suffix;
+                const char* name;
+            };
+            
+            static const SpecFile spec_files[] = {
+                {"spec.txt", "CommonMark"},           // original commonmark spec
+                {"spec-md4c.txt", "md4c"},            // md4c commonmark spec
+                {"spec-tables.txt", "Tables"},        // GFM tables
+                {"spec-tasklists.txt", "Tasklists"},  // GFM task lists
+                {"spec-strikethrough.txt", "Strikethrough"}, // GFM strikethrough
+                // {"spec-permissive-autolinks.txt", "Autolinks"}, // permissive autolinks - skipped
+                // {"spec-wiki-links.txt", "WikiLinks"}, // wiki-style links - skipped
+                // {"spec-latex-math.txt", "LaTeXMath"}, // latex math spans - skipped
+                // {"spec-underline.txt", "Underline"},  // underline extension - skipped
+                {NULL, NULL}
+            };
+            
+            // base paths to try
+            const char* base_paths[] = {
+                "test/markup/md/",
+                "../test/markup/md/",
+                "markup/md/",
                 NULL
             };
 
-            for (int i = 0; spec_paths[i] != NULL; i++) {
-                examples = parse_commonmark_spec(spec_paths[i]);
-                if (!examples.empty()) {
-                    printf("Loaded %zu CommonMark examples from %s\n",
-                           examples.size(), spec_paths[i]);
+            // find working base path
+            std::string working_base;
+            for (int i = 0; base_paths[i] != NULL; i++) {
+                std::string test_path = std::string(base_paths[i]) + "spec.txt";
+                std::ifstream test_file(test_path);
+                if (test_file.is_open()) {
+                    working_base = base_paths[i];
+                    test_file.close();
                     break;
                 }
             }
+            
+            if (working_base.empty()) {
+                fprintf(stderr, "ERROR: Cannot find spec files in any search path\n");
+                examples_loaded = true;
+                return;
+            }
+            
+            // load all spec files
+            int total_examples = 0;
+            for (int i = 0; spec_files[i].path_suffix != NULL; i++) {
+                std::string spec_path = working_base + spec_files[i].path_suffix;
+                std::ifstream check_file(spec_path);
+                if (!check_file.is_open()) {
+                    // spec file not found, skip it
+                    continue;
+                }
+                check_file.close();
+                
+                std::vector<MarkdownExample> file_examples = 
+                    parse_commonmark_spec(spec_path.c_str(), spec_files[i].name);
+                
+                if (!file_examples.empty()) {
+                    printf("Loaded %zu examples from %s (%s)\n",
+                           file_examples.size(), spec_path.c_str(), spec_files[i].name);
+                    total_examples += file_examples.size();
+                    examples.insert(examples.end(), file_examples.begin(), file_examples.end());
+                }
+            }
+            
+            printf("Total: %d examples from all spec files\n", total_examples);
             examples_loaded = true;
         }
     }
 
     // Parse markdown and format as CommonMark-style HTML fragment
-    std::string parse_and_format_html(const std::string& markdown) {
+    // Takes optional cmdline_options to determine which flavor to use
+    std::string parse_and_format_html(const std::string& markdown, const std::string& cmdline_options = "") {
         String* type_str = create_test_string("markup");
-        String* flavor_str = create_test_string("commonmark");
+        
+        // Use "markdown" (GFM) flavor when GFM-specific options are enabled
+        // Otherwise use "commonmark" for strict CommonMark parsing
+        bool use_gfm = cmdline_options.find("--ftables") != std::string::npos ||
+                       cmdline_options.find("--ftasklists") != std::string::npos ||
+                       cmdline_options.find("--fstrikethrough") != std::string::npos;
+        String* flavor_str = use_gfm ? create_test_string("markdown") : create_test_string("commonmark");
+        
         Url* cwd = get_current_dir();
         Url* dummy_url = parse_url(cwd, "test.md");
 
@@ -215,11 +332,11 @@ protected:
 };
 
 // Static member initialization
-std::vector<CommonMarkExample> CommonMarkSpecTest::examples;
-bool CommonMarkSpecTest::examples_loaded = false;
+std::vector<MarkdownExample> MarkdownSpecTest::examples;
+bool MarkdownSpecTest::examples_loaded = false;
 
 // Test that we can load the spec file
-TEST_F(CommonMarkSpecTest, LoadSpec) {
+TEST_F(MarkdownSpecTest, LoadSpec) {
     ASSERT_FALSE(examples.empty()) << "Failed to load CommonMark spec examples";
     printf("Total examples loaded: %zu\n", examples.size());
 }
@@ -234,12 +351,12 @@ struct TestStats {
 static TestStats global_stats;
 
 // Parameterized test for individual examples
-class CommonMarkExampleTest : public CommonMarkSpecTest,
+class MarkdownExampleTest : public MarkdownSpecTest,
                                public ::testing::WithParamInterface<int> {
 };
 
 // Run a specific example by index
-TEST_P(CommonMarkExampleTest, Example) {
+TEST_P(MarkdownExampleTest, Example) {
     int index = GetParam();
 
     if (index >= (int)examples.size()) {
@@ -247,18 +364,21 @@ TEST_P(CommonMarkExampleTest, Example) {
         return;
     }
 
-    const CommonMarkExample& ex = examples[index];
+    const MarkdownExample& ex = examples[index];
 
     // Parse markdown and get HTML output
-    std::string actual_html = parse_and_format_html(ex.markdown);
+    // Pass cmdline_options to determine flavor (GFM vs CommonMark)
+    std::string actual_html = parse_and_format_html(ex.markdown, ex.cmdline_options);
     std::string normalized_actual = normalize_html(actual_html);
     std::string normalized_expected = normalize_html(ex.expected_html);
 
     // Compare outputs using GTest assertion
     EXPECT_EQ(normalized_expected, normalized_actual)
         << "\n=== Example " << ex.example_number << " FAILED ===\n"
+        << "Spec: " << ex.spec_file << "\n"
         << "Section: " << ex.section << "\n"
         << "Line: " << ex.line_number << "\n"
+        << "Options: " << (ex.cmdline_options.empty() ? "(none)" : ex.cmdline_options) << "\n"
         << "--- Markdown input ---\n" << ex.markdown << "\n"
         << "--- Expected HTML ---\n" << ex.expected_html << "\n"
         << "--- Actual HTML ---\n" << actual_html << "\n"
@@ -273,25 +393,34 @@ TEST_P(CommonMarkExampleTest, Example) {
 
 // Generate test parameters for first N examples (for quick testing)
 // Use INSTANTIATE_TEST_SUITE_P with a range
+// Note: We use a large enough number to cover all spec files
+// The tests will handle out-of-range indices gracefully
 INSTANTIATE_TEST_SUITE_P(
     AllExamples,
-    CommonMarkExampleTest,
-    ::testing::Range(0, 655),  // Test all 655 examples
+    MarkdownExampleTest,
+    ::testing::Range(0, 2000),  // Large enough to cover all examples from all spec files
     [](const ::testing::TestParamInfo<int>& info) {
         return "Example_" + std::to_string(info.param + 1);
     }
 );
 
 // Test specific categories
-TEST_F(CommonMarkSpecTest, CountExamplesBySection) {
+TEST_F(MarkdownSpecTest, CountExamplesBySection) {
     if (examples.empty()) {
         GTEST_SKIP() << "No examples loaded";
         return;
     }
 
+    std::map<std::string, int> spec_counts;
     std::map<std::string, int> section_counts;
     for (const auto& ex : examples) {
+        spec_counts[ex.spec_file]++;
         section_counts[ex.section]++;
+    }
+
+    printf("\nExamples by spec file:\n");
+    for (const auto& pair : spec_counts) {
+        printf("  %s: %d\n", pair.first.c_str(), pair.second);
     }
 
     printf("\nExamples by section:\n");
@@ -301,7 +430,7 @@ TEST_F(CommonMarkSpecTest, CountExamplesBySection) {
 }
 
 // Test basic headers (examples typically in "ATX headings" section)
-TEST_F(CommonMarkSpecTest, ATXHeadings) {
+TEST_F(MarkdownSpecTest, ATXHeadings) {
     int passed = 0, failed = 0;
 
     for (const auto& ex : examples) {
@@ -328,7 +457,7 @@ TEST_F(CommonMarkSpecTest, ATXHeadings) {
 }
 
 // Test paragraphs
-TEST_F(CommonMarkSpecTest, Paragraphs) {
+TEST_F(MarkdownSpecTest, Paragraphs) {
     int passed = 0, failed = 0;
 
     for (const auto& ex : examples) {
@@ -349,7 +478,7 @@ TEST_F(CommonMarkSpecTest, Paragraphs) {
 }
 
 // Test code blocks
-TEST_F(CommonMarkSpecTest, CodeBlocks) {
+TEST_F(MarkdownSpecTest, CodeBlocks) {
     int passed = 0, failed = 0;
 
     for (const auto& ex : examples) {
@@ -371,13 +500,14 @@ TEST_F(CommonMarkSpecTest, CodeBlocks) {
 }
 
 // Comprehensive statistics by section
-TEST_F(CommonMarkSpecTest, ComprehensiveStats) {
+TEST_F(MarkdownSpecTest, ComprehensiveStats) {
     if (examples.empty()) {
         GTEST_SKIP() << "No examples loaded";
         return;
     }
 
     std::map<std::string, std::pair<int, int>> section_stats; // {passed, failed}
+    std::map<std::string, std::pair<int, int>> spec_stats;    // {passed, failed} by spec file
     int total_passed = 0;
     int total_failed = 0;
 
@@ -390,9 +520,11 @@ TEST_F(CommonMarkSpecTest, ComprehensiveStats) {
 
         if (passed) {
             section_stats[ex.section].first++;
+            spec_stats[ex.spec_file].first++;
             total_passed++;
         } else {
             section_stats[ex.section].second++;
+            spec_stats[ex.spec_file].second++;
             total_failed++;
         }
     }
@@ -401,7 +533,23 @@ TEST_F(CommonMarkSpecTest, ComprehensiveStats) {
     printf("========================================\n");
     printf("CommonMark Spec Compliance Report\n");
     printf("========================================\n\n");
+    
+    // stats by spec file
+    printf("Results by Spec File:\n");
+    printf("%-30s %6s %6s %7s\n", "Spec File", "Pass", "Fail", "Rate");
+    printf("%-30s %6s %6s %7s\n", "------------------------------", "------", "------", "-------");
+    for (const auto& pair : spec_stats) {
+        int passed = pair.second.first;
+        int failed = pair.second.second;
+        int total = passed + failed;
+        double rate = 100.0 * passed / total;
+        printf("%-30s %6d %6d %6.1f%%\n",
+               pair.first.substr(0, 30).c_str(),
+               passed, failed, rate);
+    }
+    printf("\n");
 
+    printf("Results by Section:\n");
     printf("%-40s %6s %6s %7s\n", "Section", "Pass", "Fail", "Rate");
     printf("%-40s %6s %6s %7s\n", "----------------------------------------", "------", "------", "-------");
 
@@ -423,7 +571,7 @@ TEST_F(CommonMarkSpecTest, ComprehensiveStats) {
 }
 
 // Print final statistics
-TEST_F(CommonMarkSpecTest, FinalStatistics) {
+TEST_F(MarkdownSpecTest, FinalStatistics) {
     printf("\n========================================\n");
     printf("CommonMark Spec Test Summary\n");
     printf("========================================\n");
