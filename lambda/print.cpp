@@ -251,7 +251,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
                 break;
             case LMD_TYPE_INT:
-                strbuf_append_format(strbuf, "%d", *(int*)data);
+                strbuf_append_format(strbuf, "%" PRId64, *(int64_t*)data);  // read full int64 to preserve 56-bit value
                 break;
             case LMD_TYPE_INT64:
                 strbuf_append_format(strbuf, "%" PRId64, *(int64_t*)data);

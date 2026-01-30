@@ -2,22 +2,28 @@
 <latex_document
   <documentclass
     "article">
-  <itemize
-    <section
-      "Basic Test">
-    "This is a basic LaTeX document to test the typesetting pipeline.
-
+  "
 "
-    <subsection
-      "Simple Content">
-    "Here is some simple text content with basic formatting.
-
-"
-    <textbf
-      "Bold text">
-    "and "
-    <textit
-      "italic text">
-    "should be rendered correctly.
-
-">>
+  <document
+    'parbreak'
+    <section title: <curly_group
+        "Basic Test">>
+    <paragraph
+      'parbreak'
+      "This is a basic LaTeX document to test the typesetting pipeline."
+      'parbreak'>
+    <subsection title: <curly_group
+        "Simple Content">>
+    <paragraph
+      'parbreak'
+      "Here is some simple text content with basic formatting."
+      'parbreak'
+      <textbf
+        "Bold text">
+      " and "
+      <textit
+        "italic text">
+      " should be rendered correctly."
+      'parbreak'>>
+  "
+">

@@ -77,7 +77,7 @@
   },
   strings: {
     simple_string: "hello world",
-    string_with_spaces: "value with leading and trailing spaces  ",
+    string_with_spaces: "value with leading and trailing spaces",
     empty_string: null,
     double_quoted: "This is a double quoted string",
     single_quoted: "This is a single quoted string",
@@ -91,14 +91,14 @@
     string_with_semicolon: "value"
   },
   whitespace_tests: {
-    key_with_spaces: "value_with_spaces   ",
-    tab_separated: "tab_value   ",
-    mixed_whitespace: "mixed value       "
+    key_with_spaces: "value_with_spaces",
+    tab_separated: "tab_value",
+    mixed_whitespace: "mixed value"
   },
   edge_cases: {
     just_key: null,
-    key_with_comment: "value ",
-    key_with_hash: "value ",
+    key_with_comment: "value",
+    key_with_hash: "value",
     key_123: "numeric key",
     _underscore_key: "underscore value",
     key_with_123_numbers: "mixed key"
