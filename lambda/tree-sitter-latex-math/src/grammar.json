@@ -24,15 +24,11 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "_atom"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "group"
-        },
-        {
-          "type": "SYMBOL",
           "name": "subsup"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_atom"
         }
       ]
     },
@@ -49,6 +45,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "symbol_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "operator"
         },
         {
@@ -61,6 +61,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "group"
+        },
+        {
+          "type": "SYMBOL",
           "name": "fraction"
         },
         {
@@ -69,11 +73,11 @@
         },
         {
           "type": "SYMBOL",
-          "name": "radical"
+          "name": "genfrac"
         },
         {
           "type": "SYMBOL",
-          "name": "symbol_command"
+          "name": "radical"
         },
         {
           "type": "SYMBOL",
@@ -117,6 +121,14 @@
         },
         {
           "type": "SYMBOL",
+          "name": "mathop_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "matrix_command"
+        },
+        {
+          "type": "SYMBOL",
           "name": "environment"
         },
         {
@@ -130,6 +142,14 @@
         {
           "type": "SYMBOL",
           "name": "space_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "hspace_command"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "skip_command"
         },
         {
           "type": "SYMBOL",
@@ -203,6 +223,46 @@
         {
           "type": "STRING",
           "value": "\\varnothing"
+        },
+        {
+          "type": "STRING",
+          "value": "\\cdots"
+        },
+        {
+          "type": "STRING",
+          "value": "\\ldots"
+        },
+        {
+          "type": "STRING",
+          "value": "\\vdots"
+        },
+        {
+          "type": "STRING",
+          "value": "\\ddots"
+        },
+        {
+          "type": "STRING",
+          "value": "\\dots"
+        },
+        {
+          "type": "STRING",
+          "value": "\\dotsb"
+        },
+        {
+          "type": "STRING",
+          "value": "\\dotsc"
+        },
+        {
+          "type": "STRING",
+          "value": "\\dotsi"
+        },
+        {
+          "type": "STRING",
+          "value": "\\dotsm"
+        },
+        {
+          "type": "STRING",
+          "value": "\\dotso"
         }
       ]
     },
@@ -837,9 +897,22 @@
         }
       ]
     },
+    "limits_modifier": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\limits"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nolimits"
+        }
+      ]
+    },
     "subsup": {
       "type": "PREC_RIGHT",
-      "value": 1,
+      "value": 10,
       "content": {
         "type": "SEQ",
         "members": [
@@ -850,6 +923,22 @@
               "type": "SYMBOL",
               "name": "_atom"
             }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "modifier",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "limits_modifier"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           },
           {
             "type": "CHOICE",
@@ -868,6 +957,34 @@
                       "type": "SYMBOL",
                       "name": "_script_arg"
                     }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "FIELD",
+                        "name": "sup_modifier",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "limits_modifier"
+                        }
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "^"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "sup",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_script_arg"
+                    }
                   }
                 ]
               },
@@ -881,6 +998,34 @@
                   {
                     "type": "FIELD",
                     "name": "sup",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_script_arg"
+                    }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "FIELD",
+                        "name": "sub_modifier",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "limits_modifier"
+                        }
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "_"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "sub",
                     "content": {
                       "type": "SYMBOL",
                       "name": "_script_arg"
@@ -902,18 +1047,6 @@
                       "type": "SYMBOL",
                       "name": "_script_arg"
                     }
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "^"
-                  },
-                  {
-                    "type": "FIELD",
-                    "name": "sup",
-                    "content": {
-                      "type": "SYMBOL",
-                      "name": "_script_arg"
-                    }
                   }
                 ]
               },
@@ -927,18 +1060,6 @@
                   {
                     "type": "FIELD",
                     "name": "sup",
-                    "content": {
-                      "type": "SYMBOL",
-                      "name": "_script_arg"
-                    }
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "_"
-                  },
-                  {
-                    "type": "FIELD",
-                    "name": "sub",
                     "content": {
                       "type": "SYMBOL",
                       "name": "_script_arg"
@@ -1085,6 +1206,63 @@
         {
           "type": "FIELD",
           "name": "bottom",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_frac_arg"
+          }
+        }
+      ]
+    },
+    "genfrac": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\genfrac"
+        },
+        {
+          "type": "FIELD",
+          "name": "left_delim",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "right_delim",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "thickness",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "style",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "numer",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_frac_arg"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "denom",
           "content": {
             "type": "SYMBOL",
             "name": "_frac_arg"
@@ -2116,12 +2294,91 @@
       }
     },
     "row_sep": {
-      "type": "STRING",
-      "value": "\\\\"
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\\\"
+        },
+        {
+          "type": "STRING",
+          "value": "\\cr"
+        }
+      ]
     },
     "col_sep": {
       "type": "STRING",
       "value": "&"
+    },
+    "matrix_command": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "cmd",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\\matrix"
+              },
+              {
+                "type": "STRING",
+                "value": "\\pmatrix"
+              },
+              {
+                "type": "STRING",
+                "value": "\\bordermatrix"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "body",
+              "content": {
+                "type": "SYMBOL",
+                "name": "matrix_body"
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "matrix_body": {
+      "type": "REPEAT1",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "_expression"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "row_sep"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "col_sep"
+          }
+        ]
+      }
     },
     "text_command": {
       "type": "SEQ",
@@ -2256,6 +2513,10 @@
                 },
                 {
                   "type": "STRING",
+                  "value": "\\mathnormal"
+                },
+                {
+                  "type": "STRING",
                   "value": "\\displaystyle"
                 },
                 {
@@ -2296,6 +2557,23 @@
         ]
       }
     },
+    "mathop_command": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\mathop"
+        },
+        {
+          "type": "FIELD",
+          "name": "content",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        }
+      ]
+    },
     "box_command": {
       "type": "SEQ",
       "members": [
@@ -2316,10 +2594,6 @@
               {
                 "type": "STRING",
                 "value": "\\boxed"
-              },
-              {
-                "type": "STRING",
-                "value": "\\colorbox"
               },
               {
                 "type": "STRING",
@@ -2393,6 +2667,10 @@
                 {
                   "type": "STRING",
                   "value": "\\color"
+                },
+                {
+                  "type": "STRING",
+                  "value": "\\colorbox"
                 }
               ]
             }
@@ -2545,14 +2823,205 @@
         {
           "type": "STRING",
           "value": "\\qquad"
+        }
+      ]
+    },
+    "hspace_command": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "cmd",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\\hspace"
+              },
+              {
+                "type": "STRING",
+                "value": "\\hspace*"
+              }
+            ]
+          }
         },
         {
           "type": "STRING",
-          "value": "\\hspace"
+          "value": "{"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "sign",
+              "content": {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "+"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "-"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "number"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "unit",
+          "content": {
+            "type": "SYMBOL",
+            "name": "dimension_unit"
+          }
         },
         {
           "type": "STRING",
-          "value": "\\hspace*"
+          "value": "}"
+        }
+      ]
+    },
+    "skip_command": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "cmd",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\\hskip"
+              },
+              {
+                "type": "STRING",
+                "value": "\\kern"
+              },
+              {
+                "type": "STRING",
+                "value": "\\mskip"
+              },
+              {
+                "type": "STRING",
+                "value": "\\mkern"
+              }
+            ]
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "sign",
+              "content": {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "+"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "-"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "number"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "unit",
+          "content": {
+            "type": "SYMBOL",
+            "name": "dimension_unit"
+          }
+        }
+      ]
+    },
+    "dimension_unit": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "pt"
+        },
+        {
+          "type": "STRING",
+          "value": "mm"
+        },
+        {
+          "type": "STRING",
+          "value": "cm"
+        },
+        {
+          "type": "STRING",
+          "value": "in"
+        },
+        {
+          "type": "STRING",
+          "value": "ex"
+        },
+        {
+          "type": "STRING",
+          "value": "em"
+        },
+        {
+          "type": "STRING",
+          "value": "bp"
+        },
+        {
+          "type": "STRING",
+          "value": "pc"
+        },
+        {
+          "type": "STRING",
+          "value": "dd"
+        },
+        {
+          "type": "STRING",
+          "value": "cc"
+        },
+        {
+          "type": "STRING",
+          "value": "sp"
+        },
+        {
+          "type": "STRING",
+          "value": "mu"
+        },
+        {
+          "type": "STRING",
+          "value": "\\fill"
         }
       ]
     },
