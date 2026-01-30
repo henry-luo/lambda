@@ -7,7 +7,7 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
         case LMD_TYPE_BOOL:
             return {.item = b2it(*(bool*)field_data)};
         case LMD_TYPE_INT:
-            return {.int_val = *(int*)field_data, ._type_id = LMD_TYPE_INT};
+            return {.item = i2it(*(int64_t*)field_data)};  // read full int64 to preserve 56-bit value
         case LMD_TYPE_INT64:
             return {.item = l2it((int64_t*)field_data)};
         case LMD_TYPE_FLOAT:

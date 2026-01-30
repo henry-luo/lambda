@@ -1861,7 +1861,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
             if (item->node_type == AST_NODE_KEY_EXPR) {
                 AstNamedNode* key_expr = (AstNamedNode*)item;
                 if (key_expr->as) {
-                    transpile_expr(tp, key_expr->as);
+                    transpile_box_item(tp, key_expr->as);  // use box_item to wrap with i2it() etc.
                 } else {
                     log_error("Error: transpile_map_expr key expression missing assignment");
                     strbuf_append_str(tp->code_buf, "ITEM_ERROR");
@@ -1906,7 +1906,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
             if (item->node_type == AST_NODE_KEY_EXPR) {
                 AstNamedNode* key_expr = (AstNamedNode*)item;
                 if (key_expr->as) {
-                    transpile_expr(tp, key_expr->as);
+                    transpile_box_item(tp, key_expr->as);  // use box_item to wrap with i2it() etc.
                 } else {
                     log_error("Error: transpile_element key expression missing assignment");
                     strbuf_append_str(tp->code_buf, "ITEM_ERROR");

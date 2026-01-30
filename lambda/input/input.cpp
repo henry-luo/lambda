@@ -111,14 +111,20 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     void* field_ptr = (char*)mp->data + byte_offset - bsize;
     switch (type_id) {
     case LMD_TYPE_NULL:
-        *(void**)field_ptr = NULL;
+        // null value doesn't need to store anything - type_info says 1 byte but we don't write it
+        // just mark the slot with a zero byte for safety
+        *(bool*)field_ptr = false;
         break;
     case LMD_TYPE_BOOL:
         *(bool*)field_ptr = value.bool_val;
         break;
-    case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.int_val;
+    case LMD_TYPE_INT: {
+        int64_t int_val = value.get_int56();
+        log_debug("map_put INT: value.item=0x%llx, get_int56()=%lld", 
+                  (unsigned long long)value.item, (long long)int_val);
+        *(int64_t*)field_ptr = int_val;
         break;
+    }
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
@@ -224,7 +230,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.int_val;
+        *(int64_t*)field_ptr = value.get_int56();  // use get_int56() to extract full 56-bit value
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();

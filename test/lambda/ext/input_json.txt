@@ -5,7 +5,7 @@
   number_float: 3.14159,
   number_negative: -123,
   number_zero: 0,
-  number_scientific: 1.23e+10,
+  number_scientific: 12300000000,
   number_scientific_negative: -5e-7,
   boolean_true: true,
   boolean_false: false,
@@ -19,7 +19,7 @@
     number_float: 3.14159,
     number_negative: -123,
     number_zero: 0,
-    number_scientific: 1.23e+10,
+    number_scientific: 12300000000,
     number_scientific_negative: -5e-7,
     boolean_true: true,
     boolean_false: false,
@@ -27,11 +27,11 @@
   },
   strings: {
     empty: null,
-    whitespace: "
+    whitespace: "   	
   ",
     unicode: "Hello 🌍 世界 مرحبا بالعالم",
-    escaped_characters: "Quote: " Backslash: \ Newline:
- Tab:   ",
+    escaped_characters: "Quote: " Backslash: \ Newline: 
+ Tab: 	",
     unicode_escape: "Unicode heart: \u2764",
     long_string: "This is a very long string that might be used to test parsing performance and memory allocation when dealing with large text content in JSON documents.",
     numbers_as_strings: "123",
@@ -40,12 +40,12 @@
     url_like: "https://example.com/api/v1/users?id=123&format=json"
   },
   numbers: {
-    integer_max: 9.0072e+15,
-    integer_min: -9.0072e+15,
+    integer_max: 9007199254740991,
+    integer_min: -9007199254740991,
     float_precision: 0.123456789,
     very_small: 1e-10,
-    very_large: 1e+10,
-    zero_variants: [0, 0, -0],
+    very_large: 10000000000,
+    zero_variants: [0, 0, 0],
     infinity_representation: "Infinity cannot be represented in JSON",
     nan_representation: "NaN cannot be represented in JSON"
   },

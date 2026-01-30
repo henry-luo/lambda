@@ -385,7 +385,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             case LMD_TYPE_BOOL:
                 return {.item = b2it(*(bool*)field_ptr)};
             case LMD_TYPE_INT:
-                return {.item = i2it(*(int*)field_ptr)};
+                return {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
             case LMD_TYPE_INT64:
                 return push_l(*(int64_t*)field_ptr);
             case LMD_TYPE_FLOAT:
