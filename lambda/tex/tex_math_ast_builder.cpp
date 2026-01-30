@@ -658,6 +658,7 @@ private:
     MathASTNode* build_subsup(TSNode node);
     MathASTNode* build_fraction(TSNode node);
     MathASTNode* build_binomial(TSNode node);
+    MathASTNode* build_genfrac(TSNode node);
     MathASTNode* build_infix_frac(TSNode node);
     MathASTNode* build_radical(TSNode node);
     MathASTNode* build_delimiter_group(TSNode node);
@@ -675,6 +676,7 @@ private:
     MathASTNode* build_text_command(TSNode node);
     MathASTNode* build_space_command(TSNode node);
     MathASTNode* build_style_command(TSNode node);
+    MathASTNode* build_mathop_command(TSNode node);
 
     // Helpers
     const char* node_text(TSNode node, int* out_len);
@@ -720,6 +722,13 @@ MathASTNode* MathASTBuilder::build() {
 
     TSNode root = ts_tree_root_node(tree);
 
+    // DEBUG: Dump parse tree S-expression
+    char* sexp = ts_node_string(root);
+    if (sexp) {
+        log_debug("tex_math_ast: parse tree = %s", sexp);
+        free(sexp);
+    }
+
     if (ts_node_has_error(root)) {
         log_debug("tex_math_ast: parse tree has errors, continuing anyway");
     }
@@ -757,6 +766,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "subsup") == 0) return build_subsup(node);
     if (strcmp(type, "fraction") == 0) return build_fraction(node);
     if (strcmp(type, "binomial") == 0) return build_binomial(node);
+    if (strcmp(type, "genfrac") == 0) return build_genfrac(node);
     if (strcmp(type, "infix_frac") == 0) return build_infix_frac(node);
     if (strcmp(type, "radical") == 0) return build_radical(node);
     if (strcmp(type, "delimiter_group") == 0) return build_delimiter_group(node);
@@ -774,6 +784,7 @@ MathASTNode* MathASTBuilder::build_ts_node(TSNode node) {
     if (strcmp(type, "space_command") == 0) return build_space_command(node);
     if (strcmp(type, "style_command") == 0) return build_style_command(node);
     if (strcmp(type, "brack_group") == 0) return build_brack_group(node);
+    if (strcmp(type, "mathop_command") == 0) return build_mathop_command(node);
 
     // Unknown - try children
     uint32_t child_count = ts_node_named_child_count(node);
@@ -1096,18 +1107,37 @@ MathASTNode* MathASTBuilder::build_command(TSNode node) {
 }
 
 MathASTNode* MathASTBuilder::build_subsup(TSNode node) {
-    // subsup has fields: base, sub, sup
+    // subsup has fields: base, sub, sup, modifier (optional \limits or \nolimits)
     // Use ts_node_child_by_field_name to get them
 
     TSNode base_node = ts_node_child_by_field_name(node, "base", 4);
     TSNode sub_node = ts_node_child_by_field_name(node, "sub", 3);
     TSNode sup_node = ts_node_child_by_field_name(node, "sup", 3);
+    TSNode modifier_node = ts_node_child_by_field_name(node, "modifier", 8);
 
-    log_debug("tex_math_ast_builder: build_subsup base=%d sub=%d sup=%d",
-              !ts_node_is_null(base_node), !ts_node_is_null(sub_node), !ts_node_is_null(sup_node));
+    log_debug("tex_math_ast_builder: build_subsup base=%d sub=%d sup=%d modifier=%d",
+              !ts_node_is_null(base_node), !ts_node_is_null(sub_node),
+              !ts_node_is_null(sup_node), !ts_node_is_null(modifier_node));
 
     MathASTNode* base = ts_node_is_null(base_node) ? nullptr : build_ts_node(base_node);
     if (!base) return nullptr;
+
+    // Check for \limits or \nolimits modifier
+    bool has_limits = false;
+    bool has_nolimits = false;
+    if (!ts_node_is_null(modifier_node)) {
+        int len;
+        const char* mod_text = node_text(modifier_node, &len);
+        if (mod_text) {
+            if (len >= 7 && strncmp(mod_text, "\\limits", 7) == 0) {
+                has_limits = true;
+                log_debug("tex_math_ast_builder: subsup has \\limits modifier");
+            } else if (len >= 9 && strncmp(mod_text, "\\nolimits", 9) == 0) {
+                has_nolimits = true;
+                log_debug("tex_math_ast_builder: subsup has \\nolimits modifier");
+            }
+        }
+    }
 
     MathASTNode* super = ts_node_is_null(sup_node) ? nullptr : build_ts_node(sup_node);
     MathASTNode* sub = ts_node_is_null(sub_node) ? nullptr : build_ts_node(sub_node);
@@ -1115,10 +1145,19 @@ MathASTNode* MathASTBuilder::build_subsup(TSNode node) {
     log_debug("tex_math_ast_builder: build_subsup result super=%p sub=%p", (void*)super, (void*)sub);
 
     if (!super && !sub) {
+        // Apply flags to base even without scripts
+        if (has_limits) base->flags |= MathASTNode::FLAG_LIMITS;
+        if (has_nolimits) base->flags |= MathASTNode::FLAG_NOLIMITS;
         return base;
     }
 
-    return make_math_scripts(arena, base, super, sub);
+    MathASTNode* scripts = make_math_scripts(arena, base, super, sub);
+
+    // Apply limits/nolimits flags
+    if (has_limits) scripts->flags |= MathASTNode::FLAG_LIMITS;
+    if (has_nolimits) scripts->flags |= MathASTNode::FLAG_NOLIMITS;
+
+    return scripts;
 }
 
 MathASTNode* MathASTBuilder::build_fraction(TSNode node) {
@@ -1180,6 +1219,93 @@ MathASTNode* MathASTBuilder::build_binomial(TSNode node) {
         binom->frac.right_delim = ')';
     }
     return binom;
+}
+
+MathASTNode* MathASTBuilder::build_genfrac(TSNode node) {
+    // \genfrac{left}{right}{thickness}{style}{numer}{denom}
+    // General fraction command from amsmath
+
+    // Get delimiter groups
+    TSNode left_node = ts_node_child_by_field_name(node, "left_delim", 10);
+    TSNode right_node = ts_node_child_by_field_name(node, "right_delim", 11);
+    TSNode thickness_node = ts_node_child_by_field_name(node, "thickness", 9);
+    TSNode style_node = ts_node_child_by_field_name(node, "style", 5);
+    TSNode numer_node = ts_node_child_by_field_name(node, "numer", 5);
+    TSNode denom_node = ts_node_child_by_field_name(node, "denom", 5);
+
+    // Parse left delimiter
+    int32_t left_delim = 0;
+    if (!ts_node_is_null(left_node)) {
+        // Get content inside the braces
+        int len;
+        const char* text = node_text(left_node, &len);
+        // text is like "{(" or "{}" - extract the delimiter
+        if (text && len >= 2 && text[0] == '{' && text[len-1] == '}') {
+            if (len > 2) {
+                left_delim = (int32_t)(unsigned char)text[1];  // First char inside braces
+            }
+        }
+    }
+
+    // Parse right delimiter
+    int32_t right_delim = 0;
+    if (!ts_node_is_null(right_node)) {
+        int len;
+        const char* text = node_text(right_node, &len);
+        if (text && len >= 2 && text[0] == '{' && text[len-1] == '}') {
+            if (len > 2) {
+                right_delim = (int32_t)(unsigned char)text[1];
+            }
+        }
+    }
+
+    // Parse thickness (default: standard bar line)
+    float rule_thickness = -1.0f;  // -1 means default
+    if (!ts_node_is_null(thickness_node)) {
+        int len;
+        const char* text = node_text(thickness_node, &len);
+        // text is like "{0pt}" or "{}"
+        if (text && len >= 2 && text[0] == '{' && text[len-1] == '}') {
+            if (len > 2) {
+                // Parse dimension value - crude parsing
+                char dim_buf[32];
+                int dim_len = len - 2;
+                if (dim_len > 31) dim_len = 31;
+                strncpy(dim_buf, text + 1, dim_len);
+                dim_buf[dim_len] = '\0';
+                // Try to parse as float
+                char* endptr;
+                float val = strtof(dim_buf, &endptr);
+                if (endptr != dim_buf) {
+                    // Check unit - pt, em, ex
+                    if (strstr(endptr, "pt")) {
+                        rule_thickness = val;
+                    } else if (strstr(endptr, "em")) {
+                        rule_thickness = val * 10.0f;  // approximate
+                    } else if (strstr(endptr, "ex")) {
+                        rule_thickness = val * 5.0f;   // approximate
+                    } else {
+                        rule_thickness = val;  // assume pt
+                    }
+                }
+            } else {
+                rule_thickness = -1.0f;  // empty: default bar line
+            }
+        }
+    }
+
+    // Build numerator and denominator
+    MathASTNode* numer = !ts_node_is_null(numer_node) ? build_ts_node(numer_node) : nullptr;
+    MathASTNode* denom = !ts_node_is_null(denom_node) ? build_ts_node(denom_node) : nullptr;
+
+    // Create FRAC node
+    MathASTNode* frac = make_math_frac(arena, numer, denom, rule_thickness);
+    if (frac) {
+        frac->frac.command = "genfrac";
+        frac->frac.left_delim = left_delim;
+        frac->frac.right_delim = right_delim;
+    }
+    return frac;
 }
 
 MathASTNode* MathASTBuilder::build_infix_frac(TSNode node) {
@@ -2116,6 +2242,35 @@ MathASTNode* MathASTBuilder::build_style_command(TSNode node) {
     return body;
 }
 
+MathASTNode* MathASTBuilder::build_mathop_command(TSNode node) {
+    // \mathop{content} - makes content behave as a big operator
+    // It inherits limits behavior and can use \limits or \nolimits modifiers
+
+    TSNode content_node = ts_node_child_by_field_name(node, "content", 7);
+
+    log_debug("tex_math_ast_builder: build_mathop_command");
+
+    MathASTNode* body = nullptr;
+    if (!ts_node_is_null(content_node)) {
+        body = build_group(content_node);
+    }
+
+    if (!body) {
+        body = make_math_row(arena);
+    }
+
+    // Create an OP node for the mathop content
+    MathASTNode* op = alloc_math_node(arena, MathNodeType::OP);
+    op->body = body;
+    op->atom.command = "mathop";
+    op->atom.codepoint = 0;  // No specific codepoint - content is in body
+    op->atom.atom_class = (uint8_t)AtomType::Op;
+    // By default, \mathop uses limits in display style (like \sum)
+    op->flags = MathASTNode::FLAG_LIMITS;
+
+    return op;
+}
+
 // ============================================================================
 // Public Entry Points
 // ============================================================================
@@ -2306,6 +2461,14 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
     // Type
     ::strbuf_append_str(out, "\"type\":");
     json_escape_string(math_node_type_name(node->type), out);
+
+    // Output relevant flags
+    if (node->flags & MathASTNode::FLAG_LIMITS) {
+        ::strbuf_append_str(out, ",\"limits\":true");
+    }
+    if (node->flags & MathASTNode::FLAG_NOLIMITS) {
+        ::strbuf_append_str(out, ",\"nolimits\":true");
+    }
 
     // Type-specific fields
     switch (node->type) {

@@ -40,10 +40,11 @@ module.exports = grammar({
     // Expressions
     // ========================================================================
 
+    // Note: subsup is tried first because it's more specific (atom + scripts)
+    // If there's no script, it falls back to just _atom
     _expression: $ => choice(
-      $._atom,
-      $.group,
       $.subsup,
+      $._atom,
     ),
 
     // ========================================================================
@@ -56,8 +57,10 @@ module.exports = grammar({
       $.operator,
       $.relation,
       $.punctuation,
+      $.group,              // Braced groups can be atoms (for {}_a style subscripts)
       $.fraction,
       $.binomial,
+      $.genfrac,
       $.radical,
       $.symbol_command,  // Symbol commands that could conflict - must be before delimiter_group
       $.delimiter_group,
@@ -70,6 +73,7 @@ module.exports = grammar({
       $.rule_command,       // \rule with dimensions
       $.phantom_command,    // \phantom, \hphantom, \vphantom, \smash
       $.big_operator,
+      $.mathop_command,     // \mathop{...} - custom operator
       $.environment,
       $.text_command,
       $.style_command,
@@ -187,16 +191,27 @@ module.exports = grammar({
     // Sub/Superscript (TeXBook Rules 18)
     // ========================================================================
 
-    subsup: $ => prec.right(1, seq(
+    // Limits modifier: \limits forces above/below, \nolimits forces inline scripts
+    limits_modifier: $ => choice('\\limits', '\\nolimits'),
+
+    subsup: $ => prec.right(10, seq(
       field('base', $._atom),
+      // Optional limits modifier (for \sum\limits or \mathop{X}\nolimits)
+      optional(field('modifier', $.limits_modifier)),
       choice(
+        // Both sub and sup with optional second modifier - check these FIRST
+        // x_1^2 or x_1\limits^2 or x_1\nolimits^2 (sub then sup)
+        seq('_', field('sub', $._script_arg),
+            optional(field('sup_modifier', $.limits_modifier)),
+            '^', field('sup', $._script_arg)),
+        // x^2_1 or x^2\limits_1 or x^2\nolimits_1 (sup then sub)
+        seq('^', field('sup', $._script_arg),
+            optional(field('sub_modifier', $.limits_modifier)),
+            '_', field('sub', $._script_arg)),
         // subscript only: x_1
         seq('_', field('sub', $._script_arg)),
         // superscript only: x^2
         seq('^', field('sup', $._script_arg)),
-        // both: x_1^2 or x^2_1
-        seq('_', field('sub', $._script_arg), '^', field('sup', $._script_arg)),
-        seq('^', field('sup', $._script_arg), '_', field('sub', $._script_arg)),
       ),
     )),
 
@@ -240,6 +255,17 @@ module.exports = grammar({
       field('cmd', choice('\\binom', '\\dbinom', '\\tbinom')),
       field('top', $._frac_arg),
       field('bottom', $._frac_arg),
+    ),
+
+    // \genfrac{left}{right}{thickness}{style}{numer}{denom}
+    genfrac: $ => seq(
+      '\\genfrac',
+      field('left_delim', $.group),      // Left delimiter (can be empty {})
+      field('right_delim', $.group),     // Right delimiter (can be empty {})
+      field('thickness', $.group),       // Rule thickness (can be empty {})
+      field('style', $.group),           // Math style (can be empty {})
+      field('numer', $._frac_arg),       // Numerator
+      field('denom', $._frac_arg),       // Denominator
     ),
 
     // ========================================================================
@@ -451,6 +477,15 @@ module.exports = grammar({
       )),
       optional(field('arg', $.group)),
     )),
+
+    // ========================================================================
+    // Mathop command: \mathop{...} - makes content behave like an operator
+    // ========================================================================
+
+    mathop_command: $ => seq(
+      '\\mathop',
+      field('content', $.group),
+    ),
 
     // ========================================================================
     // Box commands: \bbox, \fbox, \boxed
