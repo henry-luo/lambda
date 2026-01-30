@@ -24,15 +24,11 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "_atom"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "group"
-        },
-        {
-          "type": "SYMBOL",
           "name": "subsup"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_atom"
         }
       ]
     },
@@ -61,11 +57,19 @@
         },
         {
           "type": "SYMBOL",
+          "name": "group"
+        },
+        {
+          "type": "SYMBOL",
           "name": "fraction"
         },
         {
           "type": "SYMBOL",
           "name": "binomial"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "genfrac"
         },
         {
           "type": "SYMBOL",
@@ -114,6 +118,10 @@
         {
           "type": "SYMBOL",
           "name": "big_operator"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "mathop_command"
         },
         {
           "type": "SYMBOL",
@@ -837,9 +845,22 @@
         }
       ]
     },
+    "limits_modifier": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\limits"
+        },
+        {
+          "type": "STRING",
+          "value": "\\nolimits"
+        }
+      ]
+    },
     "subsup": {
       "type": "PREC_RIGHT",
-      "value": 1,
+      "value": 10,
       "content": {
         "type": "SEQ",
         "members": [
@@ -850,6 +871,22 @@
               "type": "SYMBOL",
               "name": "_atom"
             }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "modifier",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "limits_modifier"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           },
           {
             "type": "CHOICE",
@@ -868,6 +905,34 @@
                       "type": "SYMBOL",
                       "name": "_script_arg"
                     }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "FIELD",
+                        "name": "sup_modifier",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "limits_modifier"
+                        }
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "^"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "sup",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_script_arg"
+                    }
                   }
                 ]
               },
@@ -881,6 +946,34 @@
                   {
                     "type": "FIELD",
                     "name": "sup",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_script_arg"
+                    }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "FIELD",
+                        "name": "sub_modifier",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "limits_modifier"
+                        }
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "_"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "sub",
                     "content": {
                       "type": "SYMBOL",
                       "name": "_script_arg"
@@ -902,18 +995,6 @@
                       "type": "SYMBOL",
                       "name": "_script_arg"
                     }
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "^"
-                  },
-                  {
-                    "type": "FIELD",
-                    "name": "sup",
-                    "content": {
-                      "type": "SYMBOL",
-                      "name": "_script_arg"
-                    }
                   }
                 ]
               },
@@ -927,18 +1008,6 @@
                   {
                     "type": "FIELD",
                     "name": "sup",
-                    "content": {
-                      "type": "SYMBOL",
-                      "name": "_script_arg"
-                    }
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "_"
-                  },
-                  {
-                    "type": "FIELD",
-                    "name": "sub",
                     "content": {
                       "type": "SYMBOL",
                       "name": "_script_arg"
@@ -1085,6 +1154,63 @@
         {
           "type": "FIELD",
           "name": "bottom",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_frac_arg"
+          }
+        }
+      ]
+    },
+    "genfrac": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\genfrac"
+        },
+        {
+          "type": "FIELD",
+          "name": "left_delim",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "right_delim",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "thickness",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "style",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "numer",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_frac_arg"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "denom",
           "content": {
             "type": "SYMBOL",
             "name": "_frac_arg"
@@ -2295,6 +2421,23 @@
           }
         ]
       }
+    },
+    "mathop_command": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\\mathop"
+        },
+        {
+          "type": "FIELD",
+          "name": "content",
+          "content": {
+            "type": "SYMBOL",
+            "name": "group"
+          }
+        }
+      ]
     },
     "box_command": {
       "type": "SEQ",
