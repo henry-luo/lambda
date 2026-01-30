@@ -532,15 +532,9 @@ static void format_math_inline(StringBuf* sb, Element* elem) {
                 if (ascii_output && ascii_output->len > 0) {
                     // Check if we have a flavor attribute to determine the original prefix
                     String* flavor_attr = get_attribute(elem, "flavor");
-                    printf("DEBUG: flavor_attr = %p\n", flavor_attr);
-                    if (flavor_attr) {
-                        printf("DEBUG: flavor_attr->chars = '%s'\n", flavor_attr->chars);
-                    }
                     if (flavor_attr && strcmp(flavor_attr->chars, "AM") == 0) {
-                        printf("DEBUG: Using AM:: prefix\n");
                         stringbuf_append_str(sb, "AM::");
                     } else {
-                        printf("DEBUG: Using asciimath:: prefix\n");
                         stringbuf_append_str(sb, "asciimath::");
                     }
                     stringbuf_append_str(sb, ascii_output->chars);
