@@ -109,39 +109,86 @@ static const EmojiEntry emoji_map[] = {
 /**
  * parse_strikethrough - Parse strikethrough text
  *
- * Handles: ~~text~~
+ * Handles: ~~text~~ (double tilde) and ~text~ (single tilde, md4c extension)
+ * GFM uses <del> tag for strikethrough output.
+ *
+ * Rules per GFM spec:
+ * - Only 1 or 2 tildes allowed (not 3+)
+ * - Opening delimiter must be left-flanking (followed by non-whitespace)
+ * - Closing delimiter must be right-flanking (preceded by non-whitespace)
+ * - Opening and closing delimiter lengths must match
  */
 Item parse_strikethrough(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
-    // Check for opening ~~
-    if (*start != '~' || *(start + 1) != '~') {
+    // Check for opening ~
+    if (*start != '~') {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    const char* pos = start + 2;
+    // Count consecutive tildes
+    int tilde_count = 1;
+    while (*(start + tilde_count) == '~') {
+        tilde_count++;
+    }
+
+    // Only 1 or 2 tildes are valid for strikethrough (not 3+)
+    if (tilde_count > 2) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    int delim_len = tilde_count;
+    const char* pos = start + delim_len;
     const char* content_start = pos;
 
-    // Find closing ~~
-    while (*pos && !(*pos == '~' && *(pos + 1) == '~')) {
+    // Check left-flanking: opening delimiter must be followed by non-whitespace
+    if (!*pos || *pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r') {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Find matching closing delimiter
+    // Must be:
+    // - Same number of tildes as opening
+    // - Preceded by non-whitespace (right-flanking)
+    // - Either end of string or followed by non-tilde (exact match)
+    while (*pos) {
+        if (*pos == '~') {
+            // Count consecutive tildes at this position
+            int close_count = 1;
+            while (*(pos + close_count) == '~') {
+                close_count++;
+            }
+
+            // Check if this matches our opening delimiter length
+            if (close_count == delim_len) {
+                // Check right-flanking: must be preceded by non-whitespace
+                char prev_char = *(pos - 1);
+                if (prev_char != ' ' && prev_char != '\t' && prev_char != '\n' && prev_char != '\r') {
+                    // Valid closing delimiter found
+                    break;
+                }
+            }
+            // Skip all tildes in this run
+            pos += close_count;
+            continue;
+        }
         pos++;
     }
 
-    if (!*pos || *(pos + 1) != '~') {
-        // No closing ~~
+    if (!*pos) {
+        // No closing delimiter found
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Extract content between ~~
+    // Extract content between delimiters
     size_t content_len = pos - content_start;
     if (content_len == 0) {
-        *text = pos + 2;
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Create strikethrough element
-    Element* s_elem = create_element(parser, "s");
-    if (!s_elem) {
+    // Create strikethrough element (GFM uses <del>)
+    Element* del_elem = create_element(parser, "del");
+    if (!del_elem) {
         return Item{.item = ITEM_ERROR};
     }
 
@@ -154,14 +201,14 @@ Item parse_strikethrough(MarkupParser* parser, const char** text) {
         String* content_str = create_string(parser, content);
         if (content_str) {
             Item content_item = {.item = s2it(content_str)};
-            list_push((List*)s_elem, content_item);
-            increment_element_content_length(s_elem);
+            list_push((List*)del_elem, content_item);
+            increment_element_content_length(del_elem);
         }
         free(content);
     }
 
-    *text = pos + 2; // Skip closing ~~
-    return Item{.item = (uint64_t)s_elem};
+    *text = pos + delim_len; // Skip closing delimiter
+    return Item{.item = (uint64_t)del_elem};
 }
 
 /**

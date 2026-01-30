@@ -18,6 +18,14 @@ namespace markup {
 // Forward declaration for inline parsing
 extern Item parse_inline_spans(MarkupParser* parser, const char* text);
 
+// Alignment enum for table columns
+enum class TableAlign {
+    NONE,
+    LEFT,
+    CENTER,
+    RIGHT
+};
+
 /**
  * is_separator_row - Check if a table row is a separator (---|---|---)
  */
@@ -48,6 +56,66 @@ static bool is_separator_row(const char* line) {
 }
 
 /**
+ * parse_separator_alignments - Parse alignment info from separator row
+ * Returns a vector of alignments, one per column
+ */
+static std::vector<TableAlign> parse_separator_alignments(const char* line) {
+    std::vector<TableAlign> alignments;
+    if (!line) return alignments;
+
+    const char* pos = line;
+    skip_whitespace(&pos);
+
+    // Skip leading |
+    if (*pos == '|') pos++;
+
+    while (*pos) {
+        // Skip whitespace before cell
+        while (*pos == ' ' || *pos == '\t') pos++;
+        
+        if (!*pos || *pos == '\n' || *pos == '\r') break;
+
+        bool left_colon = false;
+        bool right_colon = false;
+        
+        // Check for left colon
+        if (*pos == ':') {
+            left_colon = true;
+            pos++;
+        }
+        
+        // Skip dashes
+        while (*pos == '-') pos++;
+        
+        // Check for right colon
+        if (*pos == ':') {
+            right_colon = true;
+            pos++;
+        }
+        
+        // Skip whitespace after cell
+        while (*pos == ' ' || *pos == '\t') pos++;
+        
+        // Determine alignment
+        TableAlign align = TableAlign::NONE;
+        if (left_colon && right_colon) {
+            align = TableAlign::CENTER;
+        } else if (left_colon) {
+            align = TableAlign::LEFT;
+        } else if (right_colon) {
+            align = TableAlign::RIGHT;
+        }
+        alignments.push_back(align);
+        
+        // Skip to next cell
+        if (*pos == '|') pos++;
+        else break;
+    }
+
+    return alignments;
+}
+
+/**
  * parse_table_cell_content - Parse content within a table cell
  */
 Item parse_table_cell_content(MarkupParser* parser, const char* text) {
@@ -72,13 +140,22 @@ Item parse_table_cell_content(MarkupParser* parser, const char* text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Create trimmed copy
+    // Create trimmed copy with escaped pipes unescaped
     char* trimmed = (char*)malloc(len + 1);
     if (!trimmed) {
         return Item{.item = ITEM_ERROR};
     }
-    memcpy(trimmed, start, len);
-    trimmed[len] = '\0';
+    
+    // Copy while unescaping \| to |
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (start[i] == '\\' && i + 1 < len && start[i + 1] == '|') {
+            // Skip the backslash, the pipe will be copied in next iteration
+            continue;
+        }
+        trimmed[j++] = start[i];
+    }
+    trimmed[j] = '\0';
 
     // Parse inline content
     Item result = parse_inline_spans(parser, trimmed);
@@ -88,9 +165,16 @@ Item parse_table_cell_content(MarkupParser* parser, const char* text) {
 }
 
 /**
- * parse_table_row - Parse a single table row
+ * parse_table_row_with_type - Parse a single table row with specified cell type and alignments
+ * 
+ * @param parser The markup parser
+ * @param line The line to parse
+ * @param cell_tag Cell tag name ("th" for header, "td" for body)
+ * @param alignments Column alignments (may be empty)
  */
-Item parse_table_row(MarkupParser* parser, const char* line) {
+static Item parse_table_row_with_type(MarkupParser* parser, const char* line, 
+                                       const char* cell_tag,
+                                       const std::vector<TableAlign>& alignments) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
     }
@@ -114,12 +198,37 @@ Item parse_table_row(MarkupParser* parser, const char* line) {
     // Skip leading | if present
     if (*pos == '|') pos++;
 
+    int col_index = 0;
     while (*pos) {
-        // Find next | or end of line
+        // Find next unescaped | outside of code spans
         const char* cell_start = pos;
         const char* cell_end = pos;
+        int backtick_count = 0;  // Track if we're inside a code span
+        int backtick_opener = 0; // Number of backticks that opened the code span
 
-        while (*cell_end && *cell_end != '|') {
+        while (*cell_end && !(*cell_end == '|' && backtick_count == 0 && (cell_end == pos || *(cell_end - 1) != '\\'))) {
+            if (*cell_end == '`') {
+                if (backtick_count == 0) {
+                    // Count consecutive backticks to open code span
+                    backtick_opener = 0;
+                    const char* bt = cell_end;
+                    while (*bt == '`') { backtick_opener++; bt++; }
+                    backtick_count = backtick_opener;
+                    cell_end = bt;
+                    continue;
+                } else {
+                    // Check if this closes the code span
+                    int closing_count = 0;
+                    const char* bt = cell_end;
+                    while (*bt == '`') { closing_count++; bt++; }
+                    if (closing_count == backtick_opener) {
+                        backtick_count = 0;
+                        backtick_opener = 0;
+                    }
+                    cell_end = bt;
+                    continue;
+                }
+            }
             cell_end++;
         }
 
@@ -142,9 +251,25 @@ Item parse_table_row(MarkupParser* parser, const char* line) {
         memcpy(cell_text, cell_start, cell_len);
         cell_text[cell_len] = '\0';
 
-        // Create table cell
-        Element* cell = create_element(parser, "td");
+        // Create table cell with specified type
+        Element* cell = create_element(parser, cell_tag);
         if (cell) {
+            // Add alignment attribute if specified
+            if (col_index < (int)alignments.size() && alignments[col_index] != TableAlign::NONE) {
+                String* align_key = parser->builder.createName("align");
+                const char* align_val_str = nullptr;
+                switch (alignments[col_index]) {
+                    case TableAlign::LEFT: align_val_str = "left"; break;
+                    case TableAlign::CENTER: align_val_str = "center"; break;
+                    case TableAlign::RIGHT: align_val_str = "right"; break;
+                    default: break;
+                }
+                if (align_val_str) {
+                    String* align_val = parser->builder.createString(align_val_str);
+                    parser->builder.putToElement(cell, align_key, Item{.item = s2it(align_val)});
+                }
+            }
+            
             // Parse cell content
             Item cell_content = parse_table_cell_content(parser, cell_text);
             if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
@@ -162,12 +287,47 @@ Item parse_table_row(MarkupParser* parser, const char* line) {
         // Move to next cell
         pos = cell_end;
         if (*pos == '|') pos++;
+        col_index++;
 
         if (!*pos) break;
     }
 
+    // Pad row with empty cells if it has fewer cells than expected
+    size_t expected_cols = alignments.size();
+    while (col_index < (int)expected_cols) {
+        Element* empty_cell = create_element(parser, cell_tag);
+        if (empty_cell) {
+            // Add alignment attribute if specified
+            if (col_index < (int)alignments.size() && alignments[col_index] != TableAlign::NONE) {
+                String* align_key = parser->builder.createName("align");
+                const char* align_val_str = nullptr;
+                switch (alignments[col_index]) {
+                    case TableAlign::LEFT: align_val_str = "left"; break;
+                    case TableAlign::CENTER: align_val_str = "center"; break;
+                    case TableAlign::RIGHT: align_val_str = "right"; break;
+                    default: break;
+                }
+                if (align_val_str) {
+                    String* align_val = parser->builder.createString(align_val_str);
+                    parser->builder.putToElement(empty_cell, align_key, Item{.item = s2it(align_val)});
+                }
+            }
+            list_push((List*)row, Item{.item = (uint64_t)empty_cell});
+            increment_element_content_length(row);
+        }
+        col_index++;
+    }
+
     parser->current_line++;
     return Item{.item = (uint64_t)row};
+}
+
+/**
+ * parse_table_row - Parse a single table row (backward compatible wrapper)
+ */
+Item parse_table_row(MarkupParser* parser, const char* line) {
+    std::vector<TableAlign> empty_alignments;
+    return parse_table_row_with_type(parser, line, "td", empty_alignments);
 }
 
 /**
@@ -303,8 +463,9 @@ static bool is_asciidoc_table_delimiter(const char* line) {
 /**
  * parse_table - Parse a complete table structure
  *
- * Collects all consecutive table rows into a <table> element.
- * Handles both GFM-style tables and AsciiDoc |=== delimited tables.
+ * Collects all consecutive table rows into a <table> element with proper
+ * <thead> and <tbody> structure for GFM-style tables.
+ * Also handles AsciiDoc |=== delimited tables.
  */
 Item parse_table(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
@@ -330,92 +491,121 @@ Item parse_table(MarkupParser* parser, const char* line) {
         parser->current_line++;
     }
 
-    // Check for header row
-    bool first_row = true;
-    bool has_header = false;
-    Element* header_row = nullptr;
-
-    while (parser->current_line < parser->line_count) {
-        const char* current = parser->lines[parser->current_line];
-
-        // For AsciiDoc: |=== ends the table
-        if (is_asciidoc_delimited && is_asciidoc_table_delimiter(current)) {
-            parser->current_line++;  // Skip closing |===
-            break;
+    // For GFM tables: we need to look ahead to detect the header
+    // Pattern: header_row -> separator_row -> body_rows
+    std::vector<TableAlign> column_alignments;
+    bool has_gfm_header = false;
+    
+    // Check if this is a GFM table with header
+    if (!is_asciidoc_delimited && parser->current_line + 1 < parser->line_count) {
+        const char* next_line = parser->lines[parser->current_line + 1];
+        if (is_separator_row(next_line)) {
+            has_gfm_header = true;
+            column_alignments = parse_separator_alignments(next_line);
         }
+    }
 
-        // Empty line ends non-delimited tables
-        if (!is_asciidoc_delimited && is_empty_line(current)) {
-            break;
-        }
-
-        // Skip empty lines within AsciiDoc delimited tables
-        if (is_asciidoc_delimited && is_empty_line(current)) {
-            // Empty line in AsciiDoc table separates header from body
-            if (first_row && header_row) {
-                has_header = true;
+    // Parse header row if present
+    if (has_gfm_header) {
+        // Create thead element
+        Element* thead = create_element(parser, "thead");
+        if (thead) {
+            // Parse header row with <th> cells
+            Item header_row = parse_table_row_with_type(parser, line, "th", column_alignments);
+            if (header_row.item != ITEM_ERROR && header_row.item != ITEM_UNDEFINED) {
+                list_push((List*)thead, header_row);
+                increment_element_content_length(thead);
             }
-            parser->current_line++;
-            continue;
+            list_push((List*)table, Item{.item = (uint64_t)thead});
+            increment_element_content_length(table);
         }
-
-        // Check if this is still a table row
-        const char* pos = current;
-        skip_whitespace(&pos);
-
-        // Check for separator row to detect header (GFM style)
-        if (!is_asciidoc_delimited && first_row && is_separator_row(current)) {
-            // Previous row was header
-            has_header = true;
+        
+        // Skip separator row
+        if (parser->current_line < parser->line_count && 
+            is_separator_row(parser->lines[parser->current_line])) {
             parser->current_line++;
-            continue;
         }
+        
+        // Create tbody element for remaining rows
+        Element* tbody = create_element(parser, "tbody");
+        if (tbody) {
+            while (parser->current_line < parser->line_count) {
+                const char* current = parser->lines[parser->current_line];
+                
+                // Empty line ends table
+                if (is_empty_line(current)) {
+                    break;
+                }
+                
+                // Parse body row with <td> cells and alignments
+                // Note: Lines without pipes are also valid table rows in GFM
+                // (content goes in first cell, rest are empty)
+                Item row_item = parse_table_row_with_type(parser, current, "td", column_alignments);
+                if (row_item.item == ITEM_UNDEFINED) {
+                    continue; // Skip separator rows
+                }
+                if (row_item.item == ITEM_ERROR) {
+                    break;
+                }
+                
+                list_push((List*)tbody, row_item);
+                increment_element_content_length(tbody);
+            }
+            
+            // Only add tbody if it has content
+            TypeElmt* tbody_type = (TypeElmt*)tbody->type;
+            if (tbody_type->content_length > 0) {
+                list_push((List*)table, Item{.item = (uint64_t)tbody});
+                increment_element_content_length(table);
+            }
+        }
+    } else {
+        // Non-GFM table (AsciiDoc or simple table without header)
+        // Fall back to original behavior
+        bool first_row = true;
 
-        // Must have | to be a table row
-        bool has_pipe = (strchr(current, '|') != nullptr);
-        if (!has_pipe) {
-            if (!is_asciidoc_delimited) {
+        while (parser->current_line < parser->line_count) {
+            const char* current = parser->lines[parser->current_line];
+
+            // For AsciiDoc: |=== ends the table
+            if (is_asciidoc_delimited && is_asciidoc_table_delimiter(current)) {
+                parser->current_line++;
                 break;
             }
-            // In AsciiDoc tables, skip lines without pipes
-            parser->current_line++;
-            continue;
-        }
 
-        // Parse the row
-        Item row_item = parse_table_row(parser, current);
-        if (row_item.item == ITEM_UNDEFINED) {
-            // Separator row, continue
-            continue;
-        }
-        if (row_item.item == ITEM_ERROR) {
-            break;
-        }
-
-        Element* row = (Element*)row_item.item;
-
-        // If this was the first row and next is separator, mark as header
-        if (first_row) {
-            header_row = row;
-
-            // Check if next line is separator (GFM style)
-            if (!is_asciidoc_delimited && parser->current_line < parser->line_count) {
-                const char* next = parser->lines[parser->current_line];
-                if (is_separator_row(next)) {
-                    has_header = true;
-                    // Note: The first row was already created with td cells.
-                    // In a future refactor, we should detect header before creating
-                    // the row, or use attributes to mark header cells.
-                    // For now, we mark header detection but don't mutate elements.
-                }
+            // Empty line ends non-delimited tables
+            if (!is_asciidoc_delimited && is_empty_line(current)) {
+                break;
             }
+
+            // Skip empty lines within AsciiDoc delimited tables
+            if (is_asciidoc_delimited && is_empty_line(current)) {
+                parser->current_line++;
+                continue;
+            }
+
+            // Must have | to be a table row
+            if (!strchr(current, '|')) {
+                if (!is_asciidoc_delimited) {
+                    break;
+                }
+                parser->current_line++;
+                continue;
+            }
+
+            // Parse the row
+            Item row_item = parse_table_row(parser, current);
+            if (row_item.item == ITEM_UNDEFINED) {
+                continue;
+            }
+            if (row_item.item == ITEM_ERROR) {
+                break;
+            }
+
+            list_push((List*)table, row_item);
+            increment_element_content_length(table);
+            first_row = false;
         }
-
-        // Add row to table
-        list_push((List*)table, row_item);
-        increment_element_content_length(table);
-
-        first_row = false;
     }
 
     // Warn if table has no rows
