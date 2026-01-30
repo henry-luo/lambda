@@ -110,7 +110,12 @@ static Item parse_number(InputContext& ctx, const char **json) {
 
     // Check if it's an integer
     if (value == (int64_t)value) {
-        return ctx.builder.createInt((int64_t)value);
+        int64_t int_value = (int64_t)value;
+        log_debug("parse_number: creating INT from double=%g, int64=%lld (0x%llx)", 
+                  value, (long long)int_value, (unsigned long long)int_value);
+        Item result = ctx.builder.createInt(int_value);
+        log_debug("parse_number: result.item=0x%llx", (unsigned long long)result.item);
+        return result;
     } else {
         return ctx.builder.createFloat(value);
     }

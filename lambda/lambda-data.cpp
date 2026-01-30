@@ -116,7 +116,7 @@ void init_type_info() {
     type_info[LMD_TYPE_NULL] = {sizeof(bool), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
     type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
-    type_info[LMD_TYPE_INT] = {sizeof(int), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};
+    type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // 64-bit to store 56-bit value
     type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};
@@ -552,12 +552,13 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
         // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset,
         //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
+        // always read an Item (uint64_t) from varargs - transpiler now passes Items via box functions like i2it()
+        Item item = {.item = va_arg(args, uint64_t)};
         if (!field->name) { // nested map
             log_debug("set nested map field of type: %d", field->type->type_id);
-            Item itm = {.item = va_arg(args, uint64_t)};
-            TypeId type_id = get_type_id(itm);
+            TypeId type_id = get_type_id(item);
             if (type_id == LMD_TYPE_MAP) {
-                Map* nested_map = itm.map;
+                Map* nested_map = item.map;
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
@@ -569,28 +570,29 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 field->name->str, field->type->type_id, (int)field->byte_offset);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
-                *(bool*)field_ptr = (bool)va_arg(args, int);
+                // item is ITEM_NULL, nothing to store
                 break;
             }
             case LMD_TYPE_BOOL: {
-                *(bool*)field_ptr = (bool)va_arg(args, int);
+                *(bool*)field_ptr = item.bool_val;
                 break;
             }
             case LMD_TYPE_INT: {
-                *(int*)field_ptr = va_arg(args, int);
-                log_debug("set field of int type to val: %d", *(int*)field_ptr);
+                int64_t val = item.get_int56();
+                *(int64_t*)field_ptr = val;  // store full 64-bit to preserve 56-bit value
+                log_debug("set field of int type to val: %lld", (long long)val);
                 break;
             }
             case LMD_TYPE_INT64: {
-                *(int64_t*)field_ptr = va_arg(args, int64_t);
+                *(int64_t*)field_ptr = item.get_int64();
                 break;
             }
             case LMD_TYPE_FLOAT: {
-                *(double*)field_ptr = va_arg(args, double);
+                *(double*)field_ptr = item.get_double();
                 break;
             }
             case LMD_TYPE_DTIME:  {
-                DateTime dtval = va_arg(args, DateTime);
+                DateTime dtval = item.get_datetime();
                 // StrBuf *strbuf = strbuf_new();
                 // datetime_format_lambda(strbuf, &dtval);
                 // log_debug("set field of datetime type to: %s", strbuf->str);
@@ -598,25 +600,23 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-                String *str = va_arg(args, String*);
+                String *str = item.get_string();
                 *(String**)field_ptr = str;
                 str->ref_cnt++;
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
-                Container *container = va_arg(args, Container*);
+                Container *container = item.container;
                 *(Container**)field_ptr = container;
                 container->ref_cnt++;
                 break;
             }
             case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC: {
-                void *arr = va_arg(args, void*);
-                *(void**)field_ptr = arr;
+                *(void**)field_ptr = (void*)item.function;  // use function pointer accessor
                 break;
             }
             case LMD_TYPE_ANY: { // a special case
-                Item item = va_arg(args, Item);
                 TypeId type_id = get_type_id(item);
                 log_debug("set field of ANY type to type: %d", type_id);
                 TypedItem titem = {.type_id = type_id, .item = item.item};
@@ -725,7 +725,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result.bool_val = *(bool*)field_ptr;
         break;
     case LMD_TYPE_INT:
-        result.int_val = *(int*)field_ptr;
+        result = {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
         break;
     case LMD_TYPE_INT64:
         result = {.item = l2it(field_ptr)};  // points to long directly
