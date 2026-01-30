@@ -362,10 +362,6 @@
             "named": false
           },
           {
-            "type": "\\colorbox",
-            "named": false
-          },
-          {
             "type": "\\fbox",
             "named": false
           },
@@ -470,7 +466,15 @@
           "named": true
         },
         {
+          "type": "hspace_command",
+          "named": true
+        },
+        {
           "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
           "named": true
         },
         {
@@ -510,6 +514,10 @@
           "named": true
         },
         {
+          "type": "skip_command",
+          "named": true
+        },
+        {
           "type": "space_command",
           "named": true
         },
@@ -546,6 +554,10 @@
         "types": [
           {
             "type": "\\color",
+            "named": false
+          },
+          {
+            "type": "\\colorbox",
             "named": false
           },
           {
@@ -689,7 +701,15 @@
           "named": true
         },
         {
+          "type": "hspace_command",
+          "named": true
+        },
+        {
           "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
           "named": true
         },
         {
@@ -733,6 +753,10 @@
           "named": true
         },
         {
+          "type": "skip_command",
+          "named": true
+        },
+        {
           "type": "space_command",
           "named": true
         },
@@ -758,6 +782,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "dimension_unit",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "env_body",
@@ -820,7 +849,15 @@
           "named": true
         },
         {
+          "type": "hspace_command",
+          "named": true
+        },
+        {
           "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
           "named": true
         },
         {
@@ -861,6 +898,10 @@
         },
         {
           "type": "sized_delimiter",
+          "named": true
+        },
+        {
+          "type": "skip_command",
           "named": true
         },
         {
@@ -1247,11 +1288,19 @@
           "named": true
         },
         {
+          "type": "hspace_command",
+          "named": true
+        },
+        {
           "type": "infix_frac",
           "named": true
         },
         {
           "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
           "named": true
         },
         {
@@ -1291,6 +1340,10 @@
           "named": true
         },
         {
+          "type": "skip_command",
+          "named": true
+        },
+        {
           "type": "space_command",
           "named": true
         },
@@ -1315,6 +1368,60 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "hspace_command",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\hspace",
+            "named": false
+          },
+          {
+            "type": "\\hspace*",
+            "named": false
+          }
+        ]
+      },
+      "sign": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "+",
+            "named": false
+          },
+          {
+            "type": "-",
+            "named": false
+          }
+        ]
+      },
+      "unit": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "dimension_unit",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1404,7 +1511,15 @@
             "named": true
           },
           {
+            "type": "hspace_command",
+            "named": true
+          },
+          {
             "type": "mathop_command",
+            "named": true
+          },
+          {
+            "type": "matrix_command",
             "named": true
           },
           {
@@ -1441,6 +1556,10 @@
           },
           {
             "type": "sized_delimiter",
+            "named": true
+          },
+          {
+            "type": "skip_command",
             "named": true
           },
           {
@@ -1522,7 +1641,15 @@
             "named": true
           },
           {
+            "type": "hspace_command",
+            "named": true
+          },
+          {
             "type": "mathop_command",
+            "named": true
+          },
+          {
+            "type": "matrix_command",
             "named": true
           },
           {
@@ -1559,6 +1686,10 @@
           },
           {
             "type": "sized_delimiter",
+            "named": true
+          },
+          {
+            "type": "skip_command",
             "named": true
           },
           {
@@ -1652,11 +1783,19 @@
           "named": true
         },
         {
+          "type": "hspace_command",
+          "named": true
+        },
+        {
           "type": "infix_frac",
           "named": true
         },
         {
           "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
           "named": true
         },
         {
@@ -1693,6 +1832,10 @@
         },
         {
           "type": "sized_delimiter",
+          "named": true
+        },
+        {
+          "type": "skip_command",
           "named": true
         },
         {
@@ -1733,6 +1876,183 @@
           {
             "type": "group",
             "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "matrix_body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "accent",
+          "named": true
+        },
+        {
+          "type": "big_operator",
+          "named": true
+        },
+        {
+          "type": "binomial",
+          "named": true
+        },
+        {
+          "type": "box_command",
+          "named": true
+        },
+        {
+          "type": "col_sep",
+          "named": true
+        },
+        {
+          "type": "color_command",
+          "named": true
+        },
+        {
+          "type": "command",
+          "named": true
+        },
+        {
+          "type": "delimiter_group",
+          "named": true
+        },
+        {
+          "type": "environment",
+          "named": true
+        },
+        {
+          "type": "extensible_arrow",
+          "named": true
+        },
+        {
+          "type": "fraction",
+          "named": true
+        },
+        {
+          "type": "genfrac",
+          "named": true
+        },
+        {
+          "type": "group",
+          "named": true
+        },
+        {
+          "type": "hspace_command",
+          "named": true
+        },
+        {
+          "type": "mathop_command",
+          "named": true
+        },
+        {
+          "type": "matrix_command",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "operator",
+          "named": true
+        },
+        {
+          "type": "overunder_command",
+          "named": true
+        },
+        {
+          "type": "phantom_command",
+          "named": true
+        },
+        {
+          "type": "punctuation",
+          "named": true
+        },
+        {
+          "type": "radical",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "row_sep",
+          "named": true
+        },
+        {
+          "type": "rule_command",
+          "named": true
+        },
+        {
+          "type": "sized_delimiter",
+          "named": true
+        },
+        {
+          "type": "skip_command",
+          "named": true
+        },
+        {
+          "type": "space_command",
+          "named": true
+        },
+        {
+          "type": "style_command",
+          "named": true
+        },
+        {
+          "type": "subsup",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "symbol_command",
+          "named": true
+        },
+        {
+          "type": "text_command",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "matrix_command",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "matrix_body",
+            "named": true
+          }
+        ]
+      },
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\bordermatrix",
+            "named": false
+          },
+          {
+            "type": "\\matrix",
+            "named": false
+          },
+          {
+            "type": "\\pmatrix",
+            "named": false
           }
         ]
       }
@@ -1900,6 +2220,11 @@
     "fields": {}
   },
   {
+    "type": "row_sep",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "rule_command",
     "named": true,
     "fields": {
@@ -2022,6 +2347,68 @@
     }
   },
   {
+    "type": "skip_command",
+    "named": true,
+    "fields": {
+      "cmd": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "\\hskip",
+            "named": false
+          },
+          {
+            "type": "\\kern",
+            "named": false
+          },
+          {
+            "type": "\\mkern",
+            "named": false
+          },
+          {
+            "type": "\\mskip",
+            "named": false
+          }
+        ]
+      },
+      "sign": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "+",
+            "named": false
+          },
+          {
+            "type": "-",
+            "named": false
+          }
+        ]
+      },
+      "unit": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "dimension_unit",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "number",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "space_command",
     "named": true,
     "fields": {}
@@ -2066,6 +2453,10 @@
           },
           {
             "type": "\\mathit",
+            "named": false
+          },
+          {
+            "type": "\\mathnormal",
             "named": false
           },
           {
@@ -2161,7 +2552,15 @@
             "named": true
           },
           {
+            "type": "hspace_command",
+            "named": true
+          },
+          {
             "type": "mathop_command",
+            "named": true
+          },
+          {
+            "type": "matrix_command",
             "named": true
           },
           {
@@ -2198,6 +2597,10 @@
           },
           {
             "type": "sized_delimiter",
+            "named": true
+          },
+          {
+            "type": "skip_command",
             "named": true
           },
           {
@@ -2549,6 +2952,10 @@
     "named": false
   },
   {
+    "type": "\\\\",
+    "named": false
+  },
+  {
     "type": "\\above",
     "named": false
   },
@@ -2653,6 +3060,10 @@
     "named": false
   },
   {
+    "type": "\\bordermatrix",
+    "named": false
+  },
+  {
     "type": "\\boxed",
     "named": false
   },
@@ -2678,6 +3089,10 @@
   },
   {
     "type": "\\cdot",
+    "named": false
+  },
+  {
+    "type": "\\cdots",
     "named": false
   },
   {
@@ -2725,6 +3140,10 @@
     "named": false
   },
   {
+    "type": "\\cr",
+    "named": false
+  },
+  {
     "type": "\\cup",
     "named": false
   },
@@ -2757,6 +3176,10 @@
     "named": false
   },
   {
+    "type": "\\ddots",
+    "named": false
+  },
+  {
     "type": "\\det",
     "named": false
   },
@@ -2774,6 +3197,30 @@
   },
   {
     "type": "\\dot",
+    "named": false
+  },
+  {
+    "type": "\\dots",
+    "named": false
+  },
+  {
+    "type": "\\dotsb",
+    "named": false
+  },
+  {
+    "type": "\\dotsc",
+    "named": false
+  },
+  {
+    "type": "\\dotsi",
+    "named": false
+  },
+  {
+    "type": "\\dotsm",
+    "named": false
+  },
+  {
+    "type": "\\dotso",
     "named": false
   },
   {
@@ -2798,6 +3245,10 @@
   },
   {
     "type": "\\fbox",
+    "named": false
+  },
+  {
+    "type": "\\fill",
     "named": false
   },
   {
@@ -2861,6 +3312,10 @@
     "named": false
   },
   {
+    "type": "\\hskip",
+    "named": false
+  },
+  {
     "type": "\\hspace",
     "named": false
   },
@@ -2905,6 +3360,10 @@
     "named": false
   },
   {
+    "type": "\\kern",
+    "named": false
+  },
+  {
     "type": "\\lVert",
     "named": false
   },
@@ -2922,6 +3381,10 @@
   },
   {
     "type": "\\lceil",
+    "named": false
+  },
+  {
+    "type": "\\ldots",
     "named": false
   },
   {
@@ -3065,6 +3528,10 @@
     "named": false
   },
   {
+    "type": "\\mathnormal",
+    "named": false
+  },
+  {
     "type": "\\mathop",
     "named": false
   },
@@ -3089,6 +3556,10 @@
     "named": false
   },
   {
+    "type": "\\matrix",
+    "named": false
+  },
+  {
     "type": "\\max",
     "named": false
   },
@@ -3109,11 +3580,19 @@
     "named": false
   },
   {
+    "type": "\\mkern",
+    "named": false
+  },
+  {
     "type": "\\models",
     "named": false
   },
   {
     "type": "\\mp",
+    "named": false
+  },
+  {
+    "type": "\\mskip",
     "named": false
   },
   {
@@ -3242,6 +3721,10 @@
   },
   {
     "type": "\\pm",
+    "named": false
+  },
+  {
+    "type": "\\pmatrix",
     "named": false
   },
   {
@@ -3513,6 +3996,10 @@
     "named": false
   },
   {
+    "type": "\\vdots",
+    "named": false
+  },
+  {
     "type": "\\vec",
     "named": false
   },
@@ -3625,7 +4112,19 @@
     "named": false
   },
   {
+    "type": "bp",
+    "named": false
+  },
+  {
     "type": "cases",
+    "named": false
+  },
+  {
+    "type": "cc",
+    "named": false
+  },
+  {
+    "type": "cm",
     "named": false
   },
   {
@@ -3641,8 +4140,16 @@
     "named": false
   },
   {
+    "type": "dd",
+    "named": false
+  },
+  {
     "type": "digit",
     "named": true
+  },
+  {
+    "type": "em",
+    "named": false
   },
   {
     "type": "end_cmd",
@@ -3654,6 +4161,10 @@
   },
   {
     "type": "equation*",
+    "named": false
+  },
+  {
+    "type": "ex",
     "named": false
   },
   {
@@ -3669,7 +4180,19 @@
     "named": false
   },
   {
+    "type": "in",
+    "named": false
+  },
+  {
     "type": "matrix",
+    "named": false
+  },
+  {
+    "type": "mm",
+    "named": false
+  },
+  {
+    "type": "mu",
     "named": false
   },
   {
@@ -3685,7 +4208,15 @@
     "named": true
   },
   {
+    "type": "pc",
+    "named": false
+  },
+  {
     "type": "pmatrix",
+    "named": false
+  },
+  {
+    "type": "pt",
     "named": false
   },
   {
@@ -3693,11 +4224,11 @@
     "named": false
   },
   {
-    "type": "row_sep",
-    "named": true
+    "type": "smallmatrix",
+    "named": false
   },
   {
-    "type": "smallmatrix",
+    "type": "sp",
     "named": false
   },
   {

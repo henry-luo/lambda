@@ -54,6 +54,7 @@ module.exports = grammar({
     _atom: $ => choice(
       $.symbol,
       $.number,
+      $.symbol_command,  // Symbol commands that could conflict - must be before operator for \cdots vs \cdot
       $.operator,
       $.relation,
       $.punctuation,
@@ -62,22 +63,24 @@ module.exports = grammar({
       $.binomial,
       $.genfrac,
       $.radical,
-      $.symbol_command,  // Symbol commands that could conflict - must be before delimiter_group
       $.delimiter_group,
       $.sized_delimiter,    // \big, \Big, \bigg, \Bigg delimiters
       $.overunder_command,  // \overset, \underset, \stackrel
       $.extensible_arrow,   // \xrightarrow, \xleftarrow
       $.accent,
       $.box_command,        // \bbox, \fbox, \boxed
-      $.color_command,      // \textcolor, \color
+      $.color_command,      // \textcolor, \color, \colorbox
       $.rule_command,       // \rule with dimensions
       $.phantom_command,    // \phantom, \hphantom, \vphantom, \smash
       $.big_operator,
       $.mathop_command,     // \mathop{...} - custom operator
+      $.matrix_command,     // \matrix{...} - plain TeX matrix
       $.environment,
       $.text_command,
       $.style_command,
       $.space_command,
+      $.hspace_command,     // \hspace{dim}, \hspace*{dim}
+      $.skip_command,       // \hskip, \kern, \mskip with dimensions
       $.command,  // Generic fallback for unknown commands
     ),
 
@@ -101,6 +104,17 @@ module.exports = grammar({
       '\\hbar',      // h-bar
       '\\emptyset',  // Empty set
       '\\varnothing', // Empty set variant
+      // Dots commands (must match before \cdot)
+      '\\cdots',     // Center dots (horizontal ellipsis)
+      '\\ldots',     // Lower dots
+      '\\vdots',     // Vertical dots
+      '\\ddots',     // Diagonal dots
+      '\\dots',      // Generic dots
+      '\\dotsb',     // Binary dots
+      '\\dotsc',     // Comma dots
+      '\\dotsi',     // Integral dots
+      '\\dotsm',     // Multiplication dots
+      '\\dotso',     // Other dots
     ),
 
     // Single letter variable (a-z, A-Z, Greek via commands, @ symbol)
@@ -442,8 +456,21 @@ module.exports = grammar({
       $.col_sep,
     )),
 
-    row_sep: $ => '\\\\',
+    row_sep: $ => choice('\\\\', '\\cr'),  // Both \\ and \cr for plain TeX compatibility
     col_sep: $ => '&',
+
+    // Plain TeX \matrix{...} command (uses \cr as row separator)
+    matrix_command: $ => seq(
+      field('cmd', choice('\\matrix', '\\pmatrix', '\\bordermatrix')),
+      '{', optional(field('body', $.matrix_body)), '}',  // Body with & and \cr separators (optional for empty matrix)
+    ),
+
+    // Matrix body - like env_body but for plain TeX \matrix{...}
+    matrix_body: $ => repeat1(choice(
+      $._expression,
+      $.row_sep,
+      $.col_sep,
+    )),
 
     // ========================================================================
     // Text mode in math
@@ -470,6 +497,7 @@ module.exports = grammar({
         // Math variants
         '\\mathrm', '\\mathit', '\\mathbf', '\\mathsf', '\\mathtt',
         '\\mathcal', '\\mathfrak', '\\mathbb', '\\mathscr',
+        '\\mathnormal',  // Normal math font (italic for letters)
         // Sizing
         '\\displaystyle', '\\textstyle', '\\scriptstyle', '\\scriptscriptstyle',
         // Operator name
@@ -496,7 +524,6 @@ module.exports = grammar({
         '\\bbox',   // AMS box with optional styling
         '\\fbox',   // Framed box
         '\\boxed',  // AMS boxed (like fbox)
-        '\\colorbox', // Color background box
         '\\llap',   // Left overlap
         '\\rlap',   // Right overlap
         '\\clap',   // Center overlap (mathtools)
@@ -509,13 +536,13 @@ module.exports = grammar({
     ),
 
     // ========================================================================
-    // Color commands: \textcolor, \color
+    // Color commands: \textcolor, \color, \colorbox
     // ========================================================================
 
     color_command: $ => prec.right(seq(
-      field('cmd', choice('\\textcolor', '\\color')),
+      field('cmd', choice('\\textcolor', '\\color', '\\colorbox')),
       field('color', $.group),           // Color specification {red} or {rgb}{...}
-      optional(field('content', $.group)),  // Content to color (for \textcolor)
+      optional(field('content', $.group)),  // Content to color (for \textcolor, \colorbox)
     )),
 
     // ========================================================================
@@ -551,9 +578,31 @@ module.exports = grammar({
     space_command: $ => choice(
       '\\,', '\\:', '\\;', '\\!',  // Thin, medium, thick, negative thin
       '\\quad', '\\qquad',
-      '\\hspace', '\\hspace*',
-      // Note: \hskip, \kern, etc. with dimensions fall through to 'command'
-      // and are handled in the AST builder
+    ),
+
+    // \hspace{dim} and \hspace*{dim} - horizontal space with braced dimension
+    hspace_command: $ => seq(
+      field('cmd', choice('\\hspace', '\\hspace*')),
+      '{',
+      optional(field('sign', choice('+', '-'))),
+      field('value', $.number),
+      field('unit', $.dimension_unit),
+      '}',
+    ),
+
+    // Skip/kern commands with dimensions: \hskip 3em, \kern 2pt, \mskip 3mu
+    skip_command: $ => seq(
+      field('cmd', choice('\\hskip', '\\kern', '\\mskip', '\\mkern')),
+      optional(field('sign', choice('+', '-'))),
+      field('value', $.number),
+      field('unit', $.dimension_unit),
+    ),
+
+    // Dimension units for spacing commands
+    dimension_unit: $ => choice(
+      'pt', 'mm', 'cm', 'in', 'ex', 'em', 'bp', 'pc', 'dd', 'cc', 'sp',
+      'mu',  // math units
+      '\\fill',  // flexible fill
     ),
 
     // ========================================================================

@@ -602,22 +602,52 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
         const mathliveType = mathlive.type;
 
         // Special handling: MathLive command-based nodes (no type field)
-        // e.g., \rule which has command:"\\rule" and args array
+        // e.g., \not, \rule which have command:"\\cmd" and args array
         if (!mathliveType && mathlive.command) {
             const mathliveCmd = (mathlive.command || '').replace(/^\\/, '');
             const lambdaCmd = (lambda.command || '').replace(/^\\/, '');
+
+            // Special case: \not command in MathLive vs NOT type in Lambda
+            if (mathliveCmd === 'not' && lambdaType === 'NOT') {
+                matchedElements++;
+
+                // Compare the negated body
+                const lambdaBody = lambda.body;
+                const mathliveArgs = mathlive.args || [];
+                const mathliveAtoms = mathliveArgs[0]?.atoms || mathliveArgs[0] || [];
+                const mathliveNegated = Array.isArray(mathliveAtoms) ? mathliveAtoms[0] : mathliveAtoms;
+
+                if (lambdaBody && mathliveNegated) {
+                    totalElements++;
+                    const lambdaVal = lambdaBody.value || '';
+                    const mathliveVal = mathliveNegated.value || '';
+
+                    if (lambdaVal === mathliveVal) {
+                        matchedElements++;
+                    } else {
+                        // Try command match
+                        const lCmd = (lambdaBody.command || '').replace(/^\\/, '');
+                        const mCmd = (mathliveNegated.command || '').replace(/^\\/, '');
+                        if (lCmd && mCmd && lCmd === mCmd) {
+                            matchedElements++;
+                        } else {
+                            differences.push({
+                                path: path + '.body',
+                                issue: 'Negated symbol mismatch',
+                                lambda: lambdaVal || lCmd,
+                                mathlive: mathliveVal || mCmd,
+                            });
+                        }
+                    }
+                }
+                return;
+            }
 
             // Check if Lambda's command matches MathLive's
             if (lambdaCmd === mathliveCmd) {
                 matchedElements++;
                 // For \rule, the dimensions are in args array - we count command match as success
                 // Don't need to deeply compare args since Lambda stores dimensions differently
-                return;
-            }
-            // If commands don't match but Lambda has a value that represents the same thing
-            // (e.g., ORD with command: "rule" represents the \rule command)
-            if (lambdaCmd === mathliveCmd) {
-                matchedElements++;
                 return;
             }
             // Command mismatch
@@ -755,6 +785,216 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
             }
 
             return;  // Done with this comparison
+        }
+
+        // Special handling: Lambda NOT vs MathLive command-based negation
+        // Lambda: NOT { body: REL { value: "=" } }
+        // MathLive: { command: "\\not", args: [{ atoms: [{ type: "mrel", value: "=" }] }] }
+        if (lambdaType === 'NOT' && mathlive.command === '\\not') {
+            matchedElements++;  // NOT/\not match
+
+            // Compare the negated body
+            const lambdaBody = lambda.body;
+            const mathliveArgs = mathlive.args || [];
+            const mathliveAtoms = mathliveArgs[0]?.atoms || mathliveArgs[0] || [];
+            const mathliveNegated = Array.isArray(mathliveAtoms) ? mathliveAtoms[0] : mathliveAtoms;
+
+            if (lambdaBody && mathliveNegated) {
+                const lambdaVal = lambdaBody.value || '';
+                const mathliveVal = mathliveNegated.value || '';
+
+                totalElements++;
+                if (lambdaVal === mathliveVal) {
+                    matchedElements++;
+                } else {
+                    // Try command match
+                    const lambdaCmd = (lambdaBody.command || '').replace(/^\\/, '');
+                    const mathliveCmd = (mathliveNegated.command || '').replace(/^\\/, '');
+                    if (lambdaCmd && mathliveCmd && lambdaCmd === mathliveCmd) {
+                        matchedElements++;
+                    } else {
+                        differences.push({
+                            path: path + '.body',
+                            issue: 'Negated symbol mismatch',
+                            lambda: lambdaVal || lambdaCmd,
+                            mathlive: mathliveVal || mathliveCmd,
+                        });
+                    }
+                }
+            }
+
+            return;  // Done with NOT comparison
+        }
+
+        // Special handling: Lambda ARRAY vs MathLive array
+        // Lambda: ARRAY { body: [ARRAY_ROW { body: [ARRAY_CELL { body: ROW {...} }] }] }
+        // MathLive: array { array: [[[{type:"first"}, "a"], ...]], environmentName: "...", leftDelim, rightDelim }
+        if (lambdaType === 'ARRAY' && (mathliveType === 'array' || mathlive.array)) {
+            matchedElements++;  // Types match
+
+            // Compare delimiters if present
+            if (lambda.leftDelim || mathlive.leftDelim) {
+                totalElements++;
+                if (lambda.leftDelim === mathlive.leftDelim) {
+                    matchedElements++;
+                } else {
+                    differences.push({
+                        path: path + '.leftDelim',
+                        issue: 'Left delimiter mismatch',
+                        lambda: lambda.leftDelim,
+                        mathlive: mathlive.leftDelim,
+                    });
+                }
+            }
+            if (lambda.rightDelim || mathlive.rightDelim) {
+                totalElements++;
+                if (lambda.rightDelim === mathlive.rightDelim) {
+                    matchedElements++;
+                } else {
+                    differences.push({
+                        path: path + '.rightDelim',
+                        issue: 'Right delimiter mismatch',
+                        lambda: lambda.rightDelim,
+                        mathlive: mathlive.rightDelim,
+                    });
+                }
+            }
+
+            // Compare array content
+            const lambdaRows = lambda.body || [];
+            const mathliveRows = mathlive.array || [];
+
+            const maxRows = Math.max(lambdaRows.length, mathliveRows.length);
+            for (let rowIdx = 0; rowIdx < maxRows; rowIdx++) {
+                const lambdaRow = lambdaRows[rowIdx];
+                const mathliveRow = mathliveRows[rowIdx];
+
+                if (!lambdaRow && mathliveRow) {
+                    totalElements++;
+                    differences.push({
+                        path: `${path}.row[${rowIdx}]`,
+                        issue: 'Missing row in Lambda',
+                        lambda: null,
+                        mathlive: `row with ${mathliveRow.length} cells`,
+                    });
+                    continue;
+                }
+                if (lambdaRow && !mathliveRow) {
+                    totalElements++;
+                    differences.push({
+                        path: `${path}.row[${rowIdx}]`,
+                        issue: 'Extra row in Lambda',
+                        lambda: `row with ${(lambdaRow.body || []).length} cells`,
+                        mathlive: null,
+                    });
+                    continue;
+                }
+
+                // Compare cells in the row
+                const lambdaCells = lambdaRow.body || [];
+                const mathliveCells = mathliveRow || [];
+
+                const maxCells = Math.max(lambdaCells.length, mathliveCells.length);
+                for (let cellIdx = 0; cellIdx < maxCells; cellIdx++) {
+                    const lambdaCell = lambdaCells[cellIdx];
+                    const mathliveCell = mathliveCells[cellIdx];
+
+                    totalElements++;
+
+                    // Helper: check if MathLive cell only contains first/placeholder (empty cell)
+                    const mathliveIsEmpty = !mathliveCell || mathliveCell.every(item =>
+                        item && typeof item === 'object' &&
+                        (item.type === 'first' || item.type === 'placeholder')
+                    );
+
+                    if (!lambdaCell && mathliveCell) {
+                        if (mathliveIsEmpty) {
+                            matchedElements++;  // Both are empty - match
+                        } else {
+                            differences.push({
+                                path: `${path}.row[${rowIdx}].cell[${cellIdx}]`,
+                                issue: 'Missing cell in Lambda',
+                                lambda: null,
+                                mathlive: JSON.stringify(mathliveCell),
+                            });
+                        }
+                        continue;
+                    }
+                    if (lambdaCell && !mathliveCell) {
+                        differences.push({
+                            path: `${path}.row[${rowIdx}].cell[${cellIdx}]`,
+                            issue: 'Extra cell in Lambda',
+                            lambda: JSON.stringify(lambdaCell),
+                            mathlive: null,
+                        });
+                        continue;
+                    }
+
+                    // Extract cell content
+                    // Lambda: ARRAY_CELL { body: ROW { body: [ORD, ...] } } or { body: ROW } for empty
+                    // MathLive: [{type:"first"}, "a", ...] - filter out {type:"first"} nodes
+                    let lambdaCellContent = [];
+                    if (lambdaCell.body) {
+                        if (lambdaCell.body.body) {
+                            // Normal case: ARRAY_CELL > ROW > body[]
+                            lambdaCellContent = lambdaCell.body.body;
+                        } else if (lambdaCell.body.type !== 'ROW') {
+                            // Direct content (not wrapped in ROW)
+                            lambdaCellContent = [lambdaCell.body];
+                        }
+                        // else: Empty ROW - leave as empty array
+                    }
+                    const lambdaCellItems = Array.isArray(lambdaCellContent) ? lambdaCellContent : [lambdaCellContent];
+
+                    // Filter MathLive cell: remove {type:"first"} markers and {type:"placeholder"} nodes
+                    const mathliveCellItems = (mathliveCell || []).filter(item =>
+                        !(item && typeof item === 'object' &&
+                          (item.type === 'first' || item.type === 'placeholder'))
+                    );
+
+                    // Compare cell content
+                    if (lambdaCellItems.length === 0 && mathliveCellItems.length === 0) {
+                        matchedElements++;  // Both empty - match
+                    } else if (lambdaCellItems.length === mathliveCellItems.length) {
+                        // Compare each element
+                        let allMatch = true;
+                        for (let i = 0; i < lambdaCellItems.length; i++) {
+                            const lambdaItem = lambdaCellItems[i];
+                            const mathliveItem = mathliveCellItems[i];
+
+                            // Extract values for comparison
+                            const lambdaVal = typeof lambdaItem === 'object' ?
+                                (lambdaItem.value || lambdaItem.symbol || '') : String(lambdaItem);
+                            const mathliveVal = typeof mathliveItem === 'object' ?
+                                (mathliveItem.value || mathliveItem.symbol || '') : String(mathliveItem);
+
+                            if (lambdaVal !== mathliveVal) {
+                                allMatch = false;
+                                break;
+                            }
+                        }
+                        if (allMatch) {
+                            matchedElements++;
+                        } else {
+                            differences.push({
+                                path: `${path}.row[${rowIdx}].cell[${cellIdx}]`,
+                                issue: 'Cell content mismatch',
+                                lambda: lambdaCellItems.map(i => i.value || i).join(''),
+                                mathlive: mathliveCellItems.map(i => typeof i === 'string' ? i : (i.value || '')).join(''),
+                            });
+                        }
+                    } else {
+                        differences.push({
+                            path: `${path}.row[${rowIdx}].cell[${cellIdx}]`,
+                            issue: 'Cell content length mismatch',
+                            lambda: `${lambdaCellItems.length} items`,
+                            mathlive: `${mathliveCellItems.length} items`,
+                        });
+                    }
+                }
+            }
+
+            return;  // Done with ARRAY comparison
         }
 
         // Special handling: Lambda ORD with command vs MathLive macro
