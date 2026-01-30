@@ -278,13 +278,18 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             return BlockType::QUOTE;
         }
 
-        // Table detection
-        const char* table_next = nullptr;
-        if (parser->current_line + 1 < parser->line_count) {
-            table_next = parser->lines[parser->current_line + 1];
-        }
-        if (adapter->detectTable(line, table_next)) {
-            return BlockType::TABLE;
+        // Table detection (GFM extension - not available in strict CommonMark mode)
+        if (parser->config.flavor != Flavor::COMMONMARK) {
+            const char* table_next = nullptr;
+            if (parser->current_line + 1 < parser->line_count) {
+                table_next = parser->lines[parser->current_line + 1];
+            }
+            if (adapter->detectTable(line, table_next)) {
+                log_debug("block_detection: detected TABLE");
+                return BlockType::TABLE;
+            }
+        } else {
+            log_debug("block_detection: skipping table detection (COMMONMARK mode)");
         }
 
         // AsciiDoc-specific detection
@@ -372,8 +377,8 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         return BlockType::QUOTE;
     }
 
-    // Table row (|)
-    if (is_table_line(line)) {
+    // Table row (|) - GFM extension, disabled in CommonMark mode
+    if (parser->config.flavor != Flavor::COMMONMARK && is_table_line(line)) {
         return BlockType::TABLE;
     }
 

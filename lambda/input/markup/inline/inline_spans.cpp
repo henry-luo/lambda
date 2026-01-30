@@ -710,9 +710,33 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             continue;
         }
 
-        // Check for strikethrough (~~)
-        if (*pos == '~' && *(pos+1) == '~') {
-            // Flush text
+        // Check for strikethrough (~~ or ~) - GFM extension, disabled in CommonMark
+        if (*pos == '~' && parser->config.flavor != Flavor::COMMONMARK) {
+            // First, count consecutive tildes
+            int tilde_count = 1;
+            while (*(pos + tilde_count) == '~') {
+                tilde_count++;
+            }
+
+            // If 3+ tildes, treat all as literal (not valid strikethrough)
+            if (tilde_count >= 3) {
+                // Flush any pending text
+                if (sb->length > 0) {
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+                // Add all tildes as literal text
+                for (int i = 0; i < tilde_count; i++) {
+                    stringbuf_append_char(sb, '~');
+                }
+                pos += tilde_count;
+                continue;
+            }
+
+            // Flush text before attempting strikethrough
             if (sb->length > 0) {
                 String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};

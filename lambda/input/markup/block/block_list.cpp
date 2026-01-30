@@ -936,9 +936,17 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             // Get content after marker (for checking thematic break and nested lists)
             const char* item_content = get_list_item_content(line, line_is_ordered);
 
-            // Get properly stripped first line content (preserves indentation for code blocks)
-            // Use strip_to_column_with_tabs for proper tab expansion
-            char* first_line_stripped = strip_to_column_with_tabs(line, content_column);
+            // For task list items, use the adapter's text_start which skips [x]/[ ]
+            // item_info.text_start points to the text AFTER the checkbox marker
+            char* first_line_stripped = nullptr;
+            if (item_info.valid && item_info.is_task && item_info.text_start) {
+                // Use text_start directly - it already points past [x]/[ ] and any trailing space
+                first_line_stripped = strdup(item_info.text_start);
+            } else {
+                // Get properly stripped first line content (preserves indentation for code blocks)
+                // Use strip_to_column_with_tabs for proper tab expansion
+                first_line_stripped = strip_to_column_with_tabs(line, content_column);
+            }
 
             // Check if the content is a thematic break (e.g., "- * * *" -> list item containing <hr />)
             // This must be checked BEFORE checking for nested list markers because "* * *" looks like a list marker
@@ -970,7 +978,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 std::vector<char*> content_lines;
 
                 // Add first line content (properly stripped to preserve code block indentation)
-                // first_line_stripped is already allocated by strip_to_column_with_tabs
+                // first_line_stripped is already allocated by strip_to_column_with_tabs or strdup
                 bool first_line_empty = !first_line_stripped || !*first_line_stripped;
                 if (!first_line_empty) {
                     content_lines.push_back(first_line_stripped);
