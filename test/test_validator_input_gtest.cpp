@@ -84,7 +84,7 @@ protected:
     }
 
     ConstItem create_int(int value) {
-        Item item = {.int_val = value, ._type_id = LMD_TYPE_INT};
+        Item item = {.item = i2it(value)};
         return *(ConstItem*)&item;
     }
 

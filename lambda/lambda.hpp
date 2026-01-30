@@ -8,9 +8,8 @@ typedef struct Item {
     union {
         // packed values with type_id tagging
         struct {
-            int int_val: 32;
-            uint32_t _24: 24;
-            uint32_t _type_id: 8;
+            uint64_t int_val: 56;
+            uint64_t _type_id: 8;
         };
         struct {
             uint64_t bool_val: 8;
