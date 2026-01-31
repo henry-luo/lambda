@@ -1560,6 +1560,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_debug("layout_html_root complete");
 
     log_debug("end layout");
+    
     log_debug("calling layout_cleanup...");
     layout_cleanup(&lycon);
     log_debug("layout_cleanup complete");
