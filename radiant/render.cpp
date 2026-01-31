@@ -67,13 +67,7 @@ void tvg_canvas_reset_and_draw(RenderContext* rdcon, bool clear) {
     tvg_canvas_sync(rdcon->canvas);
 }
 
-// Forward declaration for border-collapse support
-struct CollapsedBorder {
-    float width;
-    CssEnum style;
-    Color color;
-    uint8_t priority;
-};
+// CollapsedBorder struct is now defined in view.hpp
 
 // ============================================================================
 // CSS white-space Property Helpers for Rendering
