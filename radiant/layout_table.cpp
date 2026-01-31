@@ -4263,6 +4263,65 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table content: min=%dpx, preferred=%dpx", min_table_content_width, pref_table_content_width);
     log_debug("Table total (with spacing): min=%dpx, preferred=%dpx", min_table_width, pref_table_width);
 
+    // CSS 2.1: For auto-width tables, constrain by available space minus margins
+    // The available space comes from:
+    // 1. The parent element's width (most reliable)
+    // 2. lycon->line bounds (if set)
+    // 3. lycon->available_space (fallback)
+    int max_available_width = 0;
+    if (explicit_table_width == 0) {
+        // Try to get container width from parent element first
+        int container_width = 0;
+        ViewBlock* parent = (ViewBlock*)table->parent;
+        if (parent && parent->width > 0) {
+            // Parent width is the content area width (already excludes parent's border/padding)
+            container_width = (int)parent->width;
+            // If parent has border/padding, its content area is what's available
+            if (parent->bound) {
+                if (parent->bound->border) {
+                    container_width -= (int)(parent->bound->border->width.left + parent->bound->border->width.right);
+                }
+                container_width -= parent->bound->padding.left + parent->bound->padding.right;
+            }
+            log_debug("Container width from parent element: %dpx (parent->width=%.1f)", container_width, parent->width);
+        }
+        
+        // Fallback to line bounds
+        if (container_width <= 0) {
+            container_width = lycon->line.right - lycon->line.left;
+        }
+        
+        // Fallback to available_space
+        if (container_width <= 0 && lycon->available_space.width.is_definite()) {
+            container_width = (int)lycon->available_space.width.to_px_or_zero();
+        }
+        
+        // Subtract table margins
+        int margin_left = 0, margin_right = 0;
+        if (table->bound) {
+            margin_left = (int)table->bound->margin.left;
+            margin_right = (int)table->bound->margin.right;
+        }
+        
+        max_available_width = container_width - margin_left - margin_right;
+        if (max_available_width < 0) max_available_width = 0;
+        
+        log_debug("Auto table width constraint: container=%dpx, margin_left=%dpx, margin_right=%dpx, max_available=%dpx",
+                 container_width, margin_left, margin_right, max_available_width);
+        
+        // Constrain preferred width to available space
+        // But never go below minimum content width (table will overflow)
+        if (max_available_width > 0 && pref_table_width > max_available_width) {
+            log_debug("Constraining preferred width from %dpx to %dpx (available space minus margins)",
+                     pref_table_width, max_available_width);
+            pref_table_width = max_available_width;
+        } else if (max_available_width == 0 && container_width > 0) {
+            // Margins consume all available space - use minimum content width
+            log_debug("Margins consume all space, using minimum content width: %dpx", min_table_width);
+            pref_table_width = min_table_width;
+        }
+    }
+
     // Determine used table width according to CSS 2.1 specification
     // For explicit width, we need to account for border and padding
     // (table_content_width already has border/padding/spacing subtracted,
