@@ -194,7 +194,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell);
 
 // Get CSS width from a cell element, handling percentage and length values
 // Returns 0 if no explicit width is set
-static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, float table_content_width) {
+// border_collapse: if true, don't add cell border to width (CSS 2.1 border-collapse model)
+static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, float table_content_width, bool border_collapse = false) {
     if (tcell->node_type != DOM_NODE_ELEMENT) return 0.0f;
 
     DomElement* dom_elem = tcell->as_element();
@@ -226,8 +227,9 @@ static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, floa
         cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
     }
 
-    // Add border width (only if border-style is not none)
-    if (tcell->bound && tcell->bound->border) {
+    // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't contribute to column widths.
+    // The column widths are content+padding only. Half-borders are added at positioning stage.
+    if (!border_collapse && tcell->bound && tcell->bound->border) {
         float border_left = (tcell->bound->border->left_style != CSS_VALUE_NONE)
             ? tcell->bound->border->width.left : 0.0f;
         float border_right = (tcell->bound->border->right_style != CSS_VALUE_NONE)
@@ -418,17 +420,22 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
     }
 
     // Add border based on collapse mode
-    if (tcell->bound && tcell->bound->border) {
+    if (table->tb->border_collapse) {
+        // CSS 2.1 §17.6.2: In border-collapse mode, use the RESOLVED collapsed borders.
+        // These are determined by conflict resolution (highest priority wins) and
+        // include contributions from cells, rows, row groups, columns, column groups, and table.
+        float border_top = tcell->td->top_resolved ? tcell->td->top_resolved->width : 0.0f;
+        float border_bottom = tcell->td->bottom_resolved ? tcell->td->bottom_resolved->width : 0.0f;
+        cell_height += (border_top + border_bottom) / 2.0f;
+        log_debug("Border-collapse cell height: content=%.1f, resolved borders top=%.1f bottom=%.1f, +%.1f",
+                content_height, border_top, border_bottom, (border_top + border_bottom) / 2.0f);
+    } else if (tcell->bound && tcell->bound->border) {
+        // Separate borders mode: use cell's specified border
         float border_top = (tcell->bound->border->top_style != CSS_VALUE_NONE)
             ? tcell->bound->border->width.top : 0.0f;
         float border_bottom = (tcell->bound->border->bottom_style != CSS_VALUE_NONE)
             ? tcell->bound->border->width.bottom : 0.0f;
-
-        if (table->tb->border_collapse) {
-            cell_height += (border_top + border_bottom) / 2.0f;
-        } else {
-            cell_height += border_top + border_bottom;
-        }
+        cell_height += border_top + border_bottom;
     }
 
     return cell_height;
@@ -551,6 +558,26 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     for (int c = tcell->td->col_index; c < end_col && c < columns; c++) {
         cell_width += col_widths[c];
     }
+
+    // CSS 2.1 §17.6.2: In border-collapse mode, cell's reported width via
+    // getBoundingClientRect includes half of its resolved left and right borders.
+    // Each cell reports its dimensions including its half of the collapsed borders.
+    if (table->tb->border_collapse) {
+        float left_add = 0, right_add = 0;
+        if (tcell->td->left_resolved && tcell->td->left_resolved->width > 0) {
+            left_add = tcell->td->left_resolved->width / 2.0f;
+            cell_width += left_add;
+        }
+        if (tcell->td->right_resolved && tcell->td->right_resolved->width > 0) {
+            right_add = tcell->td->right_resolved->width / 2.0f;
+            cell_width += right_add;
+        }
+        if (left_add > 0 || right_add > 0) {
+            log_debug("Border-collapse cell width adjustment: col=%d, +%.1f left, +%.1f right, total=%.1f",
+                    tcell->td->col_index, left_add, right_add, cell_width);
+        }
+    }
+
     cell->width = cell_width;
 
     // Layout cell content now that width is set
@@ -756,8 +783,18 @@ struct TableMetadata {
     float* row_y_positions;     // Row Y positions for rowspan calculation
     bool* row_collapsed;        // Visibility: collapse tracking per row
 
+    // Border-collapse: max winning border widths at table edges (CSS 2.1 §17.6.2)
+    // These are the maximum resolved border widths at each outer edge,
+    // considering borders from table, row, rowgroup, cell, colgroup, column
+    float collapsed_border_top;
+    float collapsed_border_right;
+    float collapsed_border_bottom;
+    float collapsed_border_left;
+
     TableMetadata(int cols, int rows)
-        : column_count(cols), row_count(rows) {
+        : column_count(cols), row_count(rows),
+          collapsed_border_top(0), collapsed_border_right(0),
+          collapsed_border_bottom(0), collapsed_border_left(0) {
         grid_occupied = (bool*)mem_calloc(rows * cols, sizeof(bool), MEM_CAT_LAYOUT);
         col_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
         col_min_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);  // Minimum content widths (CSS MCW)
@@ -783,16 +820,7 @@ struct TableMetadata {
     }
 };
 
-struct CollapsedBorder {
-    float width;
-    CssEnum style;      // CSS_VALUE_NONE, CSS_VALUE_HIDDEN, CSS_VALUE_SOLID, etc.
-    Color color;        // Border color (simple RGBA union)
-    uint8_t priority;   // Used for conflict resolution (higher wins)
-
-    CollapsedBorder() : width(0), style(CSS_VALUE_NONE), priority(0) {
-        color.r = color.g = color.b = color.a = 0;
-    }
-};
+// CollapsedBorder struct is now defined in view.hpp
 
 // Get border style priority for conflict resolution
 static uint8_t get_border_style_priority(CssEnum style) {
@@ -963,10 +991,20 @@ static CollapsedBorder get_row_border(ViewTableRow* row, int side) {
             border.style = bp->top_style;
             border.color = bp->top_color;
             break;
+        case 1: // right
+            border.width = bp->width.right;
+            border.style = bp->right_style;
+            border.color = bp->right_color;
+            break;
         case 2: // bottom
             border.width = bp->width.bottom;
             border.style = bp->bottom_style;
             border.color = bp->bottom_color;
+            break;
+        case 3: // left
+            border.width = bp->width.left;
+            border.style = bp->left_style;
+            border.color = bp->left_color;
             break;
     }
     border.priority = get_border_style_priority(border.style);
@@ -1039,8 +1077,8 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
             }
 
             // Row borders (if row elements have borders)
-            if (row > 0 && row < meta->row_count) {
-                ViewTableRow* trow = nullptr;
+            // Check row above (bottom border) - for interior and top edge
+            if (row > 0) {
                 int curr = 0;
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row - 1) {
@@ -1055,7 +1093,11 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                     }
                     curr++;
                 }
-                curr = 0;
+            }
+
+            // Check row below (top border) - for interior and bottom edge
+            if (row < meta->row_count) {
+                int curr = 0;
                 for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
                     if (curr == row) {
                         CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
@@ -1141,8 +1183,28 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
                 arraylist_append(candidates, border);
             }
 
+            // Row borders at left and right edges (CSS 2.1 §17.6.2: rows can have borders)
+            if (col == 0 || col == meta->column_count) {
+                // Find the row at this position
+                int curr = 0;
+                for (ViewTableRow* r = table->first_row(); r; r = table->next_row(r)) {
+                    if (curr == row) {
+                        int side = (col == 0) ? 3 : 1; // left or right
+                        CollapsedBorder* border = (CollapsedBorder*)mem_alloc(sizeof(CollapsedBorder), MEM_CAT_LAYOUT);
+                        *border = get_row_border(r, side);
+                        if (border->style != CSS_VALUE_NONE) {
+                            arraylist_append(candidates, border);
+                        } else {
+                            mem_free(border);
+                        }
+                        break;
+                    }
+                    curr++;
+                }
+            }
+
             // TODO: Add column and column group border support (CSS 2.1 §17.6.2)
-            // For now, we handle cell and table borders which covers most cases
+            // For now, we handle cell, table, and row borders which covers most cases
 
             // Select winner from all candidates
             if (candidates->length > 0) {
@@ -1180,6 +1242,56 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
     log_debug("resolve_collapsed_borders: completed - processed %d horizontal and %d vertical borders",
               (meta->row_count + 1) * meta->column_count,
               meta->row_count * (meta->column_count + 1));
+
+    // After resolving all borders, calculate max winning borders at table edges
+    // CSS 2.1 §17.6.2: The table's border-box includes half of the outer collapsed borders.
+    // We need to find the maximum resolved border width at each edge.
+
+    // Top edge: scan all cells in first row
+    for (int col = 0; col < meta->column_count; col++) {
+        ViewTableCell* cell = find_cell_at(table, 0, col);
+        if (cell && cell->td->top_resolved) {
+            if (cell->td->top_resolved->width > meta->collapsed_border_top) {
+                meta->collapsed_border_top = cell->td->top_resolved->width;
+            }
+        }
+    }
+
+    // Bottom edge: scan all cells in last row
+    int last_row = meta->row_count - 1;
+    for (int col = 0; col < meta->column_count; col++) {
+        ViewTableCell* cell = find_cell_at(table, last_row, col);
+        if (cell && cell->td->bottom_resolved) {
+            if (cell->td->bottom_resolved->width > meta->collapsed_border_bottom) {
+                meta->collapsed_border_bottom = cell->td->bottom_resolved->width;
+            }
+        }
+    }
+
+    // Left edge: scan all cells in first column
+    for (int row = 0; row < meta->row_count; row++) {
+        ViewTableCell* cell = find_cell_at(table, row, 0);
+        if (cell && cell->td->left_resolved) {
+            if (cell->td->left_resolved->width > meta->collapsed_border_left) {
+                meta->collapsed_border_left = cell->td->left_resolved->width;
+            }
+        }
+    }
+
+    // Right edge: scan all cells in last column
+    int last_col = meta->column_count - 1;
+    for (int row = 0; row < meta->row_count; row++) {
+        ViewTableCell* cell = find_cell_at(table, row, last_col);
+        if (cell && cell->td->right_resolved) {
+            if (cell->td->right_resolved->width > meta->collapsed_border_right) {
+                meta->collapsed_border_right = cell->td->right_resolved->width;
+            }
+        }
+    }
+
+    log_debug("Max collapsed borders at edges: top=%.1f, right=%.1f, bottom=%.1f, left=%.1f",
+              meta->collapsed_border_top, meta->collapsed_border_right,
+              meta->collapsed_border_bottom, meta->collapsed_border_left);
 }
 
 // =============================================================================
@@ -3208,7 +3320,8 @@ struct CellWidths {
 // Measure cell's minimum and maximum content widths in single pass
 // This performs accurate measurement using font metrics for CSS 2.1 compliance
 // CONSOLIDATED: Combines previous measure_cell_intrinsic_width() and measure_cell_minimum_width()
-static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell) {
+// border_collapse: if true, don't add cell border to width (CSS 2.1 border-collapse model)
+static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell, bool border_collapse = false) {
     CellWidths result = {20.0f, 20.0f}; // CSS minimum usable width
     if (!cell || !cell->is_element()) return result;
 
@@ -3456,8 +3569,11 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
         padding_horizontal = (float)(cell->bound->padding.left + cell->bound->padding.right);
     }
 
+    // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't contribute to column widths.
+    // The column widths are content+padding only. The half-borders are added only at
+    // the final cell positioning stage for getBoundingClientRect reporting.
     float border_horizontal = 0.0f;
-    if (cell->bound && cell->bound->border) {
+    if (!border_collapse && cell->bound && cell->bound->border) {
         border_horizontal = cell->bound->border->width.left + cell->bound->border->width.right;
     }
 
@@ -3468,8 +3584,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
     if (max_width < 16.0f) max_width = 16.0f;
     if (min_width < 16.0f) min_width = 16.0f;
 
-    log_debug("Cell widths: max=%.2f, min=%.2f (content + padding=%.1f + border=%.1f)",
-        max_width, min_width, padding_horizontal, border_horizontal);
+    log_debug("Cell widths: max=%.2f, min=%.2f (content + padding=%.1f + border=%.1f, collapse=%d)",
+        max_width, min_width, padding_horizontal, border_horizontal, border_collapse);
 
     // Use ceiling to ensure we always have enough space for content
     result.max_width = ceilf(max_width);
@@ -3672,13 +3788,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (explicit_table_width > 0) {
         table_content_width = explicit_table_width;
 
-        // In border-collapse mode, the table border is shared with cell borders
-        // so we don't subtract it from content width. In separate mode, subtract it.
-        if (!table->tb->border_collapse) {
-            // Subtract table border only in separate mode
-            if (table->bound && table->bound->border) {
-                table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
-            }
+        // CSS 2.1: Table content width for percentage calculations excludes the table border.
+        // In border-collapse mode, the table border participates in collapse resolution
+        // but the CSS width still represents the outer box edge. The content area for
+        // column percentage calculations is the CSS width minus the table border.
+        if (table->bound && table->bound->border) {
+            table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+            log_debug("Subtracted table border from content width: -%dpx (left=%d, right=%d)",
+                     (int)(table->bound->border->width.left + table->bound->border->width.right),
+                     (int)table->bound->border->width.left, (int)table->bound->border->width.right);
         }
 
         // Subtract table padding
@@ -3711,7 +3829,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int col = tcell->td->col_index;
 
             // Get explicit CSS width using helper function
-            float cell_width = get_cell_css_width(lycon, tcell, table_content_width);
+            // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't add to column width
+            float cell_width = get_cell_css_width(lycon, tcell, table_content_width, table->tb->border_collapse);
 
             // Calculate both minimum and preferred widths for CSS 2.1 table layout
             float min_width = 0.0f;   // MCW - Minimum Content Width
@@ -3719,7 +3838,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             if (cell_width == 0.0f) {
                 // No explicit CSS width - measure intrinsic content widths
-                CellWidths widths = measure_cell_widths(lycon, tcell);
+                // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't add to column width
+                CellWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
                 pref_width = widths.max_width;  // PCW (preferred/max-content)
                 min_width = widths.min_width;   // MCW (minimum/min-content)
                 cell_width = pref_width; // Use preferred for backward compatibility
@@ -4143,6 +4263,65 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table content: min=%dpx, preferred=%dpx", min_table_content_width, pref_table_content_width);
     log_debug("Table total (with spacing): min=%dpx, preferred=%dpx", min_table_width, pref_table_width);
 
+    // CSS 2.1: For auto-width tables, constrain by available space minus margins
+    // The available space comes from:
+    // 1. The parent element's width (most reliable)
+    // 2. lycon->line bounds (if set)
+    // 3. lycon->available_space (fallback)
+    int max_available_width = 0;
+    if (explicit_table_width == 0) {
+        // Try to get container width from parent element first
+        int container_width = 0;
+        ViewBlock* parent = (ViewBlock*)table->parent;
+        if (parent && parent->width > 0) {
+            // Parent width is the content area width (already excludes parent's border/padding)
+            container_width = (int)parent->width;
+            // If parent has border/padding, its content area is what's available
+            if (parent->bound) {
+                if (parent->bound->border) {
+                    container_width -= (int)(parent->bound->border->width.left + parent->bound->border->width.right);
+                }
+                container_width -= parent->bound->padding.left + parent->bound->padding.right;
+            }
+            log_debug("Container width from parent element: %dpx (parent->width=%.1f)", container_width, parent->width);
+        }
+        
+        // Fallback to line bounds
+        if (container_width <= 0) {
+            container_width = lycon->line.right - lycon->line.left;
+        }
+        
+        // Fallback to available_space
+        if (container_width <= 0 && lycon->available_space.width.is_definite()) {
+            container_width = (int)lycon->available_space.width.to_px_or_zero();
+        }
+        
+        // Subtract table margins
+        int margin_left = 0, margin_right = 0;
+        if (table->bound) {
+            margin_left = (int)table->bound->margin.left;
+            margin_right = (int)table->bound->margin.right;
+        }
+        
+        max_available_width = container_width - margin_left - margin_right;
+        if (max_available_width < 0) max_available_width = 0;
+        
+        log_debug("Auto table width constraint: container=%dpx, margin_left=%dpx, margin_right=%dpx, max_available=%dpx",
+                 container_width, margin_left, margin_right, max_available_width);
+        
+        // Constrain preferred width to available space
+        // But never go below minimum content width (table will overflow)
+        if (max_available_width > 0 && pref_table_width > max_available_width) {
+            log_debug("Constraining preferred width from %dpx to %dpx (available space minus margins)",
+                     pref_table_width, max_available_width);
+            pref_table_width = max_available_width;
+        } else if (max_available_width == 0 && container_width > 0) {
+            // Margins consume all available space - use minimum content width
+            log_debug("Margins consume all space, using minimum content width: %dpx", min_table_width);
+            pref_table_width = min_table_width;
+        }
+    }
+
     // Determine used table width according to CSS 2.1 specification
     // For explicit width, we need to account for border and padding
     // (table_content_width already has border/padding/spacing subtracted,
@@ -4279,35 +4458,32 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Apply border spacing or border collapse adjustments
     if (table->tb->border_collapse) {
-        // Border-collapse: borders overlap between adjacent cells
-        // Calculate the overlap amount based on actual cell border widths
-        // In collapse mode, adjacent borders share space, so we subtract the overlapping border width
-
-        if (columns > 1) {
-            // Get actual table border width for proper CSS 2.1 collapse calculation
-            float table_border_width = 1.0f; // Default to 1px
-
-            // Get table border width from computed style
-            if (table->bound && table->bound->border) {
-                table_border_width = table->bound->border->width.left; // Use left border as representative
-                log_debug("Border-collapse: detected table border width: %.1fpx", table_border_width);
+        // Border-collapse: CSS 2.1 §17.6.2
+        // The column widths represent content+padding only.
+        // Cell reported widths include half of their resolved collapsed borders.
+        // We need to add the cell half-borders to table_width here.
+        //
+        // For each cell, its width contribution = col_width + half_left_resolved + half_right_resolved
+        // Interior borders are shared between adjacent cells, so we don't double-count.
+        //
+        // Compute the sum of all cells' border half-widths by iterating through cells.
+        float total_cell_border_contribution = 0.0f;
+        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+            // Only process first row to avoid counting each column multiple times
+            for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
+                // Get this cell's resolved border half-widths
+                float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
+                float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
+                total_cell_border_contribution += half_left + half_right;
+                log_debug("  Cell col=%d: half_left=%.1f, half_right=%.1f, running_total=%.1f",
+                         tcell->td->col_index, half_left, half_right, total_cell_border_contribution);
             }
-
-            // For border-collapse, use the table border width as the collapsed border width
-            // This is a simplification but matches CSS behavior where table border takes precedence
-            // at table edges, and for interior boundaries we assume similar border widths
-            float collapsed_border_width = table_border_width;
-
-            // Reduce table width by the overlapping border widths
-            // Each interior column boundary has one border that would otherwise be doubled
-            int reduction = (int)((columns - 1) * collapsed_border_width);
-            log_debug("Border-collapse: using table border width %.1fpx for collapsed borders",
-                collapsed_border_width);
-            log_debug("Border-collapse reducing width by %dpx (%d boundaries × %.1fpx collapsed border)",
-                reduction, columns - 1, collapsed_border_width);
-            table_width -= reduction;
+            break; // Only process first row (all rows have same column structure)
         }
-        log_debug("Border-collapse applied - table width: %d", table_width);
+
+        table_width += total_cell_border_contribution;
+        log_debug("Border-collapse: adding cell half-borders: +%.1fpx, table_width=%.1fpx",
+               total_cell_border_contribution, table_width);
     } else if (table->tb->border_spacing_h > 0) {
         // Separate borders: add spacing between columns AND around table edges
         log_debug("Applying border-spacing %fpx to table width", table->tb->border_spacing_h);
@@ -4361,8 +4537,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Add table border width (content starts inside the border)
     int table_border_left = 0;
     if (table->bound && table->bound->border && table->bound->border->width.left > 0) {
-        table_border_left = (int)table->bound->border->width.left;
-        log_debug("Added table border left: +%dpx", table_border_left);
+        if (table->tb->border_collapse) {
+            // Border-collapse: cells start at half of the collapsed border
+            // The other half is outside the cells (part of table's border area)
+            table_border_left = (int)(table->bound->border->width.left / 2.0f + 0.5f);
+            log_debug("Border-collapse: table border left half: +%dpx (full=%dpx)",
+                     table_border_left, (int)table->bound->border->width.left);
+        } else {
+            table_border_left = (int)table->bound->border->width.left;
+            log_debug("Added table border left: +%dpx", table_border_left);
+        }
     }
 
     col_x_positions[0] = table_border_left + table_padding_left;
@@ -4455,33 +4639,50 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // CSS 2.1 Column Position Calculation (Section 17.5)
-    for (int i = 1; i <= columns; i++) {
-        col_x_positions[i] = col_x_positions[i-1] + col_widths[i-1];
-
-        if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
-            // CSS 2.1: Separate borders - add border-spacing between columns with precision
-            float precise_spacing = table->tb->border_spacing_h;
-            col_x_positions[i] += (int)(precise_spacing + 0.5f); // Round to nearest pixel
-            log_debug("Enhanced border precision: Added border-spacing %.1fpx (rounded to %dpx) between columns %d and %d",
-                     precise_spacing, (int)(precise_spacing + 0.5f), i-1, i);
-        } else if (table->tb->border_collapse && i > 1) {
-            // CSS 2.1: Border-collapse - adjacent borders overlap with proper rounding
-            // For border-collapse, we need at least 1px overlap to merge borders properly
-            float precise_overlap = cell_border_width / 2.0f; // Half border width for overlap
-
-            // Ensure minimum 1px overlap for border-collapse to work correctly
-            int overlap_pixels = (int)(precise_overlap + 0.5f); // Round to nearest pixel
-            if (overlap_pixels < 1 && cell_border_width > 0.5f) {
-                overlap_pixels = 1; // Minimum 1px overlap for border-collapse
+    // In border-collapse mode, we need to compute cell widths (including half-borders)
+    // from resolved collapsed borders, then position columns so cells touch.
+    if (table->tb->border_collapse) {
+        // Compute cell widths from first row's resolved borders
+        // cell_width[c] = col_widths[c] + half_left_resolved + half_right_resolved
+        float* cell_widths_with_borders = (float*)mem_calloc(columns, sizeof(float), MEM_CAT_LAYOUT);
+        int col_idx = 0;
+        for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+            for (ViewTableCell* tcell = row->first_cell(); tcell && col_idx < columns; tcell = row->next_cell(tcell)) {
+                int c = tcell->td->col_index;
+                if (c >= 0 && c < columns) {
+                    float half_left = tcell->td->left_resolved ? tcell->td->left_resolved->width / 2.0f : 0.0f;
+                    float half_right = tcell->td->right_resolved ? tcell->td->right_resolved->width / 2.0f : 0.0f;
+                    cell_widths_with_borders[c] = col_widths[c] + half_left + half_right;
+                    log_debug("Border-collapse cell width[%d]: col_width=%.1f + half_left=%.1f + half_right=%.1f = %.1f",
+                             c, col_widths[c], half_left, half_right, cell_widths_with_borders[c]);
+                }
+                col_idx++;
             }
-
-            // Apply the overlap
-            col_x_positions[i] -= overlap_pixels;
-
-            log_debug("Enhanced border precision: Border-collapse overlap -%.2fpx (applied as %dpx) between columns %d and %d",
-                     precise_overlap, overlap_pixels, i-1, i);
+            break; // Only process first row
         }
-        log_debug("CSS 2.1: Column %d starts at x=%dpx", i-1, col_x_positions[i-1]);
+
+        // Set column positions: cells touch each other
+        for (int i = 1; i <= columns; i++) {
+            col_x_positions[i] = col_x_positions[i-1] + cell_widths_with_borders[i-1];
+            log_debug("Border-collapse: Column %d starts at x=%.1fpx (prev + cell_width %.1f)",
+                     i, col_x_positions[i], cell_widths_with_borders[i-1]);
+        }
+
+        mem_free(cell_widths_with_borders);
+    } else {
+        // Non-collapsed: use original column position logic
+        for (int i = 1; i <= columns; i++) {
+            col_x_positions[i] = col_x_positions[i-1] + col_widths[i-1];
+
+            if (table->tb->border_spacing_h > 0) {
+                // CSS 2.1: Separate borders - add border-spacing between columns
+                float precise_spacing = table->tb->border_spacing_h;
+                col_x_positions[i] += (int)(precise_spacing + 0.5f);
+                log_debug("Border-spacing: Added %.1fpx between columns %d and %d",
+                         precise_spacing, i-1, i);
+            }
+            log_debug("CSS 2.1: Column %d starts at x=%.1fpx", i, col_x_positions[i]);
+        }
     }
 
     // Start Y position - only include caption height if caption is at top
@@ -4710,8 +4911,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Calculate tbody content width
             int tbody_content_width;
             if (table->tb->border_collapse) {
-                // For border-collapse, use the final table width (includes border adjustments)
-                tbody_content_width = table_width;
+                // For border-collapse, tbody width = sum of cell widths (including half-borders)
+                // This equals: col_x_positions[columns] - col_x_positions[0]
+                // The cells' widths already include their half-borders from resolved collapsed borders.
+                tbody_content_width = (int)(col_x_positions[columns] - col_x_positions[0] + 0.5f);
+                log_debug("Border-collapse tbody width: col_positions[%d]=%.1f - col_positions[0]=%.1f = %d",
+                        columns, col_x_positions[columns], col_x_positions[0], tbody_content_width);
             } else {
                 // For border-spacing, calculate as sum of column widths + spacing
                 tbody_content_width = 0;
@@ -4835,10 +5040,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         apply_fixed_row_height(lycon, trow, table->tb->fixed_row_height);
                     } else {
                         row->height = row_height;
+
+                        // CSS 2.1 §17.6.2: In border-collapse mode, cell heights already include
+                        // half of the collapsed borders (via calculate_cell_height).
+                        // Row height = max(cell heights), no additional border adjustment needed.
+                        // The row's reported height from getBoundingClientRect should match
+                        // the tallest cell's height.
+                        log_debug("Row height from cells: %.1f (border-collapse=%d)",
+                                row_height, table->tb->border_collapse);
+
                         // Also apply height to all cells in the row
                         for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                            if (tcell->height < row_height) {
-                                tcell->height = row_height;
+                            if (tcell->height < row->height) {
+                                tcell->height = row->height;
                                 // Re-apply vertical alignment with correct cell height
                                 float content_height = measure_cell_content_height(lycon, tcell);
                                 apply_cell_vertical_align(tcell, tcell->height, content_height);
@@ -4943,10 +5157,28 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Apply row height
             trow->height = row_height;
 
+            // CSS 2.1 §17.6.2: In border-collapse mode, row height includes
+            // half of the collapsed top border + half of the collapsed bottom border.
+            if (table->tb->border_collapse) {
+                float max_top_border = 0, max_bottom_border = 0;
+                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                    if (tcell->td->top_resolved && tcell->td->top_resolved->width > max_top_border) {
+                        max_top_border = tcell->td->top_resolved->width;
+                    }
+                    if (tcell->td->bottom_resolved && tcell->td->bottom_resolved->width > max_bottom_border) {
+                        max_bottom_border = tcell->td->bottom_resolved->width;
+                    }
+                }
+                float border_contribution = max_top_border / 2.0f + max_bottom_border / 2.0f;
+                trow->height += border_contribution;
+                log_debug("Border-collapse direct row height adjustment: +%.1f (top %.1f + bottom %.1f) / 2",
+                        border_contribution, max_top_border, max_bottom_border);
+            }
+
             // Apply height to all cells in the row
             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                if (tcell->height < row_height) {
-                    tcell->height = row_height;
+                if (tcell->height < trow->height) {
+                    tcell->height = trow->height;
                     float content_height = measure_cell_content_height(lycon, tcell);
                     apply_cell_vertical_align(tcell, tcell->height, content_height);
                 }
@@ -5490,31 +5722,30 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int table_border_width = 0;
     int table_border_height = 0;
 
-    if (table->bound && table->bound->border) {
-        if (table->tb->border_collapse) {
-            // Border-collapse: CSS 2.1 Section 17.6.2
-            // The table's border-box includes half of the collapsed outer borders.
-            // In collapse mode, the table border wins at outer edges (max of table/cell borders).
-            // getBoundingClientRect() returns the border-box which includes these half-borders.
-            // The collapsed border width added is half of the winning border on each side.
-            float table_border_left = table->bound->border->width.left;
-            float table_border_right = table->bound->border->width.right;
-            float table_border_top = table->bound->border->width.top;
-            float table_border_bottom = table->bound->border->width.bottom;
+    if (table->tb->border_collapse) {
+        // Border-collapse: CSS 2.1 Section 17.6.2
+        // The table's border-box includes half of the collapsed outer borders.
+        // Use the max resolved borders at each edge (from cells, rows, rowgroups, colgroups, table).
+        // These were calculated in resolve_collapsed_borders() and stored in TableMetadata.
+        float collapsed_left = meta->collapsed_border_left;
+        float collapsed_right = meta->collapsed_border_right;
+        float collapsed_top = meta->collapsed_border_top;
+        float collapsed_bottom = meta->collapsed_border_bottom;
 
-            // Add half of collapsed borders to table dimensions (for border-box reporting)
-            table_border_width = (int)(table_border_left / 2.0f + table_border_right / 2.0f + 0.5f);
-            table_border_height = (int)(table_border_top / 2.0f + table_border_bottom / 2.0f + 0.5f);
-            log_debug("Border-collapse: adding half of collapsed borders to dimensions: width+%d, height+%d",
-                   table_border_width, table_border_height);
-        } else {
-            // Separate borders: add full table border
-            table_border_width = (int)(table->bound->border->width.left + table->bound->border->width.right);
-            table_border_height = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
-            log_debug("Separate borders: table border width=%dpx (left=%.1f, right=%.1f), height=%dpx (top=%.1f, bottom=%.1f)",
-                   table_border_width, table->bound->border->width.left, table->bound->border->width.right,
-                   table_border_height, table->bound->border->width.top, table->bound->border->width.bottom);
-        }
+        // Add half of collapsed borders to table dimensions (for border-box reporting)
+        table_border_width = (int)(collapsed_left / 2.0f + collapsed_right / 2.0f + 0.5f);
+        table_border_height = (int)(collapsed_top / 2.0f + collapsed_bottom / 2.0f + 0.5f);
+        log_debug("Border-collapse: using max resolved borders - left=%.1f, right=%.1f, top=%.1f, bottom=%.1f",
+               collapsed_left, collapsed_right, collapsed_top, collapsed_bottom);
+        log_debug("Border-collapse: adding half of collapsed borders to dimensions: width+%d, height+%d",
+               table_border_width, table_border_height);
+    } else if (table->bound && table->bound->border) {
+        // Separate borders: add full table border
+        table_border_width = (int)(table->bound->border->width.left + table->bound->border->width.right);
+        table_border_height = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
+        log_debug("Separate borders: table border width=%dpx (left=%.1f, right=%.1f), height=%dpx (top=%.1f, bottom=%.1f)",
+               table_border_width, table->bound->border->width.left, table->bound->border->width.right,
+               table_border_height, table->bound->border->width.top, table->bound->border->width.bottom);
     }
 
     // Set final table dimensions including border
