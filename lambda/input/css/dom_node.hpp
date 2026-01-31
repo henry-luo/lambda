@@ -57,6 +57,8 @@ typedef enum {
     RDT_VIEW_TABLE_ROW_GROUP,
     RDT_VIEW_TABLE_ROW,
     RDT_VIEW_TABLE_CELL,
+    RDT_VIEW_TABLE_COLUMN_GROUP,  // Column group (colgroup) - CSS 2.1 §17.5.1 table layer
+    RDT_VIEW_TABLE_COLUMN,        // Column (col) - CSS 2.1 §17.5.1 table layer
     // TexNode rendering (unified TeX pipeline)
     RDT_VIEW_TEXNODE,  // Direct TexNode tree rendering - TexNode IS the view tree
 } ViewType;
@@ -151,7 +153,8 @@ struct DomNode {
 
     inline bool is_block() {
         return view_type == RDT_VIEW_BLOCK || view_type == RDT_VIEW_INLINE_BLOCK || view_type == RDT_VIEW_LIST_ITEM ||
-            view_type == RDT_VIEW_TABLE || view_type == RDT_VIEW_TABLE_ROW_GROUP || view_type == RDT_VIEW_TABLE_ROW || view_type == RDT_VIEW_TABLE_CELL;
+            view_type == RDT_VIEW_TABLE || view_type == RDT_VIEW_TABLE_ROW_GROUP || view_type == RDT_VIEW_TABLE_ROW || view_type == RDT_VIEW_TABLE_CELL ||
+            view_type == RDT_VIEW_TABLE_COLUMN_GROUP || view_type == RDT_VIEW_TABLE_COLUMN;
     }
 
     const char* view_name();
