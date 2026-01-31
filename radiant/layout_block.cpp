@@ -20,6 +20,11 @@
 #include <cfloat>
 using namespace std::chrono;
 
+// DEBUG: Global for tracking table height between calls
+// WORKAROUND: Table height gets corrupted between layout_block_content return and caller
+// This is a mysterious issue that needs further investigation
+static float g_layout_table_height = 0;
+
 // Thread-local iframe depth counter to prevent infinite recursion
 // (e.g., <iframe src="index.html"> loading itself)
 // Shared between layout_block.cpp and layout_flex_multipass.cpp
@@ -473,19 +478,47 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     else {
         // For non-flex containers, set height to flow height
         // For flex containers, the height is already set by flex algorithm
+        // For table elements, the height is already set by table_auto_layout
         bool has_embed = block->embed != nullptr;
         bool has_flex = has_embed && block->embed->flex != nullptr;
-        log_debug("finalize block flow: has_embed=%d, has_flex=%d, block=%s",
-                  has_embed, has_flex, block->node_name());
-        if (!has_flex) {
+        bool is_table = (block->view_type == RDT_VIEW_TABLE);
+        log_debug("finalize block flow: has_embed=%d, has_flex=%d, is_table=%d, block=%s",
+                  has_embed, has_flex, is_table, block->node_name());
+        if (!has_flex && !is_table) {
             // Apply min-height/max-height constraints to auto height
             float final_height = adjust_min_max_height(block, flow_height);
             log_debug("finalize block flow, set block height to flow height: %f (after min/max: %f)",
                       flow_height, final_height);
             block->height = final_height;
         } else {
-            log_debug("finalize block flow: flex container, keeping height: %f (flow=%f)",
-                      block->height, flow_height);
+            log_debug("finalize block flow: %s container, keeping height: %f (flow=%f)",
+                      is_table ? "table" : "flex", block->height, flow_height);
+        }
+        // DEBUG: Check table height RIGHT BEFORE fprintf (only for body and html)
+        if (strcmp(block->node_name(), "html") == 0 || strcmp(block->node_name(), "body") == 0) {
+            View* html_or_body = block;
+            View* body_view = nullptr;
+            
+            // For html, find body first; for body, use itself
+            if (strcmp(block->node_name(), "html") == 0) {
+                View* child = ((ViewElement*)block)->first_placed_child();
+                while (child) {
+                    if (child->is_block() && strcmp(child->node_name(), "body") == 0) {
+                        body_view = child;
+                        break;
+                    }
+                    child = child->next();
+                }
+            } else {
+                body_view = block;
+            }
+            
+            if (body_view) {
+                View* grandchild = ((ViewElement*)body_view)->first_placed_child();
+                while (grandchild) {
+                    grandchild = grandchild->next();
+                }
+            }
         }
     }
 
@@ -1347,6 +1380,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     lycon->block.advance_y, block->height);
 
                 finalize_block_flow(lycon, block, block->display.outer);
+                
+                // WORKAROUND: Save table height to global - it gets corrupted after return
+                // This is a mysterious issue where the height field gets zeroed between
+                // the return statement and the caller's next instruction
+                g_layout_table_height = block->height;
                 return;
             }
             else {
@@ -1524,6 +1562,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 
+__attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
@@ -2660,7 +2699,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     } else {
         // layout block content to determine content width and height
+        // DEBUG: Check if this is a table before layout_block_content
+        // Always print block type for debugging
+        bool is_table = (block->view_type == RDT_VIEW_TABLE);
         layout_block_content(lycon, block, &pa_block, &pa_line);
+        
+        // WORKAROUND: Restore table height from global - it gets corrupted after return
+        // This is a mysterious issue where the height field gets zeroed between
+        // the return statement in layout_block_content and this point
+        if (is_table && g_layout_table_height > 0) {
+            block->height = g_layout_table_height;
+            g_layout_table_height = 0;  // Reset for next table
+        }
 
         // CSS 2.1 Section 10.8.1: For non-replaced inline-blocks with in-flow line boxes
         // and overflow:visible, the baseline is the baseline of the last line box.
