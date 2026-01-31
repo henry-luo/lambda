@@ -246,14 +246,24 @@ static float get_explicit_css_height(LayoutContext* lycon, ViewBlock* element) {
     if (element->node_type != DOM_NODE_ELEMENT) return 0.0f;
 
     DomElement* dom_elem = element->as_element();
-    if (!dom_elem || !dom_elem->specified_style) return 0.0f;
+    if (!dom_elem) return 0.0f;
 
-    CssDeclaration* height_decl = style_tree_get_declaration(
-        dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-    if (!height_decl || !height_decl->value) return 0.0f;
+    // First try CSS specified_style
+    if (dom_elem->specified_style) {
+        CssDeclaration* height_decl = style_tree_get_declaration(
+            dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
+        if (height_decl && height_decl->value) {
+            float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+            if (resolved > 0) return resolved;
+        }
+    }
 
-    float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-    return (resolved > 0) ? resolved : 0.0f;
+    // Fallback to blk->given_height (from HTML height attribute or resolved styles)
+    if (element->blk && element->blk->given_height > 0) {
+        return element->blk->given_height;
+    }
+
+    return 0.0f;
 }
 
 // Check if a table cell is empty (has no content)
@@ -329,9 +339,10 @@ static bool is_visibility_collapse(ViewBlock* element) {
 
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
-    float content_height = 0.0f;
     float block_content_min_y = -1.0f;  // Track min y of block content (for offset)
     float block_content_max_y = 0.0f;   // Track max bottom of block content
+    float inline_content_min_y = -1.0f; // Track min y of inline/text content
+    float inline_content_max_y = 0.0f;  // Track max bottom of inline/text content
 
     // Set up line-height for this cell so we can use it for text content measurement
     // This ensures we use the cell's own line-height, not a stale value from lycon
@@ -351,14 +362,32 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
-            // CRITICAL: Use the maximum of CSS line-height and actual text bounding box height.
-            // For single-line text: line_height (24px from CSS line-height: 1.5) > text->height (18px from font metrics)
-            // For wrapped text: text->height (108px from 6 wrapped lines) > line_height (24px)
+            // Track min/max Y for text content to handle multi-line cells with <br> elements
+            // Each text node may be on a different line (e.g., y=0, y=20, y=40 for 3 lines)
             // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
-            // This ensures both single-line and wrapped content are measured correctly.
+            float text_top = text->y;
+            // Use the maximum of CSS line-height and actual text bounding box height for each line
             float text_height = max(cell_line_height > 0 ? cell_line_height : 0.0f, text->height);
+            float text_bottom = text_top + text_height;
 
-            if (text_height > content_height) content_height = text_height;
+            if (inline_content_min_y < 0 || text_top < inline_content_min_y) {
+                inline_content_min_y = text_top;
+            }
+            if (text_bottom > inline_content_max_y) {
+                inline_content_max_y = text_bottom;
+            }
+        }
+        else if (child->view_type == RDT_VIEW_BR) {
+            // BR elements also contribute to content extent - they mark line breaks
+            // Their Y position indicates where the next line starts
+            float br_top = child->y;
+            float br_bottom = br_top + child->height;
+            if (inline_content_min_y < 0 || br_top < inline_content_min_y) {
+                inline_content_min_y = br_top;
+            }
+            if (br_bottom > inline_content_max_y) {
+                inline_content_max_y = br_bottom;
+            }
         }
         else if (child->view_type == RDT_VIEW_BLOCK ||
                  child->view_type == RDT_VIEW_INLINE ||
@@ -382,7 +411,15 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             ViewTable* nested_table = (ViewTable*)child;
             float table_height = nested_table->height;
             log_debug("measure_cell_content: nested table height=%.1f", table_height);
-            if (table_height > content_height) content_height = table_height;
+            // Treat nested tables like block content for extent tracking
+            float table_top = child->y;
+            float table_bottom = table_top + table_height;
+            if (block_content_min_y < 0 || table_top < block_content_min_y) {
+                block_content_min_y = table_top;
+            }
+            if (table_bottom > block_content_max_y) {
+                block_content_max_y = table_bottom;
+            }
         }
     }
 
@@ -390,8 +427,16 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     // This correctly handles cells with padding by subtracting the initial offset
     float block_content_height = (block_content_min_y >= 0) ? (block_content_max_y - block_content_min_y) : 0.0f;
 
+    // Compute inline content height as the extent from min to max y
+    // This handles multi-line text (e.g., 10 lines at y=0,20,40...180 = 200px total)
+    float inline_content_height = (inline_content_min_y >= 0) ? (inline_content_max_y - inline_content_min_y) : 0.0f;
+
     // Use the larger of inline content height or block content extent
-    content_height = max(content_height, block_content_height);
+    float content_height = max(inline_content_height, block_content_height);
+
+    log_debug("measure_cell_content: inline=%.1f (y:%.1f-%.1f), block=%.1f (y:%.1f-%.1f) -> %.1f",
+              inline_content_height, inline_content_min_y, inline_content_max_y,
+              block_content_height, block_content_min_y, block_content_max_y, content_height);
 
     // Return measured content height (no artificial minimum)
     return content_height;
@@ -4896,13 +4941,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (int i = 0; i < direct_rows->length; i++) arraylist_append(ordered_elements, direct_rows->data[i]);
     for (int i = 0; i < tfoot_groups->length; i++) arraylist_append(ordered_elements, tfoot_groups->data[i]);
 
-    log_debug("Row group ordering: %d thead, %d tbody, %d direct rows, %d tfoot (total %d)",
+    log_info("Row group ordering: %d thead, %d tbody, %d direct rows, %d tfoot (total %d)",
               thead_groups->length, tbody_groups->length, direct_rows->length, tfoot_groups->length,
               ordered_elements->length);
 
     // Process elements in visual order (THEAD groups → TBODY groups → direct rows → TFOOT groups)
     for (int _i = 0; _i < ordered_elements->length; _i++) {
         ViewBlock* child = (ViewBlock*)ordered_elements->data[_i];
+        log_info("Processing ordered element %d: view_type=%d", _i, child->view_type);
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             int group_start_y = current_y;
 
