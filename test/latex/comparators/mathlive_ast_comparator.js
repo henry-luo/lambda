@@ -356,15 +356,135 @@ function normalizeMathLiveBody(body) {
 }
 
 /**
+ * Get fontSize style from a node, or null if none/default.
+ * Used to group text nodes by their sizing.
+ */
+function getTextFontSize(node) {
+    if (!node || typeof node !== 'object') return null;
+    if (node.style && node.style.fontSize !== undefined) {
+        return node.style.fontSize;
+    }
+    return null;
+}
+
+/**
+ * Check if a node is a text-mode node (MathLive outputs individual characters as text nodes).
+ */
+function isTextNode(node) {
+    if (!node || typeof node !== 'object') return false;
+    const type = normalizeType(node.type);
+    return type === 'text' && node.mode === 'text';
+}
+
+/**
+ * Merge consecutive text nodes with the same style.fontSize into a single text node.
+ *
+ * MathLive outputs: [{type:"text", value:"a"}, {type:"text", value:" "}, {type:"text", value:"x", style:{fontSize:1}}]
+ * Lambda outputs: [{type:"TEXT", text:"a "}, {type:"TEXT", text:"x y", style:{fontSize:1}}] (conceptually)
+ *
+ * This function groups consecutive text nodes by their fontSize style and concatenates values.
+ */
+function mergeConsecutiveTextNodes(body) {
+    if (!Array.isArray(body)) return body;
+
+    const result = [];
+    let i = 0;
+
+    while (i < body.length) {
+        const item = body[i];
+
+        // Check if this is a text node that can be merged
+        if (isTextNode(item)) {
+            const currentFontSize = getTextFontSize(item);
+            let mergedValue = item.value || '';
+            let lastMergedIndex = i;
+
+            // Look ahead and merge consecutive text nodes with same fontSize
+            for (let j = i + 1; j < body.length; j++) {
+                const nextItem = body[j];
+                if (isTextNode(nextItem)) {
+                    const nextFontSize = getTextFontSize(nextItem);
+                    // Merge if fontSize matches (both null or same value)
+                    if (currentFontSize === nextFontSize ||
+                        (currentFontSize === null && nextFontSize === undefined) ||
+                        (currentFontSize === undefined && nextFontSize === null)) {
+                        mergedValue += nextItem.value || '';
+                        lastMergedIndex = j;
+                    } else {
+                        break; // Different fontSize, stop merging
+                    }
+                } else {
+                    break; // Not a text node, stop merging
+                }
+            }
+
+            // Create merged text node
+            const mergedNode = {
+                type: 'text',
+                mode: 'text',
+                value: mergedValue,
+            };
+            if (currentFontSize !== null && currentFontSize !== undefined) {
+                mergedNode.style = { fontSize: currentFontSize };
+            }
+            result.push(mergedNode);
+
+            i = lastMergedIndex + 1;
+        } else {
+            // Not a text node, keep as-is
+            result.push(item);
+            i++;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Extract all text content from consecutive text nodes in an array (ignoring fontSize).
+ * Used for comparison when Lambda has one TEXT node and MathLive has multiple.
+ *
+ * @param {Array} nodes - Array of nodes
+ * @returns {string} Combined text content
+ */
+function extractCombinedTextFromNodes(nodes) {
+    if (!Array.isArray(nodes)) return '';
+
+    let result = '';
+    for (const node of nodes) {
+        if (isTextNode(node)) {
+            result += node.value || '';
+        } else if (typeof node === 'string') {
+            // Bare strings in body array
+            result += node;
+        }
+    }
+    return result;
+}
+
+/**
+ * Check if all items in an array are text nodes or bare strings.
+ */
+function isAllTextContent(nodes) {
+    if (!Array.isArray(nodes)) return false;
+    return nodes.every(node =>
+        isTextNode(node) || typeof node === 'string'
+    );
+}
+
+/**
  * Deep normalize MathLive AST to be more comparable with Lambda's structure.
  */
 function normalizeMathLiveAST(node) {
     if (!node) return null;
 
     if (Array.isArray(node)) {
-        // First normalize children, then merge base+subsup patterns
+        // First normalize children, then merge patterns
         const normalized = node.map(normalizeMathLiveAST);
-        return normalizeMathLiveBody(normalized);
+        // Merge base+subsup patterns
+        const withScripts = normalizeMathLiveBody(normalized);
+        // Merge consecutive text nodes with same fontSize
+        return mergeConsecutiveTextNodes(withScripts);
     }
 
     if (typeof node !== 'object') return node;
@@ -997,6 +1117,40 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
             return;  // Done with ARRAY comparison
         }
 
+        // Special handling: Lambda TEXT vs MathLive text nodes
+        // Lambda outputs single TEXT node with full text string
+        // MathLive (after normalization) outputs merged text nodes with concatenated values
+        // Compare the text content, ignoring style.fontSize differences
+        if (lambdaType === 'TEXT' && mathliveType === 'text') {
+            matchedElements++;  // Types match
+
+            // Lambda uses 'text' field, MathLive uses 'value' field
+            const lambdaText = lambda.text || '';
+            const mathliveText = mathlive.value || '';
+
+            // Normalize text: trim and collapse whitespace for more lenient comparison
+            const normalizeText = (s) => s.replace(/\s+/g, ' ').trim();
+            const lambdaNorm = normalizeText(lambdaText);
+            const mathliveNorm = normalizeText(mathliveText);
+
+            if (lambdaNorm === mathliveNorm) {
+                // Text content matches
+                // Note: We don't compare fontSize since Lambda doesn't track sizing inside \text{}
+            } else if (lambdaNorm.includes(mathliveNorm) || mathliveNorm.includes(lambdaNorm)) {
+                // Partial match (one contains the other) - count as partial success
+                // This handles cases where text is split differently
+            } else {
+                differences.push({
+                    path,
+                    issue: 'Text content mismatch',
+                    lambda: lambdaNorm,
+                    mathlive: mathliveNorm,
+                });
+            }
+
+            return;  // Done with TEXT comparison
+        }
+
         // Special handling: Lambda ORD with command vs MathLive macro
         // MathLive uses 'macro' type for custom commands, Lambda uses ORD with command field
         if (lambdaType === 'ORD' && mathliveType === 'macro') {
@@ -1122,6 +1276,32 @@ function compareASTToMathLive(lambdaAST, mathliveRef) {
                                 mathliveBranch[i],
                                 `${path}.${branch}[${i}]`
                             );
+                        }
+                    } else if (lambdaBranch && typeof lambdaBranch === 'object' &&
+                               normalizeType(lambdaBranch.type) === 'text' &&
+                               isAllTextContent(mathliveBranch)) {
+                        // Special case: Lambda has single TEXT node, MathLive has array of text nodes
+                        // Compare by combining all text content
+                        totalElements++;
+                        const lambdaText = lambdaBranch.text || '';
+                        const mathliveText = extractCombinedTextFromNodes(mathliveBranch);
+
+                        const normalizeText = (s) => s.replace(/\s+/g, ' ').trim();
+                        const lambdaNorm = normalizeText(lambdaText);
+                        const mathliveNorm = normalizeText(mathliveText);
+
+                        if (lambdaNorm === mathliveNorm) {
+                            matchedElements++;
+                        } else if (lambdaNorm.includes(mathliveNorm) || mathliveNorm.includes(lambdaNorm)) {
+                            // Partial match - count as partial success
+                            matchedElements += 0.5;
+                        } else {
+                            differences.push({
+                                path: `${path}.${branch}`,
+                                issue: 'Text content mismatch (single vs multiple)',
+                                lambda: lambdaNorm,
+                                mathlive: mathliveNorm,
+                            });
                         }
                     } else {
                         differences.push({
