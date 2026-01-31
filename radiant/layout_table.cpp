@@ -3099,6 +3099,15 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
     // Check if we should collapse whitespace based on CSS white-space property
     bool collapse_ws = should_collapse_whitespace(cell);
 
+    // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
+    // We track "inline run width" - the accumulated max-content width of consecutive
+    // inline/text children that would flow together on one line.
+    // For PCW (max-content): sum widths of consecutive inline children
+    // For MCW (min-content): take max of individual word widths
+    float inline_run_max = 0.0f;  // Running sum for current inline sequence
+    bool has_inline_content = false;  // Track if we have any inline content
+    bool prev_ended_with_space = false;  // Track whitespace between text nodes
+
     // Measure each child's natural width
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
@@ -3111,9 +3120,22 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
                 size_t measure_len = text_len;
                 static char normalized_buffer[4096];  // Static buffer for normalized text
 
+                // Track if original text has leading/trailing whitespace (before normalization)
+                bool original_has_leading_ws = (text_len > 0 && is_all_whitespace((const char*)text, 1));
+                bool original_has_trailing_ws = false;
+                if (text_len > 0) {
+                    const char* end = (const char*)text + text_len - 1;
+                    while (end >= (const char*)text && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
+                        original_has_trailing_ws = true;
+                        end--;
+                    }
+                }
+
                 if (collapse_ws) {
                     // Check if all whitespace first (fast path)
                     if (is_all_whitespace((const char*)text, text_len)) {
+                        // Whitespace-only text contributes a space between adjacent text nodes
+                        prev_ended_with_space = true;
                         continue; // Skip whitespace-only text nodes
                     }
                     // Normalize whitespace to buffer
@@ -3132,8 +3154,23 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
                 log_debug("Cell widths: text max=%.2f, min=%.2f (unified API)", text_max, text_min);
-                if (text_max > max_width) max_width = text_max;
+
+                // Add space width if there was whitespace between this and previous text
+                // This handles: "text1 " + "text2" OR "text1" + " text2" OR "text1 " + " text2"
+                if (has_inline_content && (prev_ended_with_space || original_has_leading_ws) && lycon->font.style) {
+                    inline_run_max += lycon->font.style->space_width;
+                    log_debug("Cell widths: adding inter-text space width=%.2f", lycon->font.style->space_width);
+                }
+
+                // Accumulate max-content for inline run (consecutive text flows together)
+                inline_run_max += text_max;
+                has_inline_content = true;
+
+                // For min-content, take the max of all word widths
                 if (text_min > min_width) min_width = text_min;
+
+                // Check if ORIGINAL text ended with whitespace (for next text node)
+                prev_ended_with_space = original_has_trailing_ws;
             }
         }
         else if (child->is_element()) {
@@ -3211,10 +3248,49 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell)
                           child->node_name(), child_min, child_max);
             }
 
-            if (child_max > max_width) max_width = child_max;
+            // Check if this is an inline element (flows with text) or block element (starts new line)
+            DisplayValue child_display = resolve_display_value(child);
+            bool is_inline = (child_display.outer == CSS_VALUE_INLINE ||
+                              child_display.outer == CSS_VALUE_INLINE_BLOCK);
+
+            // Special handling for <br> - it breaks the inline run even though it's inline
+            uintptr_t child_tag = child->tag();
+            bool is_line_break = (child_tag == HTM_TAG_BR);
+
+            if (is_line_break) {
+                // <br> forces a line break - finalize current inline run
+                if (inline_run_max > max_width) max_width = inline_run_max;
+                inline_run_max = 0.0f;
+                has_inline_content = false;
+                prev_ended_with_space = false;
+                log_debug("Cell widths: <br> breaks inline run, max_width now=%.2f", max_width);
+            } else if (is_inline) {
+                // Inline elements flow with text - add to inline run
+                if (has_inline_content && prev_ended_with_space && lycon->font.style) {
+                    inline_run_max += lycon->font.style->space_width;
+                }
+                inline_run_max += child_max;
+                has_inline_content = true;
+                prev_ended_with_space = false;
+            } else {
+                // Block elements break the inline run - finalize current run first
+                if (inline_run_max > max_width) max_width = inline_run_max;
+                inline_run_max = 0.0f;
+                has_inline_content = false;
+                prev_ended_with_space = false;
+
+                // Block element width is compared independently
+                if (child_max > max_width) max_width = child_max;
+            }
+
             if (child_min > min_width) min_width = child_min;
         }
     }
+
+    // Finalize any remaining inline run
+    if (inline_run_max > max_width) max_width = inline_run_max;
+
+    log_debug("Cell widths: inline_run_max=%.2f, final max_width=%.2f", inline_run_max, max_width);
 
     // Restore context
     lycon->block = saved_block;
