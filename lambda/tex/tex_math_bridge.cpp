@@ -287,7 +287,7 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
     Arena* arena = ctx.arena;
 
     float size_pt = ctx.base_size_pt;
-    
+
     // TeX sigma table values (from cmsy10 fontdimens, TeXBook p. 445)
     // These are the shift amounts from the main baseline to num/denom baselines
     float axis = 2.5f * size_pt / 10.0f;  // axis_height (fontdimen22)
@@ -295,12 +295,12 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
     float num2 = 3.94f * size_pt / 10.0f;   // text num shift with rule (fontdimen9)
     float denom1 = 6.86f * size_pt / 10.0f; // display denom shift (fontdimen11)
     float denom2 = 3.45f * size_pt / 10.0f; // text denom shift (fontdimen12)
-    
+
     // Minimum clearance between content and rule (3*rule for display, 1*rule for text)
     float default_rule = 0.4f * size_pt / 10.0f;
     float min_gap_display = 3.0f * default_rule;
     float min_gap_text = default_rule;
-    
+
     float num_shift, denom_shift, min_gap;
     if (ctx.style == MathStyle::Display || ctx.style == MathStyle::DisplayPrime) {
         num_shift = num1;
@@ -311,13 +311,13 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
         denom_shift = denom2;
         min_gap = min_gap_text;
     }
-    
+
     // TeX algorithm: position num/denom baselines, then adjust if clearance insufficient
     // num_y is the y-position of numerator baseline (positive = above main baseline)
     // denom_y is the y-position of denominator baseline (negative = below main baseline)
     float num_y = num_shift;
     float denom_y = -denom_shift;
-    
+
     // Check clearance: gap between bottom of numerator and top of rule
     float rule_top = axis + rule_thickness / 2.0f;
     float num_bottom = num_y - numerator->depth;
@@ -325,7 +325,7 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
     if (clearance_above < min_gap) {
         num_y += (min_gap - clearance_above);
     }
-    
+
     // Check clearance: gap between bottom of rule and top of denominator
     float rule_bottom = axis - rule_thickness / 2.0f;
     float denom_top = denom_y + denominator->height;
@@ -453,17 +453,17 @@ TexNode* typeset_root(TexNode* degree, TexNode* radicand, MathContext& ctx) {
         // Expand the radical's width to include the degree area on the left
         float extra_left = deg_width;
         radical->width += extra_left;
-        
+
         // Shift radicand's x position to account for the degree width
         if (radical->content.radical.radicand) {
             radical->content.radical.radicand->x += extra_left;
         }
-        
+
         // Degree is at the left edge (x=0), radical sign is after it
         degree->x = 0;
         degree->y = deg_shift_y;
         degree->parent = radical;
-        
+
         log_debug("typeset_root: degree x=%.1f width=%.1f, radicand x=%.1f, total width=%.1f",
                   degree->x, degree->width,
                   radical->content.radical.radicand ? radical->content.radical.radicand->x : 0.0f,
@@ -590,16 +590,16 @@ TexNode* typeset_op_limits(TexNode* op_node, TexNode* subscript, TexNode* supers
 
     // Link children in DVI output order: superscript -> operator (nucleus) -> subscript
     // This matches TeX reference DVI ordering for display-style limits
-    
+
     // Position operator at center
     op_node->x = op_offset;
     op_node->y = 0;
     op_node->parent = result;
-    
+
     // Start with operator dimensions
     float total_height = op_node->height;
     float total_depth = op_node->depth;
-    
+
     // First, position superscript and make it the first child
     TexNode* prev = nullptr;
     if (superscript) {
@@ -750,6 +750,94 @@ TexNode* typeset_scripts(TexNode* nucleus, TexNode* subscript, TexNode* superscr
 // Delimiter Typesetting
 // ============================================================================
 
+// Map Unicode/ASCII delimiter to cmex10 starting character code
+// cmex10 has delimiter chains: char→next_larger→next_larger...→extensible recipe
+static int delim_to_cmex_start(int32_t delim, bool is_left) {
+    switch (delim) {
+        case '(':  return is_left ? 0 : 1;   // small parens at 0,1
+        case ')':  return is_left ? 0 : 1;
+        case '[':  return is_left ? 2 : 3;   // small brackets at 2,3
+        case ']':  return is_left ? 2 : 3;
+        case '{':  return is_left ? 8 : 9;   // small braces at 8,9
+        case '}':  return is_left ? 8 : 9;
+        case '|':  return 12;                // vertical bar at 12
+        case 0x2016: return 13;              // double vertical at 13 (‖)
+        default:   return is_left ? 0 : 1;   // fallback to parens
+    }
+}
+
+// Find best-sized delimiter from cmex10 next-larger chain
+// Returns the character code and its metrics
+static TexNode* make_sized_delimiter(Arena* arena, int32_t delim, bool is_left,
+                                      float target_height, MathContext& ctx) {
+    if (delim == 0) return nullptr;
+
+    TFMFont* cmex = ctx.fonts->get_font("cmex10");
+    if (!cmex) {
+        // Fallback to simple char if no TFM available
+        FontSpec font("cmr10", ctx.base_size_pt, nullptr, 0);
+        TexNode* node = make_char(arena, delim, font);
+        node->width = ctx.base_size_pt * 0.4f;
+        node->height = ctx.x_height;
+        node->depth = 0;
+        return node;
+    }
+
+    float size = ctx.font_size();
+    float scale = size / cmex->design_size;
+
+    // Get starting code for this delimiter in cmex10
+    int current = delim_to_cmex_start(delim, is_left);
+    int best = current;
+    float best_total = 0;
+
+    // Walk the next-larger chain to find best fit
+    // cmex10 has chains like: small → medium → large → extensible
+    int max_iterations = 10;  // prevent infinite loops
+    while (current != 0 && max_iterations-- > 0) {
+        if (!cmex->has_char(current)) break;
+
+        float h = cmex->char_height(current) * scale;
+        float d = cmex->char_depth(current) * scale;
+        float total = h + d;
+
+        if (total >= target_height) {
+            // Found one big enough
+            best = current;
+            best_total = total;
+            break;
+        }
+
+        // Keep this as best so far
+        if (total > best_total) {
+            best = current;
+            best_total = total;
+        }
+
+        // Try next larger
+        int next = cmex->get_next_larger(current);
+        if (next == 0 || next == current) break;
+        current = next;
+    }
+
+    // Create character node with proper metrics
+    FontSpec font("cmex10", size, nullptr, 0);
+    TexNode* node = make_char(arena, best, font);
+
+    float h = cmex->char_height(best) * scale;
+    float d = cmex->char_depth(best) * scale;
+    float w = cmex->char_width(best) * scale;
+
+    node->width = w > 0 ? w : ctx.base_size_pt * 0.4f;
+    node->height = h;
+    node->depth = d;
+
+    log_debug("[DELIM] sized delimiter: cp=%d target=%.2f actual=%.2f (h=%.2f d=%.2f)",
+              best, target_height, h + d, h, d);
+
+    return node;
+}
+
 TexNode* typeset_delimited(int32_t left_delim, TexNode* content,
                            int32_t right_delim, MathContext& ctx, bool extensible) {
     Arena* arena = ctx.arena;
@@ -766,28 +854,24 @@ TexNode* typeset_delimited(int32_t left_delim, TexNode* content,
     TexNode* left = nullptr;
     TexNode* right = nullptr;
 
-    // For non-extensible delimiters (matrix environments), use regular char nodes
-    // For extensible delimiters (\left/\right), use Delimiter nodes
+    // For non-extensible delimiters (matrix environments), use cmex10 next-larger chain
+    // to find best-fit delimiter size without using extensible recipes
+    // For extensible delimiters (\left/\right), use Delimiter nodes that trigger
+    // the full extensible recipe in DVI output
     if (!extensible) {
-        // Non-extensible: use regular cmr10 characters
-        FontSpec font("cmr10", ctx.base_size_pt, nullptr, 0);
-        float char_width = ctx.base_size_pt * 0.4f;
-        float char_height = ctx.x_height;
-        float char_depth = 0;
-        
-        if (left_delim != 0) {
-            left = make_char(arena, left_delim, font);
-            left->width = char_width;
-            left->height = char_height;
-            left->depth = char_depth;
+        // Non-extensible: use cmex10 next-larger chain for properly sized delimiters
+        left = make_sized_delimiter(arena, left_delim, true, delim_size, ctx);
+        if (left) {
             total_width += left->width;
+            total_height = fmaxf(total_height, left->height);
+            total_depth = fmaxf(total_depth, left->depth);
         }
-        if (right_delim != 0) {
-            right = make_char(arena, right_delim, font);
-            right->width = char_width;
-            right->height = char_height;
-            right->depth = char_depth;
+
+        right = make_sized_delimiter(arena, right_delim, false, delim_size, ctx);
+        if (right) {
             total_width += right->width;
+            total_height = fmaxf(total_height, right->height);
+            total_depth = fmaxf(total_depth, right->depth);
         }
     } else {
         // Extensible: use Delimiter nodes (will be sized by DVI output)
