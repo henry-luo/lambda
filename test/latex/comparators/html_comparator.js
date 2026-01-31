@@ -35,6 +35,14 @@ const CLASS_CATEGORIES = {
 
     // Roots
     'ML__sqrt': 'sqrt',
+    'ML__sqrt-index': 'sqrt-index',
+    'ML__sqrt-sign': 'sqrt-sign',
+    'ML__sqrt-line': 'sqrt-line',
+    'ML__sqrt-symbol': 'sqrt-sign',
+    'ML__sqrt-body': 'sqrt-body',
+    'ML__root': 'sqrt-index',
+    'ML__delim-size1': 'delim-size',
+    'ML__delim-size2': 'delim-size',
     'sqrt': 'sqrt',
     'sqrt-sign': 'sqrt-sign',
     'lambda-sqrt': 'sqrt',
@@ -53,6 +61,18 @@ const CLASS_CATEGORIES = {
     'vlist-t2': 'vlist',
     'vlist-r': 'vlist',
     'vlist-s': 'vlist',
+
+    // VList (MathLive)
+    'ML__vlist': 'vlist',
+    'ML__vlist-t': 'vlist',
+    'ML__vlist-t2': 'vlist',
+    'ML__vlist-r': 'vlist',
+    'ML__vlist-s': 'vlist',
+    'ML__pstrut': 'strut',
+    'ML__msubsup': 'scripts',
+    'ML__mfrac': 'frac',
+    'ML__center': 'center',
+    'ML__nulldelimiter': 'delim',
 
     // Delimiters
     'ML__open': 'open',
@@ -110,7 +130,8 @@ const WRAPPER_CLASSES = new Set([
     'katex',
     'katex-html',
     'ML__latex',
-    'ML__base'
+    'ML__base',
+    'ML__mord'  // Lambda uses ML__mord as wrapper like MathLive uses ML__base
 ]);
 
 /**
