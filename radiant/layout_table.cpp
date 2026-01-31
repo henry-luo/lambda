@@ -523,14 +523,40 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, float cell_height, f
 
     log_debug("  cell_content_area=%.1f after border/padding subtraction", cell_content_area);
 
-    float y_adjustment = 0.0f;
-    if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE) {
-        y_adjustment = (cell_content_area - content_height) / 2.0f;
-    } else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
-        y_adjustment = cell_content_area - content_height;
+    // Calculate the content start Y position (border + padding from top)
+    float content_start_y = 0.0f;
+    if (tcell->bound && tcell->bound->border) {
+        if (tcell->bound->border->top_style != CSS_VALUE_NONE) {
+            content_start_y += tcell->bound->border->width.top;
+        }
+    }
+    if (tcell->bound && tcell->bound->padding.top >= 0) {
+        content_start_y += tcell->bound->padding.top;
     }
 
-    if (y_adjustment > 0) {
+    // Calculate target Y position for content based on alignment
+    float target_y = content_start_y;  // Default: top alignment
+    if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE) {
+        target_y = content_start_y + (cell_content_area - content_height) / 2.0f;
+    } else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
+        target_y = content_start_y + (cell_content_area - content_height);
+    }
+
+    // Find current content Y position (min y of all VISIBLE children)
+    // Skip nil-views (RDT_VIEW_NONE) as they don't represent actual content
+    float current_min_y = 1e9f;
+    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
+        if (child->view_type != RDT_VIEW_NONE && child->y < current_min_y) {
+            current_min_y = child->y;
+        }
+    }
+
+    // Calculate adjustment needed to move content from current position to target
+    float y_adjustment = target_y - current_min_y;
+    log_debug("  vertical-align: target_y=%.1f, current_min_y=%.1f, y_adjustment=%.1f",
+             target_y, current_min_y, y_adjustment);
+
+    if (y_adjustment != 0 && current_min_y < 1e8f) {
         for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
             child->y += y_adjustment;
             // Also update TextRect for ViewText nodes
@@ -827,6 +853,7 @@ struct TableMetadata {
     float* row_heights;         // Row heights for rowspan calculation
     float* row_y_positions;     // Row Y positions for rowspan calculation
     bool* row_collapsed;        // Visibility: collapse tracking per row
+    bool* row_has_percent_height;  // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto
 
     // Border-collapse: max winning border widths at table edges (CSS 2.1 §17.6.2)
     // These are the maximum resolved border widths at each outer edge,
@@ -847,6 +874,7 @@ struct TableMetadata {
         row_heights = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
         row_y_positions = (float*)mem_calloc(rows, sizeof(float), MEM_CAT_LAYOUT);
         row_collapsed = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
+        row_has_percent_height = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
     }
 
     ~TableMetadata() {
@@ -857,6 +885,7 @@ struct TableMetadata {
         mem_free(row_heights);
         mem_free(row_y_positions);
         mem_free(row_collapsed);
+        mem_free(row_has_percent_height);
     }
 
     // Grid accessor
@@ -2955,19 +2984,34 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
     int valign = tcell->td->vertical_align;
 
     // Calculate content's actual height to determine offset
-    int content_actual_height = 0;
+    // We need to find both min and max Y to get the true content height
+    float min_y = 1e9f;
     float max_y = 0;
+    bool has_content = false;
 
-    // Find the maximum Y position of all child content to determine actual height
+    // Find the bounding box of all child content
     for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
+            if (text->y < min_y) min_y = text->y;
             float child_bottom = text->y + text->height;
             if (child_bottom > max_y) max_y = child_bottom;
+            has_content = true;
+        } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE) {
+            ViewBlock* block = (ViewBlock*)child;
+            if (block->y < min_y) min_y = block->y;
+            float child_bottom = block->y + block->height;
+            if (child_bottom > max_y) max_y = child_bottom;
+            has_content = true;
         }
-        // Add other child types as needed (blocks, inlines, etc.)
     }
-    content_actual_height = (int)max_y;
+
+    if (!has_content) return;
+
+    // Content actual height is the span from first content to last content bottom
+    int content_actual_height = (int)(max_y - min_y);
+    log_debug("Cell vertical-align: content_height=%d, content_actual_height=%d (min_y=%.1f, max_y=%.1f)",
+             content_height, content_actual_height, min_y, max_y);
 
     // Calculate vertical offset based on alignment
     int vertical_offset = 0;
@@ -3006,8 +3050,10 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
                 text->y += vertical_offset;
                 log_debug("CSS vertical-align: adjusted text Y by +%dpx (align=%d)",
                          vertical_offset, (int)valign);
+            } else if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE) {
+                ViewBlock* block = (ViewBlock*)child;
+                block->y += vertical_offset;
             }
-            // Apply to other child types as needed
         }
     }
 }
@@ -5007,10 +5053,31 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             int current_row_index = 0;
 
+            // CSS 2.1 §17.5.3: Check if row group has percentage height (computes to auto)
+            // If so, all rows in this group should be treated as having percentage height
+            bool group_has_percent_height = false;
+            if (child->is_element()) {
+                DomElement* group_elem = child->as_element();
+                if (group_elem->specified_style) {
+                    CssDeclaration* height_decl = style_tree_get_declaration(
+                        group_elem->specified_style, CSS_PROPERTY_HEIGHT);
+                    if (height_decl && height_decl->value &&
+                        height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        group_has_percent_height = true;
+                        log_debug("Row group has percentage height - all rows compute to auto");
+                    }
+                }
+            }
+
             for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     current_row_index++;
                     bool is_last_row = (current_row_index == row_count);
+
+                    // CSS 2.1 §17.5.3: If row group has percentage height, mark all its rows
+                    if (group_has_percent_height && global_row_index < meta->row_count) {
+                        meta->row_has_percent_height[global_row_index] = true;
+                    }
 
                     // CSS 2.1 §17.5.5: Check for visibility: collapse
                     // Collapsed rows don't render and don't contribute to height
@@ -5066,6 +5133,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
 
                     // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
+                    // "The height of a 'table-row' element's box is calculated once the user
+                    // agent has all the cells in the row available... Percentages for 'height'
+                    // on table cells, table rows, and table row groups [compute to 'auto']"
                     float explicit_row_height = 0.0f;
                     if (row->is_element()) {
                         DomElement* row_elem = row->as_element();
@@ -5073,10 +5143,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             CssDeclaration* height_decl = style_tree_get_declaration(
                                 row_elem->specified_style, CSS_PROPERTY_HEIGHT);
                             if (height_decl && height_decl->value) {
-                                float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                                if (resolved_height > 0) {
-                                    explicit_row_height = resolved_height;
-                                    log_debug("Row has explicit CSS height: %.1fpx", explicit_row_height);
+                                // CSS 2.1 §17.5.3: Percentage heights on table rows compute to auto
+                                if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                    // Mark this row as having percentage height - computes to auto
+                                    if (global_row_index < meta->row_count) {
+                                        meta->row_has_percent_height[global_row_index] = true;
+                                        log_debug("Row %d has percentage height - treating as auto", global_row_index);
+                                    }
+                                } else {
+                                    float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                                    if (resolved_height > 0) {
+                                        explicit_row_height = resolved_height;
+                                        log_debug("Row has explicit CSS height: %.1fpx", explicit_row_height);
+                                    }
                                 }
                             }
                         }
@@ -5186,6 +5265,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     row_height = height_for_row;
                 }
             }            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
+            // "The height of a 'table-row' element's box is calculated once the user
+            // agent has all the cells in the row available... Percentages for 'height'
+            // on table cells, table rows, and table row groups [compute to 'auto']"
             float explicit_row_height = 0.0f;
             if (trow->is_element()) {
                 DomElement* row_elem = trow->as_element();
@@ -5193,10 +5275,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     CssDeclaration* height_decl = style_tree_get_declaration(
                         row_elem->specified_style, CSS_PROPERTY_HEIGHT);
                     if (height_decl && height_decl->value) {
-                        float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                        if (resolved_height > 0) {
-                            explicit_row_height = resolved_height;
-                            log_debug("Direct row has explicit CSS height: %.1fpx", explicit_row_height);
+                        // CSS 2.1 §17.5.3: Percentage heights on table rows compute to auto
+                        if (height_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            // Mark this row as having percentage height - computes to auto
+                            if (global_row_index < meta->row_count) {
+                                meta->row_has_percent_height[global_row_index] = true;
+                                log_debug("Direct row %d has percentage height - treating as auto", global_row_index);
+                            }
+                        } else {
+                            float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                            if (resolved_height > 0) {
+                                explicit_row_height = resolved_height;
+                                log_debug("Direct row has explicit CSS height: %.1fpx", explicit_row_height);
+                            }
                         }
                     }
                 }
@@ -5537,12 +5628,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                      extra_for_body, body_row_count, extra_height);
 
             if (extra_for_body > 0 && body_row_count > 0) {
-                // Distribute extra height equally among body rows only
-                int height_per_row = extra_for_body / body_row_count;
-                int remainder = extra_for_body % body_row_count;
-                int distributed_count = 0;
-
-                // First pass: update meta->row_heights for body rows
+                // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto and should
+                // not receive extra height. Only distribute to rows without percentage heights.
+                int eligible_row_count = 0;
                 for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
                     if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
                         ViewTableRowGroup* group = (ViewTableRowGroup*)child;
@@ -5554,17 +5642,58 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
                                     int row_idx = tcell->td->row_index;
                                     if (row_idx >= 0 && row_idx < meta->row_count) {
-                                        int row_extra = height_per_row + (distributed_count < remainder ? 1 : 0);
-                                        meta->row_heights[row_idx] += row_extra;
-                                        log_debug("    Body row %d: natural=%d + extra=%d = %d",
-                                                 row_idx, meta->row_heights[row_idx] - row_extra, row_extra, meta->row_heights[row_idx]);
-                                        distributed_count++;
+                                        // Only count rows that don't have percentage height
+                                        if (!meta->row_has_percent_height[row_idx]) {
+                                            eligible_row_count++;
+                                        }
                                         break;  // Found row index
                                     }
                                 }
                             }
                         }
                     }
+                }
+
+                log_debug("Eligible rows for height distribution: %d (of %d body rows)",
+                         eligible_row_count, body_row_count);
+
+                if (eligible_row_count > 0) {
+                    // Distribute extra height equally among eligible body rows only
+                    int height_per_row = extra_for_body / eligible_row_count;
+                    int remainder = extra_for_body % eligible_row_count;
+                    int distributed_count = 0;
+
+                    // First pass: update meta->row_heights for eligible body rows
+                    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                            ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                            TableSectionType section_type = group->get_section_type();
+                            bool is_body_group = (section_type == TABLE_SECTION_TBODY);
+
+                            if (is_body_group) {
+                                for (ViewTableRow* trow = group->first_row(); trow; trow = group->next_row(trow)) {
+                                    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                                        int row_idx = tcell->td->row_index;
+                                        if (row_idx >= 0 && row_idx < meta->row_count) {
+                                            // Skip rows with percentage height
+                                            if (meta->row_has_percent_height[row_idx]) {
+                                                log_debug("    Skipping row %d (percentage height)", row_idx);
+                                                break;
+                                            }
+                                            int row_extra = height_per_row + (distributed_count < remainder ? 1 : 0);
+                                            meta->row_heights[row_idx] += row_extra;
+                                            log_debug("    Body row %d: natural=%d + extra=%d = %d",
+                                                     row_idx, meta->row_heights[row_idx] - row_extra, row_extra, meta->row_heights[row_idx]);
+                                            distributed_count++;
+                                            break;  // Found row index
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    log_debug("No eligible rows for height distribution (all have percentage heights)");
                 }
 
                 // Second pass: recalculate row y positions after height changes
