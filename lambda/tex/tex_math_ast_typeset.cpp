@@ -1057,10 +1057,26 @@ static TexNode* typeset_sqrt_node(MathASTNode* node, MathContext& ctx) {
 // ============================================================================
 
 static TexNode* typeset_scripts_node(MathASTNode* node, MathContext& ctx) {
-    log_debug("[TYPESET] typeset_scripts_node: BEGIN has_super=%d has_sub=%d",
-              node->superscript != nullptr, node->subscript != nullptr);
+    log_debug("[TYPESET] typeset_scripts_node: BEGIN has_super=%d has_sub=%d flags=0x%02x",
+              node->superscript != nullptr, node->subscript != nullptr, node->flags);
 
     TexNode* nucleus = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
+
+    // Check for explicit \limits or \nolimits flags (TeXBook p. 159)
+    // These override the default behavior of the nucleus operator
+    bool force_limits = (node->flags & MathASTNode::FLAG_LIMITS) != 0;
+    bool force_nolimits = (node->flags & MathASTNode::FLAG_NOLIMITS) != 0;
+
+    // Apply limits override to MathOp nucleus
+    if (nucleus && nucleus->node_class == NodeClass::MathOp) {
+        if (force_limits) {
+            nucleus->content.math_op.limits = true;
+            log_debug("[TYPESET] typeset_scripts_node: forcing limits=true via \\limits");
+        } else if (force_nolimits) {
+            nucleus->content.math_op.limits = false;
+            log_debug("[TYPESET] typeset_scripts_node: forcing limits=false via \\nolimits");
+        }
+    }
 
     MathStyle saved = ctx.style;
 
@@ -1172,6 +1188,30 @@ static TexNode* typeset_accent_node(MathASTNode* node, MathContext& ctx) {
 
     float size = tc.font_size();
     accent_font.size_pt = size;
+
+    // For wide accents, walk the "next larger" chain to find best size
+    if (is_wide && accent_tfm && base) {
+        float base_width = base->width;
+        float scale = size / accent_tfm->design_size;
+        int current = accent_cp;
+        int best = accent_cp;
+
+        // Walk the chain until we find an accent wide enough
+        // or reach the end of the chain
+        for (int i = 0; i < 10 && current > 0 && current < 256; i++) {
+            float w = accent_tfm->char_width(current) * scale;
+            if (w >= base_width * 0.9f) {
+                best = current;
+                break;
+            }
+            best = current;
+            int next = accent_tfm->get_next_larger(current);
+            if (next == 0 || next == current) break;
+            current = next;
+        }
+        accent_cp = best;
+        log_debug("[TYPESET] wide accent: base_width=%.2f, selected char=%d", base_width, accent_cp);
+    }
 
     // Build accent node - stack accent over base
     Arena* arena = tc.arena();
@@ -1399,6 +1439,69 @@ static TexNode* typeset_not_node(MathASTNode* node, MathContext& ctx) {
 // Array/Matrix Typesetting
 // ============================================================================
 
+// Column alignment types for array/matrix
+enum class ColAlign : uint8_t {
+    Left = 0,
+    Center = 1,
+    Right = 2
+};
+
+// Parse column specification string (e.g., "lcr", "lll", "c|c|c")
+// Returns array of ColAlign values, allocated from arena
+static ColAlign* parse_col_spec(const char* col_spec, int num_cols, Arena* arena) {
+    ColAlign* alignments = (ColAlign*)arena_alloc(arena, num_cols * sizeof(ColAlign));
+
+    // Default to center alignment
+    for (int i = 0; i < num_cols; i++) {
+        alignments[i] = ColAlign::Center;
+    }
+
+    if (!col_spec) return alignments;
+
+    int col_idx = 0;
+    for (const char* p = col_spec; *p && col_idx < num_cols; p++) {
+        switch (*p) {
+            case 'l': alignments[col_idx++] = ColAlign::Left; break;
+            case 'c': alignments[col_idx++] = ColAlign::Center; break;
+            case 'r': alignments[col_idx++] = ColAlign::Right; break;
+            case '|': break;  // Skip vertical bar separators
+            case '@': // Skip @{...} expressions
+                if (*(p + 1) == '{') {
+                    p++; // skip {
+                    int brace_depth = 1;
+                    while (*p && brace_depth > 0) {
+                        p++;
+                        if (*p == '{') brace_depth++;
+                        else if (*p == '}') brace_depth--;
+                    }
+                }
+                break;
+            case '*': // Skip *{n}{...} repeat expressions
+                // Find the count
+                if (*(p + 1) == '{') {
+                    p++; // skip {
+                    while (*p && *p != '}') p++;  // skip count
+                    if (*p == '}') p++;
+                    // Now skip the pattern
+                    if (*p == '{') {
+                        int brace_depth = 1;
+                        while (*p && brace_depth > 0) {
+                            p++;
+                            if (*p == '{') brace_depth++;
+                            else if (*p == '}') brace_depth--;
+                        }
+                    }
+                }
+                break;
+            default:
+                // Ignore other characters (whitespace, etc.)
+                break;
+        }
+    }
+
+    return alignments;
+}
+
 static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
     TypesetContext tc(ctx);
     Arena* arena = tc.arena();
@@ -1407,12 +1510,17 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
     // Array node contains ARRAY_ROW children, each containing ARRAY_CELL children
     int num_rows = node->array.num_rows;
     int num_cols = node->array.num_cols;
+    const char* col_spec = node->array.col_spec;
 
-    log_debug("tex_math_ast_typeset: array %d rows x %d cols", num_rows, num_cols);
+    log_debug("tex_math_ast_typeset: array %d rows x %d cols, col_spec='%s'",
+              num_rows, num_cols, col_spec ? col_spec : "(null)");
 
     if (num_rows == 0) {
         return make_hbox(arena);
     }
+
+    // Parse column alignment specification
+    ColAlign* col_align = parse_col_spec(col_spec, num_cols, arena);
 
     // Spacing parameters (TeXBook values)
     float col_sep = size * 0.8f;     // Column separation (about 1em)
@@ -1507,20 +1615,36 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
             CellInfo& info = cells[r * num_cols + c];
             TexNode* cell_node = info.node ? info.node : make_hbox(arena);
 
-            // Center cell horizontally within column
+            // Apply column alignment (l=left, c=center, r=right)
             float cell_width = info.width;
-            float padding = (col_widths[c] - cell_width) / 2.0f;
+            float pre_padding = 0;
+            float post_padding = 0;
+            float available = col_widths[c] - cell_width;
 
-            if (padding > 0) {
-                TexNode* pre_kern = make_kern(arena, padding);
+            switch (col_align[c]) {
+                case ColAlign::Left:
+                    post_padding = available;
+                    break;
+                case ColAlign::Right:
+                    pre_padding = available;
+                    break;
+                case ColAlign::Center:
+                default:
+                    pre_padding = available / 2.0f;
+                    post_padding = available - pre_padding;
+                    break;
+            }
+
+            if (pre_padding > 0) {
+                TexNode* pre_kern = make_kern(arena, pre_padding);
                 link_node(hbox_first, hbox_last, pre_kern);
             }
 
-            cell_node->x = x_pos + padding;
+            cell_node->x = x_pos + pre_padding;
             link_node(hbox_first, hbox_last, cell_node);
 
-            if (padding > 0) {
-                TexNode* post_kern = make_kern(arena, padding);
+            if (post_padding > 0) {
+                TexNode* post_kern = make_kern(arena, post_padding);
                 link_node(hbox_first, hbox_last, post_kern);
             }
 
