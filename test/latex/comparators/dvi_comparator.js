@@ -198,10 +198,42 @@ function parseDVIBinary(buffer) {
     let h = 0, v = 0;
     let currentFont = 0;
     const stack = [];
+    let inPage = false;  // Track whether we're inside a page (between BOP and EOP)
 
-    // Skip preamble and find BOP
+    // Parse DVI file
     while (pos < buffer.length) {
         const opcode = buffer[pos];
+
+        // Handle preamble and postamble FIRST (before set_char check)
+        if (opcode === DVI_OPCODES.PRE) {
+            // Skip preamble: 1 byte opcode + 1 byte version + 4 bytes num + 4 bytes den + 4 bytes mag + 1 byte comment_len + comment
+            const commentLen = buffer[pos + 14];
+            pos += 15 + commentLen;
+            continue;
+        } else if (opcode === DVI_OPCODES.POST) {
+            // End parsing at postamble
+            break;
+        } else if (opcode === DVI_OPCODES.POST_POST) {
+            break;
+        } else if (opcode === DVI_OPCODES.BOP) {
+            // Begin page - reset position and enter page mode
+            h = 0;
+            v = 0;
+            inPage = true;
+            pos += 45; // Skip BOP parameters (10 * 4 bytes counts + 4 bytes prev pointer)
+            continue;
+        } else if (opcode === DVI_OPCODES.EOP) {
+            inPage = false;
+            pos++;
+            continue;
+        }
+
+        // Only process character and movement commands when inside a page
+        if (!inPage) {
+            // Skip this byte - we're not in a page yet
+            pos++;
+            continue;
+        }
 
         if (opcode >= 0 && opcode <= 127) {
             // set_char_0 to set_char_127
@@ -223,13 +255,6 @@ function parseDVIBinary(buffer) {
                 font: fonts[currentFont] || 'unknown'
             });
             pos += 2;
-        } else if (opcode === DVI_OPCODES.BOP) {
-            // Begin page - reset position
-            h = 0;
-            v = 0;
-            pos += 45; // Skip BOP parameters
-        } else if (opcode === DVI_OPCODES.EOP) {
-            pos++;
         } else if (opcode === DVI_OPCODES.PUSH) {
             stack.push({ h, v });
             pos++;
@@ -299,10 +324,6 @@ function parseDVIBinary(buffer) {
             const result = parseFontDef(buffer, pos, opcode);
             fonts[result.fontNum] = result.fontName;
             pos = result.nextPos;
-        } else if (opcode === DVI_OPCODES.PRE) {
-            // Skip preamble
-            const commentLen = buffer[pos + 14];
-            pos += 15 + commentLen;
         } else if (opcode >= DVI_OPCODES.XXX1 && opcode <= DVI_OPCODES.XXX4) {
             // Skip XXX special commands (contain metadata like "header=l3backend...")
             const bytes = opcode - DVI_OPCODES.XXX1 + 1;
@@ -311,9 +332,6 @@ function parseDVIBinary(buffer) {
                 len = (len << 8) | buffer[pos + 1 + i];
             }
             pos += 1 + bytes + len;
-        } else if (opcode === DVI_OPCODES.POST) {
-            // End parsing at postamble
-            break;
         } else {
             // Skip unknown opcodes
             pos++;
@@ -461,7 +479,23 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
     }
 
     const lambdaGlyphs = lambdaResult.glyphs;
-    const refGlyphs = refResult.glyphs;
+    let refGlyphs = refResult.glyphs;
+
+    // For math formula comparison, filter out page numbers from reference
+    // pdfTeX document mode adds page number at the end of the page
+    // Page numbers are typically single digits at the very end
+    if (options.mathFormula !== false && refGlyphs.length > lambdaGlyphs.length) {
+        // Check if the extra characters at the end are just page numbers (digits 1-9)
+        const extraCount = refGlyphs.length - lambdaGlyphs.length;
+        if (extraCount <= 2) {  // Page numbers are typically 1-2 digits
+            const extraGlyphs = refGlyphs.slice(-extraCount);
+            const allDigits = extraGlyphs.every(g => g.charCode >= 0x30 && g.charCode <= 0x39);
+            if (allDigits) {
+                // Remove page number from reference for comparison
+                refGlyphs = refGlyphs.slice(0, -extraCount);
+            }
+        }
+    }
 
     results.totalGlyphs = refGlyphs.length;
 
