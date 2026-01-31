@@ -33,6 +33,8 @@ const char* View::view_name() {
         case RDT_VIEW_TABLE_ROW_GROUP: return "table-row-group";
         case RDT_VIEW_TABLE_ROW: return "table-row";
         case RDT_VIEW_TABLE_CELL: return "table-cell";
+        case RDT_VIEW_TABLE_COLUMN_GROUP: return "table-column-group";
+        case RDT_VIEW_TABLE_COLUMN: return "table-column";
         case RDT_VIEW_INLINE: return "inline";
         case RDT_VIEW_TEXT: return "text";
         case RDT_VIEW_BR: return "br";
@@ -91,6 +93,11 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             cell->td->is_annoy_colgroup = 0;
             break;
         }
+        case RDT_VIEW_TABLE_COLUMN_GROUP:
+        case RDT_VIEW_TABLE_COLUMN:
+            // Column and column group views just need view_type set - no special props
+            // Their dimensions are calculated during table layout
+            break;
         default:
             log_debug("Unknown view type: %d", type);
             return NULL;
