@@ -605,6 +605,134 @@ static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, flo
 }
 
 // =============================================================================
+// COLUMN/COLGROUP LAYOUT (CSS 2.1 Section 17.5.1)
+// =============================================================================
+// CSS 2.1 §17.5.1: Column groups and columns do not generate cells.
+// They exist as part of the table layer structure for:
+// - Applying backgrounds (lowest layer, behind cells)
+// - Applying borders (in collapsed borders mode)
+// - Applying width constraints
+//
+// Per CSS 2.1 §17.5.1, table layers from bottom to top are:
+// table → column groups → columns → row groups → rows → cells
+//
+// This function sets column/colgroup dimensions after table layout is complete.
+
+/**
+ * Layout column and column group elements.
+ * Called after table layout to set their dimensions based on final column widths.
+ *
+ * @param table The table view
+ * @param col_widths Array of final column widths
+ * @param col_x_positions Array of column X positions
+ * @param columns Number of columns
+ * @param table_height Height of the table content area (excluding caption)
+ */
+static void layout_column_elements(ViewTable* table, float* col_widths, float* col_x_positions,
+                                   int columns, float table_height) {
+    if (!table || columns <= 0) return;
+
+    log_debug("[COLUMN-LAYOUT] Setting column/colgroup dimensions for %d columns, table_height=%.1f",
+              columns, table_height);
+
+    // Track current column index for iterating through columns within colgroups
+    int current_col = 0;
+
+    // Iterate through table children to find column groups and columns
+    for (ViewElement* child = (ViewElement*)table->first_child; child; child = (ViewElement*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
+            // Column group: spans multiple columns
+            // Find the first and last column indices this group covers
+            int first_col = current_col;
+            int last_col = current_col;
+
+            // Count columns in this group by iterating its children
+            int col_count = 0;
+            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                if (col->view_type == RDT_VIEW_TABLE_COLUMN) {
+                    col_count++;
+                }
+            }
+
+            // If no col children, colgroup with span attribute would handle columns
+            // For now, assume each colgroup without children represents 1 column
+            if (col_count == 0) {
+                // Check span attribute
+                const char* span_str = child->get_attribute("span");
+                col_count = (span_str && *span_str) ? atoi(span_str) : 1;
+                if (col_count <= 0) col_count = 1;
+            }
+
+            last_col = first_col + col_count - 1;
+            if (last_col >= columns) last_col = columns - 1;
+
+            // Calculate colgroup dimensions
+            if (first_col < columns) {
+                float x = col_x_positions[first_col] - col_x_positions[0];  // Relative to table content
+                float width = 0;
+                for (int c = first_col; c <= last_col && c < columns; c++) {
+                    width += col_widths[c];
+                }
+                // Add border-spacing between columns (if applicable)
+                // Note: col_x_positions already includes spacing, so calculate from positions
+                if (last_col < columns) {
+                    width = (col_x_positions[last_col + 1] - col_x_positions[first_col]);
+                }
+
+                child->x = x;
+                child->y = 0;
+                child->width = width;
+                child->height = table_height;
+
+                log_debug("[COLUMN-LAYOUT] Colgroup: cols %d-%d, x=%.1f, y=0, width=%.1f, height=%.1f",
+                          first_col, last_col, x, width, table_height);
+            }
+
+            // Now set dimensions for child column elements
+            // Column x is relative to parent colgroup, not to table
+            float colgroup_x = child->x;  // Colgroup's x relative to table
+            int col_idx = first_col;
+            for (ViewElement* col = (ViewElement*)child->first_child; col; col = (ViewElement*)col->next_sibling) {
+                if (col->view_type == RDT_VIEW_TABLE_COLUMN && col_idx < columns) {
+                    // Column x relative to table
+                    float col_x_in_table = col_x_positions[col_idx] - col_x_positions[0];
+                    // Column x relative to parent colgroup
+                    float col_x = col_x_in_table - colgroup_x;
+                    float col_width = col_widths[col_idx];
+
+                    col->x = col_x;
+                    col->y = 0;
+                    col->width = col_width;
+                    col->height = table_height;
+
+                    log_debug("[COLUMN-LAYOUT] Column %d: x=%.1f (in table: %.1f), y=0, width=%.1f, height=%.1f",
+                              col_idx, col_x, col_x_in_table, col_width, table_height);
+                    col_idx++;
+                }
+            }
+
+            current_col = last_col + 1;
+        }
+        else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
+            // Standalone column (not in a colgroup)
+            if (current_col < columns) {
+                float col_x = col_x_positions[current_col] - col_x_positions[0];
+                float col_width = col_widths[current_col];
+
+                child->x = col_x;
+                child->y = 0;
+                child->width = col_width;
+                child->height = table_height;
+
+                log_debug("[COLUMN-LAYOUT] Standalone column %d: x=%.1f, y=0, width=%.1f, height=%.1f",
+                          current_col, col_x, col_width, table_height);
+                current_col++;
+            }
+        }
+    }
+}
+
+// =============================================================================
 // BORDER-COLLAPSE ALGORITHM (CSS 2.1 Section 17.6.2)
 // =============================================================================
 // Implements CSS 2.1 border conflict resolution for collapsed borders model
@@ -2564,6 +2692,29 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             lycon->view = (View*)cell;
             dom_node_resolve_style(node, lycon);
             parse_cell_attributes(lycon, node, cell);
+        }
+    }
+    else if (tag == HTM_TAG_COLGROUP || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
+        // Column group - mark with view type and recurse to handle child columns
+        // CSS 2.1 §17.2.1: Column groups don't generate cells, only provide metadata
+        ViewBlock* colgroup = (ViewBlock*)set_view(lycon, RDT_VIEW_TABLE_COLUMN_GROUP, node);
+        if (colgroup) {
+            lycon->view = (View*)colgroup;
+            dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
+            // Recurse to mark child column elements
+            DomNode* child = static_cast<DomElement*>(node)->first_child;
+            for (; child; child = child->next_sibling) {
+                if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)colgroup);
+            }
+        }
+    }
+    else if (tag == HTM_TAG_COL || display.inner == CSS_VALUE_TABLE_COLUMN) {
+        // Column - mark with view type
+        // CSS 2.1 §17.2.1: Columns don't generate cells, only provide metadata
+        ViewBlock* col = (ViewBlock*)set_view(lycon, RDT_VIEW_TABLE_COLUMN, node);
+        if (col) {
+            lycon->view = (View*)col;
+            dom_node_resolve_style(node, lycon);  // Resolve styles (background, border, width)
         }
     }
 
@@ -5383,6 +5534,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table dimensions calculated: width=%dpx, height=%dpx (ptr=%p, table->width=%.1f, table->height=%.1f)",
               table_width, final_table_height, table, table->width, table->height);
     log_debug("Table layout complete: %dx%d", table_width, current_y);
+
+    // CSS 2.1 §17.5.1: Set dimensions for column and column group elements
+    // Column elements span the full table content height (excluding caption)
+    // Their width is determined by the computed column widths
+    layout_column_elements(table, col_widths, col_x_positions, columns, (float)table->content_height);
 
     // Cleanup ArrayLists
     arraylist_free(thead_groups);
