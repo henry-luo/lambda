@@ -95,15 +95,15 @@ static int32_t unicode_to_cmmi(int32_t cp) {
     if (cp == '/') return 61;   // ASCII 47 -> cmmi 61
     if (cp == '>') return 62;   // same
     if (cp == '*') return 63;   // ASCII 42 -> cmmi 63
-    
+
     // Letters and digits are at same positions
     if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return cp;
     if (cp >= '0' && cp <= '9') return cp - '0' + 48;  // digits at 48-57
-    
+
     // Greek uppercase (positions 0-10)
     // Greek lowercase (positions 11-33)
     // These are typically set via symbol lookup, not here
-    
+
     return cp;  // default: pass through
 }
 
@@ -112,12 +112,12 @@ static int32_t unicode_to_cmr(int32_t cp) {
     // CMR is mostly ASCII-compatible for printable characters
     // Some special characters:
     if (cp == 0x2018) return 96;   // left single quote
-    if (cp == 0x2019) return 39;   // right single quote  
+    if (cp == 0x2019) return 39;   // right single quote
     if (cp == 0x201C) return 92;   // left double quote
     if (cp == 0x201D) return 34;   // right double quote
     if (cp == 0x2013) return 123;  // en-dash
     if (cp == 0x2014) return 124;  // em-dash
-    
+
     return cp;  // mostly pass through for ASCII
 }
 
@@ -126,7 +126,7 @@ static int32_t unicode_to_cmsy(int32_t cp) {
     // Most symbols are set via explicit code lookup, but handle some cases
     if (cp == '-') return 0;    // minus sign at position 0
     if (cp == 0x2212) return 0; // Unicode minus
-    
+
     // Arrows
     if (cp == 0x2190) return 32;  // leftarrow (space position)
     if (cp == 0x2192) return 33;  // rightarrow/to (! position)
@@ -141,20 +141,20 @@ static int32_t unicode_to_cmsy(int32_t cp) {
     if (cp == 0x21D3) return 43;  // Downarrow (+ position)
     if (cp == 0x21D4) return 44;  // Leftrightarrow (, position)
     if (cp == 0x21CC) return 29;  // rightleftharpoons
-    
+
     // Infinity
     if (cp == 0x221E) return 49;  // infinity (1 position)
-    
+
     // Delimiters - cmsy uses different positions than ASCII
     if (cp == '{') return 102;  // left brace at 102 (shows as 'f')
     if (cp == '}') return 103;  // right brace at 103 (shows as 'g')
     if (cp == '|') return 106;  // vertical bar at 106 (shows as 'j')
     // Note: backslash/setminus is at 110, but should come from symbol lookup, not ASCII translation
-    
+
     return cp;
 }
 
-// CMEX (Computer Modern Extension) encoding  
+// CMEX (Computer Modern Extension) encoding
 static int32_t unicode_to_cmex(int32_t cp) {
     // Large delimiters - mostly set via explicit lookup
     return cp;
@@ -163,9 +163,9 @@ static int32_t unicode_to_cmex(int32_t cp) {
 // Main translation function - dispatches based on font name
 static int32_t translate_to_font_encoding(const char* font_name, int32_t cp) {
     if (!font_name) return cp;
-    
+
     int32_t result = cp;
-    
+
     // Check font family
     if (strncmp(font_name, "cmmi", 4) == 0) {
         result = unicode_to_cmmi(cp);
@@ -176,12 +176,12 @@ static int32_t translate_to_font_encoding(const char* font_name, int32_t cp) {
     } else if (strncmp(font_name, "cmex", 4) == 0) {
         result = unicode_to_cmex(cp);
     }
-    
+
     // Debug: log translations for punctuation
     if (cp != result) {
         log_debug("tex_dvi_out: font_encoding %s: %d -> %d", font_name, cp, result);
     }
-    
+
     return result;
 }
 
@@ -627,6 +627,9 @@ void dvi_special(DVIWriter& writer, const char* str, int len) {
 void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
     if (!node) return;
 
+    log_debug("tex_dvi_out: processing node class=%d width=%.1f h=%.1f d=%.1f",
+             (int)node->node_class, node->width, node->height, node->depth);
+
     switch (node->node_class) {
         case NodeClass::Char: {
             // Ensure correct font is selected
@@ -679,7 +682,7 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             int32_t orig_cp = node->content.math_char.codepoint;
             int32_t font_cp = translate_to_font_encoding(font_name, orig_cp);
             log_debug("tex_dvi_out: MathChar font=%s orig=%d (0x%02x '%c') -> %d",
-                      font_name ? font_name : "null", orig_cp, orig_cp, 
+                      font_name ? font_name : "null", orig_cp, orig_cp,
                       (orig_cp >= 32 && orig_cp < 127) ? orig_cp : '?', font_cp);
             dvi_set_char(writer, font_cp);
 
@@ -776,6 +779,59 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             break;
         }
 
+        case NodeClass::Fraction: {
+            // Fraction node: numerator over denominator with optional rule
+            // Structure: numerator centered above, rule line, denominator centered below
+            int32_t save_h = writer.h;
+            int32_t save_v = writer.v;
+
+            TexNode* numer = node->content.frac.numerator;
+            TexNode* denom = node->content.frac.denominator;
+            float rule_thickness = node->content.frac.rule_thickness;
+
+            log_debug("tex_dvi_out: Fraction numer=%p denom=%p rule=%.2f width=%.1f",
+                     numer, denom, rule_thickness, node->width);
+
+            // Output numerator (positioned above baseline by its y offset)
+            if (numer) {
+                dvi_push(writer);
+                writer.h = save_h + pt_to_sp(numer->x);
+                writer.v = save_v - pt_to_sp(numer->y);  // DVI y increases downward
+                log_debug("tex_dvi_out: Fraction numer at x=%.1f y=%.1f", numer->x, numer->y);
+                dvi_output_node(writer, numer, fonts);
+                dvi_pop(writer);
+            }
+
+            // Output fraction rule (horizontal line)
+            if (rule_thickness > 0) {
+                dvi_push(writer);
+                // The rule is typically positioned at the math axis
+                // Rule y position should come from the node's computed layout
+                // For now, position it between numerator and denominator
+                float rule_y = 0;  // Will be at baseline level
+                writer.h = save_h;
+                writer.v = save_v - pt_to_sp(rule_y);
+                int32_t rule_height_sp = pt_to_sp(rule_thickness);
+                int32_t rule_width_sp = pt_to_sp(node->width);
+                dvi_set_rule(writer, rule_height_sp, rule_width_sp);
+                dvi_pop(writer);
+            }
+
+            // Output denominator (positioned below baseline by its y offset)
+            if (denom) {
+                dvi_push(writer);
+                writer.h = save_h + pt_to_sp(denom->x);
+                writer.v = save_v - pt_to_sp(denom->y);  // DVI y increases downward
+                log_debug("tex_dvi_out: Fraction denom at x=%.1f y=%.1f", denom->x, denom->y);
+                dvi_output_node(writer, denom, fonts);
+                dvi_pop(writer);
+            }
+
+            // Advance by total width
+            writer.h = save_h + pt_to_sp(node->width);
+            break;
+        }
+
         case NodeClass::Radical: {
             // Radical node: output degree (if any) + sqrt sign + radicand
             // TeX outputs in order: degree, radical sign, radicand
@@ -792,7 +848,7 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             // If degree is present, radical sign comes after the degree
             TexNode* degree = node->content.radical.degree;
             float rad_sign_offset = 0.0f;
-            
+
             // First output the degree (root index) if present
             // The degree appears BEFORE the radical sign in TeX's glyph order
             if (degree) {
@@ -808,9 +864,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
 
                 // Radical sign comes after the degree
                 rad_sign_offset = degree->x + degree->width;
-                
+
                 log_debug("tex_dvi_out: Radical rad_sign_offset=%.1f", rad_sign_offset);
-                
+
                 // Restore position
                 writer.h = save_h;
                 writer.v = save_v;
@@ -821,11 +877,11 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             // and cmex10 positions 112-118 for larger ones (higher position = larger glyph)
             // The height includes the radicand plus the rule and clearance above it
             float total_height = node->height + node->depth;  // Total radical height
-            
+
             // Determine font and glyph based on radical size
             const char* radical_font = "cmsy10";
             int radical_glyph = 112;  // Default: cmsy10 surd (smallest)
-            
+
             // TeX threshold for switching to cmex10 is approximately 10pt total height
             // The cmex10 radical glyphs scale with the content:
             // Thresholds tuned to match TeX's glyph selection behavior
@@ -847,8 +903,8 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                 else if (total_height > 11.0f) radical_glyph = 113;
                 else radical_glyph = 112;
             }
-            
-            log_debug("tex_dvi_out: Radical total_height=%.1f, font=%s, glyph=%d", 
+
+            log_debug("tex_dvi_out: Radical total_height=%.1f, font=%s, glyph=%d",
                      total_height, radical_font, radical_glyph);
 
             float size = node->height * 10.0f;  // Approximate size
@@ -859,9 +915,9 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
 
             // Move to radical sign position
             writer.h = save_h + pt_to_sp(rad_sign_offset);
-            
+
             log_debug("tex_dvi_out: Outputting radical sign at offset=%.1f", rad_sign_offset);
-            
+
             // Output radical sign character
             dvi_set_char(writer, radical_glyph);
 
@@ -888,22 +944,22 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             // Output a delimiter character using TFM-based selection (TeXBook p.152)
             int32_t cp = node->content.delim.codepoint;
             float target_size = node->content.delim.target_size;
-            
+
             log_debug("tex_dvi_out: Delimiter codepoint=%d '%c' size=%.1f", cp, cp, target_size);
-            
+
             float font_size = 10.0f;
             const char* font_name = "cmr10";
             int32_t output_cp = cp;
-            
+
             // Use TFM-based delimiter selection if font manager available
             if (fonts) {
                 DelimiterSelection sel = select_delimiter(fonts, cp, target_size, font_size);
                 font_name = sel.font_name;
                 output_cp = sel.codepoint;
-                
+
                 log_debug("tex_dvi_out: TFM selected font=%s pos=%d (h=%.1f d=%.1f ext=%d)",
                           font_name, output_cp, sel.height, sel.depth, sel.is_extensible);
-                
+
                 // For extensible delimiters, we'd need to output multiple pieces
                 // For now, just use the base character (extensible building is TODO)
                 if (sel.is_extensible) {
@@ -944,11 +1000,11 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
                         break;
                 }
             }
-            
+
             uint32_t font_num = dvi_define_font(writer, font_name, font_size);
             dvi_select_font(writer, font_num);
             dvi_set_char(writer, output_cp);
-            
+
             writer.h += pt_to_sp(node->width);
             break;
         }
@@ -958,21 +1014,21 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             TexNode* base = node->content.accent.base;
             int32_t accent_char = node->content.accent.accent_char;
             FontSpec accent_font = node->content.accent.font;
-            
+
             int32_t save_h = writer.h;
             int32_t save_v = writer.v;
-            
+
             // Calculate base metrics
             float base_width = base ? base->width : 5.0f;
             float accent_width = 5.0f;  // Approximate accent width
-            
+
             // Select accent font (typically cmsy10 or cmmi10)
             const char* font_name = accent_font.name ? accent_font.name : "cmmi10";
             float font_size = accent_font.size_pt > 0 ? accent_font.size_pt : 10.0f;
-            
+
             uint32_t font_num = dvi_define_font(writer, font_name, font_size);
             dvi_select_font(writer, font_num);
-            
+
             // Map accent character to font encoding
             int32_t output_cp = accent_char;
             if (accent_char == 0x2192) {
@@ -987,24 +1043,24 @@ void dvi_output_node(DVIWriter& writer, TexNode* node, TFMFontManager* fonts) {
             } else if (accent_char == '.') {
                 output_cp = 95;   // overdot
             }
-            
+
             // Output accent FIRST (positioned above base)
             int32_t accent_h = save_h + pt_to_sp((base_width - accent_width) / 2.0f);
             int32_t accent_v = save_v - pt_to_sp(base ? base->height : 5.0f);
-            
+
             writer.h = accent_h;
             writer.v = accent_v;
             dvi_set_char(writer, output_cp);
-            
+
             // Restore position for base output
             writer.h = save_h;
             writer.v = save_v;
-            
+
             // Output the base
             if (base) {
                 dvi_output_node(writer, base, fonts);
             }
-            
+
             // Position after full width
             writer.h = save_h + pt_to_sp(node->width);
             break;
@@ -1110,7 +1166,19 @@ bool dvi_write_page(
     dvi_right(writer, margin_sp);
     dvi_down(writer, margin_sp);
 
-    dvi_output_vlist(writer, page_vlist, fonts);
+    // Handle different node types at the root level
+    if (page_vlist->node_class == NodeClass::VList || page_vlist->node_class == NodeClass::VBox) {
+        dvi_output_vlist(writer, page_vlist, fonts);
+    } else if (page_vlist->node_class == NodeClass::HList || page_vlist->node_class == NodeClass::HBox) {
+        dvi_output_hlist(writer, page_vlist, fonts);
+    } else {
+        // For math formulas (Radical, Fraction, Scripts, etc.), output the node directly
+        // Position it properly: move down by its height first
+        if (page_vlist->height > 0) {
+            dvi_down(writer, pt_to_sp(page_vlist->height));
+        }
+        dvi_output_node(writer, page_vlist, fonts);
+    }
 
     dvi_end_page(writer);
 

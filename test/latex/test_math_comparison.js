@@ -756,7 +756,11 @@ async function runExtendedTest(testInfo, options) {
 async function runBaselineTest(testInfo, options) {
     const testName = path.basename(testInfo.file, '.tex');
     // Baseline tests contain a single expression, so use index 0
-    const referenceDVI = path.join(REFERENCE_DIR, `${testName}_0.dvi`);
+    // Prefer pdftex.dvi reference, fall back to .dvi
+    let referenceDVI = path.join(REFERENCE_DIR, `${testName}_0.pdftex.dvi`);
+    if (!fs.existsSync(referenceDVI)) {
+        referenceDVI = path.join(REFERENCE_DIR, `${testName}_0.dvi`);
+    }
 
     // Check if reference DVI exists
     if (!fs.existsSync(referenceDVI)) {
