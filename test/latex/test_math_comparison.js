@@ -27,7 +27,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 // ES module __dirname equivalent
@@ -499,6 +499,58 @@ function calculateTestScore(astResult, htmlResult, dviResult, compareMode) {
 }
 
 /**
+ * Generate DVI reference on demand using pdfTeX/LaTeX
+ */
+function generateDVIReference(latex, outputPath) {
+    const tempDir = path.join(PROJECT_ROOT, 'temp', 'dvi_refs');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const tempTexFile = path.join(tempDir, 'temp_formula.tex');
+    const tempDviFile = path.join(tempDir, 'temp_formula.dvi');
+
+    // Create minimal LaTeX document
+    const texContent = `\\documentclass{article}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\pagestyle{empty}
+\\begin{document}
+$${latex}$
+\\end{document}
+`;
+
+    try {
+        fs.writeFileSync(tempTexFile, texContent);
+
+        // Run latex to generate DVI
+        execSync(`latex -interaction=nonstopmode -output-directory="${tempDir}" "${tempTexFile}"`, {
+            cwd: tempDir,
+            stdio: 'pipe',
+            timeout: 10000
+        });
+
+        if (fs.existsSync(tempDviFile)) {
+            fs.copyFileSync(tempDviFile, outputPath);
+            return true;
+        }
+        return false;
+    } catch (e) {
+        // LaTeX compilation failed
+        return false;
+    } finally {
+        // Cleanup temp files
+        try {
+            const extensions = ['.tex', '.dvi', '.aux', '.log'];
+            for (const ext of extensions) {
+                const file = path.join(tempDir, 'temp_formula' + ext);
+                if (fs.existsSync(file)) fs.unlinkSync(file);
+            }
+        } catch (e) { /* ignore cleanup errors */ }
+    }
+}
+
+/**
  * Run a single extended test (tex or JSON file with AST references)
  */
 async function runExtendedTest(testInfo, options) {
@@ -627,11 +679,28 @@ async function runExtendedTest(testInfo, options) {
                 // Use pdfTeX DVI reference (authoritative)
                 dviResult = compareDVI(lambdaOutput.dvi, refPdfTexDviPath, { tolerance: options.tolerance });
             } else if (lambdaOutput.dvi && fs.existsSync(refDviPath)) {
-                // Fallback to Lambda DVI reference (for consistency testing)
+                // Fallback to existing DVI reference
                 dviResult = compareDVI(lambdaOutput.dvi, refDviPath, { tolerance: options.tolerance });
-                // Mark as self-reference with reduced score
-                dviResult.selfReference = true;
-                dviResult.passRate = Math.min(dviResult.passRate, 50); // Cap at 50% for self-reference
+            } else if (lambdaOutput.dvi) {
+                // Try to generate DVI reference on demand
+                const generatedDviPath = path.join(REFERENCE_DIR, `${refBaseName}.pdftex.dvi`);
+                if (generateDVIReference(expr.latex, generatedDviPath)) {
+                    dviResult = compareDVI(lambdaOutput.dvi, generatedDviPath, { tolerance: options.tolerance });
+                    dviResult.generated = true; // Mark as newly generated
+                } else {
+                    // Failed to generate - report error with 0 score
+                    dviResult = {
+                        passRate: 0,
+                        differences: [{ issue: `Failed to generate DVI reference for: ${expr.latex}` }],
+                        generationError: true
+                    };
+                }
+            } else {
+                // Lambda didn't produce DVI
+                dviResult = {
+                    passRate: 0,
+                    differences: [{ issue: 'Lambda did not produce DVI output' }]
+                };
             }
         }
 
@@ -652,6 +721,22 @@ async function runExtendedTest(testInfo, options) {
         ? expressionResults.reduce((sum, r) => sum + r.score.overall, 0) / expressionResults.length
         : 0;
 
+    // Average breakdowns for reporting
+    const avgBreakdown = expressionResults.length > 0 ? {
+        ast: {
+            rate: expressionResults.reduce((sum, r) => sum + (r.score.breakdown?.ast?.rate || 0), 0) / expressionResults.length,
+            weighted: expressionResults.reduce((sum, r) => sum + (r.score.breakdown?.ast?.weighted || 0), 0) / expressionResults.length
+        },
+        html: {
+            rate: expressionResults.reduce((sum, r) => sum + (r.score.breakdown?.html?.rate || 0), 0) / expressionResults.length,
+            weighted: expressionResults.reduce((sum, r) => sum + (r.score.breakdown?.html?.weighted || 0), 0) / expressionResults.length
+        },
+        dvi: {
+            rate: expressionResults.reduce((sum, r) => sum + (r.score.breakdown?.dvi?.rate || 0), 0) / expressionResults.length,
+            weighted: expressionResults.reduce((sum, r) => sum + (r.score.breakdown?.dvi?.weighted || 0), 0) / expressionResults.length
+        }
+    } : null;
+
     return {
         name: testInfo.file,
         suite: testInfo.suite,
@@ -659,6 +744,7 @@ async function runExtendedTest(testInfo, options) {
         expressionCount: expressionResults.length,
         score: {
             overall: Math.round(avgScore * 10) / 10,
+            breakdown: avgBreakdown,
             expressions: options.verbose ? expressionResults : undefined
         }
     };
