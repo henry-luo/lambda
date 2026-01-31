@@ -1105,8 +1105,19 @@ typedef struct ViewTableRow : ViewBlock {
     ViewBlock* parent_row_group();
 } ViewTableRow;
 
-// Forward declaration for border-collapse support
-struct CollapsedBorder;
+// Border-collapse resolved border structure (CSS 2.1 §17.6.2)
+// Stores the winning border after conflict resolution between
+// cell, row, rowgroup, column, colgroup, and table borders
+struct CollapsedBorder {
+    float width;
+    CssEnum style;      // CSS_VALUE_NONE, CSS_VALUE_HIDDEN, CSS_VALUE_SOLID, etc.
+    Color color;        // Border color (simple RGBA union)
+    uint8_t priority;   // Used for conflict resolution (higher wins)
+
+    CollapsedBorder() : width(0), style(CSS_VALUE_NONE), priority(0) {
+        color.r = color.g = color.b = color.a = 0;
+    }
+};
 
 struct TableCellProp {
     // Vertical alignment
