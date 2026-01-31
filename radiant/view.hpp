@@ -1026,6 +1026,8 @@ typedef struct TableProp {
     float border_spacing_v; // vertical spacing between rows (px)
     // Fixed layout height distribution
     int fixed_row_height;   // Height per row for table-layout:fixed with explicit height (0=auto)
+    // Table's computed font-size for resolving em units in CSS properties like height
+    float computed_font_size;  // Set before cell layout, used for height resolution
     // border_collapse=false => separate borders, apply border-spacing gaps
     // border_collapse=true  => collapsed borders, no gaps between cells
     bool border_collapse;
