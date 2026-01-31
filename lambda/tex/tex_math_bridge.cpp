@@ -339,11 +339,8 @@ TexNode* typeset_fraction(TexNode* numerator, TexNode* denominator,
     TexNode* bar = make_rule(arena, bar_width, rule_thickness, 0);
     bar->y = axis;  // bar is centered on axis
 
-    // Create VBox for fraction
-    TexNode* frac = make_vbox(arena);
-    frac->content.frac.numerator = numerator;
-    frac->content.frac.denominator = denominator;
-    frac->content.frac.rule_thickness = rule_thickness;
+    // Create Fraction node (not VBox!) for proper HTML rendering
+    TexNode* frac = make_fraction(arena, numerator, denominator, rule_thickness);
 
     // Center numerator and denominator
     float total_width = bar_width;
