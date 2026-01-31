@@ -35,6 +35,14 @@ const CLASS_CATEGORIES = {
 
     // Roots
     'ML__sqrt': 'sqrt',
+    'ML__sqrt-index': 'sqrt-index',
+    'ML__sqrt-sign': 'sqrt-sign',
+    'ML__sqrt-line': 'sqrt-line',
+    'ML__sqrt-symbol': 'sqrt-sign',
+    'ML__sqrt-body': 'sqrt-body',
+    'ML__root': 'sqrt-index',
+    'ML__delim-size1': 'delim-size',
+    'ML__delim-size2': 'delim-size',
     'sqrt': 'sqrt',
     'sqrt-sign': 'sqrt-sign',
     'lambda-sqrt': 'sqrt',
@@ -53,6 +61,18 @@ const CLASS_CATEGORIES = {
     'vlist-t2': 'vlist',
     'vlist-r': 'vlist',
     'vlist-s': 'vlist',
+
+    // VList (MathLive)
+    'ML__vlist': 'vlist',
+    'ML__vlist-t': 'vlist',
+    'ML__vlist-t2': 'vlist',
+    'ML__vlist-r': 'vlist',
+    'ML__vlist-s': 'vlist',
+    'ML__pstrut': 'strut',
+    'ML__msubsup': 'scripts',
+    'ML__mfrac': 'frac',
+    'ML__center': 'center',
+    'ML__nulldelimiter': 'delim',
 
     // Delimiters
     'ML__open': 'open',
@@ -110,7 +130,8 @@ const WRAPPER_CLASSES = new Set([
     'katex',
     'katex-html',
     'ML__latex',
-    'ML__base'
+    'ML__base',
+    'ML__mord'  // Lambda uses ML__mord as wrapper like MathLive uses ML__base
 ]);
 
 /**
@@ -242,6 +263,7 @@ function normalizeHTMLTree(rootElement) {
 
 /**
  * Compare two normalized HTML nodes
+ * Simplified scoring: Perfect match = 1.0, partial match based on specifics
  */
 function compareHTMLNodes(lambdaNode, refNode, path, results) {
     results.totalElements++;
@@ -298,73 +320,79 @@ function compareHTMLNodes(lambdaNode, refNode, path, results) {
     // Compare element nodes
     if (lambdaNode.type === 'element') {
         let score = 0;
+        let maxScore = 0;
+        let issues = [];
 
-        // Tag name comparison (25% weight)
+        // Tag name comparison
+        maxScore += 1;
         if (lambdaNode.tag === refNode.tag) {
-            score += 0.25;
+            score += 1;
         } else {
-            results.differences.push({
-                path,
-                issue: 'Tag mismatch',
-                expected: refNode.tag,
-                got: lambdaNode.tag
-            });
+            issues.push('Tag mismatch');
         }
 
-        // Class comparison (20% weight)
+        // Class comparison (using set intersection)
         const lambdaClasses = new Set(lambdaNode.classes || []);
         const refClasses = new Set(refNode.classes || []);
-        const classIntersection = [...lambdaClasses].filter(c => refClasses.has(c));
-        const classUnion = new Set([...lambdaClasses, ...refClasses]);
 
-        if (classUnion.size > 0) {
+        // Check if classes are semantically equivalent
+        if (lambdaClasses.size === 0 && refClasses.size === 0) {
+            // Both have no classes - perfect match
+            maxScore += 1;
+            score += 1;
+        } else if (lambdaClasses.size > 0 || refClasses.size > 0) {
+            maxScore += 1;
+            const classIntersection = [...lambdaClasses].filter(c => refClasses.has(c));
+            const classUnion = new Set([...lambdaClasses, ...refClasses]);
             const classScore = classIntersection.length / classUnion.size;
-            score += 0.2 * classScore;
+            score += classScore;
 
             if (classScore < 1) {
-                results.differences.push({
-                    path,
-                    issue: 'Class mismatch',
-                    expected: Array.from(refClasses),
-                    got: Array.from(lambdaClasses)
-                });
+                issues.push('Class mismatch');
             }
-        } else {
-            score += 0.2; // Both have no classes
         }
 
-        // Content comparison for leaf nodes (10% weight)
+        // Content comparison for leaf nodes
         if (lambdaNode.content !== undefined || refNode.content !== undefined) {
+            maxScore += 1;
             if (lambdaNode.content === refNode.content) {
-                score += 0.1;
+                score += 1;
+            } else {
+                issues.push('Content mismatch');
             }
-        } else {
-            score += 0.1; // Both have children instead of content
         }
 
-        // Children comparison (45% weight)
+        // Children comparison
         const lambdaChildren = lambdaNode.children || [];
         const refChildren = refNode.children || [];
 
-        // Children count (20% of 45%)
-        if (lambdaChildren.length === refChildren.length) {
-            score += 0.2;
-        } else {
-            const countRatio = Math.min(lambdaChildren.length, refChildren.length) /
-                               Math.max(lambdaChildren.length, refChildren.length, 1);
-            score += 0.2 * countRatio;
+        // Children count
+        if (lambdaChildren.length > 0 || refChildren.length > 0) {
+            maxScore += 1;
+            if (lambdaChildren.length === refChildren.length) {
+                score += 1;
+            } else {
+                const countRatio = Math.min(lambdaChildren.length, refChildren.length) /
+                                   Math.max(lambdaChildren.length, refChildren.length, 1);
+                score += countRatio;
+                issues.push('Children count mismatch');
+            }
+        }
 
+        // Normalize score to 0-1 range
+        const normalizedScore = maxScore > 0 ? score / maxScore : 1;
+        results.matchedElements += normalizedScore;
+
+        if (issues.length > 0) {
             results.differences.push({
                 path,
-                issue: 'Children count mismatch',
-                expected: refChildren.length,
-                got: lambdaChildren.length
+                issue: issues.join(', '),
+                expected: summarizeElement(refNode),
+                got: summarizeElement(lambdaNode)
             });
         }
 
-        results.matchedElements += score;
-
-        // Recursively compare children (25% of 45%)
+        // Recursively compare children
         const maxChildren = Math.max(lambdaChildren.length, refChildren.length);
         for (let i = 0; i < maxChildren; i++) {
             compareHTMLNodes(
@@ -373,11 +401,6 @@ function compareHTMLNodes(lambdaNode, refNode, path, results) {
                 `${path} > child[${i}]`,
                 results
             );
-        }
-
-        // Add remaining weight for children match
-        if (maxChildren > 0) {
-            results.matchedElements += 0.25; // Distributed across recursive calls
         }
     }
 }
