@@ -1,4 +1,8 @@
-# LaTeX Math Test Framework Proposal
+Option B: Full VList Conversion (3-5 days)
+
+Rewrite render_vlist(), render_fraction(), render_scripts(), render_radical()
++20-30% score improvement
+Exact structural match with MathLive# LaTeX Math Test Framework Proposal
 
 ## Overview
 
@@ -37,6 +41,7 @@ test/
 ├── latex/
 │   ├── test_math_comparison.js      # Main test runner (Node.js)
 │   ├── generate_mathlive_json.mjs   # MathLive AST reference generator
+│   ├── generate_missing_html.mjs    # HTML reference generator (from JSON)
 │   ├── comparators/
 │   │   ├── ast_comparator.js        # AST semantic comparison
 │   │   ├── mathlive_ast_comparator.js # MathLive AST comparison (preferred)
@@ -138,17 +143,41 @@ This mismatch required complex semantic mapping during comparison, causing false
 
 | Script | Output | Purpose |
 |--------|--------|---------|
-| `generate_mathlive_json.mjs` | `*.mathlive.json` | MathLive AST via `toJson()` (preferred) |
+| `generate_mathlive_json.mjs` | `*.mathlive.json` | MathLive AST via `toJson()` + LaTeX source |
+| `generate_missing_html.mjs` | `*.mathlive.html`, `*.katex.html` | HTML references from existing JSON files |
 | `generate_authoritative_references.mjs` | `*.mathml.json` | MathML output (legacy fallback) |
 
 **Generating References**:
 ```bash
-# Generate MathLive AST references (preferred)
-node test/latex/generate_mathlive_json.mjs
+# Step 1: Generate MathLive AST references (contains AST + LaTeX source)
+cd test/latex
+node generate_mathlive_json.mjs
 
-# Generate for specific test
-node test/latex/generate_mathlive_json.mjs --test fracs_basic
+# Step 2: Generate HTML references from the JSON files
+node generate_missing_html.mjs
+
+# Generate AST for specific test only
+node generate_mathlive_json.mjs --test fracs_basic
+
+# Dry run to see what HTML files would be generated
+node generate_missing_html.mjs --dry-run
 ```
+
+### Reference File Format
+
+**JSON AST Reference** (`*.mathlive.json`):
+```json
+{
+  "format": "mathlive-ast",
+  "latex": "\\frac{1}{2}",           // Original LaTeX (used for HTML generation)
+  "type": "inline",                   // inline or display
+  "generator": "MathLive toJson()",
+  "ast": { ... }                      // MathLive internal AST
+}
+```
+
+The `latex` field in JSON files enables regenerating HTML references without re-parsing
+the original `.tex` files.
 
 ---
 
