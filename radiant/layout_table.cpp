@@ -3706,9 +3706,16 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
 
+    // Use the table's computed font-size saved at layout_table_content entry.
+    // This is necessary because cell layout modifies lycon->font to the cell's font-size,
+    // but the table's CSS properties (like height: 4em) should use the table's font-size.
+    float table_font_size = (table->tb && table->tb->computed_font_size > 0)
+                           ? table->tb->computed_font_size : 16.0f;
+
     // Initialize fixed layout fields
     table->tb->fixed_row_height = 0;  // 0 = auto height (calculate from content)
     log_debug("Starting enhanced table auto layout");
+    log_debug("Table font-size: %.1fpx (from tb->computed_font_size)", table_font_size);
     log_debug("Table layout mode: %s", table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
     log_debug("Table border-spacing: %fpx %fpx, border-collapse: %s",
         table->tb->border_spacing_h, table->tb->border_spacing_v, table->tb->border_collapse ? "true" : "false");
@@ -5391,10 +5398,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             CssDeclaration* height_decl = style_tree_get_declaration(
                 dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
             if (height_decl && height_decl->value) {
+                // CRITICAL: Use the TABLE's font-size for resolving em units in height,
+                // not the cell's font-size which may have polluted lycon->font.current_font_size.
+                // CSS 2.1: "height: 4em" on the table uses the table's computed font-size.
+                float saved_font_size = lycon->font.current_font_size;
+                lycon->font.current_font_size = table_font_size;
                 float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                lycon->font.current_font_size = saved_font_size;  // restore
                 if (resolved_height > 0) {
                     explicit_css_height = (int)resolved_height;
-                    log_debug("Table has explicit CSS height: %dpx", explicit_css_height);
+                    log_debug("Table has explicit CSS height: %dpx (resolved with table_font_size=%.1f)",
+                             explicit_css_height, table_font_size);
                 }
             }
         }
@@ -6107,6 +6121,17 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
         return;
     }
 
+    // CRITICAL: Save the table's font-size BEFORE building table tree.
+    // Cell layout in build_table_tree will modify lycon->font to the cell's font-size,
+    // but the table's CSS properties (like height: 4em) should use the table's font-size.
+    float table_font_size = 16.0f;  // default
+    if (lycon->font.current_font_size > 0) {
+        table_font_size = lycon->font.current_font_size;
+    } else if (lycon->font.style && lycon->font.style->font_size > 0) {
+        table_font_size = lycon->font.style->font_size;
+    }
+    log_debug("Saved table font-size: %.1fpx for later height resolution", table_font_size);
+
     // CRITICAL: Update font context before building table tree
     // This ensures children inherit the correct computed font-size from the table element.
     // Without this, lycon->font.style would still point to the grandparent's font.
@@ -6129,6 +6154,11 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
         return;
     }
     log_debug("Table tree built successfully");
+
+    // Store the table's font-size in TableProp for use during height resolution
+    if (table->tb) {
+        table->tb->computed_font_size = table_font_size;
+    }
 
     // Step 1.5: Detect and mark anonymous box wrappers
     detect_anonymous_boxes(table);
