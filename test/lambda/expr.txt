@@ -114,3 +114,10 @@ t'2025-01-02'
 t'2025-01-03'
 [t'2025-01-04', t'2025-01-05']
 t'2025-01-04'
+"Test null-safe member access:"
+[null]
+[null]
+[null]
+"Test error propagation in member access:"
+true
+true

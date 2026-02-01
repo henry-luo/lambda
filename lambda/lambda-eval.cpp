@@ -1206,6 +1206,10 @@ Item fn_index(Item item, Item index_item) {
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
     switch (type_id) {
+    case LMD_TYPE_NULL:
+        return ItemNull;  // null-safe: null.field returns null
+    case LMD_TYPE_ERROR:
+        return item;      // error propagation: error.field returns error
     case LMD_TYPE_MAP: {
         Map *map = item.map;
         return map_get(map, key);

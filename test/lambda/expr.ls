@@ -74,3 +74,18 @@ mp.a
 let arr = [t'2025-01-04', t'2025-01-05']
 arr
 arr[0]
+
+"Test null-safe member access:"
+let nv = null
+[nv.field]            // null.field returns null
+[nv.a.b.c]            // chained null access returns null
+let nmap = {a: null}
+[nmap.a.nested]       // null nested field returns null
+
+"Test error propagation in member access:"
+let e = error("test error")
+let err_result = e.field
+err_result is error   // error.field returns error
+let e2 = error("chained error")
+let chained_err = e2.a.b.c
+chained_err is error  // chained error propagation
