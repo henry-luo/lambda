@@ -455,6 +455,7 @@ help:
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo "  count-loc     - Count lines of code in the repository"
+	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
 	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
 	@echo "                  Tests single-file, template, multi-file, and full Lambda builds"
 	@echo "  test-layout              - Run Lambda CSS layout integration tests (all suites)"
@@ -1609,6 +1610,11 @@ uninstall:
 # 			echo "Generated README.html"; \
 # 		fi; \
 # 	fi
+
+# Cheatsheet PDF generation
+cheatsheet:
+	@echo "Generating Lambda Script cheatsheet PDFs..."
+	@cd doc && bash _generate_pdf_cheatsheets.sh
 
 # Utility targets
 info:
