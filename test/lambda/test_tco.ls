@@ -6,30 +6,30 @@
 // ==============================================================================
 
 // Classic factorial with accumulator (tail-recursive)
-fn factorial(n: int, acc: int): int => 
+fn factorial(n: int, acc: int) int => 
     if (n <= 1) acc
     else factorial(n - 1, acc * n)
 
 // Sum from 1 to n with accumulator (tail-recursive)
-fn sum_to(n: int, acc: int): int =>
+fn sum_to(n: int, acc: int) int =>
     if (n <= 0) acc
     else sum_to(n - 1, acc + n)
 
 // Count down to zero (simple tail recursion)
-fn countdown(n: int): int =>
+fn countdown(n: int) int =>
     if (n <= 0) 0
     else countdown(n - 1)
 
 // Fibonacci with accumulator (tail-recursive)
-fn fib_tail(n: int, a: int, b: int): int =>
+fn fib_tail(n: int, a: int, b: int) int =>
     if (n <= 0) a
     else if (n == 1) b
     else fib_tail(n - 1, b, a + b)
 
-fn fib(n: int): int => fib_tail(n, 0, 1)
+fn fib(n: int) int => fib_tail(n, 0, 1)
 
 // Tail recursion in both branches of if-expression
-fn gcd(a: int, b: int): int =>
+fn gcd(a: int, b: int) int =>
     if (b == 0) a
     else gcd(b, a % b)
 
@@ -39,12 +39,12 @@ fn gcd(a: int, b: int): int =>
 // ==============================================================================
 
 // Addition after recursive call - NOT tail recursive
-fn sum_non_tail(n: int): int =>
+fn sum_non_tail(n: int) int =>
     if (n <= 0) 0
     else n + sum_non_tail(n - 1)
 
 // Multiplication after recursive call - NOT tail recursive  
-fn factorial_non_tail(n: int): int =>
+fn factorial_non_tail(n: int) int =>
     if (n <= 1) 1
     else n * factorial_non_tail(n - 1)
 
@@ -54,7 +54,7 @@ fn factorial_non_tail(n: int): int =>
 // ==============================================================================
 
 // Recursive call in condition (not tail position) plus tail call in branch
-fn count_evens(n: int): int =>
+fn count_evens(n: int) int =>
     if (n <= 0) 0
     else if (n % 2 == 0) 1 + count_evens(n - 1)   // NON-tail: addition after
     else count_evens(n - 1)                        // tail call
