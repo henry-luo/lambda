@@ -38,7 +38,7 @@ int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
-(a: int, b: string) => bool   // Function type
+(a: int, b: string) -> bool   // Function type
 {a: int, b: bool}             // Map type
 <div id:symbol; <br>>         // Element type
 ```
@@ -173,7 +173,7 @@ while(c) { break;  continue;  return x; }
 **Function Declaration:**
 ```lambda
 // Function with statement body
-fn add(a: int, b: int) -> int { a + b }    
+fn add(a: int, b: int) int { a + b }    
 // Function  with expression body
 fn multiply(x: int, y: int) => x * y    
 // Anonymous function   
@@ -302,7 +302,7 @@ format(report, 'json')
 
 **Function Definition:**
 ```lambda
-fn factorial(n: int) -> int {
+fn factorial(n: int) int {
     if (n <= 1) 1 else n * factorial(n - 1)
 }
 ```
