@@ -243,6 +243,9 @@ static const SymbolEntry SYMBOL_TABLE[] = {
     {"lceil", 100, AtomType::Open, SymFont::CMSY}, {"rceil", 101, AtomType::Close, SymFont::CMSY},
     {"vert", 106, AtomType::Ord, SymFont::CMSY}, {"Vert", 107, AtomType::Ord, SymFont::CMSY},
     {"backslash", 110, AtomType::Ord, SymFont::CMSY},
+    // Punctuation symbols (cmr10)
+    {"colon", 58, AtomType::Punct, SymFont::CMR},    // : (colon from cmr10)
+    {"semicolon", 59, AtomType::Punct, SymFont::CMR}, // ; (semicolon from cmr10)
     // AMS symbols (msbm10) - not yet supported
     {"varkappa", 123, AtomType::Ord, SymFont::MSBM},
     {"varnothing", 59, AtomType::Ord, SymFont::CMSY},
@@ -765,6 +768,118 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                     }
                 }
                 return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+        }
+
+        // Handle composite symbols before symbol table lookup
+        // These are symbols that need to be composed from multiple characters
+        {
+            size_t cmd_len = strlen(cmd);
+            // \coloneq, \coloneqq, \coloncolon, \eqcolon, \Coloneq, \Coloneqq
+            if ((cmd_len == 7 && strncmp(cmd, "coloneq", 7) == 0) ||
+                (cmd_len == 8 && strncmp(cmd, "coloneqq", 8) == 0)) {
+                // := (colon equals) - compose from cmr10 colon and equals
+                font = tc.make_roman_font();
+                font.size_pt = size;
+                tfm = tc.get_roman_tfm();
+
+                TexNode* first_n = nullptr;
+                TexNode* last_n = nullptr;
+
+                // colon from cmr10 at position 58
+                TexNode* colon_char = make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, colon_char);
+
+                // thin kern
+                float kern_amount = -0.1f * size / 10.0f;
+                TexNode* kern = make_kern(tc.arena(), kern_amount);
+                link_node(first_n, last_n, kern);
+
+                // equals from cmr10 at position 61
+                TexNode* eq_char = make_char_with_metrics(tc.arena(), 61, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, eq_char);
+
+                return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+
+            if ((cmd_len == 7 && strncmp(cmd, "eqcolon", 7) == 0) ||
+                (cmd_len == 8 && strncmp(cmd, "eqqcolon", 8) == 0)) {
+                // =: (equals colon) - compose from cmr10 equals and colon
+                font = tc.make_roman_font();
+                font.size_pt = size;
+                tfm = tc.get_roman_tfm();
+
+                TexNode* first_n = nullptr;
+                TexNode* last_n = nullptr;
+
+                // equals from cmr10 at position 61
+                TexNode* eq_char = make_char_with_metrics(tc.arena(), 61, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, eq_char);
+
+                // thin kern
+                float kern_amount = -0.1f * size / 10.0f;
+                TexNode* kern = make_kern(tc.arena(), kern_amount);
+                link_node(first_n, last_n, kern);
+
+                // colon from cmr10 at position 58
+                TexNode* colon_char = make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, colon_char);
+
+                return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+
+            if ((cmd_len == 7 && strncmp(cmd, "Coloneq", 7) == 0) ||
+                (cmd_len == 8 && strncmp(cmd, "Coloneqq", 8) == 0)) {
+                // ::= (double colon equals)
+                font = tc.make_roman_font();
+                font.size_pt = size;
+                tfm = tc.get_roman_tfm();
+
+                TexNode* first_n = nullptr;
+                TexNode* last_n = nullptr;
+
+                // two colons from cmr10
+                TexNode* colon1 = make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, colon1);
+                TexNode* colon2 = make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, colon2);
+
+                // thin kern
+                float kern_amount = -0.1f * size / 10.0f;
+                TexNode* kern = make_kern(tc.arena(), kern_amount);
+                link_node(first_n, last_n, kern);
+
+                // equals from cmr10 at position 61
+                TexNode* eq_char = make_char_with_metrics(tc.arena(), 61, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, eq_char);
+
+                return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+
+            if (cmd_len == 10 && strncmp(cmd, "coloncolon", 10) == 0) {
+                // :: (double colon / proportion)
+                font = tc.make_roman_font();
+                font.size_pt = size;
+                tfm = tc.get_roman_tfm();
+
+                TexNode* first_n = nullptr;
+                TexNode* last_n = nullptr;
+
+                // two colons from cmr10
+                TexNode* colon1 = make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, colon1);
+                TexNode* colon2 = make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
+                link_node(first_n, last_n, colon2);
+
+                return wrap_hbox(tc.arena(), first_n, last_n);
+            }
+
+            if (cmd_len == 10 && strncmp(cmd, "vcentcolon", 10) == 0) {
+                // vertically centered colon - use cmr10 colon
+                font = tc.make_roman_font();
+                font.size_pt = size;
+                tfm = tc.get_roman_tfm();
+                return make_char_with_metrics(tc.arena(), 58, AtomType::Rel, font, tfm, size);
             }
         }
 
