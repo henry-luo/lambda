@@ -1,0 +1,21 @@
+"=== Variable Shadowing in Functions ==="
+1
+2
+10
+300
+56
+"=== Variable Shadowing in Block Expressions ==="
+5
+20
+101
+"=== Nested Function Shadowing ==="
+11
+"=== For Loop Variable Shadowing ==="
+10
+20
+30
+999
+"=== Multiple Levels of Shadowing ==="
+0
+3
+"All nested shadowing tests passed!"
