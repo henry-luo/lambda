@@ -121,3 +121,9 @@ t'2025-01-04'
 "Test error propagation in member access:"
 true
 true
+"Test empty string/symbol keys (no crash):"
+[null]
+"a valueTest invalid indexing (non-indexable types return null):"
+[null]
+[null]
+[null]
