@@ -30,7 +30,7 @@
 [5, 6]
 "=== Named Decomposition (let a, b at expr) ==="
 ["Bob", 25]
-["bob@example.com", "Bob"]
+["bob@test.com", "NYC"]
 20000
 "=== Combined Features ==="
 [0, [1, 2]]

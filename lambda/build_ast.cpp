@@ -567,8 +567,33 @@ bool is_type_keyword(StrView name) {
     return false;
 }
 
+// lookup a name in the current scope only (not in parent scopes)
+// returns the existing entry if found, NULL otherwise
+NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
+    NameEntry* entry = tp->current_scope->first;
+    while (entry) {
+        if (entry->name == name ||  // pointer comparison (interned strings)
+            (entry->name->len == name->len && 
+             memcmp(entry->name->chars, name->chars, name->len) == 0)) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
+    
+    // check for duplicate definition in current scope
+    NameEntry* existing = lookup_name_in_current_scope(tp, node->name);
+    if (existing) {
+        record_semantic_error(tp, node->node, ERR_DUPLICATE_DEFINITION,
+            "duplicate definition of '%.*s' in the same scope",
+            (int)node->name->len, node->name->chars);
+        // continue anyway to allow further error checking
+    }
+    
     NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
     entry->name = node->name;
     entry->node = (AstNode*)node;  entry->import = import;
