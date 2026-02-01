@@ -602,7 +602,7 @@ for x in [1, 2], y in [3, 4] {
 
 ```lambda
 // Named function statement
-fn add(a: int, b: int) -> int {
+fn add(a: int, b: int) int {
     a + b
 }
 
@@ -614,7 +614,7 @@ fn multiply(x: int, y: int) => x * y
 fn(x: int, y: int) => x + y
 
 // Multi-statement function body
-fn process(data: [int]) -> [int] {
+fn process(data: [int]) [int] {
     let filtered = (for (x in data) if (x > 0) x else 0);
     let doubled = (for (x in filtered) x * 2);
     doubled
@@ -1230,13 +1230,13 @@ string | null      // String or null
 ### Function Types
 
 ```lambda
-// Function type syntax
-(int) => int              // Function taking int, returning int
-(int, int) => int         // Function taking two ints, returning int
-(string, bool) => string  // Function taking string and bool, returning string
+// Function type syntax (for type declarations)
+(int) -> int              // Function taking int, returning int
+(int, int) -> int         // Function taking two ints, returning int
+(string, bool) -> string  // Function taking string and bool, returning string
 
-// Example function with explicit type
-let add: (int, int) => int = fn(a: int, b: int) => a + b;
+// Type alias for function types
+type BinaryOp = (a: int, b: int) -> int
 ```
 
 ### Type Declarations
@@ -1531,7 +1531,7 @@ error("Something went wrong")
 error("Division by zero in calculation")
 
 // Functions that may return errors
-fn safe_divide(a: float, b: float) -> float | error {
+fn safe_divide(a: float, b: float) float | error {
     if (b == 0.0) {
         error("Division by zero")
     } else {
@@ -1670,7 +1670,7 @@ print(format(enhanced, 'html'));
 
 ```lambda
 // Define mathematical functions
-fn factorial(n: int) -> int {
+fn factorial(n: int) int {
     if (n <= 1) {
         1
     } else {
@@ -1678,7 +1678,7 @@ fn factorial(n: int) -> int {
     }
 }
 
-fn fibonacci(n: int) -> int {
+fn fibonacci(n: int) int {
     if (n <= 1) {
         n
     } else {

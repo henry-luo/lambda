@@ -531,7 +531,7 @@ module.exports = grammar({
       field('kind', choice('fn','pn')), field('name', $.identifier),
       '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type
-      optional(seq(':', field('type', $._type_expr))),
+      optional(field('type', $._type_expr)),
       '{', field('body', $.content), '}',
     ),
 
@@ -541,7 +541,7 @@ module.exports = grammar({
       'fn', field('name', $.identifier),
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type
-      optional(seq(':', field('type', $._type_expr))),
+      optional(field('type', $._type_expr)),
       '=>', field('body', $._expression)
     ),
 
@@ -550,14 +550,14 @@ module.exports = grammar({
       seq('fn',
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         // return type
-        optional(seq(':', field('type', $._type_expr))),
+        optional(field('type', $._type_expr)),
         '{', field('body', $.content), '}'
       ),
       // use prec.right so the expression body is consumed greedily
       prec.right(seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         // return type
-        optional(seq(':', field('type', $._type_expr))),
+        optional(field('type', $._type_expr)),
         '=>', field('body', $._expression)
       )),
     ),
