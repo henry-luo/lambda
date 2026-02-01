@@ -2628,9 +2628,9 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         return;
     }    
     else {
-        // Generic fallback for all other cases
+        // Generic fallback for all other cases - box both arguments
         strbuf_append_str(tp->code_buf, "fn_index(");
-        transpile_expr(tp, field_node->object);
+        transpile_box_item(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
