@@ -253,6 +253,24 @@ static const char* atom_type_class(AtomType type) {
     }
 }
 
+// get CSS class from font name - more accurate than atom_type_class
+static const char* font_to_class(const char* font_name) {
+    if (!font_name) return "mathit";
+
+    // Map font name prefixes to CSS classes
+    if (strncmp(font_name, "cmr", 3) == 0) return "cmr";      // roman
+    if (strncmp(font_name, "cmmi", 4) == 0) return "mathit";  // math italic
+    if (strncmp(font_name, "cmsy", 4) == 0) return "cmr";     // symbols (use roman class)
+    if (strncmp(font_name, "cmex", 4) == 0) return "cmr";     // extensions
+    if (strncmp(font_name, "cmbx", 4) == 0) return "mathbf";  // bold
+    if (strncmp(font_name, "cmtt", 4) == 0) return "mathtt";  // typewriter
+    if (strncmp(font_name, "cmsl", 4) == 0) return "mathit";  // slanted
+    if (strncmp(font_name, "msbm", 4) == 0) return "ams";     // AMS symbols
+    if (strncmp(font_name, "lasy", 4) == 0) return "cmr";     // LaTeX symbols
+
+    return "mathit";  // default to italic
+}
+
 // render a single character node
 static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts) {
     if (!node) return;
@@ -267,10 +285,19 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
         codepoint = node->content.lig.codepoint;
     }
 
-    // determine CSS class based on atom type
-    const char* atom_class = "ord";
+    // determine CSS class based on font name (more accurate than atom type)
+    const char* atom_class = "mathit";  // default
     if (node->node_class == NodeClass::MathChar) {
-        atom_class = atom_type_class(node->content.math_char.atom_type);
+        // prefer font name for class determination
+        if (node->content.math_char.font.name) {
+            atom_class = font_to_class(node->content.math_char.font.name);
+        } else {
+            atom_class = atom_type_class(node->content.math_char.atom_type);
+        }
+    } else if (node->node_class == NodeClass::Char) {
+        if (node->content.ch.font.name) {
+            atom_class = font_to_class(node->content.ch.font.name);
+        }
     }
 
     char class_buf[64];
