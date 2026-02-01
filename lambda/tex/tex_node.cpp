@@ -32,6 +32,8 @@ const char* node_class_name(NodeClass nc) {
         case NodeClass::Delimiter:  return "Delimiter";
         case NodeClass::Accent:     return "Accent";
         case NodeClass::Scripts:    return "Scripts";
+        case NodeClass::MTable:     return "MTable";
+        case NodeClass::MTableColumn: return "MTableColumn";
         case NodeClass::Paragraph:  return "Paragraph";
         case NodeClass::Page:       return "Page";
         case NodeClass::Mark:       return "Mark";

@@ -103,6 +103,8 @@ enum class NodeClass : uint8_t {
     Delimiter,      // Extensible delimiter (\left, \right)
     Accent,         // Math accent (\hat, \bar)
     Scripts,        // Subscript/superscript attachment
+    MTable,         // Math table/array (matrix, bmatrix, etc.)
+    MTableColumn,   // Column within MTable
 
     // ========================================
     // Structure nodes
@@ -356,6 +358,20 @@ struct TexNode {
             float split_max;        // Max height before splitting
             bool floating;          // true = float, false = footnote
         } insert;
+
+        // MTable node (math array/matrix)
+        struct {
+            int num_cols;           // Number of columns
+            int num_rows;           // Number of rows
+            float arraycolsep;      // Column separation
+            float jot;              // Row separation
+        } mtable;
+
+        // MTableColumn node (column within MTable)
+        struct {
+            int col_index;          // Column index (0-based)
+            char col_align;         // Column alignment: 'l', 'c', 'r'
+        } mtable_col;
 
         // Error node
         struct {
