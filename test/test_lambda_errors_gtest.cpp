@@ -639,6 +639,22 @@ TEST_F(NegativeScriptTest, SemanticError_DuplicateParam) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_param.ls");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_DuplicateVariable) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_variable.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_DuplicateType) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_type.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_DuplicateFunction) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_function.ls");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_DuplicateMixed) {
+    ExpectErrorWithoutCrash("test/lambda/negative/semantic/duplicate_mixed.ls");
+}
+
 // --- Runtime Error Tests (3xx) ---
 
 TEST_F(NegativeScriptTest, RuntimeError_NullReference) {

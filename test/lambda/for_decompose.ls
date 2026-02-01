@@ -84,9 +84,9 @@ let person = {name: "Bob", age: 25, email: "bob@example.com"}
 let name, age at person
 [name, age]
 
-// Different field order
-let email, name at person
-[email, name]
+// Different field order - use email from same person (different fields)
+let email, city at {email: "bob@test.com", city: "NYC"}
+[email, city]
 
 // Decompose computed map
 let computed = {width: 100, height: 200}
