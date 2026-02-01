@@ -89,3 +89,13 @@ err_result is error   // error.field returns error
 let e2 = error("chained error")
 let chained_err = e2.a.b.c
 chained_err is error  // chained error propagation
+
+"Test empty string/symbol keys (no crash):"
+let empty_str_map = {"": "empty string key", "a": "a value"}
+[empty_str_map[""]]   // empty string key access
+empty_str_map["a"]    // normal key access
+
+"Test invalid indexing (non-indexable types return null):"
+[8[0]]                // int indexing returns null
+[3.14[0]]             // float indexing returns null  
+[true[0]]             // bool indexing returns null
