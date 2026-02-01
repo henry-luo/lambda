@@ -2263,7 +2263,99 @@ MathASTNode* MathASTBuilder::build_text_command(TSNode node) {
         TSNode text_content = ts_node_named_child(content_node, 0);
         int len;
         const char* text = node_text(text_content, &len);
-        return make_math_text(arena, arena_copy_str(text, len), len, true);
+
+        // Check for embedded math ($...$) in text content
+        // If found, split into TEXT and math nodes wrapped in a ROW
+        bool has_embedded_math = false;
+        for (int i = 0; i < len; i++) {
+            if (text[i] == '$') {
+                has_embedded_math = true;
+                break;
+            }
+        }
+
+        if (!has_embedded_math) {
+            // simple case: no embedded math
+            return make_math_text(arena, arena_copy_str(text, len), len, true);
+        }
+
+        // Parse text with embedded math
+        // Build a ROW containing TEXT and math character nodes
+        MathASTNode* row = make_math_row(arena);
+
+        int text_start = 0;
+        int i = 0;
+        while (i < len) {
+            if (text[i] == '$') {
+                // Output text before the $
+                if (i > text_start) {
+                    int text_len = i - text_start;
+                    MathASTNode* text_node = make_math_text(arena, arena_copy_str(text + text_start, text_len), text_len, true);
+                    math_row_append(row, text_node);
+                }
+
+                // Find the closing $
+                int math_start = i + 1;
+                int math_end = math_start;
+                while (math_end < len && text[math_end] != '$') {
+                    math_end++;
+                }
+
+                if (math_end < len) {
+                    // Found closing $ - parse the math content
+                    int math_len = math_end - math_start;
+                    if (math_len > 0) {
+                        // Create math content by parsing the substring
+                        // For now, create individual ORD nodes for each character
+                        // TODO: Full recursive parsing would require a sub-parser
+                        for (int j = 0; j < math_len; j++) {
+                            char c = text[math_start + j];
+                            if (c == ' ' || c == '\t' || c == '\n') continue;  // skip whitespace
+
+                            MathASTNode* char_node;
+                            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                                // letters become ORD (math italic)
+                                char_node = make_math_ord(arena, c);
+                            } else if ((c >= '0' && c <= '9')) {
+                                // digits become ORD (roman)
+                                char_node = make_math_ord(arena, c);
+                            } else if (c == '+') {
+                                char_node = make_math_bin(arena, c);
+                            } else if (c == '-') {
+                                char_node = make_math_bin(arena, c);
+                            } else if (c == '=' || c == '<' || c == '>') {
+                                char_node = make_math_rel(arena, c);
+                            } else if (c == '|') {
+                                char_node = make_math_ord(arena, c);
+                            } else {
+                                // other characters as ORD
+                                char_node = make_math_ord(arena, c);
+                            }
+                            math_row_append(row, char_node);
+                        }
+                    }
+                    i = math_end + 1;  // skip past closing $
+                } else {
+                    // No closing $ found - treat rest as text
+                    int text_len = len - i;
+                    MathASTNode* text_node = make_math_text(arena, arena_copy_str(text + i, text_len), text_len, true);
+                    math_row_append(row, text_node);
+                    break;
+                }
+                text_start = i;
+            } else {
+                i++;
+            }
+        }
+
+        // Output any remaining text
+        if (i > text_start && text_start < len) {
+            int text_len = i - text_start;
+            MathASTNode* text_node = make_math_text(arena, arena_copy_str(text + text_start, text_len), text_len, true);
+            math_row_append(row, text_node);
+        }
+
+        return row;
     }
 
     // Empty text content - return empty row
