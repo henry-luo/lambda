@@ -609,23 +609,14 @@ module.exports = grammar({
     // Indexed: for i, v in expr
     // Attribute iteration: for v at expr OR for k, v at expr
     loop_expr: $ => choice(
-      // single variable with 'in': for v in expr
+      // for value in | at expr
       seq(
-        field('name', $.identifier), 'in', field('as', $._expression)
+        field('name', $.identifier), choice('in', 'at'), field('as', $._expression)
       ),
-      // single variable with 'at': for v at expr
-      seq(
-        field('name', $.identifier), 'at', field('as', $._expression)
-      ),
-      // two variables with 'in': for i, v in expr
+      // for key, value in | at expr
       seq(
         field('index', $.identifier), ',', field('name', $.identifier),
-        'in', field('as', $._expression)
-      ),
-      // two variables with 'at': for k, v at expr
-      seq(
-        field('index', $.identifier), ',', field('name', $.identifier),
-        'at', field('as', $._expression)
+        choice('in', 'at'), field('as', $._expression)
       ),
     ),
 
