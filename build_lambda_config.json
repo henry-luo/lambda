@@ -363,9 +363,7 @@
     "flags": [
         "pedantic",
         "fdiagnostics-color=auto",
-        "fno-omit-frame-pointer",
-        "g",
-        "O2"
+        "fno-omit-frame-pointer"
     ],
     "build_dir": "build",
     "platforms": {
