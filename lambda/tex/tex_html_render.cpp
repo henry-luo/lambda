@@ -41,6 +41,8 @@ static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
 static void render_scripts(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 
 // ============================================================================
 // VList Helper Structures and Functions (MathLive-compatible)
@@ -261,7 +263,7 @@ static const char* font_to_class(const char* font_name) {
     if (strncmp(font_name, "cmr", 3) == 0) return "cmr";      // roman
     if (strncmp(font_name, "cmmi", 4) == 0) return "mathit";  // math italic
     if (strncmp(font_name, "cmsy", 4) == 0) return "cmr";     // symbols (use roman class)
-    if (strncmp(font_name, "cmex", 4) == 0) return "cmr";     // extensions
+    if (strncmp(font_name, "cmex", 4) == 0) return "delim-size1";  // delimiters
     if (strncmp(font_name, "cmbx", 4) == 0) return "mathbf";  // bold
     if (strncmp(font_name, "cmtt", 4) == 0) return "mathtt";  // typewriter
     if (strncmp(font_name, "cmsl", 4) == 0) return "mathit";  // slanted
@@ -271,18 +273,71 @@ static const char* font_to_class(const char* font_name) {
     return "mathit";  // default to italic
 }
 
+// Map cmex10 character codes to Unicode for HTML output
+// cmex10 contains extensible delimiters and large operators
+static int32_t cmex10_to_unicode(int32_t code) {
+    // Brackets and parentheses (small sizes)
+    switch (code) {
+        case 0:  return '(';   // left paren small
+        case 1:  return ')';   // right paren small
+        case 2:  return '[';   // left bracket small
+        case 3:  return ']';   // right bracket small
+        case 8:  return '{';   // left brace small
+        case 9:  return '}';   // right brace small
+        case 12: return '|';   // vertical bar
+        case 13: return 0x2225; // double vertical bar ‖
+        case 14: return '/';   // slash
+        case 15: return '\\';  // backslash
+
+        // Larger sizes (same Unicode, just larger rendition)
+        case 16: return '(';   // left paren medium
+        case 17: return ')';   // right paren medium
+        case 18: return '(';   // left paren large
+        case 19: return ')';   // right paren large
+        case 20: return '[';   // left bracket medium
+        case 21: return ']';   // right bracket medium
+        case 22: return 0x230A; // left floor
+        case 23: return 0x230B; // right floor
+        case 24: return 0x2308; // left ceiling
+        case 25: return 0x2309; // right ceiling
+        case 26: return '{';   // left brace medium
+        case 27: return '}';   // right brace medium
+
+        // Big operators
+        case 80: return 0x2211; // summation ∑
+        case 81: return 0x220F; // product ∏
+        case 82: return 0x222B; // integral ∫
+        case 83: return 0x22C3; // big union ⋃
+        case 84: return 0x22C2; // big intersection ⋂
+        case 86: return 0x2A00; // big circled operator
+
+        default:
+            // for unmapped codes, just return as-is (may render as empty)
+            return (code >= 32 && code < 127) ? code : 0;
+    }
+}
+
 // render a single character node
 static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts) {
     if (!node) return;
 
     // get codepoint from content union
     int32_t codepoint = 0;
+    const char* font_name = nullptr;
     if (node->node_class == NodeClass::Char) {
         codepoint = node->content.ch.codepoint;
+        font_name = node->content.ch.font.name;
     } else if (node->node_class == NodeClass::MathChar) {
         codepoint = node->content.math_char.codepoint;
+        font_name = node->content.math_char.font.name;
     } else if (node->node_class == NodeClass::Ligature) {
         codepoint = node->content.lig.codepoint;
+        font_name = node->content.lig.font.name;
+    }
+
+    // For cmex10, convert TFM character codes to Unicode
+    if (font_name && strncmp(font_name, "cmex", 4) == 0) {
+        codepoint = cmex10_to_unicode(codepoint);
     }
 
     // determine CSS class based on font name (more accurate than atom type)
@@ -308,7 +363,9 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
     strbuf_append_str(out, "\">");
 
     // output the character
-    append_codepoint(out, codepoint);
+    if (codepoint > 0) {
+        append_codepoint(out, codepoint);
+    }
 
     strbuf_append_str(out, "</span>");
 }
@@ -857,6 +914,136 @@ static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
     strbuf_append_str(out, "</span>");
 }
 
+// Custom content renderer for mtable cells - skips wrapper HBox to match MathLive
+static void render_mtable_cell_content(TexNode* cell, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!cell) return;
+
+    // Unwrap nested HBoxes to get to the actual content
+    TexNode* content = cell;
+    while (content &&
+           (content->node_class == NodeClass::HBox ||
+            content->node_class == NodeClass::HList ||
+            content->node_class == NodeClass::MathList)) {
+        // If this box has exactly one child that's also a box, unwrap it
+        if (content->first_child && content->first_child == content->last_child &&
+            (content->first_child->node_class == NodeClass::HBox ||
+             content->first_child->node_class == NodeClass::HList ||
+             content->first_child->node_class == NodeClass::MathList)) {
+            content = content->first_child;
+        } else {
+            // Render children of this box directly (not wrapped in ML__base)
+            TexNode* child = content->first_child;
+            while (child) {
+                render_node(child, out, opts, depth);
+                child = child->next_sibling;
+            }
+            return;
+        }
+    }
+
+    // Fallback: render the content as-is
+    render_node(content, out, opts, depth);
+}
+
+// render math table/array column - outputs MathLive-compatible col-align-X structure
+static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node) return;
+
+    char buf[256];
+    char col_align = node->content.mtable_col.col_align;
+    if (col_align == 0) col_align = 'c';  // default to center
+
+    // output column wrapper with alignment class
+    strbuf_append_str(out, "<span class=\"col-align-");
+    buf[0] = col_align;
+    buf[1] = '\0';
+    strbuf_append_str(out, buf);
+    strbuf_append_str(out, "\">");
+
+    // count children and build vlist elements
+    int child_count = 0;
+    float total_height = 0.0f;
+
+    TexNode* child = node->first_child;
+    while (child) {
+        // skip kerns (glue/spacing nodes)
+        if (child->node_class != NodeClass::Kern && child->node_class != NodeClass::Glue) {
+            child_count++;
+            total_height += child->height + child->depth;
+        }
+        child = child->next_sibling;
+    }
+
+    if (child_count == 0) {
+        strbuf_append_str(out, "</span>");
+        return;
+    }
+
+    // build vlist elements array
+    VListElement* elements = (VListElement*)alloca(child_count * sizeof(VListElement));
+    float curr_pos = 0.0f;
+    int idx = 0;
+
+    child = node->first_child;
+    while (child) {
+        if (child->node_class != NodeClass::Kern && child->node_class != NodeClass::Glue) {
+            elements[idx].node = child;
+            elements[idx].shift = curr_pos;
+            elements[idx].height = child->height / opts.base_font_size_px;
+            elements[idx].depth = child->depth / opts.base_font_size_px;
+            elements[idx].classes = nullptr;
+
+            curr_pos += (child->height + child->depth) / opts.base_font_size_px;
+            idx++;
+        }
+        child = child->next_sibling;
+    }
+
+    float height_em = total_height / opts.base_font_size_px;
+    float depth_em = node->depth / opts.base_font_size_px;
+    float pstrut_size = calculate_pstrut_size(elements, child_count, opts.base_font_size_px);
+
+    render_vlist_structure(out, opts, elements, child_count, pstrut_size, height_em, depth_em, depth, render_mtable_cell_content);
+
+    strbuf_append_str(out, "</span>");
+}
+
+// render math table/array - outputs MathLive-compatible ML__mtable structure
+static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node) return;
+
+    char buf[256];
+    float arraycolsep = node->content.mtable.arraycolsep;
+
+    // output table container with ML__mtable class
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__mtable\">");
+
+    // render children (columns and column separators)
+    int col_idx = 0;
+    TexNode* child = node->first_child;
+    while (child) {
+        if (child->node_class == NodeClass::MTableColumn) {
+            // render the column
+            render_mtable_column(child, out, opts, depth + 1);
+            col_idx++;
+        } else if (child->node_class == NodeClass::Kern) {
+            // column separator - output as ML__arraycolsep
+            // MathLive uses fixed 1em for arraycolsep between columns
+            strbuf_append_str(out, "<span class=\"");
+            strbuf_append_str(out, opts.class_prefix);
+            strbuf_append_str(out, "__arraycolsep\" style=\"width:1em\"></span>");
+        } else {
+            // render other nodes directly
+            render_node(child, out, opts, depth + 1);
+        }
+        child = child->next_sibling;
+    }
+
+    strbuf_append_str(out, "</span>");
+}
+
 // main node dispatcher
 static void render_node(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
@@ -916,6 +1103,14 @@ static void render_node(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
         case NodeClass::Accent:
             render_accent(node, out, opts, depth);
+            break;
+
+        case NodeClass::MTable:
+            render_mtable(node, out, opts, depth);
+            break;
+
+        case NodeClass::MTableColumn:
+            render_mtable_column(node, out, opts, depth);
             break;
 
         case NodeClass::Penalty:
