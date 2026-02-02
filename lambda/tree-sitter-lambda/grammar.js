@@ -62,9 +62,9 @@ function binary_expr($, in_attr) {
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
-    // Pipe operators - low precedence, just above control flow
+    // Pipe operators - same precedence, left-to-right chaining
     ['|', 'pipe'],
-    ['where', 'pipe_where'],
+    ['where', 'pipe'],  // same precedence as | for left-to-right chaining
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     ['is', 'is_in'],
@@ -193,7 +193,6 @@ module.exports = grammar({
     'is_in',
     // pipe operators (low precedence, just above control flow)
     'pipe',
-    'pipe_where',
     $.if_expr,
     $.for_expr,
     $.let_expr,

@@ -1606,9 +1606,9 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     }
     strbuf_append_str(tp->code_buf, "  }\n");
     
-    // Return result
+    // Return result - array_end finalizes and returns as Item
     strbuf_append_str(tp->code_buf, "  array_end(_pipe_result);\n");
-    strbuf_append_str(tp->code_buf, "})");;
+    strbuf_append_str(tp->code_buf, "})");
 }
 
 // while statement (procedural only)
