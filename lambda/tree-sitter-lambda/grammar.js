@@ -40,10 +40,11 @@ const decimal_literal = choice(
 const base64_unit = /[A-Za-z0-9+/]{4}/;
 const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
-// need to exclude relational exprs in attr
-function binary_expr($, in_attr) {
-  let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr)) : $._expression;
-  return [
+// need to exclude relational exprs in attr, optionally exclude pipe operators
+function binary_expr($, in_attr, exclude_pipe = false) {
+  let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr)) 
+                        : (exclude_pipe ? $._expression_no_pipe : $._expression);
+  let ops = [
     ['+', 'binary_plus'],
     ['++', 'binary_plus'],
     ['-', 'binary_plus'],
@@ -63,13 +64,16 @@ function binary_expr($, in_attr) {
     ['or', 'logical_or'],
     ['to', 'range_to'],
     // Pipe operators - same precedence, left-to-right chaining
-    ['|', 'pipe'],
-    ['where', 'pipe'],  // same precedence as | for left-to-right chaining
+    ...(exclude_pipe ? [] : [
+      ['|', 'pipe'],
+      ['where', 'pipe'],  // same precedence as | for left-to-right chaining
+    ]),
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     ['is', 'is_in'],
     ['in', 'is_in'],
-  ].map(([operator, precedence, associativity]) =>
+  ];
+  return ops.map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
       field('left', operand),
       field('operator', operator),
@@ -216,8 +220,7 @@ module.exports = grammar({
     'pattern_union',
   ]],
 
-  conflicts: $ => [
-  ],
+  conflicts: $ => [],
 
   rules: {
     document: $ => optional(choice(
@@ -442,6 +445,22 @@ module.exports = grammar({
       $.fn_expr,
     ),
 
+    // Expression without pipe operators (|, where) - used in for loop iteration expression
+    _expression_no_pipe: $ => choice(
+      $.primary_expr,
+      $.unary_expr,
+      $.binary_expr_no_pipe,
+      $.let_expr,
+      $.if_expr,
+      $.for_expr,
+      $.fn_expr,
+    ),
+
+    // Binary expression without pipe operators
+    binary_expr_no_pipe: $ => choice(
+      ...binary_expr($, false, true),
+    ),
+
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
       $.null,
@@ -620,27 +639,89 @@ module.exports = grammar({
     // Single variable: for v in expr
     // Indexed: for i, v in expr
     // Attribute iteration: for v at expr OR for k, v at expr
+    // Use _expression_no_pipe so 'where' is not consumed as binary operator
     loop_expr: $ => choice(
       // for value in | at expr
       seq(
-        field('name', $.identifier), choice('in', 'at'), field('as', $._expression)
+        field('name', $.identifier), choice('in', 'at'), field('as', $._expression_no_pipe)
       ),
       // for key, value in | at expr
       seq(
         field('index', $.identifier), ',', field('name', $.identifier),
-        choice('in', 'at'), field('as', $._expression)
+        choice('in', 'at'), field('as', $._expression_no_pipe)
       ),
+    ),
+
+    // let clause within for: let name = expr
+    // Use _expression_no_pipe so subsequent 'where' is not consumed
+    for_let_clause: $ => seq(
+      'let', field('name', $.identifier), '=', field('value', $._expression_no_pipe)
+    ),
+
+    // where clause: where expr
+    // Use prec.dynamic to prefer this over binary 'where' in for context
+    for_where_clause: $ => prec.dynamic(10, seq(
+      'where', field('cond', $._expression)
+    )),
+
+    // order by clause: order by expr [asc|desc] [, expr [asc|desc], ...]
+    // Use _expression_no_pipe so limit/offset are not consumed
+    order_spec: $ => seq(
+      field('expr', $._expression_no_pipe),
+      optional(field('dir', choice('asc', 'ascending', 'desc', 'descending')))
+    ),
+
+    for_order_clause: $ => seq(
+      'order', 'by', field('spec', $.order_spec),
+      repeat(seq(',', field('spec', $.order_spec)))
+    ),
+
+    // group by clause: group by expr [, expr, ...] as name
+    for_group_clause: $ => seq(
+      'group', 'by', field('key', $._expression),
+      repeat(seq(',', field('key', $._expression))),
+      'as', field('name', $.identifier)
+    ),
+
+    // limit clause: limit expr
+    for_limit_clause: $ => seq(
+      'limit', field('count', $._expression)
+    ),
+
+    // offset clause: offset expr
+    for_offset_clause: $ => seq(
+      'offset', field('count', $._expression)
     ),
 
     // use prec.right so the body expression is consumed greedily
     for_expr: $ => prec.right(seq(
-      'for', '(', field('declare', $.loop_expr),
-      repeat(seq(',', field('declare', $.loop_expr))), ')',
+      'for', '(',
+      field('declare', $.loop_expr),
+      repeat(seq(',', field('declare', $.loop_expr))),
+      // optional let clauses (comma-separated after declarations)
+      repeat(seq(',', field('let', $.for_let_clause))),
+      // optional clauses in order
+      optional(field('where', $.for_where_clause)),
+      optional(field('group', $.for_group_clause)),
+      optional(field('order', $.for_order_clause)),
+      optional(field('limit', $.for_limit_clause)),
+      optional(field('offset', $.for_offset_clause)),
+      ')',
       field('then', $._expression),
     )),
 
     for_stam: $ => seq(
-      'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
+      'for',
+      field('declare', $.loop_expr),
+      repeat(seq(',', field('declare', $.loop_expr))),
+      // optional let clauses
+      repeat(seq(',', field('let', $.for_let_clause))),
+      // optional clauses in order
+      optional(field('where', $.for_where_clause)),
+      optional(field('group', $.for_group_clause)),
+      optional(field('order', $.for_order_clause)),
+      optional(field('limit', $.for_limit_clause)),
+      optional(field('offset', $.for_offset_clause)),
       '{', field('then', $.content), '}'
     ),
 
