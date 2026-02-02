@@ -2732,6 +2732,220 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     return (AstNode*)ast_node;
 }
 
+// Helper: build order_spec node
+AstNode* build_order_spec(Transpiler* tp, TSNode spec_node) {
+    log_debug("build order spec");
+    AstOrderSpec* ast_node = (AstOrderSpec*)alloc_ast_node(tp, AST_NODE_ORDER_SPEC, spec_node, sizeof(AstOrderSpec));
+    
+    TSNode expr_node = ts_node_child_by_field_id(spec_node, FIELD_EXPR);
+    ast_node->expr = build_expr(tp, expr_node);
+    
+    // Check for direction (asc/desc)
+    TSNode dir_node = ts_node_child_by_field_id(spec_node, FIELD_DIR);
+    if (!ts_node_is_null(dir_node)) {
+        StrView dir_text = ts_node_source(tp, dir_node);
+        ast_node->descending = (strview_equal(&dir_text, "desc") || strview_equal(&dir_text, "descending"));
+    } else {
+        ast_node->descending = false;  // default ascending
+    }
+    
+    ast_node->type = &TYPE_ANY;
+    return (AstNode*)ast_node;
+}
+
+// Helper: build for_let_clause node (reuses AstNamedNode)
+AstNode* build_for_let_clause(Transpiler* tp, TSNode let_node) {
+    log_debug("build for let clause");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, let_node, sizeof(AstNamedNode));
+    
+    TSNode name_node = ts_node_child_by_field_id(let_node, FIELD_NAME);
+    if (ts_node_is_null(name_node)) {
+        log_error("for_let_clause: name_node is null");
+        return (AstNode*)ast_node;
+    }
+    StrView name_view = ts_node_source(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+    log_debug("for_let_clause: name = %.*s", (int)name_view.length, name_view.str);
+    
+    TSNode value_node = ts_node_child_by_field_id(let_node, FIELD_VALUE);
+    if (ts_node_is_null(value_node)) {
+        log_error("for_let_clause: value_node is null");
+        ast_node->as = NULL;
+        ast_node->type = &TYPE_ANY;
+    } else {
+        const char* value_type = ts_node_type(value_node);
+        log_debug("for_let_clause: value_node type = %s", value_type);
+        log_debug("for_let_clause: building value expression");
+        ast_node->as = build_expr(tp, value_node);
+        if (ast_node->as == NULL) {
+            log_error("for_let_clause: build_expr returned NULL for type %s", value_type);
+        }
+        ast_node->type = ast_node->as ? ast_node->as->type : &TYPE_ANY;
+    }
+    
+    // Register in current scope
+    push_name(tp, ast_node, NULL);
+    
+    return (AstNode*)ast_node;
+}
+
+// Helper: build group by clause
+AstNode* build_group_clause(Transpiler* tp, TSNode group_node) {
+    log_debug("build group clause");
+    AstGroupClause* ast_node = (AstGroupClause*)alloc_ast_node(tp, AST_NODE_GROUP_CLAUSE, group_node, sizeof(AstGroupClause));
+    
+    // Get the group name (from 'as name')
+    TSNode name_node = ts_node_child_by_field_id(group_node, FIELD_NAME);
+    StrView name_view = ts_node_source(tp, name_node);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+    
+    // Build key expressions (linked list)
+    TSTreeCursor cursor = ts_tree_cursor_new(group_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode* prev_key = NULL;
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_KEY) {
+            TSNode key_node = ts_tree_cursor_current_node(&cursor);
+            AstNode* key_expr = build_expr(tp, key_node);
+            if (prev_key == NULL) {
+                ast_node->keys = key_expr;
+            } else {
+                prev_key->next = key_expr;
+            }
+            prev_key = key_expr;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    ast_node->type = &TYPE_ANY;
+    return (AstNode*)ast_node;
+}
+
+// Helper function to build all for clauses (shared between for_expr and for_stam)
+// Three-pass approach:
+// Pass 1: Process loop declarations to register loop vars in scope
+// Pass 2: Process let clauses (can reference loop vars)
+// Pass 3: Process where, group, order, limit, offset (can reference both)
+void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
+    TSTreeCursor cursor = ts_tree_cursor_new(for_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode* prev_loop = NULL;
+    AstNode* prev_let = NULL;
+    AstNode* prev_order = NULL;
+    
+    // PASS 1: Process loop declarations to register loop vars in scope
+    log_debug("for clauses pass 1: loop declarations");
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        
+        if (field_id == FIELD_DECLARE) {
+            // Loop binding
+            AstNode* loop = build_loop_expr(tp, child);
+            log_debug("got loop type %d", loop->node_type);
+            if (prev_loop == NULL) {
+                ast_node->loop = loop;
+            } else {
+                prev_loop->next = loop;
+            }
+            prev_loop = loop;
+        }
+        
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    // PASS 2: Process let clauses (can reference loop vars)
+    log_debug("for clauses pass 2: let clauses");
+    cursor = ts_tree_cursor_new(for_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
+    
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        
+        if (field_id == FIELD_LET) {
+            // Let clause - also registers name in scope
+            AstNode* let_clause = build_for_let_clause(tp, child);
+            if (prev_let == NULL) {
+                ast_node->let_clause = let_clause;
+            } else {
+                prev_let->next = let_clause;
+            }
+            prev_let = let_clause;
+        }
+        
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    // PASS 3: Process clauses that reference variables (where, group, order, limit, offset)
+    log_debug("for clauses pass 3: where/group/order/limit/offset");
+    cursor = ts_tree_cursor_new(for_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
+    
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        
+        if (field_id == FIELD_WHERE) {
+            // Where clause - get the condition expression
+            TSNode cond_node = ts_node_child_by_field_id(child, FIELD_COND);
+            ast_node->where = build_expr(tp, cond_node);
+        }
+        else if (field_id == FIELD_GROUP) {
+            // Group by clause
+            ast_node->group = (AstGroupClause*)build_group_clause(tp, child);
+            // Register group name in scope (as a map with .key and .items)
+            if (ast_node->group && ast_node->group->name) {
+                AstNamedNode* group_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, child, sizeof(AstNamedNode));
+                group_var->name = ast_node->group->name;
+                group_var->type = &TYPE_MAP;  // {key: ..., items: [...]}
+                push_name(tp, group_var, NULL);
+            }
+        }
+        else if (field_id == FIELD_ORDER) {
+            // Order by clause - contains multiple order_spec
+            TSTreeCursor order_cursor = ts_tree_cursor_new(child);
+            bool has_spec = ts_tree_cursor_goto_first_child(&order_cursor);
+            while (has_spec) {
+                TSSymbol spec_field = ts_tree_cursor_current_field_id(&order_cursor);
+                if (spec_field == FIELD_SPEC) {
+                    TSNode spec_node = ts_tree_cursor_current_node(&order_cursor);
+                    AstNode* order_spec = build_order_spec(tp, spec_node);
+                    if (prev_order == NULL) {
+                        ast_node->order = order_spec;
+                    } else {
+                        prev_order->next = order_spec;
+                    }
+                    prev_order = order_spec;
+                }
+                has_spec = ts_tree_cursor_goto_next_sibling(&order_cursor);
+            }
+            ts_tree_cursor_delete(&order_cursor);
+        }
+        else if (field_id == FIELD_LIMIT) {
+            // Limit clause
+            TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+            ast_node->limit = build_expr(tp, count_node);
+        }
+        else if (field_id == FIELD_OFFSET) {
+            // Offset clause
+            TSNode count_node = ts_node_child_by_field_id(child, FIELD_COUNT);
+            ast_node->offset = build_expr(tp, count_node);
+        }
+        
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    
+    if (!ast_node->loop) {
+        log_error("Error: missing for loop declare");
+    }
+}
+
 AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     log_debug("build for expr");
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
@@ -2740,31 +2954,9 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
-    // for can have multiple loop declarations
-    TSTreeCursor cursor = ts_tree_cursor_new(for_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNode* prev_loop = NULL;
-    while (has_node) {
-        // Check if the current node's field ID matches the target field ID
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_DECLARE) {
-            TSNode child = ts_tree_cursor_current_node(&cursor);
-            AstNode* loop = build_loop_expr(tp, child);
-            log_debug("got loop type %d", loop->node_type);
-            if (prev_loop == NULL) {
-                ast_node->loop = loop;
-            }
-            else {
-                prev_loop->next = loop;
-            }
-            prev_loop = loop;
-        }
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-    if (!ast_node->loop) {
-        log_error("Error: missing for loop declare");
-    }
+    
+    // Build all clauses (loop, let, where, group, order, limit, offset)
+    build_for_clauses(tp, for_node, ast_node);
 
     TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
@@ -2795,28 +2987,8 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
     ast_node->vars->is_proc = tp->current_scope->is_proc;  // inherit proc context
     tp->current_scope = ast_node->vars;
 
-    // for can have multiple loop declarations
-    TSTreeCursor cursor = ts_tree_cursor_new(for_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNode* prev_loop = NULL;
-    while (has_node) {
-        // Check if the current node's field ID matches the target field ID
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_DECLARE) {
-            TSNode child = ts_tree_cursor_current_node(&cursor);
-            AstNode* loop = build_loop_expr(tp, child);
-            log_debug("got loop type %d", loop->node_type);
-            if (prev_loop == NULL) {
-                ast_node->loop = loop;
-            }
-            else {
-                prev_loop->next = loop;
-            }
-            prev_loop = loop;
-        }
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
+    // Build all clauses (loop, let, where, group, order, limit, offset)
+    build_for_clauses(tp, for_node, ast_node);
 
     TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
@@ -3402,6 +3574,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
+    case SYM_BINARY_EXPR_NO_PIPE:
         return build_binary_expr(tp, expr_node);
     case SYM_CURRENT_ITEM:
         return build_current_item(tp, expr_node);

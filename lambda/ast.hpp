@@ -39,6 +39,7 @@ extern "C" {
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_UNARY_EXPR sym_unary_expr
 #define SYM_BINARY_EXPR sym_binary_expr
+#define SYM_BINARY_EXPR_NO_PIPE sym_binary_expr_no_pipe
 
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_ITEM sym_current_item
@@ -123,6 +124,27 @@ extern "C" {
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index
 #define FIELD_DECOMPOSE field_decompose
+// For expression clause fields
+#define FIELD_LET field_let
+#define FIELD_WHERE field_where
+#define FIELD_GROUP field_group
+#define FIELD_ORDER field_order
+#define FIELD_LIMIT field_limit
+#define FIELD_OFFSET field_offset
+#define FIELD_SPEC field_spec
+#define FIELD_DIR field_dir
+#define FIELD_KEY field_key
+#define FIELD_COUNT field_count
+#define FIELD_EXPR field_expr
+
+// Symbols for for-expression clauses
+#define SYM_FOR_LET_CLAUSE sym_for_let_clause
+#define SYM_FOR_WHERE_CLAUSE sym_for_where_clause
+#define SYM_ORDER_SPEC sym_order_spec
+#define SYM_FOR_ORDER_CLAUSE sym_for_order_clause
+#define SYM_FOR_GROUP_CLAUSE sym_for_group_clause
+#define SYM_FOR_LIMIT_CLAUSE sym_for_limit_clause
+#define SYM_FOR_OFFSET_CLAUSE sym_for_offset_clause
 
 #ifdef __cplusplus
 }
@@ -167,6 +189,8 @@ typedef enum AstNodeType {
     AST_NODE_ASSIGN,
     AST_NODE_DECOMPOSE,     // multi-variable decomposition (let a, b = expr)
     AST_NODE_LOOP,
+    AST_NODE_ORDER_SPEC,    // order by specification (expr [asc|desc])
+    AST_NODE_GROUP_CLAUSE,  // group by clause
     AST_NODE_IF_EXPR,
     AST_NODE_IF_STAM,
     AST_NODE_FOR_EXPR,
@@ -299,10 +323,28 @@ typedef struct AstLetNode : AstNode {
     AstNode *declare;  // declarations in let expression
 } AstLetNode;
 
+// Order specification within for-expression: expr [asc|desc]
+typedef struct AstOrderSpec : AstNode {
+    AstNode *expr;      // expression to order by
+    bool descending;    // true if 'desc' or 'descending'
+} AstOrderSpec;
+
+// Group clause: group by expr, expr, ... as name
+typedef struct AstGroupClause : AstNode {
+    AstNode *keys;      // linked list of key expressions
+    String* name;       // alias name (from 'as name')
+} AstGroupClause;
+
 typedef struct AstForNode : AstNode {
-    AstNode *loop;
-    AstNode *then;
-    NameScope *vars;  // scope for the variables in the loop
+    AstNode *loop;       // loop bindings (linked list of AstLoopNode)
+    AstNode *let_clause; // let bindings (linked list of AstNamedNode)
+    AstNode *where;      // where condition (single expression, or NULL)
+    AstGroupClause *group; // group by clause (or NULL)
+    AstNode *order;      // order by specs (linked list of AstOrderSpec, or NULL)
+    AstNode *limit;      // limit count expression (or NULL)
+    AstNode *offset;     // offset count expression (or NULL)
+    AstNode *then;       // body expression
+    NameScope *vars;     // scope for the variables in the loop
 } AstForNode;
 
 typedef struct AstIfNode : AstNode {
