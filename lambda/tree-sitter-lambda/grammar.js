@@ -62,10 +62,10 @@ function binary_expr($, in_attr) {
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
-    ['|', 'set_union'],
+    // Note: '|' is now used for pipe operator, not set union in expressions
+    // Type unions using '|' are restricted to type contexts (type_pattern)
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.
     ['is', 'is_in'],
     ['in', 'is_in'],
   ].map(([operator, precedence, associativity]) =>
@@ -190,6 +190,9 @@ module.exports = grammar({
     'set_exclude',    // like -
     'set_union',      // like or
     'is_in',
+    // pipe operators (low precedence, just above control flow)
+    'pipe',
+    'pipe_where',
     $.if_expr,
     $.for_expr,
     $.let_expr,
@@ -213,7 +216,11 @@ module.exports = grammar({
     'pattern_union',
   ]],
 
-  conflicts: $ => [],
+  conflicts: $ => [
+    [$.content_pipe_expr, $.attr_pipe_expr],
+    [$.attr_pipe_expr, $.pipe_expr],
+    [$.attr_binary_expr, $.binary_expr],
+  ],
 
   rules: {
     document: $ => optional(choice(
@@ -328,8 +335,24 @@ module.exports = grammar({
 
     _content_expr: $ => choice(
       repeat1(choice($.string, $.map, $.element)),
+      alias($.content_pipe_expr, $.pipe_expr),  // pipe with full expressions allowed
       $._attr_expr,
       $._expr_stam
+    ),
+
+    // Pipe expression for content context - allows full expressions on right side
+    // This is separate from attr_pipe_expr which restricts right side to _attr_expr
+    content_pipe_expr: $ => choice(
+      prec.left('pipe', seq(
+        field('left', $._attr_expr),
+        field('operator', '|'),
+        field('right', $._expression),
+      )),
+      prec.left('pipe_where', seq(
+        field('left', $._attr_expr),
+        field('operator', 'where'),
+        field('right', $._expression),
+      )),
     ),
 
     // statement content
@@ -394,11 +417,26 @@ module.exports = grammar({
       ...binary_expr($, true),
     ),
 
+    // Pipe expression restricted for attribute context (no comparison in right side)
+    attr_pipe_expr: $ => choice(
+      prec.left('pipe', seq(
+        field('left', $._attr_expr),
+        field('operator', '|'),
+        field('right', $._attr_expr),
+      )),
+      prec.left('pipe_where', seq(
+        field('left', $._attr_expr),
+        field('operator', 'where'),
+        field('right', $._attr_expr),
+      )),
+    ),
+
     // expr excluding comparison exprs
     _attr_expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
       alias($.attr_binary_expr, $.binary_expr),
+      alias($.attr_pipe_expr, $.pipe_expr),  // pipe without comparisons in right side
       $.if_expr,
       $.for_expr,
       $.fn_expr,
@@ -432,6 +470,7 @@ module.exports = grammar({
       $.primary_expr,
       $.unary_expr,
       $.binary_expr,
+      $.pipe_expr,
       $.let_expr,
       $.if_expr,
       $.for_expr,
@@ -460,6 +499,8 @@ module.exports = grammar({
       $.member_expr,
       $.call_expr,
       $._parenthesized_expr,
+      $.current_item,   // ~ for pipe context
+      $.current_index,  // ~# for pipe key/index
     )),
 
     spread_argument: $ => seq('...', $._expression),
@@ -489,6 +530,28 @@ module.exports = grammar({
     binary_expr: $ => choice(
       ...binary_expr($, false),
     ),
+
+    // Pipe expression: data | transform or data where condition
+    // | is the pipe operator (auto-maps when ~ is used)
+    // where is the filter clause
+    pipe_expr: $ => choice(
+      prec.left('pipe', seq(
+        field('left', $._expression),
+        field('operator', '|'),
+        field('right', $._expression),
+      )),
+      prec.left('pipe_where', seq(
+        field('left', $._expression),
+        field('operator', 'where'),
+        field('right', $._expression),
+      )),
+    ),
+
+    // Current item reference in pipe context
+    current_item: _ => '~',
+
+    // Current key/index reference in pipe context
+    current_index: _ => '~#',
 
     unary_expr: $ => prec.left(seq(
       field('operator', choice('not', '-', '+')),
