@@ -2376,19 +2376,22 @@ MathASTNode* MathASTBuilder::build_space_command(TSNode node) {
             case ':': width_mu = 4.0f; command = ":"; break;   // medmuskip
             case ';': width_mu = 5.0f; command = ";"; break;   // thickmuskip
             case '!': width_mu = -3.0f; command = "!"; break;  // negative thin space
-            default:
-                // Check for \quad, \qquad
-                if (len >= 5 && strncmp(text + 1, "quad", 4) == 0) {
+            case 'q':
+                // Check for \quad or \qquad
+                if (len == 5 && strncmp(text + 1, "quad", 4) == 0) {
                     width_mu = 18.0f;  // 1em
                     command = "quad";
-                    if (len >= 6 && text[5] == 'q') {
-                        width_mu = 36.0f;  // 2em
-                        command = "qquad";
-                    }
+                } else if (len == 6 && strncmp(text + 1, "qquad", 5) == 0) {
+                    width_mu = 36.0f;  // 2em
+                    command = "qquad";
                 } else {
-                    // Store the full command name
+                    // Unknown q-command
                     command = arena_copy_str(text + 1, len - 1);
                 }
+                break;
+            default:
+                // Store the full command name
+                command = arena_copy_str(text + 1, len - 1);
         }
     }
 

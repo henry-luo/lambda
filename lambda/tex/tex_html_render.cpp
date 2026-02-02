@@ -273,6 +273,217 @@ static const char* font_to_class(const char* font_name) {
     return "mathit";  // default to italic
 }
 
+// Map cmsy10 (Computer Modern Symbol) character codes to Unicode for HTML output
+// cmsy10 contains mathematical symbols: operators, relations, arrows, etc.
+static int32_t cmsy10_to_unicode(int32_t code) {
+    switch (code) {
+        // Greek capitals (positions 0-11 are Greek in cmsy)
+        // Not commonly used from cmsy10, usually from cmr10
+
+        // Binary operators
+        case 1:  return 0x22C5; // cdot ⋅
+        case 2:  return 0x00D7; // times ×
+        case 3:  return 0x2217; // ast ∗
+        case 4:  return 0x00F7; // div ÷
+        case 5:  return 0x22C6; // star ⋆
+        case 6:  return 0x00B1; // pm ±
+        case 7:  return 0x2213; // mp ∓
+        case 8:  return 0x2295; // oplus ⊕
+        case 9:  return 0x2296; // ominus ⊖
+        case 10: return 0x2297; // otimes ⊗
+        case 11: return 0x2298; // oslash ⊘
+        case 12: return 0x2299; // odot ⊙
+        case 13: return 0x25EF; // bigcirc ◯
+        case 14: return 0x2218; // circ ∘
+        case 15: return 0x2219; // bullet ∙
+
+        // Relations
+        case 16: return 0x224D; // asymp ≍
+        case 17: return 0x2261; // equiv ≡
+        case 18: return 0x2286; // subseteq ⊆
+        case 19: return 0x2287; // supseteq ⊇
+        case 20: return 0x2264; // leq ≤
+        case 21: return 0x2265; // geq ≥
+        case 22: return 0x227C; // preceq ≼
+        case 23: return 0x227D; // succeq ≽
+        case 24: return 0x223C; // sim ∼
+        case 25: return 0x2248; // approx ≈
+        case 26: return 0x2282; // subset ⊂
+        case 27: return 0x2283; // supset ⊃
+        case 28: return 0x226A; // ll ≪
+        case 29: return 0x226B; // gg ≫
+        case 30: return 0x227A; // prec ≺
+        case 31: return 0x227B; // succ ≻
+
+        // Arrows
+        case 32: return 0x2190; // leftarrow ←
+        case 33: return 0x2192; // rightarrow →
+        case 34: return 0x2191; // uparrow ↑
+        case 35: return 0x2193; // downarrow ↓
+        case 36: return 0x2194; // leftrightarrow ↔
+        case 37: return 0x2197; // nearrow ↗
+        case 38: return 0x2198; // searrow ↘
+        case 39: return 0x2243; // simeq ≃
+        case 40: return 0x21D0; // Leftarrow ⇐
+        case 41: return 0x21D2; // Rightarrow ⇒
+        case 42: return 0x21D1; // Uparrow ⇑
+        case 43: return 0x21D3; // Downarrow ⇓
+        case 44: return 0x21D4; // Leftrightarrow ⇔
+        case 45: return 0x2196; // nwarrow ↖
+        case 46: return 0x2199; // swarrow ↙
+        case 47: return 0x221D; // propto ∝
+
+        // Miscellaneous symbols
+        case 48: return 0x2032; // prime ′
+        case 49: return 0x221E; // infty ∞
+        case 50: return 0x2208; // in ∈
+        case 51: return 0x220B; // ni ∋
+        case 52: return 0x25B3; // triangle △
+        case 53: return 0x25BD; // triangledown ▽
+        case 54: return 0x0338; // negation slash (for \not) - combining character
+        case 55: return 0x21A6; // mapsto ↦
+        case 56: return 0x2200; // forall ∀
+        case 57: return 0x2203; // exists ∃
+        case 58: return 0x00AC; // neg ¬
+        case 59: return 0x2205; // emptyset ∅
+        case 60: return 0x211C; // Re ℜ
+        case 61: return 0x2111; // Im ℑ
+        case 62: return 0x22A4; // top ⊤
+        case 63: return 0x22A5; // perp ⊥
+
+        // More symbols
+        case 64: return 0x2135; // aleph ℵ
+
+        // Calligraphic letters (positions 65-90 are calligraphic A-Z)
+        // Pass through as ASCII
+
+        // More operators and symbols
+        case 91: return 0x222A; // cup ∪
+        case 92: return 0x2229; // cap ∩
+        case 93: return 0x228E; // uplus ⊎
+        case 94: return 0x2227; // wedge ∧
+        case 95: return 0x2228; // vee ∨
+
+        // Delimiters
+        case 98:  return 0x230A; // lfloor ⌊
+        case 99:  return 0x230B; // rfloor ⌋
+        case 100: return 0x2308; // lceil ⌈
+        case 101: return 0x2309; // rceil ⌉
+        case 102: return '{';    // lbrace
+        case 103: return '}';    // rbrace
+        case 104: return 0x27E8; // langle ⟨
+        case 105: return 0x27E9; // rangle ⟩
+        case 106: return '|';    // vert
+        case 107: return 0x2225; // Vert ‖
+        case 108: return 0x2195; // updownarrow ↕
+        case 109: return 0x21D5; // Updownarrow ⇕
+        case 110: return '\\';   // backslash
+
+        // More relations and operators
+        case 114: return 0x2207; // nabla ∇
+        case 116: return 0x2294; // sqcup ⊔
+        case 117: return 0x2293; // sqcap ⊓
+        case 118: return 0x2291; // sqsubseteq ⊑
+        case 119: return 0x2292; // sqsupseteq ⊒
+
+        // Card suits
+        case 124: return 0x2663; // clubsuit ♣
+        case 125: return 0x2662; // diamondsuit ♢
+        case 126: return 0x2661; // heartsuit ♡
+        case 127: return 0x2660; // spadesuit ♠
+
+        default:
+            // For calligraphic letters (65-90) and unmapped codes
+            if (code >= 65 && code <= 90) {
+                return code;  // A-Z calligraphic, render as letters
+            }
+            // Return as-is if printable ASCII, else 0
+            return (code >= 32 && code < 127) ? code : 0;
+    }
+}
+
+// Map cmmi10 (Computer Modern Math Italic) character codes to Unicode for HTML output
+// cmmi10 contains italic Greek letters and some special symbols
+static int32_t cmmi10_to_unicode(int32_t code) {
+    switch (code) {
+        // Lowercase Greek letters (0-25)
+        case 11: return 0x03B1; // alpha α
+        case 12: return 0x03B2; // beta β
+        case 13: return 0x03B3; // gamma γ
+        case 14: return 0x03B4; // delta δ
+        case 15: return 0x03B5; // epsilon ε (varepsilon actually)
+        case 16: return 0x03B6; // zeta ζ
+        case 17: return 0x03B7; // eta η
+        case 18: return 0x03B8; // theta θ
+        case 19: return 0x03B9; // iota ι
+        case 20: return 0x03BA; // kappa κ
+        case 21: return 0x03BB; // lambda λ
+        case 22: return 0x03BC; // mu μ
+        case 23: return 0x03BD; // nu ν
+        case 24: return 0x03BE; // xi ξ
+        case 25: return 0x03C0; // pi π
+        case 26: return 0x03C1; // rho ρ
+        case 27: return 0x03C3; // sigma σ
+        case 28: return 0x03C4; // tau τ
+        case 29: return 0x03C5; // upsilon υ
+        case 30: return 0x03C6; // phi φ
+        case 31: return 0x03C7; // chi χ
+        case 32: return 0x03C8; // psi ψ
+        case 33: return 0x03C9; // omega ω
+
+        // Variant Greek letters
+        case 34: return 0x03B5; // varepsilon ε
+        case 35: return 0x03D1; // vartheta ϑ
+        case 36: return 0x03D6; // varpi ϖ
+        case 37: return 0x03F1; // varrho ϱ
+        case 38: return 0x03C2; // varsigma ς
+        case 39: return 0x03D5; // varphi φ
+
+        // Harpoons and other arrows
+        case 40: return 0x21BC; // leftharpoonup ↼
+        case 41: return 0x21BD; // leftharpoondown ↽
+        case 42: return 0x21C0; // rightharpoonup ⇀
+        case 43: return 0x21C1; // rightharpoondown ⇁
+
+        // Special symbols
+        case 60: return '.';    // period
+        case 61: return ',';    // comma
+        case 62: return '<';    // less
+        case 63: return '>';    // greater
+        case 64: return 0x2202; // partial ∂
+
+        // Uppercase Greek (positions in cmmi10)
+        case 0:  return 0x0393; // Gamma Γ
+        case 1:  return 0x0394; // Delta Δ
+        case 2:  return 0x0398; // Theta Θ
+        case 3:  return 0x039B; // Lambda Λ
+        case 4:  return 0x039E; // Xi Ξ
+        case 5:  return 0x03A0; // Pi Π
+        case 6:  return 0x03A3; // Sigma Σ
+        case 7:  return 0x03A5; // Upsilon Υ
+        case 8:  return 0x03A6; // Phi Φ
+        case 9:  return 0x03A8; // Psi Ψ
+        case 10: return 0x03A9; // Omega Ω
+
+        // Miscellaneous
+        case 96:  return 0x2113; // ell ℓ
+        case 123: return 0x0131; // dotless i ı (imath)
+        case 124: return 0x0237; // dotless j ȷ (jmath)
+        case 125: return 0x210F; // hbar ℏ
+
+        default:
+            // Italic letters A-Z (65-90) and a-z (97-122)
+            if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+                return code;  // ASCII letters in italic
+            }
+            // Digits 0-9 (48-57) - though rarely in cmmi10
+            if (code >= 48 && code <= 57) {
+                return code;
+            }
+            return (code >= 32 && code < 127) ? code : 0;
+    }
+}
+
 // Map cmex10 character codes to Unicode for HTML output
 // cmex10 contains extensible delimiters and large operators
 static int32_t cmex10_to_unicode(int32_t code) {
@@ -335,9 +546,15 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
         font_name = node->content.lig.font.name;
     }
 
-    // For cmex10, convert TFM character codes to Unicode
-    if (font_name && strncmp(font_name, "cmex", 4) == 0) {
-        codepoint = cmex10_to_unicode(codepoint);
+    // Convert TFM character codes to Unicode based on font
+    if (font_name) {
+        if (strncmp(font_name, "cmex", 4) == 0) {
+            codepoint = cmex10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "cmsy", 4) == 0) {
+            codepoint = cmsy10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "cmmi", 4) == 0) {
+            codepoint = cmmi10_to_unicode(codepoint);
+        }
     }
 
     // determine CSS class based on font name (more accurate than atom type)
@@ -388,10 +605,58 @@ static void render_kern(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 static void render_glue(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts) {
     if (!node) return;
 
-    float em = pt_to_em(node->content.glue.spec.space, opts.base_font_size_px);
+    float space_pt = node->content.glue.spec.space;
+
+    // check for named spacing commands that map to CSS classes
+    const char* name = node->content.glue.name;
+    if (name && strcmp(name, "mathspace") == 0) {
+        // Math spacing - the space value is in TeX points
+        // For a 10pt math font:
+        //   \quad  = 18 mu = 18 * 10pt / 18 = 10pt = 1em
+        //   \qquad = 36 mu = 36 * 10pt / 18 = 20pt = 2em
+        // We convert based on the TeX em size (10pt for most math fonts)
+        float tex_em_pt = 10.0f;  // 1em in TeX points for a 10pt font
+        float em = space_pt / tex_em_pt;
+
+        // Use MathLive CSS classes for standard spacing
+        if (fabsf(em - 1.0f) < 0.1f) {
+            // approximately 1em = \quad
+            strbuf_append_str(out, "<span class=\"ML__quad\"></span>");
+            return;
+        } else if (fabsf(em - 2.0f) < 0.1f) {
+            // approximately 2em = \qquad
+            strbuf_append_str(out, "<span class=\"ML__qquad\"></span>");
+            return;
+        } else if (fabsf(em - (3.0f / 18.0f)) < 0.02f) {
+            // approximately 3/18 em = \,  (thinspace)
+            strbuf_append_str(out, "<span class=\"ML__thinspace\"></span>");
+            return;
+        } else if (fabsf(em - (4.0f / 18.0f)) < 0.02f) {
+            // approximately 4/18 em = \:  (mediumspace)
+            strbuf_append_str(out, "<span class=\"ML__mediumspace\"></span>");
+            return;
+        } else if (fabsf(em - (5.0f / 18.0f)) < 0.02f) {
+            // approximately 5/18 em = \;  (thickspace)
+            strbuf_append_str(out, "<span class=\"ML__thickspace\"></span>");
+            return;
+        }
+
+        // For other math spacing, use calculated em value
+        if (em == 0.0f) return;
+
+        strbuf_append_str(out, "<span style=\"display:inline-block;width:");
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.2fem", round3(em));
+        strbuf_append_str(out, buf);
+        strbuf_append_str(out, "\"></span>");
+        return;
+    }
+
+    // Non-math glue - use standard pt_to_em conversion
+    float em = pt_to_em(space_pt, opts.base_font_size_px);
     if (em == 0.0f) return;
 
-    // use a span with inline-block width for spacing (MathLive compatible)
+    // use a span with inline-block width for spacing
     strbuf_append_str(out, "<span style=\"display:inline-block;width:");
     char buf[32];
     snprintf(buf, sizeof(buf), "%.2fem", round3(em));
@@ -1363,6 +1628,15 @@ const char* get_math_css_stylesheet() {
     display: inline-block;
     background: currentColor;
 }
+
+/* Spacing classes (MathLive-compatible) */
+.ML__quad { display: inline-block; width: 1em; }
+.ML__qquad { display: inline-block; width: 2em; }
+.ML__thinspace { display: inline-block; width: 0.17em; }
+.ML__mediumspace { display: inline-block; width: 0.22em; }
+.ML__thickspace { display: inline-block; width: 0.28em; }
+.ML__negativethinspace { display: inline-block; margin-right: -0.17em; }
+.ML__mspace { display: inline-block; }
 
 /* Font classes */
 .ML__mathit { font-style: italic; }
