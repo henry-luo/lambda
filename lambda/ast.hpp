@@ -40,6 +40,11 @@ extern "C" {
 #define SYM_UNARY_EXPR sym_unary_expr
 #define SYM_BINARY_EXPR sym_binary_expr
 
+// Pipe expression and current item references
+#define SYM_PIPE_EXPR sym_pipe_expr
+#define SYM_CURRENT_ITEM sym_current_item
+#define SYM_CURRENT_INDEX sym_current_index
+
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
@@ -151,6 +156,9 @@ typedef enum AstNodeType {
     AST_NODE_PRIMARY,
     AST_NODE_UNARY,
     AST_NODE_BINARY,
+    AST_NODE_PIPE,          // pipe expression (| and where)
+    AST_NODE_CURRENT_ITEM,  // ~ current item reference
+    AST_NODE_CURRENT_INDEX, // ~# current key/index reference
     AST_NODE_LIST,
     AST_NODE_CONTENT,
     AST_NODE_ARRAY,
@@ -250,6 +258,9 @@ typedef struct AstBinaryNode : AstNode {
     StrView op_str;
     Operator op;
 } AstBinaryNode;
+
+// Pipe expression (| and where) - same structure as binary, different semantics
+typedef AstBinaryNode AstPipeNode;
 
 // for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
 typedef struct AstNamedNode : AstNode {

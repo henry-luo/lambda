@@ -17,6 +17,11 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
 AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 
+// Forward declarations for pipe expression building
+AstNode* build_current_item(Transpiler* tp, TSNode node);
+AstNode* build_current_index(Transpiler* tp, TSNode node);
+AstNode* build_pipe_expr(Transpiler* tp, TSNode pipe_node);
+
 // System function definitions with method call support
 // Format: {fn_id, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type}
 // is_method_eligible: true if can be called as obj.method() style
@@ -1374,6 +1379,14 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
+    else if (symbol == SYM_CURRENT_ITEM) {
+        ast_node->expr = build_current_item(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_CURRENT_INDEX) {
+        ast_node->expr = build_current_index(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
     else { // from _parenthesized_expr
         ast_node->expr = build_expr(tp, child);
         ast_node->type = ast_node->expr->type;
@@ -1571,6 +1584,143 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
     log_debug("end build binary expr");
     return (AstNode*)ast_node;
+}
+
+// check if expression contains ~ or ~# references (pipe context references)
+bool has_current_item_ref(AstNode* node) {
+    if (!node) return false;
+    
+    switch (node->node_type) {
+    case AST_NODE_CURRENT_ITEM:
+    case AST_NODE_CURRENT_INDEX:
+        return true;
+    case AST_NODE_PRIMARY:
+        return has_current_item_ref(((AstPrimaryNode*)node)->expr);
+    case AST_NODE_UNARY:
+        return has_current_item_ref(((AstUnaryNode*)node)->operand);
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE:
+        return has_current_item_ref(((AstBinaryNode*)node)->left) ||
+               has_current_item_ref(((AstBinaryNode*)node)->right);
+    case AST_NODE_IF_EXPR:
+    case AST_NODE_IF_STAM: {
+        AstIfNode* if_node = (AstIfNode*)node;
+        return has_current_item_ref(if_node->cond) ||
+               has_current_item_ref(if_node->then) ||
+               has_current_item_ref(if_node->otherwise);
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        if (has_current_item_ref(call->function)) return true;
+        AstNode* arg = call->argument;
+        while (arg) {
+            if (has_current_item_ref(arg)) return true;
+            arg = arg->next;
+        }
+        return false;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        return has_current_item_ref(((AstFieldNode*)node)->object) ||
+               has_current_item_ref(((AstFieldNode*)node)->field);
+    case AST_NODE_ARRAY: {
+        AstNode* item = ((AstArrayNode*)node)->item;
+        while (item) {
+            if (has_current_item_ref(item)) return true;
+            item = item->next;
+        }
+        return false;
+    }
+    case AST_NODE_MAP: {
+        AstNode* item = ((AstMapNode*)node)->item;
+        while (item) {
+            if (has_current_item_ref(item)) return true;
+            item = item->next;
+        }
+        return false;
+    }
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_ASSIGN:
+        return has_current_item_ref(((AstNamedNode*)node)->as);
+    default:
+        return false;
+    }
+}
+
+// build pipe expression (| and where operators)
+AstNode* build_pipe_expr(Transpiler* tp, TSNode pipe_node) {
+    log_debug("build pipe expr");
+    AstPipeNode* ast_node = (AstPipeNode*)alloc_ast_node(tp, AST_NODE_PIPE, pipe_node, sizeof(AstPipeNode));
+    
+    TSNode left_node = ts_node_child_by_field_id(pipe_node, FIELD_LEFT);
+    ast_node->left = build_expr(tp, left_node);
+    
+    if (!ast_node->left) {
+        log_error("Error: build_pipe_expr failed to build left operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    TSNode op_node = ts_node_child_by_field_id(pipe_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->op_str = op;
+    
+    if (strview_equal(&op, "|")) {
+        ast_node->op = OPERATOR_PIPE;
+    } else if (strview_equal(&op, "where")) {
+        ast_node->op = OPERATOR_WHERE;
+    } else {
+        log_error("Error: build_pipe_expr unknown operator: %.*s", (int)op.length, op.str);
+        ast_node->op = OPERATOR_PIPE;
+    }
+    
+    TSNode right_node = ts_node_child_by_field_id(pipe_node, FIELD_RIGHT);
+    ast_node->right = build_expr(tp, right_node);
+    
+    if (!ast_node->right) {
+        log_error("Error: build_pipe_expr failed to build right operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    // determine result type based on operation
+    // pipe: result is array/list of transformed items (or single item for scalar)
+    // where: result is filtered collection of same type as input
+    TypeId left_type = ast_node->left->type ? ast_node->left->type->type_id : LMD_TYPE_ANY;
+    TypeId result_type = LMD_TYPE_ANY;
+    
+    if (ast_node->op == OPERATOR_WHERE) {
+        // where preserves input collection type
+        result_type = left_type;
+    } else {
+        // pipe: if left is collection, result is array; otherwise same as right
+        if (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST || 
+            left_type == LMD_TYPE_RANGE || left_type == LMD_TYPE_MAP) {
+            result_type = LMD_TYPE_ARRAY;
+        } else {
+            result_type = ast_node->right->type ? ast_node->right->type->type_id : LMD_TYPE_ANY;
+        }
+    }
+    
+    ast_node->type = alloc_type(tp->pool, result_type, sizeof(Type));
+    log_debug("end build pipe expr");
+    return (AstNode*)ast_node;
+}
+
+// build current item reference (~)
+AstNode* build_current_item(Transpiler* tp, TSNode node) {
+    log_debug("build current item (~)");
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_ITEM, node, sizeof(AstNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+    return ast_node;
+}
+
+// build current index reference (~#)
+AstNode* build_current_index(Transpiler* tp, TSNode node) {
+    log_debug("build current index (~#)");
+    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_CURRENT_INDEX, node, sizeof(AstNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(Type));
+    return ast_node;
 }
 
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
@@ -3296,6 +3446,12 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
+    case SYM_PIPE_EXPR:
+        return build_pipe_expr(tp, expr_node);
+    case SYM_CURRENT_ITEM:
+        return build_current_item(tp, expr_node);
+    case SYM_CURRENT_INDEX:
+        return build_current_index(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
     case SYM_LET_STAM:  case SYM_PUB_STAM:  case SYM_TYPE_DEFINE:

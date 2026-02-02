@@ -199,6 +199,14 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
         pre_define_closure_envs(tp, ((AstBinaryNode*)node)->left);
         pre_define_closure_envs(tp, ((AstBinaryNode*)node)->right);
         break;
+    case AST_NODE_PIPE:
+        pre_define_closure_envs(tp, ((AstPipeNode*)node)->left);
+        pre_define_closure_envs(tp, ((AstPipeNode*)node)->right);
+        break;
+    case AST_NODE_CURRENT_ITEM:
+    case AST_NODE_CURRENT_INDEX:
+        // no children to process
+        break;
     case AST_NODE_IF_EXPR:  case AST_NODE_IF_STAM: {
         AstIfNode* if_node = (AstIfNode*)node;
         pre_define_closure_envs(tp, if_node->cond);
@@ -1482,6 +1490,125 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
     }
     // return the array
     strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
+}
+
+// forward declaration
+bool has_current_item_ref(AstNode* node);
+
+// pipe expression: data | transform or data where condition
+// Semantics:
+// - With ~ in right side: auto-map over collection (or apply to scalar)
+// - Without ~: pass whole collection as first argument to function
+// - where: filter items where condition is truthy
+// Implementation: inline the iteration loop similar to for-expression
+void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
+    log_debug("transpile pipe expr");
+    if (!pipe_node || !pipe_node->left || !pipe_node->right) {
+        log_error("Error: invalid pipe_node");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        return;
+    }
+    
+    TypeId left_type = pipe_node->left->type ? pipe_node->left->type->type_id : LMD_TYPE_ANY;
+    bool uses_current_item = has_current_item_ref(pipe_node->right);
+    
+    if (!uses_current_item && pipe_node->op == OPERATOR_PIPE) {
+        // aggregate pipe: pass whole collection as first argument
+        // For now, evaluate left and right, call fn_pipe_call
+        strbuf_append_str(tp->code_buf, "fn_pipe_call(");
+        transpile_box_item(tp, pipe_node->left);
+        strbuf_append_str(tp->code_buf, ", ");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
+    }
+    
+    // Uses ~ or ~# - need to iterate
+    // Generate inline loop using statement expression
+    // Use array instead of list to avoid string merging behavior
+    strbuf_append_str(tp->code_buf, "({\n");
+    strbuf_append_str(tp->code_buf, "  Item _pipe_collection = ");
+    transpile_box_item(tp, pipe_node->left);
+    strbuf_append_str(tp->code_buf, ";\n");
+    strbuf_append_str(tp->code_buf, "  TypeId _pipe_type = item_type_id(_pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "  Array* _pipe_result = array();\n");
+    
+    // Check if collection type - if not, apply to single item
+    strbuf_append_str(tp->code_buf, "  if (_pipe_type == LMD_TYPE_ARRAY || _pipe_type == LMD_TYPE_LIST || ");
+    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_RANGE || _pipe_type == LMD_TYPE_MAP || ");
+    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_INT || _pipe_type == LMD_TYPE_ARRAY_INT64 || ");
+    strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_FLOAT || _pipe_type == LMD_TYPE_ELEMENT) {\n");
+    
+    // Map case - iterate over key-value pairs
+    strbuf_append_str(tp->code_buf, "    if (_pipe_type == LMD_TYPE_MAP) {\n");
+    strbuf_append_str(tp->code_buf, "      ArrayList* _pipe_keys = item_keys(_pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "      if (_pipe_keys) {\n");
+    strbuf_append_str(tp->code_buf, "        for (int64_t _pipe_i = 0; _pipe_i < _pipe_keys->length; _pipe_i++) {\n");
+    strbuf_append_str(tp->code_buf, "          String* _key_str = (String*)_pipe_keys->data[_pipe_i];\n");
+    strbuf_append_str(tp->code_buf, "          Item _pipe_index = s2it(_key_str);\n");
+    strbuf_append_str(tp->code_buf, "          Item _pipe_item = item_attr(_pipe_collection, _key_str->chars);\n");
+    
+    if (pipe_node->op == OPERATOR_WHERE) {
+        // filter - only keep if condition is truthy
+        strbuf_append_str(tp->code_buf, "          if (is_truthy(");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_str(tp->code_buf, ")) {\n");
+        strbuf_append_str(tp->code_buf, "            array_push(_pipe_result, _pipe_item);\n");
+        strbuf_append_str(tp->code_buf, "          }\n");
+    } else {
+        // map - transform and collect
+        strbuf_append_str(tp->code_buf, "          array_push(_pipe_result, ");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_str(tp->code_buf, ");\n");
+    }
+    strbuf_append_str(tp->code_buf, "        }\n");
+    strbuf_append_str(tp->code_buf, "        // Note: _pipe_keys memory managed by heap GC\n");
+    strbuf_append_str(tp->code_buf, "      }\n");
+    strbuf_append_str(tp->code_buf, "    } else {\n");
+    
+    // Array/List/Range case - iterate with numeric index
+    strbuf_append_str(tp->code_buf, "      int64_t _pipe_len = fn_len(_pipe_collection);\n");
+    strbuf_append_str(tp->code_buf, "      for (int64_t _pipe_i = 0; _pipe_i < _pipe_len; _pipe_i++) {\n");
+    strbuf_append_str(tp->code_buf, "        Item _pipe_index = i2it(_pipe_i);\n");
+    strbuf_append_str(tp->code_buf, "        Item _pipe_item = item_at(_pipe_collection, (int)_pipe_i);\n");
+    
+    if (pipe_node->op == OPERATOR_WHERE) {
+        // filter
+        strbuf_append_str(tp->code_buf, "        if (is_truthy(");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_str(tp->code_buf, ")) {\n");
+        strbuf_append_str(tp->code_buf, "          array_push(_pipe_result, _pipe_item);\n");
+        strbuf_append_str(tp->code_buf, "        }\n");
+    } else {
+        // map
+        strbuf_append_str(tp->code_buf, "        array_push(_pipe_result, ");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_str(tp->code_buf, ");\n");
+    }
+    strbuf_append_str(tp->code_buf, "      }\n");
+    strbuf_append_str(tp->code_buf, "    }\n");
+    strbuf_append_str(tp->code_buf, "  } else {\n");
+    
+    // Scalar case - apply transform once
+    strbuf_append_str(tp->code_buf, "    Item _pipe_item = _pipe_collection;\n");
+    strbuf_append_str(tp->code_buf, "    Item _pipe_index = ITEM_NULL;\n");
+    
+    if (pipe_node->op == OPERATOR_WHERE) {
+        strbuf_append_str(tp->code_buf, "    if (is_truthy(");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_str(tp->code_buf, ")) {\n");
+        strbuf_append_str(tp->code_buf, "      array_push(_pipe_result, _pipe_item);\n");
+        strbuf_append_str(tp->code_buf, "    }\n");
+    } else {
+        strbuf_append_str(tp->code_buf, "    array_push(_pipe_result, ");
+        transpile_box_item(tp, pipe_node->right);
+        strbuf_append_str(tp->code_buf, ");\n");
+    }
+    strbuf_append_str(tp->code_buf, "  }\n");
+    
+    // Return result
+    strbuf_append_str(tp->code_buf, "  array_end(_pipe_result);\n");
+    strbuf_append_str(tp->code_buf, "})");;
 }
 
 // while statement (procedural only)
@@ -3034,6 +3161,17 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_BINARY:
         transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
+        break;
+    case AST_NODE_PIPE:
+        transpile_pipe_expr(tp, (AstPipeNode*)expr_node);
+        break;
+    case AST_NODE_CURRENT_ITEM:
+        // ~ references the current pipe context item
+        strbuf_append_str(tp->code_buf, "_pipe_item");
+        break;
+    case AST_NODE_CURRENT_INDEX:
+        // ~# references the current pipe context key/index
+        strbuf_append_str(tp->code_buf, "_pipe_index");
         break;
     case AST_NODE_IF_EXPR:
         transpile_if(tp, (AstIfNode*)expr_node);
