@@ -2975,7 +2975,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "pipe_where",
+          "value": "pipe",
           "content": {
             "type": "SEQ",
             "members": [
@@ -4494,7 +4494,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "pipe_where",
+          "value": "pipe",
           "content": {
             "type": "SEQ",
             "members": [
@@ -7688,10 +7688,6 @@
       {
         "type": "STRING",
         "value": "pipe"
-      },
-      {
-        "type": "STRING",
-        "value": "pipe_where"
       },
       {
         "type": "SYMBOL",
