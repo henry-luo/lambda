@@ -1,0 +1,79 @@
+"===== PIPE OPERATOR BASIC TESTS =====--- Array iteration with ~ ---"
+[2, 4, 6]
+[15, 25, 35]
+[5, 10, 15]
+[4, 9, 14]
+"--- Array iteration with ~# (index) ---"
+[0, 1, 2]
+[{
+    item: "a",
+    index: 0
+  }, {
+    item: "b",
+    index: 1
+  }, {
+    item: "c",
+    index: 2
+  }]
+[0, 10, 20]
+"--- Map iteration with ~ ---"
+[10, 20, 30]
+["a", "b", "c"]
+[{
+    key: "a",
+    value: 1
+  }, {
+    key: "b",
+    value: 2
+  }]
+"===== WHERE OPERATOR BASIC TESTS =====--- Filter arrays ---"
+[2, 4, 6]
+[3, 4, 5]
+[1, 2, 3]
+[2, 2]
+[1, 2, 4, 5]
+"--- Filter arrays with index ---"
+["a", "c", "e"]
+[100, 200, 300]
+"--- Filter maps ---"
+[5, 8]
+"===== CHAINED PIPE AND WHERE =====--- Pipe after pipe ---"
+[4, 6, 8]
+[6, 7, 8]
+"--- Where after pipe ---"
+[6, 8, 10]
+"--- Pipe after where ---"
+[30, 40, 50]
+"--- Complex chains ---"
+[12, 18, 24, 30]
+"===== PIPE WITH COMPLEX EXPRESSIONS =====--- Pipe creating maps ---"
+[{
+    value: 1,
+    doubled: 2
+  }, {
+    value: 2,
+    doubled: 4
+  }, {
+    value: 3,
+    doubled: 6
+  }]
+[{
+    index: 0,
+    name: "x"
+  }, {
+    index: 1,
+    name: "y"
+  }, {
+    index: 2,
+    name: "z"
+  }]
+"--- Pipe with nested structures ---"
+[1, 2, 3]
+[2, 4, 6]
+"===== EDGE CASES =====--- Empty collections ------ Single element ---"
+[84]
+[5]
+[101]
+"--- All elements filtered ------ No elements filtered ---"
+[1, 2, 3]
+"===== END PIPE AND WHERE TESTS ====="
