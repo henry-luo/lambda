@@ -40,8 +40,7 @@ extern "C" {
 #define SYM_UNARY_EXPR sym_unary_expr
 #define SYM_BINARY_EXPR sym_binary_expr
 
-// Pipe expression and current item references
-#define SYM_PIPE_EXPR sym_pipe_expr
+// Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_ITEM sym_current_item
 #define SYM_CURRENT_INDEX sym_current_index
 
