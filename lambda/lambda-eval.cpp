@@ -1012,6 +1012,11 @@ Type* fn_type(Item item) {
     return (Type*)type;
 }
 
+// returns the TypeId of an item for use in MIR-compiled code
+TypeId item_type_id(Item item) {
+    return item.type_id();
+}
+
 extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {

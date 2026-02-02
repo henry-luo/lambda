@@ -444,6 +444,13 @@ typedef struct Context {
     Item fn_quantile(Item a, Item p);
 
     Range* fn_to(Item a, Item b);
+    
+    // pipe operations
+    typedef Item (*PipeMapFn)(Item item, Item index);
+    Item fn_pipe_map(Item collection, PipeMapFn transform);
+    Item fn_pipe_where(Item collection, PipeMapFn predicate);
+    Item fn_pipe_call(Item collection, Item func);
+
     String* fn_string(Item item);
     String *fn_strcat(String *left, String *right);
     Item fn_normalize(Item str, Item type);
@@ -471,6 +478,7 @@ typedef struct Context {
 
     // returns the type of the item
     Type* fn_type(Item item);
+    TypeId item_type_id(Item item);  // returns the TypeId of an item (for MIR use)
 
     Item fn_input1(Item url);
     Item fn_input2(Item url, Item options);

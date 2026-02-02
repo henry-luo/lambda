@@ -230,6 +230,10 @@ typedef enum Operator {
     OPERATOR_IS,
     OPERATOR_IN,
 
+    // pipe operators
+    OPERATOR_PIPE,      // | pipe operator
+    OPERATOR_WHERE,     // where filter clause
+
     // occurrence
     OPERATOR_OPTIONAL,  // ?
     OPERATOR_ONE_MORE,  // +

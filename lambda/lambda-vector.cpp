@@ -866,6 +866,171 @@ static Item vec_unary_math(Item item, double (*func)(double), const char* name) 
     return { .array_float = result };
 }
 
+//==============================================================================
+// Pipe Operations
+//==============================================================================
+
+typedef Item (*PipeMapFn)(Item item, Item index);
+
+// helper: create an Item from an integer index
+static Item index_to_item(int64_t index) {
+    return { .item = i2it((int)index) };
+}
+
+// fn_pipe_map: apply transform function to each element of a collection
+// For arrays/lists/ranges: ~# is index, ~ is value
+// For maps: ~# is key (as string), ~ is value
+Item fn_pipe_map(Item collection, PipeMapFn transform) {
+    TypeId type = get_type_id(collection);
+    
+    // scalar case: apply transform directly
+    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST && 
+        type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
+        type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
+        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT) {
+        return transform(collection, ItemNull);
+    }
+    
+    // map case: iterate over key-value pairs
+    if (type == LMD_TYPE_MAP) {
+        Map* mp = collection.map;
+        List* result = list();
+        
+        // use item_keys to get the list of keys
+        ArrayList* keys = item_keys(collection);
+        if (keys) {
+            for (int64_t i = 0; i < keys->length; i++) {
+                String* key_str = (String*)keys->data[i];
+                Item key_item = { .item = s2it(key_str) };
+                Item value = map_get(mp, key_item);
+                Item transformed = transform(value, key_item);
+                list_push(result, transformed);
+            }
+            arraylist_free(keys);
+        }
+        return { .list = result };
+    }
+    
+    // element case: iterate over children (content items, not attributes)
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = collection.element;
+        List* result = list();
+        
+        // element content starts at items[0] (attributes are in separate data struct)
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            Item idx = index_to_item(i);
+            Item transformed = transform(child, idx);
+            list_push(result, transformed);
+        }
+        return { .list = result };
+    }
+    
+    // collection case: iterate with index
+    int64_t len = vector_length(collection);
+    if (len < 0) return ItemError;
+    
+    List* result = list();
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = vector_get(collection, i);
+        Item idx = index_to_item(i);
+        Item transformed = transform(elem, idx);
+        list_push(result, transformed);
+    }
+    return { .list = result };
+}
+
+// fn_pipe_where: filter elements where predicate is truthy
+Item fn_pipe_where(Item collection, PipeMapFn predicate) {
+    TypeId type = get_type_id(collection);
+    
+    // scalar case: return collection if truthy, else null
+    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST && 
+        type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
+        type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
+        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT) {
+        Item result = predicate(collection, ItemNull);
+        if (is_truthy(result)) {
+            return collection;
+        }
+        return ItemNull;
+    }
+    
+    // map case: filter key-value pairs (return list of values that pass predicate)
+    if (type == LMD_TYPE_MAP) {
+        Map* mp = collection.map;
+        List* result = list();
+        
+        ArrayList* keys = item_keys(collection);
+        if (keys) {
+            for (int64_t i = 0; i < keys->length; i++) {
+                String* key_str = (String*)keys->data[i];
+                Item key_item = { .item = s2it(key_str) };
+                Item value = map_get(mp, key_item);
+                Item pred_result = predicate(value, key_item);
+                if (is_truthy(pred_result)) {
+                    list_push(result, value);
+                }
+            }
+            arraylist_free(keys);
+        }
+        return { .list = result };
+    }
+    
+    // element case: filter children (content items, not attributes)
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = collection.element;
+        List* result = list();
+        
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            Item idx = index_to_item(i);
+            Item pred_result = predicate(child, idx);
+            if (is_truthy(pred_result)) {
+                list_push(result, child);
+            }
+        }
+        return { .list = result };
+    }
+    
+    // collection case
+    int64_t len = vector_length(collection);
+    if (len < 0) return ItemError;
+    
+    List* result = list();
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = vector_get(collection, i);
+        Item idx = index_to_item(i);
+        Item pred_result = predicate(elem, idx);
+        if (is_truthy(pred_result)) {
+            list_push(result, elem);
+        }
+    }
+    return { .list = result };
+}
+
+// fn_pipe_call: pass collection as first argument to a function
+// This handles the aggregate case where ~ is not used
+Item fn_pipe_call(Item collection, Item func_or_result) {
+    // If the right side is already evaluated (not using ~), 
+    // we assume it's a function that should receive the collection
+    // For now, we check if it's a callable
+    TypeId type = get_type_id(func_or_result);
+    
+    if (type == LMD_TYPE_FUNC) {
+        // call function with collection as first argument
+        Function* fn = func_or_result.function;
+        if (fn && fn->ptr) {
+            return fn_call1(fn, collection);
+        }
+        return ItemError;
+    }
+    
+    // if right side is not a function, return it as-is
+    // (the transform was already computed without ~)
+    return func_or_result;
+}
+
 // sqrt(vec) - element-wise square root
 Item fn_sqrt(Item item) {
     // Check if scalar
