@@ -146,10 +146,7 @@ let mem_test3 = for (i in 1 to 500) i * 2
 let complex_result = sum([1, 2, 3] * [2, 2, 2]) + avg([10, 20, 30] / [2, 4, 6])
 
 // Vector operations in control flow
-for (multiplier in [1, 2, 3, 4, 5]) {
-    let result = [10, 20, 30] * multiplier
-    sum(result)
-}
+for (multiplier in [1, 2, 3, 4, 5]) sum([10, 20, 30] * multiplier)
 
 // Nested vector operations
 let nested_calc = ([1, 2, 3] + [4, 5, 6]) * ([7, 8, 9] - [1, 1, 1])
@@ -183,19 +180,16 @@ if ([false]) "truthy false" else "falsy false"
 "=== Memory Fragmentation Test ==="
 
 // Create and discard many vectors
-for (i in 1 to 50) {
-    let temp_vec = [i, i*2, i*3]
-    temp_vec + [1, 2, 3]
-}
+[for (i in 1 to 50) [i, i*2, i*3] + [1, 2, 3]]
 
 "=== Vector with Range Integration ==="
 
 // Combine vectors with ranges
 let range_vec = for (x in 1 to 10) x
-range_vec + [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+[range_vec + [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
 
 // Range to vector conversion performance
-for (x in 1 to 100) x
+[for (x in 1 to 100) x]
 
 "=== Function Call Overhead ==="
 

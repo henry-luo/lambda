@@ -1,38 +1,17 @@
 "===== VECTOR ADVANCED OPERATIONS TEST ======== Broadcasting Rules ==="
-6
-7
-8
-4
-5
-6
-7
-8
+[6, 7, 8]
+[4, 5, 6, 7, 8]
 "=== Complex Expressions ==="
-10
-14
-18
-7
-9
-11
-13
-15
-9
-17
-16
-30
+[10, 14, 18]
+[7, 9, 11]
+[13, 15]
+[9, 17]
+[16, 30]
 "=== Integration with Variables ==="
-5
-7
-9
-10
-20
-30
-9
-8
-7
-50
-70
-90
+[5, 7, 9]
+[10, 20, 30]
+[9, 8, 7]
+[50, 70, 90]
 "=== Integration with Functions ==="
 4
 0
@@ -68,21 +47,13 @@
 6
 "=== Mixed Type Vectors ==="
 [1, "hello", true, 3.14]
-4
-error
-6
-2
-4
-error
-8
+[4, error, 6]
+[2, 4, error, 8]
 "=== Error Cases ==="
 [inf, inf, inf]
 [3, inf, 5]
-nan
-nan
-nan
-0
-nan
+[nan, nan, nan]
+[0, nan]
 "=== Vector Comparisons ==="
 error
 error
@@ -111,9 +82,7 @@ error
 14
 15
 "=== Memory and Performance Edge Cases ==="
-4
-8
-12
+[4, 8, 12]
 "=== Type System Integration ==="
 array
 array
