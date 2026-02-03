@@ -44,4 +44,10 @@ false
 30
 4
 11
+6
+12
+"hello world"
+false
+17
+[3, 7, 11]
 "All box_unbox_advanced tests completed"
