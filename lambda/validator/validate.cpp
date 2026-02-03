@@ -58,13 +58,48 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
     }
     
     // Handle compound types
+    // Note: Must check for generic types (TYPE_MAP, TYPE_ELMT, TYPE_ARRAY) which are
+    // simple Type structs, not TypeMap/TypeElmt/TypeArray. Casting them would read garbage.
+    extern Type TYPE_MAP;
+    extern Type TYPE_ELMT;
+    extern TypeArray TYPE_ARRAY;
+    
     if (base_type->type_id == LMD_TYPE_MAP) {
+        if (base_type == &TYPE_MAP) {
+            // Generic map type - just check if item is a map
+            if (item.type_id() == LMD_TYPE_MAP) {
+                result->valid = true;
+            } else {
+                add_type_mismatch_error(result, validator, "map", item.type_id());
+            }
+            return result;
+        }
         return validate_against_map_type(validator, item, (TypeMap*)base_type);
     }
     if (base_type->type_id == LMD_TYPE_ELEMENT) {
+        if (base_type == &TYPE_ELMT) {
+            // Generic element type - just check if item is an element
+            if (item.type_id() == LMD_TYPE_ELEMENT) {
+                result->valid = true;
+            } else {
+                add_type_mismatch_error(result, validator, "element", item.type_id());
+            }
+            return result;
+        }
         return validate_against_element_type(validator, item, (TypeElmt*)base_type);
     }
     if (base_type->type_id == LMD_TYPE_ARRAY || base_type->type_id == LMD_TYPE_LIST) {
+        if (base_type == (Type*)&TYPE_ARRAY) {
+            // Generic array type - just check if item is an array/list
+            if (item.type_id() == LMD_TYPE_ARRAY || item.type_id() == LMD_TYPE_LIST ||
+                item.type_id() == LMD_TYPE_ARRAY_INT || item.type_id() == LMD_TYPE_ARRAY_INT64 ||
+                item.type_id() == LMD_TYPE_ARRAY_FLOAT) {
+                result->valid = true;
+            } else {
+                add_type_mismatch_error(result, validator, "array", item.type_id());
+            }
+            return result;
+        }
         return validate_against_array_type(validator, item, (TypeArray*)base_type);
     }
     
