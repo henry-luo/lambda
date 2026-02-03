@@ -45,6 +45,11 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         return validate_occurrence_type(validator, item, (TypeUnary*)base_type);
     }
 
+    // Handle TypeBinary (union/intersection: |, &, \)
+    if (base_type->type_id == LMD_TYPE_TYPE_BINARY) {
+        return validate_binary_type(validator, item, (TypeBinary*)base_type);
+    }
+
     // Handle numeric types with promotion
     if (LMD_TYPE_INT <= base_type->type_id && base_type->type_id <= LMD_TYPE_NUMBER) {
         // Number promotion - allow int/float/decimal interchangeably
@@ -434,6 +439,11 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_TYPE_UNARY:
             // TypeUnary passed directly - delegate to occurrence validation
             result = validate_occurrence_type(validator, item, (TypeUnary*)type);
+            break;
+            
+        case LMD_TYPE_TYPE_BINARY:
+            // TypeBinary passed directly - delegate to binary type validation
+            result = validate_binary_type(validator, item, (TypeBinary*)type);
             break;
             
         default:

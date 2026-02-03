@@ -300,7 +300,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
-            case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
+            case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:  case LMD_TYPE_TYPE_BINARY:
                 print_item(strbuf, *(Item*)data, depth, indent);
                 break;
             case LMD_TYPE_ANY:
@@ -583,6 +583,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_TYPE: {
         TypeType *type = (TypeType*)item.type;
+        // Check if inner type is a TypeBinary (union/intersection)
+        if (type->type->type_id == LMD_TYPE_TYPE_BINARY) {
+            strbuf_append_str(strbuf, "type");  // union types print as "type"
+            break;
+        }
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
             // print as "type.null"
@@ -590,6 +595,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         } else {
             strbuf_append_str(strbuf, type_name);
         }
+        break;
+    }
+    case LMD_TYPE_TYPE_BINARY: {
+        // Direct TypeBinary (not wrapped in TypeType) prints as "type"
+        strbuf_append_str(strbuf, "type");
         break;
     }
     case LMD_TYPE_ERROR: {
@@ -687,6 +697,8 @@ char* format_type(Type *type) {
         return "Func*";
     case LMD_TYPE_TYPE:
         return "Type*";
+    case LMD_TYPE_TYPE_BINARY:
+        return "Type*";  // union/intersection types are still Type*
     default:
         return "UNKNOWN";
     }
