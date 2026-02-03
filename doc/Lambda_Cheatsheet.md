@@ -38,7 +38,8 @@ int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
-(a: int, b: string) -> bool   // Function type
+fn (a: int, b: string) bool   // Function type
+fn int                        // Function type (no params)
 {a: int, b: bool}             // Map type
 <div id:symbol; <br>>         // Element type
 ```
