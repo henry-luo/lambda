@@ -121,7 +121,7 @@ fi
 
 # Verify npx can access tree-sitter CLI
 echo "Verifying tree-sitter CLI access via npx..."
-if npx tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
+if npx --yes tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
     echo "Tree-sitter CLI 0.24.7 accessible via npx"
 else
     echo "Warning: tree-sitter CLI may need to be downloaded on first use"
@@ -137,6 +137,52 @@ if ! command -v cmake >/dev/null 2>&1; then
         exit 1
     fi
 fi
+
+# Check for pkg-config (needed for dependency discovery)
+if ! command -v pkg-config >/dev/null 2>&1; then
+    echo "Installing pkg-config..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install pkg-config
+    else
+        echo "Error: pkg-config is required. Install it manually or install Homebrew first."
+        exit 1
+    fi
+fi
+
+# Check for meson and ninja (needed for ThorVG)
+if ! command -v meson >/dev/null 2>&1; then
+    echo "Installing meson and ninja..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install meson ninja
+    elif command -v pip3 >/dev/null 2>&1; then
+        pip3 install --user meson ninja
+    else
+        echo "Error: meson is required for ThorVG. Install it manually or install Homebrew first."
+        exit 1
+    fi
+fi
+
+# Check for openssl (needed for libcurl with HTTP/2)
+if ! brew list openssl@3 >/dev/null 2>&1; then
+    echo "Installing openssl@3..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install openssl@3
+    else
+        echo "Warning: openssl not found. libcurl with HTTP/2 may not build correctly."
+    fi
+fi
+
+# Check for freetype and expat (needed for FontConfig)
+for dep in freetype expat; do
+    if ! brew list $dep >/dev/null 2>&1; then
+        echo "Installing $dep..."
+        if command -v brew >/dev/null 2>&1; then
+            brew install $dep
+        else
+            echo "Warning: $dep not found. FontConfig may not build correctly."
+        fi
+    fi
+done
 
 # Check for xxd (needed for binary data conversion)
 if ! command -v xxd >/dev/null 2>&1; then
@@ -245,8 +291,8 @@ build_mir_for_mac() {
     fi
 
     if [ ! -d "build_temp/mir" ]; then
-        cd build_temp
         echo "Cloning MIR repository..."
+        cd build_temp
         git clone https://github.com/vnmakarov/mir.git || {
             echo "Warning: Could not clone MIR repository"
             cd - > /dev/null
@@ -255,7 +301,10 @@ build_mir_for_mac() {
         cd - > /dev/null
     fi
 
-    cd "build_temp/mir"
+    cd "build_temp/mir" || {
+        echo "Error: Could not enter build_temp/mir directory"
+        return 1
+    }
 
     echo "Building MIR..."
     if make -j$(sysctl -n hw.ncpu); then
@@ -914,9 +963,9 @@ build_nghttp2_for_mac() {
     return 1
 }
 
-# Function to build libcurl with HTTP/2 support for Mac (using mbedTLS)
+# Function to build libcurl with HTTP/2 support for Mac (using OpenSSL)
 build_curl_with_http2_for_mac() {
-    echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
+    echo "Building libcurl with HTTP/2 and OpenSSL support for Mac..."
 
     # Check if already built
     if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
@@ -939,27 +988,31 @@ build_curl_with_http2_for_mac() {
 
     cd mac-deps/curl-8.10.1
 
-    # Get mbedTLS path from Homebrew
+    # Get OpenSSL path from Homebrew
     if command -v brew >/dev/null 2>&1; then
-        MBEDTLS_PATH=$(brew --prefix mbedtls)
-        if [ ! -d "$MBEDTLS_PATH" ]; then
-            echo "❌ mbedTLS not found in Homebrew. Install it with: brew install mbedtls"
+        OPENSSL_PATH=$(brew --prefix openssl@3)
+        if [ ! -d "$OPENSSL_PATH" ]; then
+            echo "❌ OpenSSL not found in Homebrew. Install it with: brew install openssl@3"
             cd - > /dev/null
             return 1
         fi
     else
-        echo "❌ Homebrew required for mbedTLS path"
+        echo "❌ Homebrew required for OpenSSL path"
         cd - > /dev/null
         return 1
     fi
 
-    # Configure libcurl with HTTP/2 and mbedTLS support
-    echo "Configuring libcurl with HTTP/2 and mbedTLS support..."
-    echo "mbedTLS path: $MBEDTLS_PATH"
+    # Configure libcurl with HTTP/2 and OpenSSL support
+    echo "Configuring libcurl with HTTP/2 and OpenSSL support..."
+    echo "OpenSSL path: $OPENSSL_PATH"
+    
+    # Set PKG_CONFIG_PATH for OpenSSL discovery
+    export PKG_CONFIG_PATH="$OPENSSL_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
+    
     if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
         --enable-static --disable-shared \
-        --with-mbedtls="$MBEDTLS_PATH" \
-        --without-openssl --without-gnutls --without-wolfssl \
+        --with-openssl="$OPENSSL_PATH" \
+        --without-mbedtls --without-gnutls --without-wolfssl \
         --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
         --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
@@ -979,14 +1032,14 @@ build_curl_with_http2_for_mac() {
         if make -j$(sysctl -n hw.ncpu); then
             echo "Installing libcurl..."
             if make install; then
-                echo "✅ libcurl with HTTP/2 and mbedTLS built successfully"
+                echo "✅ libcurl with HTTP/2 and OpenSSL built successfully"
 
-                # Verify mbedTLS linkage
-                echo "Verifying mbedTLS linkage..."
-                if otool -L lib/.libs/libcurl.a 2>/dev/null | grep -q mbedtls; then
-                    echo "✅ libcurl is properly linked with mbedTLS"
+                # Verify OpenSSL linkage
+                echo "Verifying SSL linkage..."
+                if otool -L lib/.libs/libcurl.a 2>/dev/null | grep -q libssl; then
+                    echo "✅ libcurl is properly linked with OpenSSL"
                 else
-                    echo "⚠️  Note: Static library linkage verification may not show mbedTLS (normal for .a files)"
+                    echo "⚠️  Note: Static library linkage verification may not show OpenSSL (normal for .a files)"
                 fi
 
                 cd - > /dev/null
@@ -1106,7 +1159,7 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     make clean || true
 
     # Build static library for Mac (creates libtree-sitter-lambda.a)
-    make libtree-sitter-lambda.a
+    make TS="npx --yes tree-sitter-cli@0.24.7" libtree-sitter-lambda.a
 
     cd - > /dev/null
     echo "Tree-sitter-lambda built successfully"
@@ -1129,14 +1182,14 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
         echo "Generating tree-sitter-javascript parser..."
         if command -v npx >/dev/null 2>&1; then
-            npx tree-sitter-cli@0.24.7 generate
+            npx --yes tree-sitter-cli@0.24.7 generate
         else
             echo "Warning: npx not available, assuming parser files are already generated"
         fi
     fi
 
     # Build static library for Mac (creates libtree-sitter-javascript.a)
-    make libtree-sitter-javascript.a
+    make TS="npx --yes tree-sitter-cli@0.24.7" libtree-sitter-javascript.a
 
     cd - > /dev/null
     echo "Tree-sitter-javascript built successfully"
