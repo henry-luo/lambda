@@ -1,0 +1,19 @@
+"1. Int comparison functions"
+[true, false, true, false, true, false, true, false, true, false, true, false]
+"2. Float comparison functions"
+[true, true, true, true, true, true]
+"3. Bool equality (native)"
+[true, true, false, true, false]
+"4. Mixed int/float comparison (native)"
+[true, false, true, false]
+"5. Untyped args (runtime fn_*)"
+[true, true, true, true]
+"6. Mixed typed/untyped (runtime fn_*)"
+[true, false, true, false]
+"7. Comparisons in conditionals"
+[5, 8, 3, 2, true, false, false]
+"8. Comparisons in recursive functions"
+[15, 15]
+"9. Complex expressions with comparisons"
+['negative', 'zero', 'small', 'large']
+"All sys func optimization tests passed."

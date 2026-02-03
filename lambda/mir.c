@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>  // for va_list
+#include <math.h>    // for sin, cos, tan, sqrt, log, log10, exp, fabs, floor, ceil, round
 #include "../lib/log.h"
 #include "../lib/stringbuf.h"  // for StringBuf functions
 #include "mir.h"
@@ -38,6 +39,18 @@ typedef struct {
 func_obj_t func_list[] = {
     // C library functions
     {"memset", (fn_ptr) memset},
+    // C math functions (for native math optimization)
+    {"sin", (fn_ptr) sin},
+    {"cos", (fn_ptr) cos},
+    {"tan", (fn_ptr) tan},
+    {"sqrt", (fn_ptr) sqrt},
+    {"log", (fn_ptr) log},
+    {"log10", (fn_ptr) log10},
+    {"exp", (fn_ptr) exp},
+    {"fabs", (fn_ptr) fabs},
+    {"floor", (fn_ptr) floor},
+    {"ceil", (fn_ptr) ceil},
+    {"round", (fn_ptr) round},
     // Stack overflow protection
     {"lambda_stack_overflow_error", (fn_ptr) lambda_stack_overflow_error},
     // {"printf", (fn_ptr) printf}, // printf does not work
