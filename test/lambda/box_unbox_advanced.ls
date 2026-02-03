@@ -185,6 +185,28 @@ get_len("test")                  // 4
 get_len("hello world")           // 11
 
 //==============================================================================
+// SECTION 13: Forward-referenced function calls (call before definition)
+//==============================================================================
+
+// Call function before it's defined - must properly box return value
+forward_mul(2, 3.0)              // 6 (float returned, must be boxed as Item)
+forward_add_int(5, 7)            // 12 (int returned)
+forward_concat("hello", " world") // "hello world" (string returned)
+forward_negate(true)             // false (bool returned)
+
+// Forward-declared functions defined later
+pub fn forward_mul(a: float, b: float) float => a * b
+pub fn forward_add_int(a: int, b: int) int => a + b
+fn forward_concat(a: string, b: string) string => a ++ b
+fn forward_negate(x: bool) bool => not x
+
+// Mixed: call forward-ref in expression
+10 + forward_add_int(3, 4)       // 17
+
+// Forward-ref call inside collection
+[forward_add_int(1, 2), forward_add_int(3, 4), forward_add_int(5, 6)]  // [3, 7, 11]
+
+//==============================================================================
 // FINAL: Summary result
 //==============================================================================
 
