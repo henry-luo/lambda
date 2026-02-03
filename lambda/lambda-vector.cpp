@@ -34,6 +34,12 @@ static inline bool is_homogeneous_array(TypeId type) {
            type == LMD_TYPE_ARRAY_FLOAT;
 }
 
+// check if type is any array type (homogeneous or heterogeneous)
+static inline bool is_array_type(TypeId type) {
+    return type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
+           type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY;
+}
+
 // get length of a vector-like item
 static int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
@@ -93,14 +99,16 @@ static bool needs_float_result(TypeId a, TypeId b) {
 // op: 0=add, 1=sub, 2=mul, 3=div, 4=mod, 5=pow
 static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     int64_t len = vector_length(vec);
+    TypeId vec_type = get_type_id(vec);
     if (len < 0) return ItemError;
     if (len == 0) {
-        // return empty list for empty input
-        List* result = list();
-        return { .list = result };
+        // return empty array/list matching input type
+        if (is_array_type(vec_type)) {
+            return { .array = array() };
+        }
+        return { .list = list() };
     }
 
-    TypeId vec_type = get_type_id(vec);
     TypeId scalar_type = get_type_id(scalar);
     double scalar_val = item_to_double(scalar);
     
@@ -158,15 +166,20 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         return { .array_float = result };
     }
 
-    // heterogeneous list: element-wise with ERROR for non-numeric
-    List* result = list();
+    // heterogeneous: element-wise with ERROR for non-numeric
+    // preserve array type if input was array
+    bool return_array = is_array_type(vec_type);
+    Array* arr_result = return_array ? array() : nullptr;
+    List* list_result = return_array ? nullptr : list();
+    
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(vec, i);
         TypeId elem_type = get_type_id(elem);
         
         if (!is_scalar_numeric(elem_type)) {
             // non-numeric element: produce ERROR, continue
-            list_push(result, ItemError);
+            if (return_array) array_push(arr_result, ItemError);
+            else list_push(list_result, ItemError);
             continue;
         }
         
@@ -186,14 +199,18 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         }
         
         // try to preserve integer type if possible
+        Item res_item;
         if (scalar_type != LMD_TYPE_FLOAT && elem_type != LMD_TYPE_FLOAT && 
             op != 3 && op != 5 && res == (int64_t)res) {
-            list_push(result, { .item = i2it((int64_t)res) });
+            res_item = { .item = i2it((int64_t)res) };
         } else {
-            list_push(result, push_d(res));
+            res_item = push_d(res);
         }
+        
+        if (return_array) array_push(arr_result, res_item);
+        else list_push(list_result, res_item);
     }
-    return { .list = result };
+    return return_array ? Item{ .array = arr_result } : Item{ .list = list_result };
 }
 
 //==============================================================================
@@ -203,17 +220,17 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
 static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     int64_t len_a = vector_length(vec_a);
     int64_t len_b = vector_length(vec_b);
+    TypeId type_a = get_type_id(vec_a);
+    TypeId type_b = get_type_id(vec_b);
     
     if (len_a < 0 || len_b < 0) return ItemError;
     
-    // empty vectors
-    if (len_a == 0 && len_b == 0) {
-        List* result = list();
-        return { .list = result };
-    }
+    // empty vectors - preserve array type if either was array
     if (len_a == 0 || len_b == 0) {
-        List* result = list();
-        return { .list = result };
+        if (is_array_type(type_a) || is_array_type(type_b)) {
+            return { .array = array() };
+        }
+        return { .list = list() };
     }
     
     // single-element broadcasting
@@ -233,8 +250,6 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     }
     
     int64_t len = len_a;
-    TypeId type_a = get_type_id(vec_a);
-    TypeId type_b = get_type_id(vec_b);
     bool use_float = needs_float_result(type_a, type_b) || op == 3;
     
     // fast path: both ArrayInt64
@@ -276,7 +291,11 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     }
     
     // heterogeneous: element-wise with ERROR for non-numeric
-    List* result = list();
+    // preserve array type if either input was array
+    bool return_array = is_array_type(type_a) || is_array_type(type_b);
+    Array* arr_result = return_array ? array() : nullptr;
+    List* list_result = return_array ? nullptr : list();
+    
     for (int64_t i = 0; i < len; i++) {
         Item elem_a = vector_get(vec_a, i);
         Item elem_b = vector_get(vec_b, i);
@@ -284,7 +303,8 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         TypeId tb = get_type_id(elem_b);
         
         if (!is_scalar_numeric(ta) || !is_scalar_numeric(tb)) {
-            list_push(result, ItemError);
+            if (return_array) array_push(arr_result, ItemError);
+            else list_push(list_result, ItemError);
             continue;
         }
         
@@ -302,14 +322,18 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
             default: res = NAN; break;
         }
         
+        Item res_item;
         if (ta != LMD_TYPE_FLOAT && tb != LMD_TYPE_FLOAT && 
             op != 3 && op != 5 && res == (int64_t)res) {
-            list_push(result, { .item = i2it((int64_t)res) });
+            res_item = { .item = i2it((int64_t)res) };
         } else {
-            list_push(result, push_d(res));
+            res_item = push_d(res);
         }
+        
+        if (return_array) array_push(arr_result, res_item);
+        else list_push(list_result, res_item);
     }
-    return { .list = result };
+    return return_array ? Item{ .array = arr_result } : Item{ .list = list_result };
 }
 
 //==============================================================================
