@@ -301,6 +301,8 @@
                 "lambda/mark_editor.cpp",
                 "lambda/math_symbols.cpp",
                 "lambda/validator/validate.cpp",
+                "lambda/validator/validate_helpers.cpp",
+                "lambda/validator/validate_pattern.cpp",
                 "lambda/validator/doc_validator.cpp",
                 "lambda/validator/ast_validate.cpp",
                 "lambda/validator/error_reporting.cpp",
