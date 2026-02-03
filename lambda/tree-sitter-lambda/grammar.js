@@ -800,8 +800,11 @@ module.exports = grammar({
     ),
 
     fn_type: $ => seq(
-      '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')',
-      '->', field('type', $._type_expr),
+      'fn',
+      optional(seq(
+        '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')',
+      )),
+      field('type', $._type_expr),
     ),
 
     primary_type: $ => choice(
