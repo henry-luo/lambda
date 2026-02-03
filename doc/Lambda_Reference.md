@@ -9,13 +9,16 @@
 5. [Literals](#literals)
 6. [Variables and Declarations](#variables-and-declarations)
 7. [Expressions](#expressions)
+   - [Pipe Expressions](#pipe-expressions)
 8. [Control Flow](#control-flow)
+   - [For Expressions with Clauses](#extended-for-expression-clauses)
 9. [Functions](#functions)
 10. [Collections](#collections)
 11. [Type System](#type-system)
 12. [System Functions](#system-functions)
 13. [Input/Output and Parsing](#inputoutput-and-parsing)
 14. [Operators](#operators)
+    - [Pipe and Filter Operators](#pipe-and-filter-operators)
 15. [Modules and Imports](#modules-and-imports)
 16. [Error Handling](#error-handling)
 17. [Memory Management](#memory-management)
@@ -33,7 +36,7 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 - **JIT Compilation**: Near-native performance through MIR-based compilation
 - **Cross-Platform**: Runs on macOS, Linux, Windows with consistent behavior
 - **Rich Type System**: Strong typing with type inference and advanced type constructs
-- **Document Processing**: Built-in support for 13+ input formats and multiple output formats
+- **Document Processing**: Built-in support for 12+ input formats and multiple output formats
 - **Unicode Support**: Configurable Unicode support with ICU integration
 - **Memory Safe**: Reference counting and pool-based memory management
 
@@ -102,17 +105,17 @@ Lambda Script has a rich type system with both primitive and composite types:
 
 ### Primitive Types
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `null` | Null/void value | `null` |
-| `bool` | Boolean values | `true`, `false` |
-| `int` | 64-bit signed integers | `42`, `-123` |
-| `float` | 64-bit floating point | `3.14`, `1.5e-10` |
-| `decimal` | Arbitrary precision decimal | `123.456n` |
-| `string` | UTF-8 text strings | `"hello"` |
-| `symbol` | Interned identifiers | `'symbol` |
-| `binary` | Binary data | `b'\xDEADBEEF'` |
-| `datetime` | Date and time values | `t'2025-01-01'` |
+| Type       | Description                 | Example           |
+| ---------- | --------------------------- | ----------------- |
+| `null`     | Null/void value             | `null`            |
+| `bool`     | Boolean values              | `true`, `false`   |
+| `int`      | 56-bit signed integers      | `42`, `-123`      |
+| `float`    | 64-bit floating point       | `3.14`, `1.5e-10` |
+| `decimal`  | Arbitrary precision decimal | `123.456n`        |
+| `string`   | UTF-8 text strings          | `"hello"`         |
+| `symbol`   | Interned identifiers        | `'symbol`         |
+| `binary`   | Binary data                 | `b'\xDEADBEEF'`   |
+| `datetime` | Date and time values        | `t'2025-01-01'`   |
 
 ### Composite Types
 
@@ -517,6 +520,133 @@ type("hello")     // Returns 'string'
 "hello" is string // Returns true
 ```
 
+### Pipe Expressions
+
+The **pipe operator** (`|`) enables fluent, left-to-right data transformation pipelines. Lambda's pipe is **set-oriented** — it automatically maps over collections, similar to how arithmetic operators broadcast over arrays.
+
+#### Basic Syntax
+
+```lambda
+<collection> | <expression-with-~>
+```
+
+- **`|`** — Set-oriented pipe operator
+- **`~`** — Current item reference (the element being iterated)
+
+#### Auto-Mapping Over Collections
+
+When the left side is a collection, `~` binds to each item:
+
+```lambda
+// Double each number
+[1, 2, 3] | ~ * 2
+// Result: [2, 4, 6]
+
+// Extract field from each item
+users | ~.name
+// Result: ["Alice", "Bob", "Charlie"]
+
+// Transform each item
+["hello", "world"] | ~ ++ "!"
+// Result: ["hello!", "world!"]
+```
+
+#### Scalar Pipe
+
+When the left side is a scalar, `~` binds to the whole value:
+
+```lambda
+42 | ~ * 2
+// Result: 84
+
+"hello" | ~ ++ " world"
+// Result: "hello world"
+```
+
+#### Chained Transformations
+
+Pipes can be chained for multi-step transformations:
+
+```lambda
+[1, 2, 3, 4, 5]
+    | ~ ^ 2           // square each: [1, 4, 9, 16, 25]
+    | ~ + 1           // add 1: [2, 5, 10, 17, 26]
+// Result: [2, 5, 10, 17, 26]
+```
+
+#### Key/Index Access with `~#`
+
+The `~#` token provides access to the **key** (for maps) or **index** (for arrays/lists):
+
+```lambda
+// Arrays — ~# is index (0-based)
+['a', 'b', 'c'] | {index: ~#, value: ~}
+// [{index: 0, value: 'a'}, {index: 1, value: 'b'}, {index: 2, value: 'c'}]
+
+// Maps — ~ is value, ~# is key
+{a: 1, b: 2} | {key: ~#, val: ~}
+// [{key: 'a', val: 1}, {key: 'b', val: 2}]
+```
+
+#### Aggregated Pipe (without `~`)
+
+When `~` is **not** used, the pipe passes the **entire collection** as the first argument:
+
+```lambda
+// No ~ → pass whole collection to function
+[3, 1, 4, 1, 5] | sum        // sum([3, 1, 4, 1, 5]) → 14
+[3, 1, 4, 1, 5] | sort       // sort([...]) → [1, 1, 3, 4, 5]
+[1, 2, 3, 4, 5] | take(3)    // take([...], 3) → [1, 2, 3]
+
+// Chain of transformations ending with aggregation
+[1, 2, 3, 4, 5]
+    | ~ ^ 2            // map: [1, 4, 9, 16, 25]
+    | sum              // aggregate: 55
+```
+
+#### Where Clause (Filtering)
+
+The `where` keyword filters items, keeping only those where the condition is truthy:
+
+```lambda
+// Basic filtering
+[1, 2, 3, 4, 5] where ~ > 3
+// Result: [4, 5]
+
+// Filter objects
+users where ~.age >= 18
+// Keep only adult users
+
+// Chained with pipes
+data | ~.name where len(~) > 3 | ~.upper()
+// Extract names, keep those longer than 3 chars, uppercase
+```
+
+#### Combined Pipe and Where
+
+```lambda
+// Data processing pipeline
+input("users.json", 'json').users
+    | {name: ~.name, age: ~.age}     // project fields
+    where ~.age >= 18                 // filter adults  
+    | ~.name                          // extract names
+// Result: ["Alice", "Bob", ...]
+
+// Sum of squares greater than 10
+[1, 2, 3, 4, 5] | ~ ^ 2 where ~ > 10 | sum
+// [1, 4, 9, 16, 25] → [16, 25] → 41
+```
+
+#### Behavior Summary
+
+| Left Side | `~` Binds To | `~#` Binds To | Result |
+|-----------|--------------|---------------|--------|
+| `[a, b, c]` (array) | Each element | Index (0, 1, 2) | Array of transformed elements |
+| `(a, b, c)` (list) | Each element | Index (0, 1, 2) | List of transformed elements |
+| `1 to 10` (range) | Each number | Position (0-9) | Array of results |
+| `{a: 1, b: 2}` (map) | Each value | Key ('a', 'b') | Collection of results |
+| `42` (scalar) | The value itself | N/A | Single transformed value |
+
 ---
 
 ## Control Flow
@@ -572,6 +702,144 @@ For expressions iterate over collections and return new collections:
 // String iteration
 (for (item in ["a", "b", "c"]) item + "!")
 ```
+
+#### Extended For-Expression Clauses
+
+For expressions support additional clauses for filtering, sorting, and limiting results, inspired by SQL and XQuery's FLWOR expressions:
+
+```
+for (<bindings>
+     [let <name> = <expr>, ...]
+     [where <condition>]
+     [order by <ordering>]
+     [limit <n>]
+     [offset <n>])
+  <body-expr>
+```
+
+##### Where Clause
+
+Filter items based on a condition:
+
+```lambda
+// Filter values greater than 2
+for (x in [1, 2, 3, 4, 5] where x > 2) x
+// Result: (3, 4, 5)
+
+// Filter with complex condition
+for (user in users where user.active and user.age >= 18) user.name
+```
+
+##### Let Clause
+
+Introduce intermediate bindings for computed values:
+
+```lambda
+// Compute derived value
+for (x in [1, 2, 3], let squared = x * x) squared + 1
+// Result: (2, 5, 10)
+
+// Multiple let bindings
+for (x in [2, 3, 4], let sq = x * x, let cube = sq * x) [x, sq, cube]
+// Result: ([2, 4, 8], [3, 9, 27], [4, 16, 64])
+
+// Let with where (let is evaluated before where)
+for (x in [1, 2, 3, 4, 5], let doubled = x * 2 where doubled > 4) doubled
+// Result: (6, 8, 10)
+```
+
+##### Order By Clause
+
+Sort results by one or more expressions:
+
+```lambda
+// Ascending order (default)
+for (x in [3, 1, 4, 1, 5] order by x) x
+// Result: (1, 1, 3, 4, 5)
+
+// Descending order
+for (x in [3, 1, 4, 1, 5] order by x desc) x
+// Result: (5, 4, 3, 1, 1)
+
+// Order by computed value
+for (user in users order by user.lastName, user.firstName) user
+
+// Order by field descending
+for (p in products order by p.price desc) p.name
+```
+
+**Direction keywords:**
+
+| Keyword | Meaning | Aliases |
+|---------|---------|--------|
+| `asc` | Ascending (A→Z, 0→9) | `ascending` |
+| `desc` | Descending (Z→A, 9→0) | `descending` |
+
+##### Limit and Offset Clauses
+
+Control the number of results and pagination:
+
+```lambda
+// First 3 results
+for (x in [1, 2, 3, 4, 5] limit 3) x
+// Result: (1, 2, 3)
+
+// Skip first 2 results
+for (x in [1, 2, 3, 4, 5] offset 2) x
+// Result: (3, 4, 5)
+
+// Pagination: skip 2, take 3
+for (x in [1, 2, 3, 4, 5, 6, 7] limit 3 offset 2) x
+// Result: (3, 4, 5)
+
+// Pagination with sorting
+for (item in items order by item.date desc limit 10 offset 20) item
+```
+
+##### Combined Clauses
+
+All clauses can be combined for powerful data processing:
+
+```lambda
+// Complete example: filter, compute, sort, paginate
+for (x in [10, 5, 15, 20, 25, 3],
+     let squared = x * x
+     where x > 5
+     order by squared desc
+     limit 2
+     offset 1)
+  squared
+// Filter x > 5: [10, 15, 20, 25]
+// Compute squared: [100, 225, 400, 625]
+// Sort desc: [625, 400, 225, 100]
+// Offset 1, limit 2: [400, 225]
+// Result: (400, 225)
+
+// Real-world example: top customers
+for (customer in customers,
+     let total = sum(customer.orders | ~.amount)
+     where customer.active
+     order by total desc
+     limit 10)
+  {name: customer.name, total: total}
+```
+
+##### Clause Ordering
+
+Clauses must appear in this order (all optional except bindings):
+
+```
+for (bindings, let... where... order by... limit... offset...) body
+```
+
+**Processing order:**
+1. **for bindings** — Generate iteration tuples
+2. **let** — Compute intermediate values
+3. **where** — Filter tuples
+4. **order by** — Sort results
+5. **offset** — Skip initial results
+6. **limit** — Cap result count
+7. **body** — Evaluate and collect
 
 ### For Statements
 
@@ -1442,9 +1710,35 @@ nums.reverse()              // [6, 2, 9, 5, 1, 4, 1, 3]
 
 | Operator | Description  | Example       |
 | -------- | ------------ | ------------- |
-| \|       | Union        | set1 \| set2  |
 | `&`      | Intersection | `set1 & set2` |
 | `!`      | Exclusion    | `set1 ! set2` |
+
+### Pipe and Filter Operators
+
+| Operator | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `\|` | Pipe (transform/map) | `[1, 2, 3] \| ~ * 2` | `[2, 4, 6]` |
+| `where` | Filter | `[1, 2, 3, 4] where ~ > 2` | `[3, 4]` |
+
+The pipe operator `|` enables fluent data transformation pipelines:
+- **With `~`**: Auto-maps the expression over each item in a collection
+- **Without `~`**: Passes the entire collection as the first argument to a function
+
+```lambda
+// Map pipe (with ~)
+[1, 2, 3] | ~ * 2           // [2, 4, 6]
+users | ~.name              // ["Alice", "Bob", ...]
+
+// Aggregate pipe (without ~)
+[3, 1, 4] | sort            // [1, 3, 4]
+[1, 2, 3] | sum             // 6
+
+// Combined with where
+[1, 2, 3, 4, 5] | ~ ^ 2 where ~ > 10 | sum
+// [1, 4, 9, 16, 25] → [16, 25] → 41
+```
+
+See [Pipe Expressions](#pipe-expressions) for detailed documentation.
 
 ### Type Operators
 
@@ -1461,15 +1755,16 @@ From highest to lowest precedence:
 1. Primary expressions (`()`, `[]`, `.`)
 2. Unary operators (`-`, `+`, `not`)
 3. Exponentiation (`^`)
-4. Multiplicative (`*`, `/`, `//`, `%`)
+4. Multiplicative (`*`, `/`, `div`, `%`)
 5. Additive (`+`, `-`)
 6. Relational (`<`, `<=`, `>`, `>=`)
 7. Equality (`==`, `!=`)
 8. Logical AND (`and`)
 9. Logical OR (`or`)
 10. Range (`to`)
-11. Set operations (`|`, `&`, `!`)
-12. Type operations (`is`, `in`)
+11. Type operations (`is`, `in`)
+12. Pipe (`|`)
+13. Filter (`where`)
 
 ---
 
