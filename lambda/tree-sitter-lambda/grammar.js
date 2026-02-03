@@ -205,8 +205,8 @@ module.exports = grammar({
   ],
   [
     $.fn_type,
-    $.primary_type,
     $.type_occurrence,
+    $.primary_type,
     $.binary_type,
   ],
   // Pattern precedences
@@ -759,7 +759,15 @@ module.exports = grammar({
 
     // Type Definitions: ----------------------------------
 
-    occurrence: $ => choice('?', '+', '*'),
+    // Occurrence modifiers for types: ?, +, *, [n], [n, m], [n+]
+    occurrence: $ => choice('?', '+', '*', $.occurrence_count),
+
+    // Occurrence count: [n] (exact), [n, m] (range), [n+] (unbounded)
+    occurrence_count: $ => choice(
+      seq('[', $.integer, ']'),                      // exactly n: T[5]
+      seq('[', $.integer, ',', $.integer, ']'),      // n to m: T[2, 5]
+      seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
+    ),
 
     base_type: $ => built_in_types(true),
 
@@ -886,11 +894,11 @@ module.exports = grammar({
     // Ellipsis matches zero or more of any character (shorthand for \.*)
     pattern_any_star: _ => '...',
 
-    // Occurrence count for patterns: {n}, {n,}, {n,m}
+    // Occurrence count for patterns: [n], [n+], [n, m]
     pattern_count: $ => choice(
-      seq('{', $.integer, '}'),                        // exactly n
-      seq('{', $.integer, ',', '}'),                   // n or more
-      seq('{', $.integer, ',', $.integer, '}'),        // n to m
+      seq('[', $.integer, ']'),                        // exactly n: "a"[3]
+      seq('[', $.integer, '+', ']'),                   // n or more: "a"[2+]
+      seq('[', $.integer, ',', $.integer, ']'),        // n to m: "a"[2, 5]
     ),
 
     // Primary pattern expression
@@ -902,7 +910,7 @@ module.exports = grammar({
       seq('(', $._pattern_expr, ')'),    // grouping
     ),
 
-    // Pattern with occurrence modifiers: ?, +, *, {n}, {n,}, {n,m}
+    // Pattern with occurrence modifiers: ?, +, *, [n], [n+], [n, m]
     pattern_occurrence: $ => prec.right(seq(
       field('operand', choice($.primary_pattern, $.pattern_negation)),
       field('operator', choice('?', '+', '*', $.pattern_count)),

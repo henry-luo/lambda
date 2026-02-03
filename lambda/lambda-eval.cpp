@@ -525,12 +525,49 @@ Bool fn_is(Item a, Item b) {
         return pattern_full_match(pattern, str) ? BOOL_TRUE : BOOL_FALSE;
     }
     
-    if (b_type_id != LMD_TYPE_TYPE) {
+    if (b_type_id != LMD_TYPE_TYPE && b_type_id != LMD_TYPE_TYPE_UNARY) {
         log_error("2nd argument must be a type or pattern, got type: %d", b_type_id);
         return BOOL_ERROR;
     }
+    
+    // If b is a TypeUnary directly (type_id = LMD_TYPE_TYPE_UNARY), handle it directly
+    if (b_type_id == LMD_TYPE_TYPE_UNARY) {
+        TypeUnary* type_unary = (TypeUnary*)b.type;
+        log_debug("fn_is: TypeUnary (direct), op=%d, min=%d, max=%d", 
+                  type_unary->op, type_unary->min_count, type_unary->max_count);
+        // Use full type validation for occurrence types
+        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), (Type*)type_unary);
+        if (result->error_count > 0) {
+            print_validation_result(result);
+            log_debug("type validation failed with %d errors", result->error_count);
+        } else {
+            log_debug("type validation succeeded");
+        }
+        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+    }
+    
     TypeType *type_b = (TypeType *)b.type;
     TypeId a_type_id = get_type_id(a);
+    
+    // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
+    // TypeUnary has a distinct type_id = LMD_TYPE_TYPE_UNARY
+    log_debug("fn_is: checking inner type, type_b->type->type_id=%d", type_b->type->type_id);
+    if (type_b->type->type_id == LMD_TYPE_TYPE_UNARY) {
+        TypeUnary* type_unary = (TypeUnary*)type_b->type;
+        log_debug("fn_is: TypeUnary detected, op=%d (REPEAT=%d, OPTIONAL=%d)", 
+                  type_unary->op, OPERATOR_REPEAT, OPERATOR_OPTIONAL);
+        // Use full type validation for occurrence types
+        log_debug("fn_is: TypeUnary occurrence operator detected, using validator");
+        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
+        if (result->error_count > 0) {
+            print_validation_result(result);
+            log_debug("type validation failed with %d errors", result->error_count);
+        } else {
+            log_debug("type validation succeeded");
+        }
+        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+    }
+    
     log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:

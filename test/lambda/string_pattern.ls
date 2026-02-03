@@ -21,7 +21,7 @@ string hello_pattern = "hello"
 
 string single_digit = \d
 string multi_digit = \d+
-string exact_3_digits = \d{3}
+string exact_3_digits = \d[3]
 
 "2.1"; ("5" is single_digit)         // true
 "2.2"; ("a" is single_digit)         // false
@@ -79,7 +79,7 @@ string h_any_o = "h" ... "o"
 // ============================================================
 'Test 6: Pattern Concatenation'
 
-string phone = \d{3} "-" \d{3} "-" \d{4}
+string phone = \d[3] "-" \d[3] "-" \d[4]
 string email_simple = \w+ "@" \w+ "." \w+
 
 "6.1"; ("123-456-7890" is phone)     // true
@@ -93,7 +93,7 @@ string email_simple = \w+ "@" \w+ "." \w+
 // ============================================================
 'Test 7: Optional Pattern (?)'
 
-string optional_dash = \d{3} "-"? \d{4}
+string optional_dash = \d[3] "-"? \d[4]
 
 "7.1"; ("123-4567" is optional_dash) // true - with dash
 "7.2"; ("1234567" is optional_dash)  // true - without dash
@@ -122,22 +122,22 @@ string zero_or_more_a = "a"*
 // Note: empty string test skipped (typed as null)
 
 // ============================================================
-// Test 10: Exact Count {n}
+// Test 10: Exact Count [n]
 // ============================================================
-'Test 10: Exact Count {n}'
+'Test 10: Exact Count [n]'
 
-string exactly_5 = \d{5}
+string exactly_5 = \d[5]
 
 "10.1"; ("12345" is exactly_5)       // true
 "10.2"; ("1234" is exactly_5)        // false - 4 digits
 "10.3"; ("123456" is exactly_5)      // false - 6 digits
 
 // ============================================================
-// Test 11: Range Count {n,m}
+// Test 11: Range Count [n, m]
 // ============================================================
-'Test 11: Range Count {n,m}'
+'Test 11: Range Count [n, m]'
 
-string range_2_4 = \d{2,4}
+string range_2_4 = \d[2, 4]
 
 "11.1"; ("12" is range_2_4)          // true - 2 digits
 "11.2"; ("123" is range_2_4)         // true - 3 digits
@@ -179,7 +179,7 @@ string digit_or_letter = \d | \w
 // ============================================================
 'Test 14: Complex Combined Patterns'
 
-string us_zip = \d{5} ("-" \d{4})?
+string us_zip = \d[5] ("-" \d[4])?
 string identifier = ("a" to "z" | "A" to "Z" | "_") \w*
 
 "14.1"; ("12345" is us_zip)          // true - 5 digit zip
