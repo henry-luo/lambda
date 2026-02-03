@@ -135,6 +135,23 @@ is  in  to  |  &  !
 1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]
 ```
 
+## Pipe Expressions
+
+**Pipe `|` with current item `~`:**
+```lambda
+[1,2,3] | ~ * 2          // [2,4,6] - map over items
+[1,2,3] | sum            // 6 - aggregate (no ~)
+users | ~.age            // [12,20,62] - extract field
+['a','b'] | {i:~#, v:~}  // ~# = index/key
+```
+
+**Filter with `where`:**
+```lambda
+[1,2,3,4,5] where ~ > 3         // [4,5]
+users where ~.age >= 18 | ~.name // filter then map
+[1,2,3] | ~ ^ 2 where ~ > 5 | sum // 13 (4+9)
+```
+
 ## Control Flow
 
 **If Expressions (require else):**
@@ -155,6 +172,17 @@ if (condition) { something() } else { otherThing() }
 for (x in [1, 2, 3]) x * 2     // Array iteration
 for (i in 1 to 5) i * i        // Range iteration  
 for (x in data) if (x > 0) x else 0  // Conditional
+```
+
+**For Expression Clauses:** `let`, `where`, `order by`, `limit`, `offset`
+```lambda
+for (x in data where x > 0) x           // filter
+for (x in data, let sq = x*x) sq        // let binding
+for (x in [3,1,2] order by x) x         // (1,2,3)
+for (x in [3,1,2] order by x desc) x    // (3,2,1)
+for (x in data limit 5 offset 10) x     // pagination
+for (x in data, let y=x*2 
+    where y>5 order by y desc limit 3) y
 ```
 
 **For Statements:**
@@ -278,15 +306,16 @@ else { print("Success:", result) }
 1. `()` `[]` `.` - Primary expressions
 2. `-` `+` `not` - Unary operators
 3. `^` - Exponentiation
-4. `*` `/` `//` `%` - Multiplicative
+4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` - Additive
 6. `<` `<=` `>` `>=` - Relational
 7. `==` `!=` - Equality
 8. `and` - Logical AND
 9. `or` - Logical OR
 10. `to` - Range
-11. `|` `&` `!` - Set operations
-12. `is` `in` - Type operations
+11. `is` `in` - Type operations
+12. `|` - Pipe
+13. `where` - Filter
 
 ## Quick Examples
 
