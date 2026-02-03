@@ -18,6 +18,23 @@ typedef uint64_t size_t;
 
 #define null 0
 
+// C math function declarations (for native math optimization in transpiler)
+// These are imported from libm at runtime via MIR's import resolver
+// Only declare when compiled by C2MIR (not by C++ compiler which includes <cmath>)
+#if !defined(__cplusplus)
+extern double sin(double x);
+extern double cos(double x);
+extern double tan(double x);
+extern double sqrt(double x);
+extern double log(double x);
+extern double log10(double x);
+extern double exp(double x);
+extern double fabs(double x);
+extern double floor(double x);
+extern double ceil(double x);
+extern double round(double x);
+#endif
+
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
 

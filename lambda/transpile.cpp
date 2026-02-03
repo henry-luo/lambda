@@ -109,6 +109,77 @@ bool is_type_compatible_for_unboxed(TypeId arg_type, TypeId param_type) {
     return false;
 }
 
+// Check if both operands are numeric types that can use native C comparison
+// For ordering operators (<, <=, >, >=), only numeric types are allowed
+// For equality operators (==, !=), bool is also allowed
+static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_op) {
+    if (!bi_node->left->type || !bi_node->right->type) return false;
+    TypeId left_type = bi_node->left->type->type_id;
+    TypeId right_type = bi_node->right->type->type_id;
+    
+    // Fast path for same types
+    if (left_type == right_type) {
+        if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT) {
+            return true;
+        }
+        // Bool only allowed for equality (==, !=), not ordering (<, <=, >, >=)
+        if (is_equality_op && left_type == LMD_TYPE_BOOL) {
+            return true;
+        }
+        return false;
+    }
+    
+    // Fast path for int/int64/float combinations (C handles promotion)
+    bool left_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
+    bool right_numeric = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
+    
+    return left_numeric && right_numeric;
+}
+
+// Math functions that can use native C equivalents when argument is typed numeric
+// Maps Lambda function name to C math function name
+struct NativeMathFunc {
+    const char* lambda_name;
+    const char* c_name;
+    bool returns_float;  // true if returns float, false if returns int
+};
+
+static const NativeMathFunc native_math_funcs[] = {
+    {"sin", "sin", true},
+    {"cos", "cos", true},
+    {"tan", "tan", true},
+    {"sqrt", "sqrt", true},
+    {"log", "log", true},
+    {"log10", "log10", true},
+    {"exp", "exp", true},
+    {"abs", "fabs", true},
+    {"floor", "floor", true},
+    {"ceil", "ceil", true},
+    {"round", "round", true},
+    {NULL, NULL, false}
+};
+
+// Check if a sys func call can use native C math function
+// Returns the C function name if applicable, NULL otherwise
+static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg) {
+    if (!sys_fn_node || !sys_fn_node->fn_info || !arg || !arg->type) return NULL;
+    
+    // Check if argument has known numeric type
+    TypeId arg_type = arg->type->type_id;
+    if (arg_type != LMD_TYPE_INT && arg_type != LMD_TYPE_INT64 && arg_type != LMD_TYPE_FLOAT) {
+        return NULL;
+    }
+    
+    // Look up the function name
+    const char* fn_name = sys_fn_node->fn_info->name;
+    for (int i = 0; native_math_funcs[i].lambda_name != NULL; i++) {
+        if (strcmp(fn_name, native_math_funcs[i].lambda_name) == 0) {
+            return native_math_funcs[i].c_name;
+        }
+    }
+    return NULL;
+}
+
 // Check if all arguments can use the unboxed call path
 // Returns true if we can call the _u version directly
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
@@ -1185,127 +1256,98 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');   
     }
     else if (bi_node->op == OPERATOR_EQ) {
-        // TypeId left_type = bi_node->left->type->type_id;
-        // TypeId right_type = bi_node->right->type->type_id;
-        // because of encoding of error value, it is very hard to have a fast path
-        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
-        if (!has_fast_path) {
-            strbuf_append_str(tp->code_buf, "fn_eq(");
-            transpile_box_item(tp, bi_node->left);
-            strbuf_append_char(tp->code_buf, ',');
-            transpile_box_item(tp, bi_node->right);
-            strbuf_append_char(tp->code_buf, ')');
-        } else {
-            // Use direct C comparison for compatible types
-            // todo: need to split into cases, and handle diff type differently
+        // Use native C == for numeric/bool types, fn_eq for others (strings, containers, etc.)
+        if (can_use_native_comparison(bi_node, true)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " == ");
             transpile_expr(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        }
-    }
-    else if (bi_node->op == OPERATOR_NE) {
-        // TypeId left_type = bi_node->left->type->type_id;
-        // TypeId right_type = bi_node->right->type->type_id;
-        // because of encoding of error value, it is very hard to have a fast path
-        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);        
-        if (!has_fast_path) {
-            strbuf_append_str(tp->code_buf, "fn_ne(");
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_eq(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        } else {
-            // Use direct C comparison for compatible non-string types
-            // todo: need to split into cases, and handle diff type differently
+        }
+    }
+    else if (bi_node->op == OPERATOR_NE) {
+        // Use native C != for numeric/bool types, fn_ne for others
+        if (can_use_native_comparison(bi_node, true)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " != ");
             transpile_expr(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        }
-    }
-    else if (bi_node->op == OPERATOR_LT) {
-        // TypeId left_type = bi_node->left->type->type_id;
-        // TypeId right_type = bi_node->right->type->type_id;
-        // because of encoding of error value, it is very hard to have a fast path
-        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
-        if (!has_fast_path) {
-            strbuf_append_str(tp->code_buf, "fn_lt(");
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_ne(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        } else {
-            // Use direct C comparison for compatible types
+        }
+    }
+    else if (bi_node->op == OPERATOR_LT) {
+        // Use native C < for numeric types (not bool), fn_lt for others
+        if (can_use_native_comparison(bi_node, false)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " < ");
             transpile_expr(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        }
-    }
-    else if (bi_node->op == OPERATOR_LE) {
-        // Check if we need to use the runtime comparison function for type checking
-        // TypeId left_type = bi_node->left->type->type_id;
-        // TypeId right_type = bi_node->right->type->type_id;
-        // because of encoding of error value, it is very hard to have a fast path
-        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
-        if (!has_fast_path) {
-            strbuf_append_str(tp->code_buf, "fn_le(");
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_lt(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        } else {
-            // Use direct C comparison for compatible types
+        }
+    }
+    else if (bi_node->op == OPERATOR_LE) {
+        // Use native C <= for numeric types (not bool), fn_le for others
+        if (can_use_native_comparison(bi_node, false)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " <= ");
             transpile_expr(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        }
-    }
-    else if (bi_node->op == OPERATOR_GT) {
-        // Check if we need to use the runtime comparison function for type checking
-        // TypeId left_type = bi_node->left->type->type_id;
-        // TypeId right_type = bi_node->right->type->type_id;
-        // because of encoding of error value, it is very hard to have a fast path
-        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
-        if (!has_fast_path) {
-            strbuf_append_str(tp->code_buf, "fn_gt(");
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_le(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        } else {
-            // Use direct C comparison for compatible types
+        }
+    }
+    else if (bi_node->op == OPERATOR_GT) {
+        // Use native C > for numeric types (not bool), fn_gt for others
+        if (can_use_native_comparison(bi_node, false)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " > ");
             transpile_expr(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        }
-    }
-    else if (bi_node->op == OPERATOR_GE) {
-        // Check if we need to use the runtime comparison function for type checking
-        // TypeId left_type = bi_node->left->type->type_id;
-        // TypeId right_type = bi_node->right->type->type_id;
-        // because of encoding of error value, it is very hard to have a fast path
-        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
-        if (!has_fast_path) {
-            strbuf_append_str(tp->code_buf, "fn_ge(");
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_gt(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
-        } else {
-            // Use direct C comparison for compatible types
+        }
+    }
+    else if (bi_node->op == OPERATOR_GE) {
+        // Use native C >= for numeric types (not bool), fn_ge for others
+        if (can_use_native_comparison(bi_node, false)) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " >= ");
             transpile_expr(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_ge(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         }
     } 
@@ -2751,6 +2793,23 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
+        
+        // Check if we can use native C math function
+        // Only for single-argument math functions with typed numeric arg
+        AstNode* first_arg = call_node->argument;
+        const char* native_func = can_use_native_math(sys_fn_node, first_arg);
+        
+        if (native_func && first_arg && !first_arg->next) {
+            // Use native C math: push_d(c_func((double)arg))
+            // The result needs to be boxed since native math returns double
+            strbuf_append_str(tp->code_buf, "push_d(");
+            strbuf_append_str(tp->code_buf, native_func);
+            strbuf_append_str(tp->code_buf, "((double)(");
+            transpile_expr(tp, first_arg);
+            strbuf_append_str(tp->code_buf, ")))");
+            return;  // done - skip normal argument handling
+        }
+        
         // Use the sys func name from fn_info, not from TSNode source
         // This correctly handles method-style calls (obj.method()) which are desugared to sys func calls
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
