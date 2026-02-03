@@ -69,189 +69,19 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document,
     return result;
 }
 
-// Enhanced validation context for AST validation
-typedef struct EnhancedValidationContext {
-    Pool* pool;
-    PathSegment* current_path;
-    int current_depth;
-    int max_depth;
-    ValidationOptions options;
-    HashMap* visited_nodes;  // For circular reference detection
-} EnhancedValidationContext;
+// =============================================================================
+// Lambda Source File Validation (AST-based)
+// =============================================================================
+// 
+// This section handles validation of Lambda source files (.ls).
+// Currently provides basic parse-level validation - checks that the file can
+// be parsed into a valid AST. More sophisticated semantic validation could be
+// added in the future.
+// =============================================================================
 
-uint64_t strview_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const StrView* key = (const StrView*)item;
-    return hashmap_sip(key->str, key->length, seed0, seed1);
-}
-
-// Compare function for StrView keys
-int strview_compare(const void *a, const void *b, void *udata) {
-    const StrView* key_a = (const StrView*)a;
-    const StrView* key_b = (const StrView*)b;
-
-    if (key_a->length != key_b->length) {
-        return (key_a->length < key_b->length) ? -1 : 1;
-    }
-    return memcmp(key_a->str, key_b->str, key_a->length);
-}
-
-// Create enhanced validation context for AST validation
-EnhancedValidationContext* create_enhanced_validation_context(Pool* pool) {
-    EnhancedValidationContext* ctx = (EnhancedValidationContext*)pool_calloc(pool, sizeof(EnhancedValidationContext));
-    if (!ctx) return nullptr;
-
-    ctx->pool = pool;
-    ctx->current_path = nullptr;
-    ctx->current_depth = 0;
-    ctx->max_depth = 100;  // Reasonable depth limit
-
-    // Initialize default validation options
-    ctx->options.strict_mode = false;
-    ctx->options.allow_unknown_fields = true;
-    ctx->options.allow_empty_elements = true;
-    ctx->options.max_depth = 100;
-    ctx->options.timeout_ms = 0;
-    ctx->options.enabled_rules = nullptr;
-    ctx->options.disabled_rules = nullptr;
-    // Create visited nodes hashmap for circular reference detection
-    ctx->visited_nodes = hashmap_new(
-         sizeof(VisitedEntry), 16, 0, 1,
-         strview_hash, strview_compare, nullptr, pool
-    );
-    return ctx;
-}
-
-// Create path segment for error reporting
-PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, Pool* pool) {
-    PathSegment* segment = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
-    if (!segment) return nullptr;
-
-    segment->type = type;
-    segment->next = nullptr;
-
-    switch (type) {
-        case PATH_FIELD:
-            segment->data.field_name = strview_from_cstr(name);
-            break;
-        case PATH_INDEX:
-            segment->data.index = index;
-            break;
-        case PATH_ELEMENT:
-            segment->data.element_tag = strview_from_cstr(name);
-            break;
-        case PATH_ATTRIBUTE:
-            segment->data.attr_name = strview_from_cstr(name);
-            break;
-    }
-
-    return segment;
-}
-
-// Push path segment to validation context
-void push_path_segment(EnhancedValidationContext* ctx, PathSegmentType type, const char* name, long index) {
-    if (!ctx) return;
-
-    PathSegment* segment = create_path_segment(type, name, index, ctx->pool);
-    if (segment) {
-        segment->next = ctx->current_path;
-        ctx->current_path = segment;
-    }
-}
-
-// Pop path segment from validation context
-void pop_path_segment(EnhancedValidationContext* ctx) {
-    if (!ctx || !ctx->current_path) return;
-
-    ctx->current_path = ctx->current_path->next;
-}
-
-// Create validation error with full context
-ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
-                                           EnhancedValidationContext* ctx) {
-    if (!ctx || !ctx->pool) return nullptr;
-
-    ValidationError* error = create_validation_error(code, message, ctx->current_path, ctx->pool);
-    if (!error) return nullptr;
-
-    // Add suggestions based on error type
-    error->suggestions = suggest_corrections(error, ctx->pool);
-
-    return error;
-}
-
-// Add validation error to result
-void add_validation_error(ValidationResult* result, ValidationErrorCode code,
-                             const char* message, EnhancedValidationContext* ctx) {
-    if (!result || !ctx) return;
-
-    ValidationError* error = create_validation_error(code, message, ctx);
-    if (error) {
-        add_validation_error(result, error);
-    }
-}
-
-// Validate AST node recursively
-ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationContext* ctx) {
-    if (!node || !ctx) {
-        ValidationResult* result = create_validation_result(ctx->pool);
-        add_validation_error(result, VALID_ERROR_PARSE_ERROR, "Invalid AST node or context", ctx);
-        return result;
-    }
-
-    ValidationResult* result = create_validation_result(ctx->pool);
-
-    // Check depth limit
-    if (ctx->current_depth >= ctx->max_depth) {
-        add_validation_error(result, VALID_ERROR_CONSTRAINT_VIOLATION,
-                               "Maximum validation depth exceeded", ctx);
-        return result;
-    }
-
-    ctx->current_depth++;
-
-    // Basic AST node validation - simplified to avoid type system complexity
-    push_path_segment(ctx, PATH_ELEMENT, "ast_node", 0);
-
-    // Basic validation - just check if node exists
-    if (!node) {
-        add_validation_error(result, VALID_ERROR_INVALID_ELEMENT,
-                               "AST node is null", ctx);
-    }
-
-    pop_path_segment(ctx);
-
-    ctx->current_depth--;
-    return result;
-}
-
-// Validate a Lambda AST using comprehensive validation
-ValidationResult* validate_lambda_ast(AstNode* ast, Pool* pool) {
-    if (!ast || !pool) {
-        ValidationResult* result = create_validation_result(pool);
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
-                                                       "Invalid AST or memory pool", nullptr, pool);
-        add_validation_error(result, error);
-        return result;
-    }
-
-    // Create validation context
-    EnhancedValidationContext* ctx = create_enhanced_validation_context(pool);
-    if (!ctx) {
-        ValidationResult* result = create_validation_result(pool);
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
-                                                       "Failed to create validation context", nullptr, pool);
-        add_validation_error(result, error);
-        return result;
-    }
-
-    // Perform comprehensive AST validation
-    ValidationResult* result = validate_ast_node_recursive(ast, ctx);
-
-    return result;
-}
-
-// Parse and validate a Lambda source file with full validation
-ValidationResult* validate_lambda_source(const char* source_content, Pool* pool) {
+// Parse and validate a Lambda source file
+// Returns a ValidationResult with any parse errors
+static ValidationResult* validate_lambda_source(const char* source_content, Pool* pool) {
     if (!source_content || !pool) {
         ValidationResult* result = create_validation_result(pool);
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
@@ -262,7 +92,7 @@ ValidationResult* validate_lambda_source(const char* source_content, Pool* pool)
 
     ValidationResult* result = create_validation_result(pool);
 
-    // Basic syntax check - verify it's not empty
+    // Check for empty source
     if (strlen(source_content) == 0) {
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                        "Empty Lambda source file", nullptr, pool);
@@ -270,21 +100,17 @@ ValidationResult* validate_lambda_source(const char* source_content, Pool* pool)
         return result;
     }
 
-    // Build AST using real transpiler
+    // Build AST using transpiler - this validates syntax
     Transpiler* transpiler = transpiler_create(pool);
     if (transpiler) {
         AstNode* ast = transpiler_build_ast(transpiler, source_content);
-        if (ast) {
-            // Validate the AST
-            ValidationResult* ast_result = validate_lambda_ast(ast, pool);
-            if (ast_result) {
-                merge_validation_results(result, ast_result);
-            }
-        } else {
+        if (!ast) {
             ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                            "Failed to parse Lambda source into AST", nullptr, pool);
             add_validation_error(result, error);
         }
+        // If AST was successfully built, the source is syntactically valid
+        // Future: could add semantic validation of the AST here
         transpiler_destroy(transpiler);
     } else {
         // Fallback to basic validation
@@ -308,8 +134,8 @@ ValidationResult* validate_lambda_source(const char* source_content, Pool* pool)
     return result;
 }
 
-// Read file and validate Lambda content with comprehensive validation
-ValidationResult* validate_lambda_file(const char* file_path, Pool* pool) {
+// Read file and validate Lambda content
+static ValidationResult* validate_lambda_file(const char* file_path, Pool* pool) {
     if (!file_path || !pool) {
         ValidationResult* result = create_validation_result(pool);
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
@@ -318,7 +144,7 @@ ValidationResult* validate_lambda_file(const char* file_path, Pool* pool) {
         return result;
     }
 
-    // Read file content using existing file utilities
+    // Read file content
     char* content = read_text_file(file_path);
     if (!content) {
         ValidationResult* result = create_validation_result(pool);
@@ -329,19 +155,21 @@ ValidationResult* validate_lambda_file(const char* file_path, Pool* pool) {
         return result;
     }
 
-    // Validate the source with full validation
+    // Validate the source
     ValidationResult* result = validate_lambda_source(content, pool);
 
-    // Cleanup
     free(content);
-
     return result;
 }
+
+// =============================================================================
+// Schema-based Validation (run_ast_validation)
+// =============================================================================
 
 // Enhanced AST-based validation function with full validation flow
 ValidationResult* run_ast_validation(const char* data_file, const char* schema_file,
                                     const char* input_format, ValidationOptions* options) {
-    printf("Lambda AST Validator v2.0\n");
+    printf("Lambda AST Validator v2.0\n");;
 
     // Check if this is a Lambda file or should use schema validation
     bool is_lambda_file = false;
