@@ -74,51 +74,158 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
               (void*)type, (void*)base_type, base_type->type_id, item.type_id());
 
     // TEMPORARY: Force print for debugging
-    fprintf(stderr, "[DEBUG_TRACE] validate_against_base_type: base_type->type_id=%d, item.type_id()=%d\n",
-            base_type->type_id, item.type_id());
+    // fprintf(stderr, "[DEBUG_TRACE] validate_against_base_type: base_type->type_id=%d, item.type_id()=%d\n",
+    //         base_type->type_id, item.type_id());
 
-    // Check if base_type is TypeUnary (occurrence operator: ?, +, *)
-    // TypeUnary inherits from Type and has type_id = LMD_TYPE_TYPE
-    // We need to carefully check if this is actually a TypeUnary, not just any LMD_TYPE_TYPE
-    // Use a while loop to unwrap nested TypeType wrappers
-    while (base_type->type_id == LMD_TYPE_TYPE) {
-        // Try casting to TypeUnary to check the operator
-        TypeUnary* possible_unary = (TypeUnary*)base_type;
+    // Check if base_type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
+    // TypeUnary has distinct type_id = LMD_TYPE_TYPE_UNARY
+    // Also check while unwrapping nested TypeType wrappers
+    while (base_type->type_id == LMD_TYPE_TYPE || base_type->type_id == LMD_TYPE_TYPE_UNARY) {
+        // If it's a TypeUnary, handle occurrence operators
+        if (base_type->type_id == LMD_TYPE_TYPE_UNARY) {
+            TypeUnary* type_unary = (TypeUnary*)base_type;
 
-        log_debug("[AST_VALIDATOR] base_type type_id is LMD_TYPE_TYPE, checking if TypeUnary. op=%d", possible_unary->op);
-        fprintf(stderr, "[DEBUG_TRACE] base_type is LMD_TYPE_TYPE, checking op field: op=%d\n", possible_unary->op);
+            log_debug("[AST_VALIDATOR] TypeUnary detected: op=%d, min=%d, max=%d", 
+                      type_unary->op, type_unary->min_count, type_unary->max_count);
+            // fprintf(stderr, "[DEBUG_TRACE] TypeUnary detected: op=%d, min=%d, max=%d\n", 
+            //         type_unary->op, type_unary->min_count, type_unary->max_count);
 
-        // Check if this is an occurrence operator
-        // These are the only valid unary operators on types
-        if (possible_unary->op == OPERATOR_OPTIONAL ||
-            possible_unary->op == OPERATOR_ONE_MORE ||
-            possible_unary->op == OPERATOR_ZERO_MORE) {
-
-            fprintf(stderr, "[DEBUG_TRACE] IS TypeUnary with occurrence operator!\n");
-
-            log_debug("[AST_VALIDATOR] Detected TypeUnary with occurrence operator: %d, operand at %p",
-                      possible_unary->op, (void*)possible_unary->operand);
-
-            // TEMPORARY: Force print for debugging
-            fprintf(stderr, "[DEBUG_TRACE] TypeUnary detected: op=%d, operand=%p\n",
-                    possible_unary->op, (void*)possible_unary->operand);
-
-            // Validate against the operand type
-            // Unwrap TypeType from operand if needed
-            Type* operand_type = possible_unary->operand;
-            log_debug("[AST_VALIDATOR] Before unwrap: operand_type at %p, type_id=%d",
-                      (void*)operand_type, operand_type ? operand_type->type_id : -1);
-
-            fprintf(stderr, "[DEBUG_TRACE] Before unwrap: operand_type=%p, type_id=%d\n",
-                    (void*)operand_type, operand_type ? operand_type->type_id : -1);
-
+            // For occurrence operators, the item must be a list/array, and we validate each element
+            TypeId item_type_id = item.type_id();
+            
+            // Check if item is a list/array
+            if (item_type_id != LMD_TYPE_LIST && item_type_id != LMD_TYPE_ARRAY &&
+                item_type_id != LMD_TYPE_ARRAY_INT && item_type_id != LMD_TYPE_ARRAY_INT64 &&
+                item_type_id != LMD_TYPE_ARRAY_FLOAT) {
+                
+                // For optional (?), null is valid
+                if (type_unary->op == OPERATOR_OPTIONAL && item_type_id == LMD_TYPE_NULL) {
+                    result->valid = true;
+                    return result;
+                }
+                
+                // Single item can match occurrence of 1
+                // Check if count allows exactly 1
+                int min_count = type_unary->min_count;
+                int max_count = type_unary->max_count;
+                
+                if (min_count <= 1 && (max_count == -1 || max_count >= 1)) {
+                    // Validate the single item against the operand type
+                    Type* operand_type = type_unary->operand;
+                    if (operand_type && operand_type->type_id == LMD_TYPE_TYPE) {
+                        TypeType* operand_wrapper = (TypeType*)operand_type;
+                        operand_type = operand_wrapper->type;
+                    }
+                    if (operand_type) {
+                        TypeType temp_wrapper;
+                        temp_wrapper.type_id = LMD_TYPE_TYPE;
+                        temp_wrapper.type = operand_type;
+                        return validate_against_base_type(validator, item, &temp_wrapper);
+                    }
+                }
+                
+                result->valid = false;
+                return result;
+            }
+            
+            // Item is a list/array - count the elements and validate each
+            TypeId item_actual_type = item.type_id();
+            log_debug("[AST_VALIDATOR] item_actual_type=%d", item_actual_type);
+            
+            // Handle typed arrays (ArrayInt, ArrayInt64, ArrayFloat) specially
+            // They store raw values, not tagged Items
+            if (item_actual_type == LMD_TYPE_ARRAY_INT) {
+                const ArrayInt* arr_int = item.array_int;
+                int count = arr_int ? (int)arr_int->length : 0;
+                int min_count = type_unary->min_count;
+                int max_count = type_unary->max_count;
+                
+                log_debug("[AST_VALIDATOR] ArrayInt: count=%d, min=%d, max=%d", count, min_count, max_count);
+                
+                // Check count constraints
+                if (count < min_count) {
+                    result->valid = false;
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg),
+                            "Array has %d elements, but minimum required is %d", count, min_count);
+                    ValidationError* error = create_validation_error(
+                        AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool());
+                    add_validation_error(result, error);
+                    return result;
+                }
+                
+                if (max_count != -1 && count > max_count) {
+                    result->valid = false;
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg),
+                            "Array has %d elements, but maximum allowed is %d", count, max_count);
+                    ValidationError* error = create_validation_error(
+                        AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool());
+                    add_validation_error(result, error);
+                    return result;
+                }
+                
+                // For ArrayInt, the operand type must be compatible with int
+                Type* operand_type = type_unary->operand;
+                if (operand_type && operand_type->type_id == LMD_TYPE_TYPE) {
+                    TypeType* operand_wrapper = (TypeType*)operand_type;
+                    operand_type = operand_wrapper->type;
+                }
+                
+                // Check if operand type is int-compatible
+                if (operand_type && operand_type->type_id == LMD_TYPE_INT) {
+                    result->valid = true;
+                    return result;
+                } else {
+                    result->valid = false;
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg),
+                            "ArrayInt elements are integers, but expected type_id=%d", 
+                            operand_type ? operand_type->type_id : -1);
+                    ValidationError* error = create_validation_error(
+                        AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->get_current_path(), validator->get_pool());
+                    add_validation_error(result, error);
+                    return result;
+                }
+            }
+            
+            // Handle generic List/Array
+            const List* list_ptr = item.list;
+            const List* list = item.list;
+            int count = list ? (int)list->length : 0;
+            int min_count = type_unary->min_count;
+            int max_count = type_unary->max_count;
+            
+            log_debug("[AST_VALIDATOR] Occurrence check: list count=%d, min=%d, max=%d", count, min_count, max_count);
+            
+            // Check count constraints
+            if (count < min_count) {
+                result->valid = false;
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg),
+                        "List has %d elements, but minimum required is %d", count, min_count);
+                ValidationError* error = create_validation_error(
+                    AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool());
+                add_validation_error(result, error);
+                return result;
+            }
+            
+            if (max_count != -1 && count > max_count) {
+                result->valid = false;
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg),
+                        "List has %d elements, but maximum allowed is %d", count, max_count);
+                ValidationError* error = create_validation_error(
+                    AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool());
+                add_validation_error(result, error);
+                return result;
+            }
+            
+            // Validate each element against the operand type
+            Type* operand_type = type_unary->operand;
             if (operand_type && operand_type->type_id == LMD_TYPE_TYPE) {
                 TypeType* operand_wrapper = (TypeType*)operand_type;
                 operand_type = operand_wrapper->type;
-                log_debug("[AST_VALIDATOR] After unwrap: operand_type at %p, type_id=%d",
-                          (void*)operand_type, operand_type ? operand_type->type_id : -1);
-                fprintf(stderr, "[DEBUG_TRACE] After unwrap: operand_type=%p, type_id=%d\n",
-                        (void*)operand_type, operand_type ? operand_type->type_id : -1);
             }
 
             if (!operand_type) {
@@ -126,21 +233,34 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
                 result->valid = false;
                 return result;
             }
-
-            // Now wrap the operand in TypeType for validation (unless it's already wrapped)
-            // If operand was already TypeType*, we unwrapped it, so rewrap
-            // If operand was a primitive, wrap it
-            TypeType temp_wrapper;
-            temp_wrapper.type_id = LMD_TYPE_TYPE;
-            temp_wrapper.type = operand_type;
-
-            log_debug("[AST_VALIDATOR] Recursing into validate_against_base_type with wrapped operand");
-            return validate_against_base_type(validator, item, &temp_wrapper);
+            
+            // Validate each list element
+            if (list && count > 0) {
+                TypeType temp_wrapper;
+                temp_wrapper.type_id = LMD_TYPE_TYPE;
+                temp_wrapper.type = operand_type;
+                
+                for (int i = 0; i < count; i++) {
+                    ConstItem elem = list->get(i);
+                    ValidationResult* elem_result = validate_against_base_type(validator, elem, &temp_wrapper);
+                    if (!elem_result->valid) {
+                        // Copy errors to main result (errors is a linked list)
+                        ValidationError* err = elem_result->errors;
+                        while (err) {
+                            add_validation_error(result, err);
+                            err = err->next;
+                        }
+                        result->valid = false;
+                        return result;
+                    }
+                }
+            }
+            
+            result->valid = true;
+            return result;
         }
 
-        // Not a TypeUnary with occurrence operator, must be TypeType wrapping something else
-        // This happens with literal types like &LIT_TYPE_INT
-        fprintf(stderr, "[DEBUG_TRACE] NOT a TypeUnary (op=%d), treating as TypeType wrapper\n", possible_unary->op);
+        // It's a TypeType wrapper, unwrap it
         TypeType* nested_wrapper = (TypeType*)base_type;
         if (!nested_wrapper->type) {
             log_error("[AST_VALIDATOR] TypeType wrapper has null nested type");
@@ -148,10 +268,9 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
             return result;
         }
 
-        fprintf(stderr, "[DEBUG_TRACE] Unwrapping TypeType: nested type_id=%d\n", nested_wrapper->type->type_id);
+        log_debug("[AST_VALIDATOR] Unwrapping TypeType: nested type_id=%d", nested_wrapper->type->type_id);
         // Update base_type to the wrapped type and loop to unwrap further if needed
         base_type = nested_wrapper->type;
-        fprintf(stderr, "[DEBUG_TRACE] After unwrap iteration, base_type->type_id=%d\n", base_type->type_id);
         // Continue loop to check if this is also a TypeType that needs unwrapping
     }
 
@@ -780,64 +899,6 @@ ValidationResult* validate_against_occurrence(SchemaValidator* validator, ConstI
     return result;
 }
 
-/*
-ValidationResult* validate_against_reference(SchemaValidator* validator, ConstItem typed_item, Type* schema, AstValidationContext* ctx) {
-    ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Starting reference validation for '%.*s'\n",
-    //       (int)schema->name.length, schema->name.str);
-    ValidationResult* result = create_validation_result(ctx->pool);
-
-    if (schema->schema_type != LMD_SCHEMA_REFERENCE) {
-        add_validation_error(result, create_validation_error(
-            VALID_ERROR_TYPE_MISMATCH, "Expected reference schema",
-            ctx->path, ctx->pool));
-        return result;
-    }
-
-    // Check for circular references FIRST
-    VisitedEntry lookup = { .key = schema->name, .visited = false };
-    const VisitedEntry* visited_entry = (const VisitedEntry*)hashmap_get(ctx->visited_nodes, &lookup);
-    if (visited_entry && visited_entry->visited) {
-        ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Circular reference detected for '%.*s'\n",
-        //       (int)schema->name.length, schema->name.str);
-        add_validation_error(result, create_validation_error(
-            VALID_ERROR_CIRCULAR_REFERENCE, "Circular type reference detected",
-            ctx->path, ctx->pool));
-        return result;
-    }
-
-    // Resolve the reference
-    TypeSchema* resolved = resolve_reference(schema, ctx->schema_registry);
-    if (!resolved) {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg),
-                "Cannot resolve type reference: %.*s",
-                (int)schema->name.length, schema->name.str);
-
-        add_validation_error(result, create_validation_error(
-            VALID_ERROR_REFERENCE_ERROR, error_msg, ctx->path, ctx->pool));
-        return result;
-    }
-
-    // if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_reference: Resolved '%.*s' to schema type %d\n",
-    //        (int)schema->name.length, schema->name.str, resolved->schema_type);
-
-    // Mark as visited and validate
-    VisitedEntry entry = { .key = schema->name, .visited = true };
-    hashmap_set(ctx->visited_nodes, &entry);
-
-    validation_result_destroy(result);
-
-    result = validate_item(validator, typed_item, resolved, ctx);
-
-    // Unmark as visited
-    VisitedEntry unmark_entry = { .key = schema->name, .visited = false };
-    hashmap_set(ctx->visited_nodes, &unmark_entry);
-
-    ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Finished validating '%.*s'\n",
-    //       (int)schema->name.length, schema->name.str);
-    return result;
-}
-*/
 
 ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem item, Type* type) {
     if (!validator || !type) {
@@ -874,7 +935,6 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
     ValidationResult* result = nullptr;
     validator->set_current_depth(validator->get_current_depth() + 1);
     log_debug("[AST_VALIDATOR] Validating against type_id: %d, item type_id: %d", type->type_id, item.type_id());
-    fprintf(stderr, "[VALIDATE_TYPE] type->type_id=%d, item.type_id()=%d\n", type->type_id, item.type_id());
 
     switch (type->type_id) {
         case LMD_TYPE_STRING:
@@ -948,6 +1008,16 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
             result = validate_against_base_type(validator, item, (TypeType*)type);
             validator->set_current_depth(validator->get_current_depth() - 1);
             return result;
+        case LMD_TYPE_TYPE_UNARY: {
+            // TypeUnary is passed directly, not wrapped in TypeType
+            // Create a temporary wrapper for validate_against_base_type
+            TypeType temp_wrapper;
+            temp_wrapper.type_id = LMD_TYPE_TYPE;
+            temp_wrapper.type = type;  // Point to the TypeUnary
+            result = validate_against_base_type(validator, item, &temp_wrapper);
+            validator->set_current_depth(validator->get_current_depth() - 1);
+            return result;
+        }
         default:
             result = create_validation_result(validator->get_pool());
             char error_msg[256];

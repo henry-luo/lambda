@@ -33,7 +33,7 @@ string hex_digit = digit | "a" to "f" | "A" to "F"
 string email = identifier "@" identifier "." identifier
 
 // Using occurrence operators
-string phone_us = digit{3} "-" digit{3} "-" digit{4}
+string phone_us = digit[3] "-" digit[3] "-" digit[4]
 ```
 
 ### 1.2 Pattern Operators
@@ -49,8 +49,9 @@ String patterns reuse Lambda's existing type pattern operators:
 | (space)  | Concatenation (implicit)| `"a" "b"`    | "ab"                  |
 | `&`      | Intersection            | `\w & !"_"`  | word char except "_"  |
 | `to`     | Character range         | `"a" to "z"` | a, b, c, ..., z       |
-| `{n}`    | Exactly n times         | `digit{3}`   | "000" to "999"        |
-| `{n,m}`  | Between n and m times   | `digit{2,4}` | "00" to "9999"        |
+| `[n]`    | Exactly n times         | `digit[3]`   | "000" to "999"        |
+| `[n, m]` | Between n and m times   | `digit[2, 4]`| "00" to "9999"        |
+| `[n+]`   | At least n times        | `digit[2+]`  | "00", "000", ...      |
 | `!`      | Negation                | `!\d`        | any non-digit char    |
 
 ### 1.3 Pattern Examples
@@ -70,7 +71,7 @@ string whitespace = (" " | "\t" | "\n" | "\r")+
 string ip_octet = digit | digit digit | ("0" to "1") digit digit | "2" ("0" to "4") digit | "25" ("0" to "5")
 string ipv4 = ip_octet "." ip_octet "." ip_octet "." ip_octet
 
-string date_iso = digit{4} "-" digit{2} "-" digit{2}
+string date_iso = digit[4] "-" digit[2] "-" digit[2]
 string time_24h = ("0" to "1") digit | "2" ("0" to "3") ":" ("0" to "5") digit
 
 // URL pattern
@@ -192,7 +193,7 @@ string identifier = (letter | "_") (alphanumeric | "_")*
 string positive_int = digit+ & !("0" digit*)  // no leading zeros
 
 // Pattern aliases
-string varchar50 = . {1,50}   // any string 1-50 chars
+string varchar50 = .[1, 50]   // any string 1-50 chars
 ```
 
 ---
@@ -513,8 +514,9 @@ pattern_repetition: $ => choice(
     seq(field('operand', $._pattern_expr), '*'),
     seq(field('operand', $._pattern_expr), '+'),
     seq(field('operand', $._pattern_expr), '?'),
-    seq(field('operand', $._pattern_expr), '{', field('count', $.integer), '}'),
-    seq(field('operand', $._pattern_expr), '{', field('min', $.integer), ',', field('max', $.integer), '}'),
+    seq(field('operand', $._pattern_expr), '[', field('count', $.integer), ']'),
+    seq(field('operand', $._pattern_expr), '[', field('min', $.integer), ',', field('max', $.integer), ']'),
+    seq(field('operand', $._pattern_expr), '[', field('min', $.integer), '+', ']'),
 ),
 
 pattern_alternation: $ => prec.left('set_union', seq(
@@ -544,13 +546,13 @@ String patterns integrate with Lambda's schema validation:
 ```lambda
 // Schema using string patterns
 string email = local_part '@' domain
-string phone = digit{3} '-' digit{3} '-' digit{4}
+string phone = digit[3] '-' digit[3] '-' digit[4]
 
 type User = {
     name: string,
     email: email,          // validated against pattern
     phone: phone?,
-    zip: digit{5}          // inline pattern
+    zip: digit[5]          // inline pattern
 }
 
 // Validation
@@ -595,8 +597,8 @@ parse("123")     // calls decimal version
 ```lambda
 // Define config patterns
 string semver = digit+ "." digit+ "." digit+ ("-" alphanumeric+)?
-string env_var = ("A" to "Z" | "_")+
-string file_path = ("/" | "./")? (alphanumeric | "_" | "-" | "/")+ ("." alphanumeric+)?
+string env_var = ("A" to "Z" | '_)+
+string file_path = ("/" | "./")? (alphanumeric | '_' | '-' | '/')+  ("." alphanumeric+)?
 
 type Config = {
     version: semver,
@@ -610,7 +612,7 @@ type Config = {
 ### 7.2 Log Parsing
 
 ```lambda
-string timestamp = digit{4} "-" digit{2} "-" digit{2} " " digit{2} ":" digit{2} ":" digit{2}
+string timestamp = digit[4] "-" digit[2] "-" digit[2] " " digit[2] ":" digit[2] ":" digit[2]
 string log_level = "DEBUG" | "INFO" | "WARN" | "ERROR"
 string log_line = @ts:timestamp " " @level:log_level " " @msg:.+
 
@@ -738,7 +740,9 @@ Symbol patterns use the same operators as string patterns, but with symbol liter
 | `+` | One or more | `'a+` | 'a, 'aa, 'aaa, ... |
 | `?` | Optional (0 or 1) | `'a?` | ' or 'a |
 | `to` | Character range | `'a to 'z` | 'a, 'b, 'c, ..., 'z |
-| `{n}` | Exactly n times | `('a to 'z){3}` | 'aaa to 'zzz |
+| `[n]` | Exactly n times | `('a to 'z)[3]` | 'aaa to 'zzz |
+| `[n, m]` | Between n and m times | `('a to 'z)[2, 4]` | 'aa to 'zzzz |
+| `[n+]` | At least n times | `('a to 'z)[2+]` | 'aa, 'aaa, ... |
 
 ### 11.4 Using Symbol Patterns as Types
 
@@ -886,8 +890,9 @@ enum PatternCharClass { PATTERN_DIGIT, PATTERN_WORD, PATTERN_SPACE, PATTERN_ALPH
 | `a?` | `(?:a)?` |
 | `a+` | `(?:a)+` |
 | `a*` | `(?:a)*` |
-| `a{3}` | `(?:a){3}` |
-| `a{2,4}` | `(?:a){2,4}` |
+| `a[3]` | `(?:a){3}` |
+| `a[2, 4]` | `(?:a){2,4}` |
+| `a[2+]` | `(?:a){2,}` |
 
 Full-match anchors (`^...$`) are automatically added.
 

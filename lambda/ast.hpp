@@ -92,6 +92,7 @@ extern "C" {
 #define SYM_PATTERN_RANGE sym_pattern_range
 #define SYM_BINARY_PATTERN sym_binary_pattern
 #define SYM_PATTERN_SEQ sym_pattern_seq
+#define SYM_OCCURRENCE_COUNT sym_occurrence_count
 
 #define SYM_COMMENT sym_comment
 #define SYM_NAMED_ARGUMENT sym_named_argument
