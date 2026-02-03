@@ -91,4 +91,100 @@ false
 true
 "10.2"
 false
+'Section 11: Discriminated Unions'
+"11.1"
+true
+"11.2"
+true
+"11.3"
+true
+"11.4"
+true
+"11.5"
+true
+"11.6"
+false
+'Section 12: Optional Complex Fields'
+"12.1"
+true
+"12.2"
+true
+"12.3"
+true
+"12.4"
+true
+"12.5"
+false
+'Section 13: Nested Occurrence'
+"13.1"
+true
+"13.2"
+true
+"13.3"
+false
+"13.4"
+true
+"13.5"
+false
+'Section 14: Graph Structures'
+"14.1"
+true
+"14.2"
+true
+"14.3"
+false
+'Section 15: Config Patterns'
+"15.1"
+true
+"15.2"
+true
+"15.3"
+false
+'Section 16: Heterogeneous Nesting'
+"16.1"
+true
+"16.2"
+false
+'Section 17: Fixed Size Arrays'
+"17.1"
+true
+"17.2"
+true
+"17.3"
+true
+"17.4"
+true
+"17.5"
+false
+"17.6"
+true
+"17.7"
+true
+"17.8"
+true
+"17.9"
+false
+'Section 18: Deep Optional Chains'
+"18.1"
+true
+"18.2"
+false
+'Section 19: Schema Versioning'
+"19.1"
+true
+"19.2"
+true
+"19.3"
+true
+"19.4"
+true
+"19.5"
+true
+'Section 20: Order System'
+"20.1"
+true
+"20.2"
+false
+"20.3"
+false
 "===== END OF ADVANCED TYPE PATTERN TESTS ====="
