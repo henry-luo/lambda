@@ -2508,24 +2508,116 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     return (AstNode*)ast_node;
 }
 
+// Helper function to parse occurrence count from string like "[2]", "[2, 5]", "[2+]"
+// Sets min_count and max_count; max_count=-1 means unbounded
+static void parse_occurrence_count(StrView op_str, int* min_count, int* max_count) {
+    *min_count = 0;
+    *max_count = -1;  // unbounded by default
+    
+    if (op_str.length < 3 || op_str.str[0] != '[') {
+        return;
+    }
+    
+    // skip opening bracket
+    const char* p = op_str.str + 1;
+    const char* end = op_str.str + op_str.length;
+    
+    // parse first number
+    int n1 = 0;
+    while (p < end && *p >= '0' && *p <= '9') {
+        n1 = n1 * 10 + (*p - '0');
+        p++;
+    }
+    *min_count = n1;
+    
+    // skip whitespace
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+    
+    if (p < end) {
+        if (*p == ']') {
+            // [n] - exact count
+            *max_count = n1;
+        } else if (*p == '+') {
+            // [n+] - unbounded minimum
+            *max_count = -1;
+        } else if (*p == ',') {
+            // [n, m] - range
+            p++;  // skip comma
+            while (p < end && (*p == ' ' || *p == '\t')) p++;  // skip whitespace
+            int n2 = 0;
+            while (p < end && *p >= '0' && *p <= '9') {
+                n2 = n2 * 10 + (*p - '0');
+                p++;
+            }
+            *max_count = n2;
+        }
+    }
+    
+    log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
+}
+
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     log_debug("build occurrence type");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeUnary* type = (TypeUnary*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeUnary));
+    TypeUnary* type = (TypeUnary*)alloc_type(tp->pool, LMD_TYPE_TYPE_UNARY, sizeof(TypeUnary));
     ((TypeType*)ast_node->type)->type = (Type*)type;
+    
+    // initialize occurrence counts to defaults
+    type->min_count = 0;
+    type->max_count = -1;
 
     TSNode op_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERATOR);
+    TSSymbol op_symbol = ts_node_symbol(op_node);
     StrView op = ts_node_source(tp, op_node);
     ast_node->op_str = op;
-    if (strview_equal(&op, "?")) { ast_node->op = OPERATOR_OPTIONAL; }
-    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ONE_MORE; }
-    else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_ZERO_MORE; }
-    log_debug("unknown operator: %.*s", (int)op.length, op.str);
+    
+    // The op_node is the 'occurrence' node which is a choice of '?', '+', '*', or occurrence_count
+    // When it's occurrence_count, we need to check the first child or the source text
+    // Check if op_symbol is 'occurrence' (the parent choice) and if it contains occurrence_count
+    if (op_symbol == sym_occurrence) {
+        // Get the first child which should be the actual choice
+        TSNode actual_op = ts_node_child(op_node, 0);
+        if (!ts_node_is_null(actual_op)) {
+            op_symbol = ts_node_symbol(actual_op);
+            log_debug("occurrence child symbol: %d (SYM_OCCURRENCE_COUNT=%d)", op_symbol, SYM_OCCURRENCE_COUNT);
+        }
+    }
+    
+    log_debug("build occurrence: op_symbol=%d, SYM_OCCURRENCE_COUNT=%d, op='%.*s'", 
+              op_symbol, SYM_OCCURRENCE_COUNT, (int)op.length, op.str);
+    
+    if (op_symbol == SYM_OCCURRENCE_COUNT) {
+        // Handle [n], [n, m], [n+] syntax
+        ast_node->op = OPERATOR_REPEAT;
+        parse_occurrence_count(op, &type->min_count, &type->max_count);
+        log_debug("occurrence count: %.*s -> min=%d, max=%d", (int)op.length, op.str, type->min_count, type->max_count);
+    } else if (strview_equal(&op, "?")) {
+        ast_node->op = OPERATOR_OPTIONAL;
+        type->min_count = 0;
+        type->max_count = 1;
+    } else if (strview_equal(&op, "+")) {
+        ast_node->op = OPERATOR_ONE_MORE;
+        type->min_count = 1;
+        type->max_count = -1;
+    } else if (strview_equal(&op, "*")) {
+        ast_node->op = OPERATOR_ZERO_MORE;
+        type->min_count = 0;
+        type->max_count = -1;
+    } else {
+        log_debug("unknown operator: %.*s", (int)op.length, op.str);
+    }
+    
+    type->op = ast_node->op;
 
     TSNode operand_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERAND);
     ast_node->operand = build_expr(tp, operand_node);
     type->operand = ast_node->operand->type;
+    
+    // Register the type in the type list for runtime access
+    arraylist_append(tp->type_list, type);
+    type->type_index = tp->type_list->length - 1;
+    log_debug("occurrence type index: %d, op=%d, min=%d, max=%d", type->type_index, type->op, type->min_count, type->max_count);
 
     // log_debug("built occurrence type with modifier '%c' for base type %d", modifier, node_type->type->type_id);
     return (AstNode*)ast_node;
@@ -3891,19 +3983,24 @@ AstNode* build_primary_pattern(Transpiler* tp, TSNode node) {
     return nullptr;
 }
 
-// Build pattern occurrence (pattern with ?, +, *, {n,m})
+// Build pattern occurrence (pattern with ?, +, *, [n], [n+], [n, m])
 AstNode* build_pattern_occurrence(Transpiler* tp, TSNode node) {
     log_debug("build pattern occurrence");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
     
     TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
     TSNode operator_node = ts_node_child_by_field_id(node, FIELD_OPERATOR);
+    TSSymbol op_symbol = ts_node_symbol(operator_node);
     
     ast_node->operand = build_pattern_expr(tp, operand_node);
     ast_node->op_str = ts_node_source(tp, operator_node);
     
-    // Determine operator from string
-    if (ast_node->op_str.length == 1) {
+    // Determine operator from string or symbol
+    if (op_symbol == SYM_PATTERN_COUNT) {
+        // [n], [n+], [n, m] - treat as OPERATOR_REPEAT
+        ast_node->op = OPERATOR_REPEAT;
+        log_debug("pattern count: %.*s", (int)ast_node->op_str.length, ast_node->op_str.str);
+    } else if (ast_node->op_str.length == 1) {
         switch (ast_node->op_str.str[0]) {
         case '?': ast_node->op = OPERATOR_OPTIONAL; break;
         case '+': ast_node->op = OPERATOR_ONE_MORE; break;
@@ -3911,7 +4008,7 @@ AstNode* build_pattern_occurrence(Transpiler* tp, TSNode node) {
         default: ast_node->op = OPERATOR_REPEAT; break;
         }
     } else {
-        // {n}, {n,}, {n,m} - treat as OPERATOR_REPEAT
+        // Fallback to OPERATOR_REPEAT for any other format
         ast_node->op = OPERATOR_REPEAT;
     }
     

@@ -3841,6 +3841,11 @@ void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
     strbuf_append_format(tp->code_buf, "const_type(%d)", binary_type->type_index);
 }
 
+void transpile_unary_type(Transpiler* tp, AstUnaryNode* unary_node) {
+    TypeUnary* unary_type = (TypeUnary*)((TypeType*)unary_node->type)->type;
+    strbuf_append_format(tp->code_buf, "const_type(%d)", unary_type->type_index);
+}
+
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     if (!expr_node) { log_error("missing expression node"); return; }
     // get the function name
@@ -3965,6 +3970,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
     case AST_NODE_BINARY_TYPE:
         transpile_binary_type(tp, (AstBinaryNode*)expr_node);
+        break;
+    case AST_NODE_UNARY_TYPE:
+        transpile_unary_type(tp, (AstUnaryNode*)expr_node);
         break;
     case AST_NODE_IMPORT:
         log_debug("import module");
@@ -4222,6 +4230,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         break;
     case AST_NODE_TYPE:  case AST_NODE_LIST_TYPE:  case AST_NODE_ARRAY_TYPE:
     case AST_NODE_MAP_TYPE:  case AST_NODE_ELMT_TYPE:  case AST_NODE_BINARY_TYPE:
+    case AST_NODE_UNARY_TYPE:
         // nothing to define at the moment
         break;
     default:

@@ -84,14 +84,14 @@ true
 true
 "9.2"
 true
-'Test 10: Exact Count {n}'
+'Test 10: Exact Count [n]'
 "10.1"
 true
 "10.2"
 false
 "10.3"
 false
-'Test 11: Range Count {n,m}'
+'Test 11: Range Count [n, m]'
 "11.1"
 true
 "11.2"
