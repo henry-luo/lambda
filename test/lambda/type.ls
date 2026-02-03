@@ -5,5 +5,5 @@ type f = {b:bool, c:int}
 type g = map, h = datetime
 type i = <elmt a:b; c, d>
 type j = a | b & c;
-type k = (a:int)->int;
+type k = fn (a:int) int;
 a; b; c; d; e; f; g; h; i; j ; k;

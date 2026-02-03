@@ -1,7 +1,7 @@
 // Function definitions
-fn add(a: int, b: int) -> int { a + b }
+fn add(a: int, b: int) int { a + b }
 fn multiply(x, y) => x * y;
-fn factorial(n: int) -> int {
+fn factorial(n: int) int {
     if (n <= 1) 1 else n * factorial(n - 1)
 }
 
