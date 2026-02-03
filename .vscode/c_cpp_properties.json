@@ -118,7 +118,6 @@
                     "${workspaceFolder}/typeset",
                     "${workspaceFolder}/test",
                     "${workspaceFolder}/include",
-                    "${workspaceFolder}/lexbor",
                     "${workspaceFolder}/radiant",
                     "/usr/local/include",
                     "/opt/homebrew/include"
@@ -183,7 +182,6 @@
                     "${workspaceFolder}/typeset",
                     "${workspaceFolder}/test",
                     "${workspaceFolder}/include",
-                    "${workspaceFolder}/lexbor",
                     "${workspaceFolder}/radiant",
                     "/usr/local/include",
                     "/opt/homebrew/include"
