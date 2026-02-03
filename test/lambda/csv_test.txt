@@ -1,0 +1,289 @@
+"CSV with headers (comma-separated):"
+[{
+    name: "John Doe",
+    age: "30",
+    city: "New York",
+    salary: "50000.50",
+    active: "true",
+    notes: "Simple record",
+    email: "john@example.com"
+  }, {
+    name: "Jane Smith",
+    age: "25",
+    city: "San Francisco",
+    salary: "75000",
+    active: "false",
+    notes: "Record with quoted city",
+    email: "jane@test.org"
+  }, {
+    name: "Bob Johnson",
+    age: "35",
+    city: "Boston",
+    salary: "60000.75",
+    active: "true",
+    notes: "Quoted name and notes",
+    email: "bob@company.net"
+  }, {
+    name: "Alice Brown",
+    age: "28",
+    city: "Los Angeles, CA",
+    salary: "45000",
+    active: "true",
+    notes: "City with comma, needs quotes",
+    email: "alice@domain.com"
+  }, {
+    name: "Charlie "The Great" Wilson",
+    age: "40",
+    city: "Chicago",
+    salary: "80000",
+    active: "false",
+    notes: "Name with quotes and nickname",
+    email: "charlie@email.com"
+  }, {
+    name: "David Lee",
+    age: "32",
+    city: null,
+    salary: "55000",
+    active: "true",
+    notes: "Missing city field",
+    email: "david@work.org"
+  }, {
+    name: "Maria Garcia",
+    age: "29",
+    city: "Miami",
+    salary: "65000",
+    active: null,
+    notes: "Missing boolean field",
+    email: "maria@example.net"
+  }, {
+    name: "Robert "Bob" Smith",
+    age: "45",
+    city: "Dallas, TX",
+    salary: "90000",
+    active: "true",
+    notes: "Multiple edge cases combined",
+    email: "robert@test.com"
+  }, {
+    name: "Lisa Wang",
+    age: "31",
+    city: "Seattle",
+    salary: "70000",
+    active: "false",
+    notes: "Line break in notes
+Continues here",
+    email: "lisa@company.org"
+  }, {
+    name: "Tom O'Connor",
+    age: "38",
+    city: "Dublin",
+    salary: "55000",
+    active: "true",
+    notes: "Name with apostrophe",
+    email: "tom@ireland.ie"
+  }, {
+    name: "Sarah Johnson",
+    age: "26",
+    city: "Portland",
+    salary: "48000",
+    active: "true",
+    notes: "Comma, semicolon; and "quotes" test",
+    email: "sarah@test.com"
+  }, {
+    name: "Mike Brown",
+    age: "33",
+    city: "Denver",
+    salary: "62000",
+    active: "false",
+    notes: "Tab	character in notes",
+    email: "mike@example.org"
+  }, {
+    name: "Emily Davis",
+    age: "24",
+    city: "Phoenix, AZ",
+    salary: "41000",
+    active: "true",
+    notes: null,
+    email: "emily@domain.net"
+  }, {
+    name: "Kevin Wilson",
+    age: "42",
+    city: "Austin",
+    salary: "78000",
+    active: "true",
+    notes: "NULL",
+    email: "kevin@work.com"
+  }, {
+    name: "Amy "Ace" Thompson",
+    age: "29",
+    city: "Nashville",
+    salary: "52000",
+    active: "false",
+    notes: "Special chars: @#$%^&*()",
+    email: "amy@email.org"
+  }, {
+    name: "Chris "C.J." Miller",
+    age: "36",
+    city: "Las Vegas, NV",
+    salary: "67000",
+    active: "true",
+    notes: "Multiple quotes "test" case",
+    email: "chris@test.net"
+  }, {
+    name: "Zhang, Wei",
+    age: "31",
+    city: "San Jose, CA",
+    salary: "85000",
+    active: "true",
+    notes: "Asian name with comma",
+    email: "wei.zhang@tech.com"
+  }, {
+    name: "José María",
+    age: "34",
+    city: "Barcelona",
+    salary: "45000",
+    active: "false",
+    notes: "Unicode characters",
+    email: "jose@spain.es"
+  }, {
+    name: "Müller, Hans",
+    age: "40",
+    city: "Berlin",
+    salary: "55000",
+    active: "true",
+    notes: "German umlaut characters",
+    email: "hans@germany.de"
+  }, {
+    name: "Владимир Петров",
+    age: "45",
+    city: "Moscow",
+    salary: "35000",
+    active: "true",
+    notes: "Cyrillic characters",
+    email: "vladimir@russia.ru"
+  }, {
+    name: "山田太郎",
+    age: "38",
+    city: "Tokyo",
+    salary: "60000",
+    active: "false",
+    notes: "Japanese characters",
+    email: "yamada@japan.jp"
+  }, {
+    name: null,
+    age: "25",
+    city: "Unknown",
+    salary: "30000",
+    active: "true",
+    notes: "Empty name field",
+    email: "anonymous@example.com"
+  }, {
+    name: "Test User",
+    age: "0",
+    city: "TestCity",
+    salary: "0",
+    active: "false",
+    notes: "Zero values",
+    email: "test@zero.com"
+  }, {
+    name: "Very Long Name That Exceeds Normal Length Expectations",
+    age: "99",
+    city: "VeryLongCityNameThatAlsoExceedsNormalLimits",
+    salary: "999999",
+    active: "true",
+    notes: "Testing long values",
+    email: "verylongemail@verylongdomain.com"
+  }, {
+    name: "Special,Chars"In,Name",
+    age: "50",
+    city: "City"With"Quotes",
+    salary: "75000",
+    active: "true",
+    notes: "Notes with
+multiple
+lines",
+    email: "special@csv.com"
+  }]
+"
+CSV with tab separator:"
+[{
+    name: "John Doe",
+    age: "30",
+    city: "New York",
+    salary: "50000.50",
+    active: "true"
+  }, {
+    name: "Jane Smith",
+    age: "25",
+    city: "San Francisco",
+    salary: "75000",
+    active: "false"
+  }, {
+    name: "Bob Johnson",
+    age: "35",
+    city: "Boston",
+    salary: "60000.75",
+    active: "true"
+  }, {
+    name: "Alice Brown",
+    age: "28",
+    city: "Los Angeles",
+    salary: "45000",
+    active: "true"
+  }, {
+    name: "Charlie Wilson",
+    age: "40",
+    city: "Chicago",
+    salary: "80000",
+    active: "false"
+  }]
+"
+CSV without headers (should be array of arrays):"
+[{
+    John Doe: "Jane Smith",
+    30: "25",
+    New York: "San Francisco",
+    50000.50: "75000",
+    true: "false"
+  }, {
+    John Doe: "Bob Johnson",
+    30: "35",
+    New York: "Boston",
+    50000.50: "60000.75",
+    true: "true"
+  }, {
+    John Doe: "Alice Brown",
+    30: "28",
+    New York: "Los Angeles",
+    50000.50: "45000",
+    true: "true"
+  }, {
+    John Doe: "Charlie Wilson",
+    30: "40",
+    New York: "Chicago",
+    50000.50: "80000",
+    true: "false"
+  }]
+"
+Testing map access - first person's name:"
+{
+  name: "John Doe",
+  age: "30",
+  city: "New York",
+  salary: "50000.50",
+  active: "true",
+  notes: "Simple record",
+  email: "john@example.com"
+}
+"
+Testing map access - first person's age:"
+{
+  name: "John Doe",
+  age: "30",
+  city: "New York",
+  salary: "50000.50",
+  active: "true",
+  notes: "Simple record",
+  email: "john@example.com"
+}
+"
+Testing array access - first row, first column:"
