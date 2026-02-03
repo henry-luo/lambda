@@ -2501,7 +2501,32 @@
   {
     "type": "occurrence",
     "named": true,
-    "fields": {}
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "occurrence_count",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "occurrence_count",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "integer",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "order_spec",
@@ -3617,11 +3642,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "desc",

@@ -1,0 +1,92 @@
+"===== TYPE OCCURRENCE PATTERN TESTS ====="
+'Test 1: Exact Count [n]'
+"1.1"
+true
+"1.2"
+false
+"1.3"
+false
+"1.4"
+true
+"1.5"
+false
+'Test 2: Range Count [min, max]'
+"2.1"
+false
+"2.2"
+true
+"2.3"
+true
+"2.4"
+true
+"2.5"
+false
+"2.6"
+false
+"2.7"
+true
+"2.8"
+true
+"2.9"
+false
+'Test 3: Unbounded Minimum [n+]'
+"3.1"
+false
+"3.2"
+true
+"3.3"
+true
+"3.4"
+false
+"3.5"
+true
+"3.6"
+true
+'Test 4: Standard Occurrence Operators'
+"4.1"
+true
+"4.2"
+true
+"4.3"
+true
+"4.4"
+false
+"4.5"
+true
+"4.6"
+true
+'Test 5: Edge Cases'
+"5.1"
+true
+"5.2"
+false
+"5.3"
+true
+"5.4"
+true
+"5.5"
+false
+'Test 6: Type Checking with Mixed Content'
+"6.1"
+false
+"6.2"
+true
+"6.3"
+false
+'Test 7: Nested Patterns'
+"7.1"
+true
+"7.2"
+false
+"7.3"
+false
+'Test 8: Inline Type Occurrence (via alias workaround)'
+"8.1"
+true
+"8.2"
+false
+"8.3"
+true
+"8.4"
+true
+"===== END OF TYPE OCCURRENCE TESTS ====="
