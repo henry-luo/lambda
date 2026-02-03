@@ -525,7 +525,7 @@ Bool fn_is(Item a, Item b) {
         return pattern_full_match(pattern, str) ? BOOL_TRUE : BOOL_FALSE;
     }
     
-    if (b_type_id != LMD_TYPE_TYPE && b_type_id != LMD_TYPE_TYPE_UNARY) {
+    if (b_type_id != LMD_TYPE_TYPE && b_type_id != LMD_TYPE_TYPE_UNARY && b_type_id != LMD_TYPE_TYPE_BINARY) {
         log_error("2nd argument must be a type or pattern, got type: %d", b_type_id);
         return BOOL_ERROR;
     }
@@ -537,6 +537,21 @@ Bool fn_is(Item a, Item b) {
                   type_unary->op, type_unary->min_count, type_unary->max_count);
         // Use full type validation for occurrence types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), (Type*)type_unary);
+        if (result->error_count > 0) {
+            print_validation_result(result);
+            log_debug("type validation failed with %d errors", result->error_count);
+        } else {
+            log_debug("type validation succeeded");
+        }
+        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+    }
+    
+    // If b is a TypeBinary directly (type_id = LMD_TYPE_TYPE_BINARY), handle it via validator
+    if (b_type_id == LMD_TYPE_TYPE_BINARY) {
+        TypeBinary* type_binary = (TypeBinary*)b.type;
+        log_debug("fn_is: TypeBinary (direct), op=%d", type_binary->op);
+        // Use full type validation for union/intersection types
+        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), (Type*)type_binary);
         if (result->error_count > 0) {
             print_validation_result(result);
             log_debug("type validation failed with %d errors", result->error_count);
@@ -558,6 +573,22 @@ Bool fn_is(Item a, Item b) {
                   type_unary->op, OPERATOR_REPEAT, OPERATOR_OPTIONAL);
         // Use full type validation for occurrence types
         log_debug("fn_is: TypeUnary occurrence operator detected, using validator");
+        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
+        if (result->error_count > 0) {
+            print_validation_result(result);
+            log_debug("type validation failed with %d errors", result->error_count);
+        } else {
+            log_debug("type validation succeeded");
+        }
+        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+    }
+    
+    // Check if inner type is TypeBinary (union/intersection: |, &, \)
+    // TypeBinary has a distinct type_id = LMD_TYPE_TYPE_BINARY
+    if (type_b->type->type_id == LMD_TYPE_TYPE_BINARY) {
+        TypeBinary* type_binary = (TypeBinary*)type_b->type;
+        log_debug("fn_is: TypeBinary detected (wrapped), op=%d", type_binary->op);
+        // Use full type validation for union/intersection types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
         if (result->error_count > 0) {
             print_validation_result(result);

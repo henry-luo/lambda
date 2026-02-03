@@ -59,11 +59,11 @@ true
 "7.2"
 true
 "7.3"
-false
+true
 "7.4"
-false
+true
 "7.5"
-false
+true
 "7.6"
 false
 'Section 8: Event Structures'

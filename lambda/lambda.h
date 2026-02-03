@@ -65,6 +65,7 @@ enum EnumTypeId {
     LMD_TYPE_ELEMENT,
     LMD_TYPE_TYPE,
     LMD_TYPE_TYPE_UNARY,  // unary type with occurrence operator (?, +, *, [n], etc.)
+    LMD_TYPE_TYPE_BINARY, // binary type for union (|), intersection (&), exclude (\) operations
     LMD_TYPE_FUNC,
     LMD_TYPE_PATTERN,  // compiled regex pattern for string matching
 
