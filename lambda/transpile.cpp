@@ -786,6 +786,69 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         break;
     case LMD_TYPE_ANY:
     case LMD_TYPE_ERROR:
+        // For call expressions, check if the actual function has a typed return
+        // This handles forward-referenced functions where the type wasn't known at AST build time
+        {
+            AstNode* check_item = item;
+            // unwrap primary node if present
+            if (check_item->node_type == AST_NODE_PRIMARY) {
+                AstPrimaryNode* pri = (AstPrimaryNode*)check_item;
+                if (pri->expr) check_item = pri->expr;
+            }
+            if (check_item->node_type == AST_NODE_CALL_EXPR) {
+                AstCallNode* call_node = (AstCallNode*)check_item;
+                AstNode* fn_expr = call_node->function;
+                // unwrap primary node if present
+                if (fn_expr->node_type == AST_NODE_PRIMARY) {
+                    AstPrimaryNode* pri = (AstPrimaryNode*)fn_expr;
+                    if (pri->expr) fn_expr = pri->expr;
+                }
+                // check if this is an identifier referencing a function
+                if (fn_expr->node_type == AST_NODE_IDENT) {
+                    AstIdentNode* ident_node = (AstIdentNode*)fn_expr;
+                    AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
+                    if (entry_node && (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC)) {
+                        AstFuncNode* fn_node = (AstFuncNode*)entry_node;
+                        TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                        if (fn_type && fn_type->returned && fn_type->returned->type_id != LMD_TYPE_ANY) {
+                            // function has a typed return - need to box it appropriately
+                            TypeId ret_type_id = fn_type->returned->type_id;
+                            log_debug("transpile_box_item: forward-ref call to '%.*s' with return type %d",
+                                (int)fn_node->name->len, fn_node->name->chars, ret_type_id);
+                            if (ret_type_id == LMD_TYPE_FLOAT) {
+                                strbuf_append_str(tp->code_buf, "push_d(");
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                                break;
+                            } else if (ret_type_id == LMD_TYPE_INT) {
+                                strbuf_append_str(tp->code_buf, "i2it(");
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                                break;
+                            } else if (ret_type_id == LMD_TYPE_INT64) {
+                                strbuf_append_str(tp->code_buf, "push_l(");
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                                break;
+                            } else if (ret_type_id == LMD_TYPE_BOOL) {
+                                strbuf_append_str(tp->code_buf, "b2it(");
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                                break;
+                            } else if (ret_type_id == LMD_TYPE_STRING || ret_type_id == LMD_TYPE_SYMBOL || ret_type_id == LMD_TYPE_BINARY) {
+                                char t = ret_type_id == LMD_TYPE_STRING ? 's' :
+                                    ret_type_id == LMD_TYPE_SYMBOL ? 'y' : 'x';
+                                strbuf_append_format(tp->code_buf, "%c2it(", t);
+                                transpile_expr(tp, item);
+                                strbuf_append_char(tp->code_buf, ')');
+                                break;
+                            }
+                            // for other types (containers), fall through to default behavior
+                        }
+                    }
+                }
+            }
+        }
         // ANY and ERROR types are already Item at runtime - no boxing needed
         transpile_expr(tp, item);
         break;
