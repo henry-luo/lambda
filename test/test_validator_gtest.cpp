@@ -585,7 +585,7 @@ TEST_F(ValidatorTest, DISABLED_ReferenceTypesValidation) {
 }
 
 TEST_F(ValidatorTest, DISABLED_FunctionTypesParsing) {
-    const char* function_features[] = {"fn(int) -> string", "map: fn([T]) -> [U]"};
+    const char* function_features[] = {"fn (int) string", "map: fn ([T]) [U]"};
     verify_schema_features("test/lambda/validator/schema_functions.ls",
                           function_features, 2);
 }

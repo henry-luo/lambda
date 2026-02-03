@@ -126,7 +126,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `map` | Key-value mappings | `{key: "value"}` |
 | `element` | Structured markup elements | `<tag attr: value; content>` |
 | `range` | Numeric ranges | `1 to 10` |
-| `function` | Function values | `fn(x) => x + 1` |
+| `function` | Function values | `(x) => x + 1` |
 | `type` | Type descriptors | `int`, `string` |
 
 ### Special Types
@@ -1499,12 +1499,13 @@ string | null      // String or null
 
 ```lambda
 // Function type syntax (for type declarations)
-(int) -> int              // Function taking int, returning int
-(int, int) -> int         // Function taking two ints, returning int
-(string, bool) -> string  // Function taking string and bool, returning string
+fn (int) int              // Function taking int, returning int
+fn (int, int) int         // Function taking two ints, returning int
+fn (string, bool) string  // Function taking string and bool, returning string
+fn int                    // Function with no params, returning int (shorthand for fn () int)
 
 // Type alias for function types
-type BinaryOp = (a: int, b: int) -> int
+type BinaryOp = fn (a: int, b: int) int
 ```
 
 ### Type Declarations
