@@ -94,65 +94,6 @@ void write_node_source(Transpiler* tp, TSNode node) {
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
-// Forward declaration for has_any_recursive_call
-static bool has_any_recursive_call_impl(AstNode* node, AstFuncNode* fn_node);
-
-// Check if a function body contains ANY recursive calls (not just tail calls)
-// Used to avoid generating unboxed versions for recursive functions
-static bool has_any_recursive_call(AstFuncNode* fn_node) {
-    if (!fn_node || !fn_node->body) return false;
-    return has_any_recursive_call_impl(fn_node->body, fn_node);
-}
-
-// Recursively check AST for any call to the given function
-static bool has_any_recursive_call_impl(AstNode* node, AstFuncNode* fn_node) {
-    if (!node) return false;
-    
-    switch (node->node_type) {
-    case AST_NODE_CALL_EXPR:
-        // Check if this is a recursive call
-        if (is_recursive_call((AstCallNode*)node, fn_node)) {
-            return true;
-        }
-        // Also check arguments for recursive calls
-        {
-            AstNode* arg = ((AstCallNode*)node)->argument;
-            while (arg) {
-                if (has_any_recursive_call_impl(arg, fn_node)) return true;
-                arg = arg->next;
-            }
-        }
-        // Check the function expression too
-        return has_any_recursive_call_impl(((AstCallNode*)node)->function, fn_node);
-        
-    case AST_NODE_IF_EXPR: {
-        AstIfNode* if_node = (AstIfNode*)node;
-        if (has_any_recursive_call_impl(if_node->cond, fn_node)) return true;
-        if (has_any_recursive_call_impl(if_node->then, fn_node)) return true;
-        if (has_any_recursive_call_impl(if_node->otherwise, fn_node)) return true;
-        return false;
-    }
-    
-    case AST_NODE_PRIMARY:
-        return has_any_recursive_call_impl(((AstPrimaryNode*)node)->expr, fn_node);
-        
-    case AST_NODE_BINARY: {
-        AstBinaryNode* bin = (AstBinaryNode*)node;
-        if (has_any_recursive_call_impl(bin->left, fn_node)) return true;
-        return has_any_recursive_call_impl(bin->right, fn_node);
-    }
-    
-    case AST_NODE_UNARY:
-        return has_any_recursive_call_impl(((AstUnaryNode*)node)->operand, fn_node);
-        
-    // Add more cases as needed, for now just check linked nodes
-    default:
-        // Check next node in sequence
-        if (node->next && has_any_recursive_call_impl(node->next, fn_node)) return true;
-        return false;
-    }
-}
-
 // Check if argument type is compatible with parameter type for unboxed call
 // Returns true if arg can be passed directly to unboxed version (native type)
 bool is_type_compatible_for_unboxed(TypeId arg_type, TypeId param_type) {
