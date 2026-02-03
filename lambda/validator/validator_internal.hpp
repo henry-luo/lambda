@@ -299,6 +299,15 @@ ValidationResult* validate_occurrence_type(
 );
 
 /**
+ * Validate against TypeBinary (union |, intersection &, exclude \)
+ */
+ValidationResult* validate_binary_type(
+    SchemaValidator* validator,
+    ConstItem item,
+    TypeBinary* type_binary
+);
+
+/**
  * Validate against union type (T1 | T2 | ...)
  * Note: Function name kept as validate_against_union_type for backward compatibility
  */

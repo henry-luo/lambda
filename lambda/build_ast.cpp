@@ -2482,7 +2482,7 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
         AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeBinary* type = (TypeBinary*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeBinary));
+    TypeBinary* type = (TypeBinary*)alloc_type(tp->pool, LMD_TYPE_TYPE_BINARY, sizeof(TypeBinary));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);

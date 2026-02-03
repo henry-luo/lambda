@@ -246,6 +246,122 @@ ValidationResult* validate_against_union_type(
     return result;
 }
 
+// ==================== Binary Type Validation ====================
+
+/**
+ * Flatten a binary type tree into an array of types.
+ * For union types like A | B | C, this collects [A, B, C].
+ */
+static void flatten_binary_type(TypeBinary* binary, Type** types, int* count, int max_count, Operator op) {
+    if (!binary || *count >= max_count) return;
+    
+    // Check if left is also a binary type with same operator
+    if (binary->left && binary->left->type_id == LMD_TYPE_TYPE_BINARY) {
+        TypeBinary* left_binary = (TypeBinary*)binary->left;
+        if (left_binary->op == op) {
+            flatten_binary_type(left_binary, types, count, max_count, op);
+        } else {
+            // Different operator, treat as a single type
+            types[(*count)++] = binary->left;
+        }
+    } else if (binary->left) {
+        types[(*count)++] = binary->left;
+    }
+    
+    // Check if right is also a binary type with same operator
+    if (binary->right && binary->right->type_id == LMD_TYPE_TYPE_BINARY) {
+        TypeBinary* right_binary = (TypeBinary*)binary->right;
+        if (right_binary->op == op) {
+            flatten_binary_type(right_binary, types, count, max_count, op);
+        } else {
+            // Different operator, treat as a single type
+            types[(*count)++] = binary->right;
+        }
+    } else if (binary->right) {
+        types[(*count)++] = binary->right;
+    }
+}
+
+ValidationResult* validate_binary_type(
+    SchemaValidator* validator,
+    ConstItem item,
+    TypeBinary* type_binary
+) {
+    log_debug("[PATTERN] validate_binary_type: op=%d", type_binary->op);
+    
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    
+    if (!type_binary) {
+        add_constraint_error(result, validator, "Invalid binary type (null)");
+        return result;
+    }
+    
+    switch (type_binary->op) {
+        case OPERATOR_UNION: {
+            // Flatten union type into array
+            const int MAX_UNION_TYPES = 32;
+            Type* union_types[MAX_UNION_TYPES];
+            int type_count = 0;
+            
+            flatten_binary_type(type_binary, union_types, &type_count, MAX_UNION_TYPES, OPERATOR_UNION);
+            
+            log_debug("[PATTERN] Union type flattened to %d types", type_count);
+            
+            if (type_count == 0) {
+                add_constraint_error(result, validator, "Empty union type");
+                return result;
+            }
+            
+            return validate_against_union_type(validator, item, union_types, type_count);
+        }
+        
+        case OPERATOR_OR: {
+            // Intersection type - item must match ALL types
+            // Try left first
+            ValidationResult* left_result = validate_against_type(validator, item, type_binary->left);
+            if (left_result && !left_result->valid) {
+                merge_errors(result, left_result, validator);
+                return result;
+            }
+            
+            // Then try right
+            ValidationResult* right_result = validate_against_type(validator, item, type_binary->right);
+            if (right_result && !right_result->valid) {
+                merge_errors(result, right_result, validator);
+                return result;
+            }
+            
+            result->valid = true;
+            return result;
+        }
+        
+        case OPERATOR_EXCLUDE: {
+            // Exclude type - item must match left but NOT right
+            ValidationResult* left_result = validate_against_type(validator, item, type_binary->left);
+            if (left_result && !left_result->valid) {
+                // Item doesn't match the base type
+                merge_errors(result, left_result, validator);
+                return result;
+            }
+            
+            // Item matches base type - now check it doesn't match excluded type
+            ValidationResult* right_result = validate_against_type(validator, item, type_binary->right);
+            if (right_result && right_result->valid) {
+                // Item matches the excluded type - fail
+                add_constraint_error(result, validator, "Item matches excluded type");
+                return result;
+            }
+            
+            result->valid = true;
+            return result;
+        }
+        
+        default:
+            add_constraint_error_fmt(result, validator, "Unsupported binary type operator: %d", type_binary->op);
+            return result;
+    }
+}
+
 // ==================== Legacy Occurrence Validation ====================
 
 /**
