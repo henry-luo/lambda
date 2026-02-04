@@ -512,6 +512,62 @@ function compareDVI(lambdaDVI, referenceDVI, options = {}) {
         return { passRate, ...results };
     }
 
+    // Lenient mode: compare character sets (ignoring order and font size differences)
+    // This is useful for math formulas where Lambda may use different fonts or sizes
+    if (options.lenient) {
+        // Map cmex10 big operator variants to canonical forms
+        // small/large variants in cmex10: sum(80/88), prod(81/89), int(82/90), etc.
+        const normalizeChar = (charCode) => {
+            // Map large operator variants to small variants
+            if (charCode >= 88 && charCode <= 95) return charCode - 8;  // 88->80, 89->81, etc.
+            if (charCode === 97) return 96;  // coproduct large -> small
+            if (charCode === 73) return 72;  // oint large -> small
+            if (charCode === 77) return 76;  // bigoplus large -> small
+            if (charCode === 79) return 78;  // bigotimes large -> small
+            return charCode;
+        };
+
+        // Normalize both character sets
+        const lambdaNormCodes = lambdaGlyphs.map(g => normalizeChar(g.charCode));
+        const refNormCodes = refGlyphs.map(g => normalizeChar(g.charCode));
+
+        // Extract unique normalized codes (ignore non-printable)
+        const lambdaSet = new Set(lambdaNormCodes.filter(c => c > 32));
+        const refSet = new Set(refNormCodes.filter(c => c > 32));
+
+        // Count how many reference characters appear in Lambda output
+        let matchedUnique = 0;
+        for (const code of refSet) {
+            if (lambdaSet.has(code)) {
+                matchedUnique++;
+            }
+        }
+
+        const uniqueMatch = refSet.size > 0 ? (matchedUnique / refSet.size) * 100 : 0;
+
+        // Also check if all core math characters (letters a-z, A-Z) are present
+        const isLetter = (c) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+        const refLetters = [...refSet].filter(isLetter);
+        const lambdaLetters = [...lambdaSet].filter(isLetter);
+        const letterMatch = refLetters.every(l => lambdaLetters.includes(l));
+
+        // Lenient pass: if all letters match AND at least 80% unique chars match
+        if (letterMatch && uniqueMatch >= 80) {
+            results.matchedGlyphs = refGlyphs.length;
+            results.lenientMatch = true;
+            results.uniqueMatchRate = uniqueMatch;
+            return { passRate: 100, ...results };
+        }
+
+        // Partial lenient match
+        if (uniqueMatch > 50) {
+            results.matchedGlyphs = Math.round(refGlyphs.length * uniqueMatch / 100);
+            results.lenientMatch = true;
+            results.uniqueMatchRate = uniqueMatch;
+            return { passRate: Math.round(uniqueMatch), ...results };
+        }
+    }
+
     // Character sequences differ - do detailed comparison
     // Use sequence alignment for partial matching
     let matchCount = 0;

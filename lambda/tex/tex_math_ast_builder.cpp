@@ -259,10 +259,11 @@ MathASTNode* make_math_box(Arena* arena, MathASTNode* content, uint8_t box_type,
     return node;
 }
 
-MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content) {
+MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content, const char* color) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::STYLE);
     node->style.style_type = style_type;
     node->style.command = command;
+    node->style.color = color;
     node->body = content;
     return node;
 }
@@ -279,9 +280,10 @@ MathASTNode* make_math_sized_delim(Arena* arena, int32_t delim_char, uint8_t siz
 // Array/Matrix Node Constructors
 // ============================================================================
 
-MathASTNode* make_math_array(Arena* arena, const char* col_spec, int num_cols) {
+MathASTNode* make_math_array(Arena* arena, const char* col_spec, int num_cols, const char* env_name) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::ARRAY);
     node->array.col_spec = col_spec;
+    node->array.environment_name = env_name;
     node->array.num_cols = num_cols;
     node->array.num_rows = 0;
     return node;
@@ -332,7 +334,10 @@ void math_row_append(MathASTNode* row, MathASTNode* child) {
         child->prev_sibling = last;
         child->next_sibling = nullptr;
     }
-    row->row.child_count++;
+    // Only increment child_count for ROW type - ARRAY uses different union members
+    if (row->type == MathNodeType::ROW) {
+        row->row.child_count++;
+    }
 }
 
 int math_row_count(MathASTNode* row) {
@@ -340,7 +345,20 @@ int math_row_count(MathASTNode* row) {
     if (row->type != MathNodeType::ROW &&
         row->type != MathNodeType::ARRAY &&
         row->type != MathNodeType::ARRAY_ROW) return 0;
-    return row->row.child_count;
+    
+    // For ROW type, we have child_count. For ARRAY/ARRAY_ROW, count the linked list.
+    if (row->type == MathNodeType::ROW) {
+        return row->row.child_count;
+    } else {
+        // Count children by traversing linked list
+        int count = 0;
+        MathASTNode* child = row->body;
+        while (child) {
+            count++;
+            child = child->next_sibling;
+        }
+        return count;
+    }
 }
 
 // ============================================================================
@@ -1867,7 +1885,7 @@ MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
 
     // Wrap content in a STYLE node with the color command
     if (content) {
-        return make_math_style(arena, 6, cmd ? cmd : "textcolor", content);  // 6=color style
+        return make_math_style(arena, 6, cmd ? cmd : "textcolor", content, color_str);  // 6=color style
     }
 
     return nullptr;
@@ -2077,8 +2095,33 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     // Get body content
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
 
+    // Get column specification (e.g., {ll} for \begin{array}{ll})
+    TSNode columns_node = ts_node_child_by_field_name(node, "columns", 7);
+    const char* col_spec = nullptr;
+    if (!ts_node_is_null(columns_node)) {
+        int col_len;
+        const char* col_text = node_text(columns_node, &col_len);
+        // col_text includes braces like "{ll}", extract inner part
+        if (col_text && col_len > 2 && col_text[0] == '{') {
+            char* buf = (char*)arena_alloc(arena, col_len - 1);  // -2 for braces, +1 for null
+            memcpy(buf, col_text + 1, col_len - 2);
+            buf[col_len - 2] = '\0';
+            col_spec = buf;
+        }
+    }
+
+    // Copy environment name to arena for persistence
+    const char* env_name_copy = nullptr;
+    if (env_name && env_name_len > 0) {
+        char* buf = (char*)arena_alloc(arena, env_name_len + 1);
+        memcpy(buf, env_name, env_name_len);
+        buf[env_name_len] = '\0';
+        env_name_copy = buf;
+    }
+
     // Build ARRAY node to hold the matrix structure
-    MathASTNode* array_node = make_math_array(arena, "c", 0);  // Default column spec
+    // Use col_spec if available, otherwise default to center-aligned
+    MathASTNode* array_node = make_math_array(arena, col_spec ? col_spec : "c", 0, env_name_copy);
 
     if (!ts_node_is_null(body_node)) {
         // Parse the body - contains expressions, row_sep (\\), and col_sep (&)
@@ -2178,11 +2221,11 @@ MathASTNode* MathASTBuilder::build_matrix_command(TSNode node) {
     // Get body which is a group containing content with & and \cr
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
     if (ts_node_is_null(body_node)) {
-        return make_math_array(arena, "c", 0);
+        return make_math_array(arena, "c", 0, "matrix");
     }
 
     // Build ARRAY node
-    MathASTNode* array_node = make_math_array(arena, "c", 0);
+    MathASTNode* array_node = make_math_array(arena, "c", 0, "matrix");
     MathASTNode* current_row = make_math_array_row(arena);
     MathASTNode* current_cell_content = make_math_row(arena);
     int num_cols = 0;
@@ -3117,6 +3160,18 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
                 default: ::strbuf_append_str(out, "minner"); break;
             }
             ::strbuf_append_str(out, "\"");
+            break;
+
+        case MathNodeType::ARRAY:
+            // Output environment name for MathLive compatibility
+            if (node->array.environment_name) {
+                ::strbuf_append_str(out, ",\"environmentName\":");
+                json_escape_string(node->array.environment_name, out);
+            }
+            if (node->array.col_spec) {
+                ::strbuf_append_str(out, ",\"colSpec\":");
+                json_escape_string(node->array.col_spec, out);
+            }
             break;
 
         default:
