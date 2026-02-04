@@ -665,6 +665,9 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
             // Save current state and apply the new one
             MathStyle old_style = ctx.style;
             FontVariant old_variant = ctx.font_variant;
+            const char* old_color = ctx.color;
+            bool is_color_cmd = false;
+            const char* new_color = nullptr;
 
             switch (node->style.style_type) {
                 case 0: ctx.style = MathStyle::Display; break;  // displaystyle
@@ -680,6 +683,17 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
                 case 5: // operatorname
                     ctx.font_variant = FontVariant::OperatorName;
                     break;
+                case 6: // color (\textcolor, \color)
+                    // Store color in context for propagation to output
+                    if (node->style.color) {
+                        ctx.color = node->style.color;
+                        new_color = node->style.color;
+                        is_color_cmd = true;
+                        log_debug("[TYPESET] color: cmd='%s' color='%s'",
+                                  node->style.command ? node->style.command : "(null)",
+                                  ctx.color);
+                    }
+                    break;
             }
 
             TexNode* result = nullptr;
@@ -687,8 +701,21 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
                 result = typeset_node(node->body, ctx);
             }
 
+            // For color commands, wrap result in hbox with color set
+            if (is_color_cmd && new_color && result) {
+                TexNode* wrapper = make_hbox(ctx.arena);
+                wrapper->color = new_color;
+                wrapper->append_child(result);
+                // Copy dimensions from child
+                wrapper->width = result->width;
+                wrapper->height = result->height;
+                wrapper->depth = result->depth;
+                result = wrapper;
+            }
+
             ctx.style = old_style;  // restore style
             ctx.font_variant = old_variant;  // restore font variant
+            ctx.color = old_color;  // restore color
             return result ? result : make_hbox(ctx.arena);
         }
 
