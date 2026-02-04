@@ -41,6 +41,53 @@ float style_size_factor(MathStyle style) {
 }
 
 // ============================================================================
+// Font Variant Parsing
+// ============================================================================
+
+FontVariant parse_font_variant(const char* cmd) {
+    if (!cmd) return FontVariant::Normal;
+
+    // Skip leading "math" prefix if present (e.g., "mathbf" -> "bf")
+    if (strncmp(cmd, "math", 4) == 0) {
+        cmd += 4;
+    }
+
+    // Match the suffix
+    if (strcmp(cmd, "rm") == 0 || strcmp(cmd, "normal") == 0) {
+        return FontVariant::Roman;
+    }
+    if (strcmp(cmd, "bf") == 0 || strcmp(cmd, "bold") == 0) {
+        return FontVariant::Bold;
+    }
+    if (strcmp(cmd, "it") == 0) {
+        return FontVariant::Italic;
+    }
+    if (strcmp(cmd, "bfit") == 0) {
+        return FontVariant::BoldItalic;
+    }
+    if (strcmp(cmd, "sf") == 0) {
+        return FontVariant::SansSerif;
+    }
+    if (strcmp(cmd, "tt") == 0) {
+        return FontVariant::Monospace;
+    }
+    if (strcmp(cmd, "cal") == 0) {
+        return FontVariant::Calligraphic;
+    }
+    if (strcmp(cmd, "scr") == 0) {
+        return FontVariant::Script;
+    }
+    if (strcmp(cmd, "frak") == 0) {
+        return FontVariant::Fraktur;
+    }
+    if (strcmp(cmd, "bb") == 0) {
+        return FontVariant::Blackboard;
+    }
+
+    return FontVariant::Normal;
+}
+
+// ============================================================================
 // Atom Classification
 // ============================================================================
 
