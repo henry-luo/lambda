@@ -35,7 +35,11 @@ enum class MutationType {
     TYPE_PATTERN_UNION_INTERSECT,
     TYPE_PATTERN_OCCURRENCE,
     TYPE_PATTERN_FUNCTION,
-    TYPE_PATTERN_ELEMENT
+    TYPE_PATTERN_ELEMENT,
+    // String pattern integration mutations
+    STRING_PATTERN_BASIC,
+    STRING_PATTERN_IN_TYPE,
+    STRING_PATTERN_COMPLEX
 };
 
 static const std::vector<std::string> KEYWORDS = {
@@ -786,6 +790,123 @@ static std::string mutate_type_pattern_element(const std::string& input, std::mt
     return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
 }
 
+// Basic string pattern mutations
+static std::string mutate_string_pattern_basic(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> patterns = {
+        // Basic pattern definitions
+        R"(string digit = "0" to "9")",
+        R"(string letter = "a" to "z" | "A" to "Z")",
+        R"(string alphanumeric = ("a" to "z" | "A" to "Z" | "0" to "9")+)",
+        R"(string identifier = ("a" to "z" | "_") ("a" to "z" | "0" to "9" | "_")*)",
+        // Format patterns
+        R"(string email = ("a" to "z")+ "@" ("a" to "z")+ "." ("a" to "z")+)",
+        R"(string phone = ("0" to "9")[3] "-" ("0" to "9")[3] "-" ("0" to "9")[4])",
+        R"(string date = ("0" to "9")[4] "-" ("0" to "9")[2] "-" ("0" to "9")[2])",
+        R"(string url = ("a" to "z")+ "://" ("a" to "z" | ".")+ ("/" ("a" to "z")*)*)",
+        // Character classes
+        R"(string ws = " " | "\t" | "\n")",
+        R"(string hex = "0" to "9" | "a" to "f" | "A" to "F")",
+        // Occurrence operators
+        R"(string digits = ("0" to "9")+)",
+        R"(string opt_sign = ("+" | "-")?)",
+        R"(string word = ("a" to "z")[1, 20])",
+        R"(string code = ("A" to "Z")[3+])",
+        // Pattern composition
+        R"(string d = "0" to "9"
+string num = d+)",
+        R"(string l = "a" to "z"
+string word = l+)"
+    };
+    
+    return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
+}
+
+// String pattern used in type patterns
+static std::string mutate_string_pattern_in_type(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> patterns = {
+        // Pattern as field type
+        R"(string email = ("a" to "z")+ "@" ("a" to "z")+ "." ("a" to "z")+
+type User = {name: string, email: email})",
+        // Pattern in nested type
+        R"(string phone = ("0" to "9")[3] "-" ("0" to "9")[4]
+type Contact = {name: string, phones: [phone*]})",
+        // Optional pattern field
+        R"(string url = ("a" to "z")+ "://" ("a" to "z")+
+type Profile = {name: string, website: url?})",
+        // Pattern in union type
+        R"(string email = ("a" to "z")+ "@" ("a" to "z")+
+string phone = ("0" to "9")+
+type ContactMethod = email | phone)",
+        // Pattern in element type
+        R"(string url = ("a" to "z")+ "://" ("a" to "z")+
+type Link = <a href: url; string>)",
+        // Multiple patterns in schema
+        R"(string email = ("a" to "z")+ "@" ("a" to "z")+
+string date = ("0" to "9")[4] "-" ("0" to "9")[2] "-" ("0" to "9")[2]
+type Record = {email: email, created: date, modified: date?})",
+        // Pattern in deeply nested schema
+        R"(string id = ("a" to "z" | "0" to "9")+
+type Nested = {data: {items: [{id: id, name: string}*]}})",
+        // Pattern array types
+        R"(string tag = ("a" to "z")+
+type TagList = [tag+])",
+        // Pattern with occurrence in type
+        R"(string code = ("A" to "Z")[3]
+type Codes = [code*])"
+    };
+    
+    return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
+}
+
+// Complex string pattern integration
+static std::string mutate_string_pattern_complex(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> patterns = {
+        // String enum vs string pattern distinction
+        R"(// String enum (exact values)
+type Status = "active" | "inactive"
+// String pattern (format constraint)
+string code = ("A" to "Z")[3] ("0" to "9")[3]
+type Record = {status: Status, code: code})",
+        // Pattern is check
+        R"(string email = ("a" to "z")+ "@" ("a" to "z")+
+"test@example" is email)",
+        // Pattern with special chars
+        R"(string quoted = '"' ("a" to "z" | " ")* '"'
+type Config = {value: quoted})",
+        // Deeply composed patterns
+        R"(string d = "0" to "9"
+string l = "a" to "z"
+string an = d | l
+string id = l an*
+type Entity = {id: id})",
+        // Pattern in function type
+        R"(string email = ("a" to "z")+ "@" ("a" to "z")+
+type EmailValidator = fn(email) bool)",
+        // Pattern intersection/union edge case
+        R"(string hex = "0" to "9" | "a" to "f"
+string upper_hex = "0" to "9" | "A" to "F"
+type HexValue = {lower: [hex*], upper: [upper_hex*]})",
+        // Real-world schema with patterns
+        R"(string email = ("a" to "z" | "0" to "9" | "." | "_")+ "@" ("a" to "z" | "0" to "9")+ ("." ("a" to "z")+)+
+string phone = ("0" to "9")[3] "-" ("0" to "9")[3] "-" ("0" to "9")[4]
+string zip = ("0" to "9")[5] ("-" ("0" to "9")[4])?
+string url = ("a" to "z")+ "://" ("a" to "z" | "0" to "9" | "." | "/" | "-")+
+type Customer = {
+    name: string,
+    email: email,
+    phone: phone?,
+    address: {street: string, city: string, zip: zip},
+    website: url?
+})",
+        // Invalid patterns (error handling test)
+        R"(string bad = "a" to)",  // incomplete
+        R"(string empty = )",  // missing pattern
+        R"(type T = {f: undefined_pattern})"  // reference to undefined pattern
+    };
+    
+    return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
+}
+
 std::string mutate_program(const std::string& input, std::mt19937& rng) {
     // Apply 1-3 random mutations
     int num_mutations = std::uniform_int_distribution<>(1, 3)(rng);
@@ -793,7 +914,7 @@ std::string mutate_program(const std::string& input, std::mt19937& rng) {
     
     for (int i = 0; i < num_mutations; i++) {
         MutationType type = static_cast<MutationType>(
-            std::uniform_int_distribution<>(0, 24)(rng)  // 25 mutation types (0-24)
+            std::uniform_int_distribution<>(0, 27)(rng)  // 28 mutation types (0-27)
         );
         
         switch (type) {
@@ -871,6 +992,15 @@ std::string mutate_program(const std::string& input, std::mt19937& rng) {
                 break;
             case MutationType::TYPE_PATTERN_ELEMENT:
                 result = mutate_type_pattern_element(result, rng);
+                break;
+            case MutationType::STRING_PATTERN_BASIC:
+                result = mutate_string_pattern_basic(result, rng);
+                break;
+            case MutationType::STRING_PATTERN_IN_TYPE:
+                result = mutate_string_pattern_in_type(result, rng);
+                break;
+            case MutationType::STRING_PATTERN_COMPLEX:
+                result = mutate_string_pattern_complex(result, rng);
                 break;
         }
     }
