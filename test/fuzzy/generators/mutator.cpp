@@ -28,7 +28,14 @@ enum class MutationType {
     TYPE_CONFUSION,
     CLOSURE_PATTERN,
     CONTEXT_SENSITIVE,
-    INVARIANT_VIOLATION
+    INVARIANT_VIOLATION,
+    // Type pattern mutations
+    TYPE_PATTERN_CORRUPT,
+    TYPE_PATTERN_NESTED,
+    TYPE_PATTERN_UNION_INTERSECT,
+    TYPE_PATTERN_OCCURRENCE,
+    TYPE_PATTERN_FUNCTION,
+    TYPE_PATTERN_ELEMENT
 };
 
 static const std::vector<std::string> KEYWORDS = {
@@ -562,6 +569,223 @@ static std::string mutate_invariant_violation(const std::string& input, std::mt1
     return input + "\n" + violation;
 }
 
+// Type pattern corruption - corrupt type declarations
+static std::string mutate_type_pattern_corrupt(const std::string& input, std::mt19937& rng) {
+    std::string result = input;
+    
+    int mutation = std::uniform_int_distribution<>(0, 9)(rng);
+    
+    if (mutation == 0) {
+        // Invalid type name (starts with digit)
+        result += "\ntype 123Invalid = int";
+    } else if (mutation == 1) {
+        // Missing type definition
+        result += "\ntype EmptyType";
+    } else if (mutation == 2) {
+        // Circular type reference
+        result += "\ntype A = B\ntype B = A";
+    } else if (mutation == 3) {
+        // Invalid occurrence operator position
+        result += "\ntype BadOccur = *int";
+    } else if (mutation == 4) {
+        // Multiple occurrence operators
+        result += "\ntype MultiOccur = [int*+?]";
+    } else if (mutation == 5) {
+        // Unbalanced brackets in type
+        result += "\ntype Unbalanced = [int";
+    } else if (mutation == 6) {
+        // Empty union/intersection
+        result += "\ntype EmptyUnion = |";
+    } else if (mutation == 7) {
+        // Dangling operator
+        result += "\ntype Dangling = int |";
+    } else if (mutation == 8) {
+        // Invalid map field syntax
+        result += "\ntype BadMap = {: int}";
+    } else {
+        // Type keyword as type name
+        result += "\ntype type = string";
+    }
+    
+    return result;
+}
+
+// Deeply nested type patterns
+static std::string mutate_type_pattern_nested(const std::string& input, std::mt19937& rng) {
+    int depth = std::uniform_int_distribution<>(5, 20)(rng);
+    int type_kind = std::uniform_int_distribution<>(0, 4)(rng);
+    
+    std::string type_expr;
+    std::string suffix;
+    
+    if (type_kind == 0) {
+        // Deep array nesting
+        for (int i = 0; i < depth; i++) type_expr += "[";
+        type_expr += "int";
+        for (int i = 0; i < depth; i++) type_expr += "]";
+    } else if (type_kind == 1) {
+        // Deep map nesting
+        for (int i = 0; i < depth; i++) type_expr += "{x" + std::to_string(i) + ": ";
+        type_expr += "int";
+        for (int i = 0; i < depth; i++) type_expr += "}";
+    } else if (type_kind == 2) {
+        // Deep optional nesting
+        type_expr = "string";
+        for (int i = 0; i < depth; i++) type_expr += "?";
+    } else if (type_kind == 3) {
+        // Deep tuple nesting
+        for (int i = 0; i < depth; i++) type_expr += "(int, ";
+        type_expr += "string";
+        for (int i = 0; i < depth; i++) type_expr += ")";
+    } else {
+        // Deep element nesting
+        for (int i = 0; i < depth; i++) type_expr += "<div; ";
+        type_expr += "string";
+        for (int i = 0; i < depth; i++) type_expr += ">";
+    }
+    
+    return input + "\ntype DeepNested" + std::to_string(std::uniform_int_distribution<>(0, 999)(rng)) + 
+           " = " + type_expr;
+}
+
+// Union and intersection type mutations
+static std::string mutate_type_pattern_union_intersect(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> type_patterns = {
+        // Long union chains
+        "type LongUnion = int | string | bool | null | float | int64 | decimal | datetime | symbol | binary",
+        // Mixed union and intersection
+        "type MixedOps = (int | string) & (bool | null)",
+        // Conflicting intersection
+        "type ConflictIntersect = {a: int} & {a: string}",
+        // Union of complex types
+        "type ComplexUnion = [int*] | {x: string} | <div; string>",
+        // Nested union
+        "type NestedUnion = ((int | string) | (bool | null)) | float",
+        // Union with optional
+        "type UnionOptional = (int? | string?)? | null",
+        // Repeated union members
+        "type RepeatedUnion = int | int | string | string",
+        // Empty type in union
+        "type EmptyInUnion = int | {} | []",
+        // Function union
+        "type FuncUnion = fn(int) int | fn(string) string",
+        // Intersection of incompatible
+        "type IncompatIntersect = int & string",
+        // Triple operator chain
+        "type TripleChain = int | string & bool | null",
+        // Parenthesized vs non-parenthesized
+        "type ParenDiff = int | (string & bool)",
+        // Union of recursive types
+        "type RecursiveUnion = {left: RecursiveUnion?} | {right: RecursiveUnion?}"
+    };
+    
+    return input + "\n" + type_patterns[std::uniform_int_distribution<>(0, (int)type_patterns.size() - 1)(rng)];
+}
+
+// Occurrence operator mutations
+static std::string mutate_type_pattern_occurrence(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> patterns = {
+        // Various occurrence combos
+        "type Occur1 = [int*]",
+        "type Occur2 = [int+]",
+        "type Occur3 = [int?]",
+        "type Occur4 = [int*]*",
+        "type Occur5 = [int+]+",
+        "type Occur6 = [int?]?",
+        "type Occur7 = [[int*]+]?",
+        "type Occur8 = [string*]* | [int+]+",
+        // Optional on non-array
+        "type OptPrim = int?",
+        "type OptMap = {x: int}?",
+        "type OptFunc = fn(int) int?",
+        // Occurrence in map values
+        "type MapOccur = {items: [int*], required: [string+]}",
+        // Occurrence in element content
+        "type ElmtOccur = <ul; <li; string>*>",
+        // Multiple nested occurrences
+        "type MultiNest = [[[int?]*]+]?",
+        // Occurrence on union
+        "type OccurUnion = (int | string)*",
+        // Complex combination
+        "type Complex = {data: [({id: int, name: string?})*]+}"
+    };
+    
+    return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
+}
+
+// Function type mutations
+static std::string mutate_type_pattern_function(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> patterns = {
+        // Basic function types
+        "type F1 = fn() int",
+        "type F2 = fn(int) string",
+        "type F3 = fn(int, string) bool",
+        // Optional parameters
+        "type F4 = fn(int, string?) int",
+        "type F5 = fn(a?: int) int",
+        // Variadic
+        "type F6 = fn(int, ...) int",
+        // Function returning function
+        "type F7 = fn(int) fn(string) bool",
+        "type F8 = fn(fn(int) int) fn(int) int",
+        // Array of functions
+        "type F9 = [fn(int) int*]",
+        // Map with function values
+        "type F10 = {handler: fn(string) int, validator: fn(int) bool}",
+        // Function with complex param types
+        "type F11 = fn({x: int, y: string}) [int*]",
+        // Function with union return
+        "type F12 = fn(int) (string | int | null)",
+        // Deeply nested function types
+        "type F13 = fn(fn(fn(int) int) int) fn(fn(int) int) int",
+        // Function type with named params
+        "type F14 = fn(x: int, y: string, z: bool?) int",
+        // Void/null returning
+        "type F15 = fn(int) null",
+        // Function accepting function array
+        "type F16 = fn([fn(int) int*]) int"
+    };
+    
+    return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
+}
+
+// Element type mutations
+static std::string mutate_type_pattern_element(const std::string& input, std::mt19937& rng) {
+    std::vector<std::string> patterns = {
+        // Basic elements
+        "type E1 = <div>",
+        "type E2 = <span class: string>",
+        "type E3 = <p; string>",
+        // Element with multiple attributes
+        "type E4 = <a href: string, target: string?, title: string?>",
+        // Element with typed content
+        "type E5 = <article; <header; string>, <section; string>*>",
+        // Self-closing element
+        "type E6 = <br>",
+        "type E7 = <img src: string, alt: string?>",
+        // Nested elements
+        "type E8 = <html; <head; <title; string>>, <body; <div; string>*>>",
+        // Element with mixed content
+        "type E9 = <p; string | <span; string> | <a href: string; string>>*",
+        // Element with occurrence
+        "type E10 = <ul; <li; string>+>",
+        // Complex document structure
+        "type E11 = <doc; <meta name: string, content: string;>*, <body; string>>",
+        // Element with array attribute
+        "type E12 = <select options: [string*]>",
+        // Recursive element
+        "type E13 = <tree; <node value: int; E13*>>",
+        // Element union
+        "type E14 = <div> | <span> | <p>",
+        // Empty vs content elements
+        "type E15 = <section; <header>?, string*, <footer>?>",
+        // Element with all attribute types
+        "type E16 = <data id: int, name: string, active: bool, score: float?>"
+    };
+    
+    return input + "\n" + patterns[std::uniform_int_distribution<>(0, (int)patterns.size() - 1)(rng)];
+}
+
 std::string mutate_program(const std::string& input, std::mt19937& rng) {
     // Apply 1-3 random mutations
     int num_mutations = std::uniform_int_distribution<>(1, 3)(rng);
@@ -569,7 +793,7 @@ std::string mutate_program(const std::string& input, std::mt19937& rng) {
     
     for (int i = 0; i < num_mutations; i++) {
         MutationType type = static_cast<MutationType>(
-            std::uniform_int_distribution<>(0, 18)(rng)
+            std::uniform_int_distribution<>(0, 24)(rng)  // 25 mutation types (0-24)
         );
         
         switch (type) {
@@ -629,6 +853,24 @@ std::string mutate_program(const std::string& input, std::mt19937& rng) {
                 break;
             case MutationType::INVARIANT_VIOLATION:
                 result = mutate_invariant_violation(result, rng);
+                break;
+            case MutationType::TYPE_PATTERN_CORRUPT:
+                result = mutate_type_pattern_corrupt(result, rng);
+                break;
+            case MutationType::TYPE_PATTERN_NESTED:
+                result = mutate_type_pattern_nested(result, rng);
+                break;
+            case MutationType::TYPE_PATTERN_UNION_INTERSECT:
+                result = mutate_type_pattern_union_intersect(result, rng);
+                break;
+            case MutationType::TYPE_PATTERN_OCCURRENCE:
+                result = mutate_type_pattern_occurrence(result, rng);
+                break;
+            case MutationType::TYPE_PATTERN_FUNCTION:
+                result = mutate_type_pattern_function(result, rng);
+                break;
+            case MutationType::TYPE_PATTERN_ELEMENT:
+                result = mutate_type_pattern_element(result, rng);
                 break;
         }
     }
