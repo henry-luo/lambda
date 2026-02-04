@@ -129,7 +129,9 @@ generate_random_code() {
                   "while" "break" "continue" "return" "var"
                   "x" "y" "z" "a" "b" "c" "n" "i" "j"
                   "=>" "->" "="
-                  "sum" "len" "map" "filter" "reduce")
+                  "sum" "len" "map" "filter" "reduce"
+                  "type" "is" "|" "&" "?" "*" "+"
+                  "int" "string" "bool" "float" "null" "number")
     
     local code=""
     for ((i=0; i<length; i++)); do
@@ -139,10 +141,98 @@ generate_random_code() {
     echo "$code"
 }
 
+# Generate random type pattern
+generate_random_type() {
+    local depth=$1
+    if [ "$depth" -gt 3 ]; then
+        local base_types=("int" "string" "bool" "float" "null" "number" "int64" "decimal" "datetime" "symbol")
+        echo "${base_types[$((RANDOM % ${#base_types[@]}))]}"
+        return
+    fi
+    
+    local type_kind=$((RANDOM % 8))
+    case $type_kind in
+        0) # Base type with optional ?
+            local base_types=("int" "string" "bool" "float" "null" "number")
+            local t="${base_types[$((RANDOM % ${#base_types[@]}))]}"
+            if [ $((RANDOM % 3)) -eq 0 ]; then t="$t?"; fi
+            echo "$t"
+            ;;
+        1) # Array type
+            local inner=$(generate_random_type $((depth + 1)))
+            local occur=("" "*" "+" "?")
+            echo "[${inner}${occur[$((RANDOM % 4))]}]"
+            ;;
+        2) # Map type
+            local f1=$(generate_random_type $((depth + 1)))
+            echo "{x: $f1}"
+            ;;
+        3) # Union type
+            local t1=$(generate_random_type $((depth + 1)))
+            local t2=$(generate_random_type $((depth + 1)))
+            echo "($t1 | $t2)"
+            ;;
+        4) # Intersection type
+            echo "{a: int} & {b: string}"
+            ;;
+        5) # Function type
+            local param=$(generate_random_type $((depth + 1)))
+            local ret=$(generate_random_type $((depth + 1)))
+            echo "fn($param) $ret"
+            ;;
+        6) # Element type
+            local tags=("div" "span" "p" "a" "section" "article")
+            local tag="${tags[$((RANDOM % ${#tags[@]}))]}"
+            echo "<$tag>"
+            ;;
+        7) # Tuple type
+            local t1=$(generate_random_type $((depth + 1)))
+            echo "($t1, int)"
+            ;;
+    esac
+}
+
+# Generate type pattern test
+generate_type_pattern() {
+    local pattern_kind=$((RANDOM % 10))
+    case $pattern_kind in
+        0) # Type definition
+            echo "type T$RANDOM = $(generate_random_type 0)"
+            ;;
+        1) # Type check expression
+            echo "123 is int"
+            ;;
+        2) # Typed variable
+            echo "let x: int = 42"
+            ;;
+        3) # Complex array type
+            echo "type Arr = [[int*]+]?"
+            ;;
+        4) # Union type
+            echo "type U = int | string | bool | null"
+            ;;
+        5) # Function type
+            echo "type F = fn(int, string) bool"
+            ;;
+        6) # Element type
+            echo "type E = <div class: string; string>"
+            ;;
+        7) # Nested map type
+            echo "type M = {person: {name: string, age: int}}"
+            ;;
+        8) # Invalid type (for error handling)
+            echo "type Bad = [int*+?]"
+            ;;
+        9) # Deeply nested
+            echo "type Deep = [[[[int]]]]"
+            ;;
+    esac
+}
+
 # Mutate a program with various strategies
 mutate_program() {
     local input="$1"
-    local mutation=$((RANDOM % 20))
+    local mutation=$((RANDOM % 30))  # Expanded from 20 to 30
     
     case $mutation in
         0) # Delete random character
@@ -228,7 +318,37 @@ mutate_program() {
         18) # Add type error
             echo "$input" | sed 's/\([0-9]\+\)/"\1"/g'
             ;;
-        19) # Pass through (no mutation)
+        19) # Inject type pattern
+            echo "$input"$'\n'"$(generate_type_pattern)"
+            ;;
+        20) # Corrupt type definition
+            echo "$input"$'\n'"type BadType"
+            ;;
+        21) # Add deeply nested type
+            echo "$input"$'\n'"type Deep = [[[[[[int]*]*]*]*]*]"
+            ;;
+        22) # Add invalid occurrence operator
+            echo "$input"$'\n'"type Invalid = *int"
+            ;;
+        23) # Add multiple occurrence operators
+            echo "$input"$'\n'"type Multi = [int*+?]"
+            ;;
+        24) # Add circular type reference
+            echo "$input"$'\n'"type A = B"$'\n'"type B = A"
+            ;;
+        25) # Add union with many types
+            echo "$input"$'\n'"type Union = int | string | bool | null | float | int64 | decimal"
+            ;;
+        26) # Add conflicting intersection
+            echo "$input"$'\n'"type Conflict = {a: int} & {a: string}"
+            ;;
+        27) # Add function type
+            echo "$input"$'\n'"type Func = fn(fn(int) int) fn(int) int"
+            ;;
+        28) # Add element type
+            echo "$input"$'\n'"type Elem = <div class: string; <p; string>*>"
+            ;;
+        29) # Pass through (no mutation)
             echo "$input"
             ;;
     esac
