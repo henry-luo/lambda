@@ -1172,8 +1172,18 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
              opts.class_prefix, margin_top, target_size);
     strbuf_append_str(out, buf);
 
-    // determine sizing class based on target size
-    const char* size_class = "ML__delim-size2";  // default to size2 for large delimiters
+    // determine sizing class based on target size (matches MathLive thresholds)
+    // size1: < 1.5em, size2: 1.5-2.4em, size3: 2.4-3.0em, size4: > 3.0em
+    const char* size_class;
+    if (target_size < 1.5f) {
+        size_class = "delim-size1";
+    } else if (target_size < 2.4f) {
+        size_class = "ML__delim-size2";
+    } else if (target_size < 3.0f) {
+        size_class = "delim-size3";
+    } else {
+        size_class = "delim-size4";
+    }
 
     // for stackable delimiters (vertical bars), use stacked vlist structure
     if (is_stackable_delimiter(cp)) {
@@ -1330,8 +1340,8 @@ static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
     strbuf_append_str(out, buf);
 
     // accent body
-    snprintf(buf, sizeof(buf), "<span class=\"%s__accent-body %s__accent-combining-char\" style=\"height:%.2fem;display:inline-block\">",
-             opts.class_prefix, opts.class_prefix, accent_height);
+    snprintf(buf, sizeof(buf), "<span class=\"%s__accent-body\" style=\"height:%.2fem;display:inline-block\">",
+             opts.class_prefix, accent_height);
     strbuf_append_str(out, buf);
     append_codepoint(out, node->content.accent.accent_char);
     strbuf_append_str(out, "</span></span>");
