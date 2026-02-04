@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 
 #include "input.hpp"
+#include "../lambda-decimal.hpp"
 #include "../mark_builder.hpp"
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
@@ -887,9 +888,8 @@ InputManager::InputManager() {
         log_error("InputManager: Failed to create global_pool");
     }
     inputs = arraylist_new(16);
-    decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
-    // mpd_maxcontext(decimal_ctx);
-    mpd_defaultcontext(decimal_ctx);
+    // Use shared global decimal context
+    decimal_ctx = decimal_fixed_context();
 }
 
 InputManager::~InputManager() {
@@ -911,7 +911,8 @@ InputManager::~InputManager() {
         global_pool = nullptr;
     }
 
-    // todo: free decimal_ctx
+    // decimal_ctx is now shared global - don't free
+    decimal_ctx = nullptr;
 }
 
 mpd_context_t* InputManager::decimal_context() {

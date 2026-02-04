@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
@@ -526,22 +527,7 @@ NameScope* find_global_scope(NameScope* scope) {
     return scope;
 }
 
-mpd_t* str_to_decimal(char* str, mpd_context_t* ctx) {
-    mpd_t* dec_val = mpd_new(ctx);
-    if (dec_val == NULL) {
-        log_error("ERROR: Failed to allocate mpdec");
-        return NULL;
-    }
-    // parse the decimal string
-    uint32_t status = 0;
-    mpd_qset_string(dec_val, str, ctx, &status);
-    if (status != 0) {
-        log_error("ERROR: Failed to parse decimal string: %s (status: %u)", str, status);
-        mpd_free(dec_val);
-        return NULL;
-    }
-    return dec_val;
-}
+// str_to_decimal is now in lambda-decimal.cpp as decimal_parse_str
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
     AstNode* ast_node = (AstNode*)pool_alloc(tp->pool, size);
@@ -1267,8 +1253,6 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
     return (Type*)item_type;
 }
 
-mpd_t* str_to_decimal(char* str, mpd_context_t* ctx);
-
 Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
@@ -1286,8 +1270,8 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
 
     // Initialize the decimal with reference counting and libmpdec
     decimal->ref_cnt = 1;
-    // Use transpiler's decimal context
-    decimal->dec_val = str_to_decimal(num_str, tp->decimal_ctx);
+    // Use transpiler's decimal context via centralized function
+    decimal->dec_val = decimal_parse_str(num_str, tp->decimal_ctx);
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
         free(num_str);
@@ -1301,7 +1285,6 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     free(num_str);
     return (Type*)item_type;
 }
-
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     log_debug("*** DEBUG: build_primary_expr called ***");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));

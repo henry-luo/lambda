@@ -1,4 +1,5 @@
 #include "lambda-data.hpp"
+#include "lambda-decimal.hpp"
 #include "../lib/log.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
@@ -176,12 +177,12 @@ void print_double(StrBuf *strbuf, double num) {
 
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     if (!decimal || !decimal->dec_val) { strbuf_append_str(strbuf, "error");  return; }
-    // Use libmpdec to format the decimal
-    char *decimal_str = mpd_to_sci(decimal->dec_val, 1);  // scientific notation
+    // Use centralized decimal_to_string function
+    char *decimal_str = decimal_to_string(decimal);
     if (!decimal_str) { strbuf_append_str(strbuf, "error");  return; }
     // log_debug("printed decimal: %s", decimal_str);
     strbuf_append_str(strbuf, decimal_str);
-    mpd_free(decimal_str);  // libmpdec allocates the string, we need to free it
+    decimal_free_string(decimal_str);
 }
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth, char* indent, bool is_attrs) {
