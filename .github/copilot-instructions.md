@@ -141,7 +141,6 @@ make clean-grammar      # Remove generated files (parser.c, ts-enum.h)
 
 **Tree-sitter integration**:
 - Grammar: `lambda/tree-sitter-lambda/grammar.js`
-- Generated parser: `lambda/tree-sitter-lambda/src/parser.c`
 - Enum mapping: `lambda/ts-enum.h` (auto-generated via `utils/update_ts_enum.sh`)
 
 ## Coding Conventions & Best Practices
@@ -222,15 +221,6 @@ NEVER use printf/fprintf/std::cout for debugging
 - **ThorVG**: Vector graphics rendering (Radiant engine)
 - **GTest**: Unit testing framework (dev dependency)
 
-## Integration Points & External Dependencies
-
-### Adding a New Built-in Function
-1. Define signature in `lambda/lambda.h` (for MIR) and `lambda/lambda-data.hpp` (for C++)
-2. Implement in `lambda/lambda-proc.cpp` or `lambda/lambda-eval.cpp`
-3. Register in function table (`lambda/runner.cpp`)
-4. Add tests in `test/test_lambda_proc_gtest.cpp`
-5. Document in `doc/Lambda_Reference.md`
-
 ### MIR (JIT Compiler)
 - Location: `lambda/mir.c` (embedded in repo)
 - API: See `include/mir.h`
@@ -244,7 +234,9 @@ NEVER use printf/fprintf/std::cout for debugging
 
 ## Notes & Constraints
 - C++17 standard.
-- Don't use std::string or std::* containers. Use ./lib equivalents.
+- Don't use std::string or std::* containers, like std::vector or std::map. Use ./lib equivalents.
 - Grammar regeneration is automatic - don't manually edit `parser.c`
 - Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
+- Lambda language documentation at `doc/Lambda_Reference.md`
+- After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
 - **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.
