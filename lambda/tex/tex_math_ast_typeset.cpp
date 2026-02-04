@@ -1142,7 +1142,13 @@ static TexNode* typeset_frac(MathASTNode* node, MathContext& ctx) {
 
     // Use existing typeset_fraction
     float rule = (node->frac.rule_thickness < 0) ? ctx.rule_thickness : node->frac.rule_thickness;
-    return typeset_fraction(numer, denom, rule, ctx);
+    TexNode* frac = typeset_fraction(numer, denom, rule, ctx);
+
+    // Store delimiter info in the TexNode for HTML rendering
+    frac->content.frac.left_delim = node->frac.left_delim;
+    frac->content.frac.right_delim = node->frac.right_delim;
+
+    return frac;
 }
 
 // ============================================================================

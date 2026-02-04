@@ -99,6 +99,7 @@ const CLASS_CATEGORIES = {
     // Delimiters
     'ML__open': 'open',
     'ML__close': 'close',
+    'ML__left-right': 'left-right',
     'delimsizing': 'delim',
     'nulldelimiter': 'delim',
     'mopen': 'open',
