@@ -154,6 +154,7 @@ struct MathASTNode {
         // For ARRAY
         struct {
             const char* col_spec;   // Column specification (e.g., "lcr")
+            const char* environment_name; // Environment name (e.g., "bmatrix", "pmatrix")
             int num_cols;           // Number of columns
             int num_rows;           // Number of rows
         } array;
