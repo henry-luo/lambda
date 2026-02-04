@@ -83,7 +83,7 @@ typedef struct EvalContext : Context {
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
     SchemaValidator* validator; // Schema validator for document validation
-    
+
     // Error handling and stack trace support
     ArrayList* debug_info;      // function address → source mapping for stack traces
     const char* current_file;   // current source file (for error reporting)
@@ -140,6 +140,7 @@ typedef struct TypedItem {
         Element* element;
         Type* type;
         Function* function;
+        Path* path;
     };
 } TypedItem;
 #pragma pack(pop)
@@ -423,6 +424,7 @@ extern Type TYPE_NUMBER;
 extern Type TYPE_STRING;
 extern Type TYPE_BINARY;
 extern Type TYPE_SYMBOL;
+extern Type TYPE_PATH;
 extern Type TYPE_DTIME;
 extern Type TYPE_LIST;
 extern Type TYPE_RANGE;
@@ -458,6 +460,7 @@ extern TypeType LIT_TYPE_NUMBER;
 extern TypeType LIT_TYPE_STRING;
 extern TypeType LIT_TYPE_BINARY;
 extern TypeType LIT_TYPE_SYMBOL;
+extern TypeType LIT_TYPE_PATH;
 extern TypeType LIT_TYPE_DTIME;
 extern TypeType LIT_TYPE_LIST;
 extern TypeType LIT_TYPE_RANGE;

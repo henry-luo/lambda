@@ -207,6 +207,7 @@ typedef enum AstNodeType {
     AST_NODE_TYPE_STAM,
     AST_NODE_INDEX_EXPR,
     AST_NODE_MEMBER_EXPR,
+    AST_NODE_PATH_EXPR,     // path expression (file.etc.hosts, http.api.example.com)
     AST_NODE_CALL_EXPR,
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
@@ -249,6 +250,12 @@ typedef struct AstCallNode : AstNode {
     AstNode *function;
     AstNode *argument;
 } AstCallNode;
+
+typedef struct AstPathNode : AstNode {
+    PathScheme scheme;       // file, http, https, sys, PATH_RELATIVE, PATH_PARENT
+    int segment_count;       // number of path segments
+    String** segments;       // array of pooled strings (allocated in pool)
+} AstPathNode;
 
 typedef struct SysFuncInfo {
     SysFunc fn;
@@ -459,10 +466,10 @@ struct Script : Input {
     MIR_context_t jit_context;
     main_func_t main_func;      // transpiled main function
     mpd_context_t* decimal_ctx;  // libmpdec context for decimal operations
-    
+
     // Debug info for stack traces (function address → source mapping)
     ArrayList* debug_info;      // list of FuncDebugInfo*
-    
+
     // Function name mapping: MIR internal name → Lambda human-readable name
     // Used by build_debug_info_table() to get user-friendly names
     struct hashmap* func_name_map;  // maps char* (MIR name) → char* (Lambda name)
@@ -475,22 +482,22 @@ typedef struct Transpiler : Script {
     TSParser* parser;
     StrBuf* code_buf;
     Runtime* runtime;
-    
+
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count
     int max_errors;            // threshold (default: 10)
     ArrayList* errors;         // list of LambdaError* (structured errors)
-    
+
     // Closure transpilation context
     AstFuncNode* current_closure;  // non-null when transpiling inside a closure body
-    
+
     // Assignment name context (for naming anonymous closures)
     String* current_assign_name;  // name of variable being assigned (e.g., "level1" for let level1 = fn...)
-    
+
     // Tail Call Optimization context
     AstFuncNode* tco_func;     // non-null when transpiling body of a TCO-enabled function
     bool in_tail_position;     // true when current expression is in tail position
-    
+
     // Unboxed function transpilation context
     bool in_unboxed_body;      // true when transpiling body of unboxed (_u) version
 } Transpiler;

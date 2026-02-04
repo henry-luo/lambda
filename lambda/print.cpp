@@ -128,6 +128,9 @@ void write_type(StrBuf* code_buf, Type *type) {
     case LMD_TYPE_ELEMENT:
         strbuf_append_str(code_buf, "Element*");
         break;
+    case LMD_TYPE_PATH:
+        strbuf_append_str(code_buf, "Path*");
+        break;
     case LMD_TYPE_FUNC:
         strbuf_append_str(code_buf, "Function*");
         break;
@@ -299,6 +302,11 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 }
                 break;
             }
+            case LMD_TYPE_PATH: {
+                Path *path = *(Path**)data;
+                path_to_string(path, strbuf);
+                break;
+            }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:  case LMD_TYPE_TYPE_BINARY:
@@ -370,6 +378,9 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         } else {
             strbuf_append_str(strbuf, "0x");
         }
+        break;
+    case LMD_TYPE_PATH:
+        path_to_string(titem->path, strbuf);
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
@@ -601,6 +612,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_TYPE_BINARY: {
         // Direct TypeBinary (not wrapped in TypeType) prints as "type"
         strbuf_append_str(strbuf, "type");
+        break;
+    }
+    case LMD_TYPE_PATH: {
+        Path* path = (Path*)item.item;
+        path_to_string(path, strbuf);
         break;
     }
     case LMD_TYPE_ERROR: {
