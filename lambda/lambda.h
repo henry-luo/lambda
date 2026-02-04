@@ -3,6 +3,7 @@
 
 // Include standard integer types from system
 #include <stdint.h>
+#include <stddef.h>  // for size_t
 
 // Define size_t only when compiled by MIR C compiler (not standard C/C++ compiler)
 // MIR doesn't include stddef.h so size_t won't be defined
@@ -71,13 +72,16 @@ enum EnumTypeId {
 
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
-    
+
     // JavaScript-specific types (added at end to preserve existing type IDs)
     LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
-    
+
     // Additional numeric types
     LMD_TYPE_DECIMAL_BIG,  // unlimited precision decimal (suffix 'N')
-    
+
+    // Path type for file/URL paths
+    LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
+
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 };
 typedef uint8_t TypeId;
@@ -255,6 +259,40 @@ Item fn_call1(Function* fn, Item a);
 Item fn_call2(Function* fn, Item a, Item b);
 Item fn_call3(Function* fn, Item a, Item b, Item c);
 
+// Path: segmented symbol for file/URL paths
+// A path is a linked chain of segments from leaf to root
+// Example: file.etc.hosts -> Path("hosts") -> Path("etc") -> Path("file") -> ROOT
+typedef struct Path Path;
+struct Path {
+    TypeId type_id;         // LMD_TYPE_PATH
+    uint8_t flags;          // reserved
+    uint16_t ref_cnt;       // reference count
+    const char* name;       // segment name (interned via name_pool)
+    Path* parent;           // parent segment (NULL for root schemes)
+};
+
+// Path scheme identifiers (predefined roots)
+typedef enum {
+    PATH_SCHEME_FILE = 0,   // file://
+    PATH_SCHEME_HTTP,       // http://
+    PATH_SCHEME_HTTPS,      // https://
+    PATH_SCHEME_SYS,        // sys:// (system info)
+    PATH_SCHEME_REL,        // . (relative path)
+    PATH_SCHEME_PARENT,     // .. (parent directory)
+    PATH_SCHEME_COUNT
+} PathScheme;
+
+// Path API (defined in path.c)
+void path_init(void);                                   // Initialize root scheme paths
+Path* path_get_root(PathScheme scheme);                 // Get predefined root path
+Path* path_append(Path* parent, const char* segment);   // Append segment to path
+Path* path_append_len(Path* parent, const char* segment, size_t len);
+const char* path_get_scheme_name(Path* path);           // Get scheme name (file, http, etc.)
+bool path_is_root(Path* path);                          // Check if path is a root scheme
+int path_depth(Path* path);                             // Get path depth (segment count)
+void path_to_string(Path* path, void* out);             // Convert to string (StrBuf*)
+void path_to_os_path(Path* path, void* out);            // Convert to OS path (StrBuf*)
+
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);
 Function* to_fn_n(fn_ptr ptr, int arity);
@@ -430,7 +468,7 @@ typedef struct Context {
     Item vec_div(Item a, Item b);
     Item vec_mod(Item a, Item b);
     Item vec_pow(Item a, Item b);
-    
+
     // vector system functions
     Item fn_prod(Item a);
     Item fn_cumsum(Item a);
@@ -468,7 +506,7 @@ typedef struct Context {
     Item fn_quantile(Item a, Item p);
 
     Range* fn_to(Item a, Item b);
-    
+
     // pipe operations
     typedef Item (*PipeMapFn)(Item item, Item index);
     Item fn_pipe_map(Item collection, PipeMapFn transform);
