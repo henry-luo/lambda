@@ -33,6 +33,7 @@ typedef enum ValidationErrorCode {
     VALID_ERROR_OCCURRENCE_ERROR,
     VALID_ERROR_CIRCULAR_REFERENCE,
     VALID_ERROR_PARSE_ERROR,
+    VALID_ERROR_PATTERN_MISMATCH,  // String doesn't match pattern
 } ValidationErrorCode;
 
 // Path segment types for error reporting

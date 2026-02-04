@@ -204,43 +204,12 @@ To maintain consistency across Lambda's pattern systems, string patterns should 
 
 ### Comparison with Regex
 
-| Regex | Lambda String Pattern | Meaning |
-|-------|----------------------|---------|
-| `a{3}` | `"a"[3]` | exactly 3 |
-| `a{2,5}` | `"a"[2, 5]` | 2 to 5 |
-| `a{3,}` | `"a"[3+]` | 3 or more |
-| `\d{4}` | `("0" to "9")[4]` | 4 digits |
-
----
-
-## Implementation Notes
-
-### Parser Changes
-
-1. Extend type parser to recognize `[` after a type identifier
-2. Parse occurrence specification: `INTEGER` or `INTEGER, INTEGER` or `INTEGER +`
-3. Store occurrence bounds in AST node
-
-### Validator Changes
-
-1. Add occurrence validation to schema validator
-2. Track element count during sequence validation
-3. Report clear errors: "Expected 3 to 5 items, got 2"
-
-### Type System Impact
-
-- Occurrence-qualified types are subtypes of their base types
-- `int[3]` is a subtype of `int[2, 4]` which is a subtype of `int*`
-- Union of occurrences: `int[2] | int[4]` (either exactly 2 or exactly 4)
-
----
-
-## Migration & Compatibility
-
-This is a **backward-compatible** addition:
-- Existing `T?`, `T*`, `T+` continue to work unchanged
-- New syntax is purely additive
-- No breaking changes to existing code
+| Regex    | Lambda String Pattern | Meaning   |
+| -------- | --------------------- | --------- |
+| `a{3}`   | `"a"[3]`              | exactly 3 |
+| `a{2,5}` | `"a"[2,5]`            | 2 to 5    |
+| `a{3,}`  | `"a"[3+]`             | 3 or more |
+| `\d{4}`  | `("0" to "9")[4]`     | 4 digits  |
 
 ---
 

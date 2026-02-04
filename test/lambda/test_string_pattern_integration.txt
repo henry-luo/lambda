@@ -1,0 +1,65 @@
+"=== Test 1: Basic Pattern Matching (Positive) ===1.1 - phone match"
+true
+"1.2 - email match"
+true
+"1.3 - zip match"
+true
+"1.4 - identifier match"
+true
+"=== Test 2: Pattern Matching (Negative) ===2.1 - phone no dashes"
+true
+"2.2 - phone wrong first"
+true
+"2.3 - phone wrong middle"
+true
+"2.4 - phone letters"
+true
+"2.5 - phone space"
+true
+"2.6 - email no at"
+true
+"2.7 - email no local"
+true
+"2.8 - email no domain"
+true
+"2.9 - email space"
+true
+"2.10 - zip too short"
+true
+"2.11 - zip too long"
+true
+"2.12 - zip letters"
+true
+"2.13 - id starts digit"
+true
+"2.14 - id starts hyphen"
+true
+"=== Test 3: Type with Required Pattern Field ===3.1 - valid phone record"
+true
+"=== Test 4: Type with Optional Pattern Field ===4.1 - contact with all fields"
+true
+"4.2 - contact phone only"
+true
+"4.3 - contact email only"
+true
+"4.4 - contact name only"
+true
+"=== Test 5: Edge Cases ===5.1 - phone all zeros"
+true
+"5.2 - phone all nines"
+true
+"5.3 - id single letter"
+true
+"5.4 - id single underscore"
+true
+"5.5 - id long"
+true
+"=== Test 6: Multiple Pattern Fields ===6.1 - full profile"
+true
+"6.2 - minimal profile"
+true
+"=== Test 7: Nested Types with Patterns ===7.1 - person with address"
+true
+"7.2 - person without address"
+true
+"=== All string pattern integration tests completed! ==="

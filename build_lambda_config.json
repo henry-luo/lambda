@@ -327,6 +327,7 @@
                 "lambda/input/html5/html5_tokenizer.cpp",
                 "lambda/input/html5/html5_parser.cpp",
                 "lambda/input/html5/html5_token.cpp",
+                "lambda/re2_wrapper.cpp",
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",
@@ -349,7 +350,8 @@
                 "mbedx509",
                 "mbedcrypto",
                 "zlib",
-                "rpmalloc"
+                "rpmalloc",
+                "re2"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER"
