@@ -694,14 +694,41 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    // Simple span wrapper for horizontal list (MathLive doesn't use ML__base here)
-    strbuf_append_str(out, "<span");
+    // At root level (depth=0, inside ML__base), we usually don't add extra wrapper.
+    // However, if the hlist contains complex structures (mtable, delimiter with mtable),
+    // we need the wrapper for proper layout like MathLive.
+    bool needs_wrapper = (depth > 0);
 
-    if (opts.include_styles) {
-        strbuf_append_str(out, " style=\"display:inline-block\"");
+    if (!needs_wrapper) {
+        // Check if this hlist contains complex structures that need wrapping
+        // Complex structures: mtable (for bmatrix/pmatrix/etc), or delimiter + mtable combo
+        bool has_mtable = false;
+        bool has_delimiter = false;
+        for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+            if (child->node_class == NodeClass::MTable) has_mtable = true;
+            if (child->node_class == NodeClass::Char) {
+                // Check for delimiter characters (brackets, parens, etc)
+                int32_t cp = child->content.ch.codepoint;
+                if (cp == '(' || cp == ')' || cp == '[' || cp == ']' ||
+                    cp == '{' || cp == '}' || cp == '|' ||
+                    cp == 0 || cp == 1 || cp == 2 || cp == 3) {  // cmex10 delimiters
+                    has_delimiter = true;
+                }
+            }
+        }
+        // Wrap if we have both delimiter(s) and mtable - that's a delimited matrix
+        if (has_mtable && has_delimiter) {
+            needs_wrapper = true;
+        }
     }
 
-    strbuf_append_str(out, ">");
+    if (needs_wrapper) {
+        strbuf_append_str(out, "<span");
+        if (opts.include_styles) {
+            strbuf_append_str(out, " style=\"display:inline-block\"");
+        }
+        strbuf_append_str(out, ">");
+    }
 
     // render children
     TexNode* child = node->first_child;
@@ -710,7 +737,9 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         child = child->next_sibling;
     }
 
-    strbuf_append_str(out, "</span>");
+    if (needs_wrapper) {
+        strbuf_append_str(out, "</span>");
+    }
 }
 
 // render vertical list (stack of items) - MathLive vlist structure
