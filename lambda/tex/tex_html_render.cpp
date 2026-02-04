@@ -40,6 +40,7 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
 static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_scripts(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+static void render_mathop(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
@@ -576,13 +577,35 @@ static int32_t cmex10_to_unicode(int32_t code) {
         case 26: return '{';   // left brace medium
         case 27: return '}';   // right brace medium
 
-        // Big operators
+        // Big operators (small sizes)
         case 80: return 0x2211; // summation ∑
         case 81: return 0x220F; // product ∏
         case 82: return 0x222B; // integral ∫
         case 83: return 0x22C3; // big union ⋃
         case 84: return 0x22C2; // big intersection ⋂
-        case 86: return 0x2A00; // big circled operator
+        case 85: return 0x2A04; // big multiset union ⊎
+        case 86: return 0x22C0; // big wedge ⋀
+        case 87: return 0x22C1; // big vee ⋁
+        // Big operators (large sizes, same symbols displayed larger)
+        case 88: return 0x2211; // summation ∑ (large)
+        case 89: return 0x220F; // product ∏ (large)
+        case 90: return 0x222B; // integral ∫ (large)
+        case 91: return 0x22C3; // big union ⋃ (large)
+        case 92: return 0x22C2; // big intersection ⋂ (large)
+        case 93: return 0x2A04; // big multiset union ⊎ (large)
+        case 94: return 0x22C0; // big wedge ⋀ (large)
+        case 95: return 0x22C1; // big vee ⋁ (large)
+        // coproduct
+        case 96: return 0x2210; // coproduct ∐ (small)
+        case 97: return 0x2210; // coproduct ∐ (large)
+        // oint (contour integral)
+        case 72: return 0x222E; // contour integral ∮ (small)
+        case 73: return 0x222E; // contour integral ∮ (large)
+        // circled operators
+        case 76: return 0x2A01; // bigoplus ⨁ (small)
+        case 77: return 0x2A01; // bigoplus ⨁ (large)
+        case 78: return 0x2A02; // bigotimes ⨂ (small)
+        case 79: return 0x2A02; // bigotimes ⨂ (large)
 
         default:
             // for unmapped codes, just return as-is (may render as empty)
@@ -1396,6 +1419,36 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
     strbuf_append_str(out, "</span>");  // close left-right
 }
 
+// render large math operator (sum, product, integral, etc.) - MathLive-compatible
+static void render_mathop(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node || node->node_class != NodeClass::MathOp) return;
+
+    char buf[128];
+    int32_t codepoint = node->content.math_op.codepoint;
+    const char* font_name = node->content.math_op.font.name;
+
+    // Convert TFM code to Unicode based on font
+    if (font_name && strncmp(font_name, "cmex", 4) == 0) {
+        codepoint = cmex10_to_unicode(codepoint);
+    }
+
+    // MathLive wraps large ops in ML__op-group > ML__op-symbol ML__large-op
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__op-group\"><span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__op-symbol ");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__large-op\">");
+
+    // Output the operator character
+    if (codepoint > 0) {
+        append_codepoint(out, codepoint);
+    }
+
+    strbuf_append_str(out, "</span></span>");
+}
+
 // render accent (hat, bar, etc.) - MathLive vlist-compatible structure
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
@@ -1701,6 +1754,10 @@ static void render_node(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
         case NodeClass::Delimiter:
             render_delimiter(node, out, opts, depth);
+            break;
+
+        case NodeClass::MathOp:
+            render_mathop(node, out, opts, depth);
             break;
 
         case NodeClass::Accent:
