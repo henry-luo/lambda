@@ -370,6 +370,8 @@ struct TexNode {
             int num_rows;           // Number of rows
             float arraycolsep;      // Column separation
             float jot;              // Row separation
+            uint32_t hlines;        // Bitmask: bit i set means hline before row i (up to 32 rows)
+            bool trailing_hline;    // True if hline after last row
         } mtable;
 
         // MTableColumn node (column within MTable)
