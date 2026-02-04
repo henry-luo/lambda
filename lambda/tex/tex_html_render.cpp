@@ -1129,22 +1129,125 @@ static void render_scripts(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
     strbuf_append_str(out, "</span>");  // close msubsup
 }
 
-// render delimiter (parentheses, brackets, braces)
+// check if delimiter should be stacked (extensible delimiters like |, \|)
+static bool is_stackable_delimiter(int32_t cp) {
+    switch (cp) {
+        case '|':
+        case 0x2016:  // \|
+        case 0x2223:  // \mid, ∣
+        case 0x2225:  // \parallel
+            return true;
+        default:
+            return false;
+    }
+}
+
+// render delimiter (parentheses, brackets, braces) - MathLive-compatible
+// For delimiters that need to scale (from \left...\right), build appropriate structure:
+// - Brackets, parens, braces: use delim-size class with single character
+// - Vertical bars: stack multiple characters in vlist
 static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    char class_buf[64];
+    char buf[256];
     const char* delim_class = node->content.delim.is_left ? "open" : "close";
-    snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, delim_class);
+    int32_t cp = node->content.delim.codepoint;
+    float target_size = node->content.delim.target_size / opts.base_font_size_px;  // convert to em
 
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\">");
+    // threshold for using scaled delimiter (in em)
+    const float SCALE_THRESHOLD = 1.2f;
+    
+    // for small delimiters or size 0, use simple character
+    if (target_size < SCALE_THRESHOLD) {
+        snprintf(buf, sizeof(buf), "<span class=\"%s__%s\">", opts.class_prefix, delim_class);
+        strbuf_append_str(out, buf);
+        append_codepoint(out, cp);
+        strbuf_append_str(out, "</span>");
+        return;
+    }
 
-    // output delimiter character
-    append_codepoint(out, node->content.delim.codepoint);
+    // outer left-right wrapper for scaled delimiters
+    float margin_top = -target_size / 2.0f + 0.25f;  // center vertically around axis
+    snprintf(buf, sizeof(buf), "<span class=\"%s__left-right\" style=\"margin-top:%.3fem;height:%.4fem\">",
+             opts.class_prefix, margin_top, target_size);
+    strbuf_append_str(out, buf);
 
-    strbuf_append_str(out, "</span>");
+    // determine sizing class based on target size
+    const char* size_class = "ML__delim-size2";  // default to size2 for large delimiters
+
+    // for stackable delimiters (vertical bars), use stacked vlist structure
+    if (is_stackable_delimiter(cp)) {
+        // calculate how many stacked characters we need
+        float char_height = 0.61f;  // typical glyph height in em
+        int stack_count = (int)ceil(target_size / char_height);
+        if (stack_count < 2) stack_count = 2;
+        if (stack_count > 5) stack_count = 5;  // reasonable limit
+
+        // total vlist height and depth
+        float vlist_height = stack_count * char_height - char_height / 2.0f;
+        float vlist_depth = char_height / 2.0f;
+        float pstrut_size = 2.61f;  // MathLive standard for delimiters
+
+        // delim-mult wrapper for stacked delimiter
+        snprintf(buf, sizeof(buf), "<span class=\"%s__%s %s__delim-mult\">", opts.class_prefix, delim_class, opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        // vlist structure
+        snprintf(buf, sizeof(buf), "<span class=\"delim-size1 %s__vlist-t %s__vlist-t2\">",
+                 opts.class_prefix, opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        // vlist-r
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist-r\">", opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        // vlist cell
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist\" style=\"height:%.2fem\">", opts.class_prefix, vlist_height);
+        strbuf_append_str(out, buf);
+
+        // use mathematical vertical bar character for stacking
+        int32_t stack_char = 0x2223;  // ∣ (DIVIDES)
+
+        // stack delimiter characters from bottom to top
+        for (int i = 0; i < stack_count; i++) {
+            float top = -pstrut_size + (stack_count - 1 - i) * char_height + 0.47f;
+            snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", top);
+            strbuf_append_str(out, buf);
+            
+            snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+                     opts.class_prefix, pstrut_size);
+            strbuf_append_str(out, buf);
+            
+            snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">", char_height);
+            strbuf_append_str(out, buf);
+            append_codepoint(out, stack_char);
+            strbuf_append_str(out, "</span></span>");
+        }
+
+        strbuf_append_str(out, "</span>");  // close vlist
+
+        // Safari workaround
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist-s\">\xe2\x80\x8b</span>", opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        strbuf_append_str(out, "</span>");  // close vlist-r
+
+        // depth row
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist-r\"><span class=\"%s__vlist\" style=\"height:%.2fem\"></span></span>",
+                 opts.class_prefix, opts.class_prefix, vlist_depth);
+        strbuf_append_str(out, buf);
+
+        strbuf_append_str(out, "</span>");  // close vlist-t
+        strbuf_append_str(out, "</span>");  // close delim-mult
+    } else {
+        // for brackets, parens, braces: use single scaled character with size class
+        snprintf(buf, sizeof(buf), "<span class=\"%s__%s %s\">", opts.class_prefix, delim_class, size_class);
+        strbuf_append_str(out, buf);
+        append_codepoint(out, cp);
+        strbuf_append_str(out, "</span>");
+    }
+
+    strbuf_append_str(out, "</span>");  // close left-right
 }
 
 // render accent (hat, bar, etc.) - MathLive vlist-compatible structure

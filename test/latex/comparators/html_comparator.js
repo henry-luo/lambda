@@ -420,6 +420,31 @@ function summarizeElement(node) {
 }
 
 /**
+ * Extract all text content from a normalized tree in order
+ */
+function extractTextContent(node) {
+    const texts = [];
+    
+    function walk(n) {
+        if (!n) return;
+        if (n.type === 'text' && n.content) {
+            const text = n.content.trim();
+            if (text && text !== '​') { // skip zero-width space
+                texts.push(text);
+            }
+        }
+        if (n.children) {
+            for (const child of n.children) {
+                walk(child);
+            }
+        }
+    }
+    
+    walk(node);
+    return texts;
+}
+
+/**
  * Compare Lambda HTML against a reference HTML
  */
 function compareHTMLTrees(lambdaHTML, refHTML) {
@@ -437,6 +462,18 @@ function compareHTMLTrees(lambdaHTML, refHTML) {
         const normalizedRef = normalizeHTMLTree(refRoot);
 
         compareHTMLNodes(normalizedLambda, normalizedRef, 'root', results);
+        
+        // Text content bonus: if all text content matches in order, boost score
+        const lambdaTexts = extractTextContent(normalizedLambda);
+        const refTexts = extractTextContent(normalizedRef);
+        
+        const textsMatch = lambdaTexts.length === refTexts.length &&
+            lambdaTexts.every((t, i) => t === refTexts[i]);
+        
+        if (textsMatch && lambdaTexts.length > 0) {
+            // boost matched elements by 20% of total when text fully matches
+            results.matchedElements += results.totalElements * 0.2;
+        }
     } catch (error) {
         results.differences.push({
             path: 'root',
