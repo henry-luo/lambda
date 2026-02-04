@@ -279,9 +279,10 @@ MathASTNode* make_math_sized_delim(Arena* arena, int32_t delim_char, uint8_t siz
 // Array/Matrix Node Constructors
 // ============================================================================
 
-MathASTNode* make_math_array(Arena* arena, const char* col_spec, int num_cols) {
+MathASTNode* make_math_array(Arena* arena, const char* col_spec, int num_cols, const char* env_name) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::ARRAY);
     node->array.col_spec = col_spec;
+    node->array.environment_name = env_name;
     node->array.num_cols = num_cols;
     node->array.num_rows = 0;
     return node;
@@ -2077,8 +2078,17 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     // Get body content
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
 
+    // Copy environment name to arena for persistence
+    const char* env_name_copy = nullptr;
+    if (env_name && env_name_len > 0) {
+        char* buf = (char*)arena_alloc(arena, env_name_len + 1);
+        memcpy(buf, env_name, env_name_len);
+        buf[env_name_len] = '\0';
+        env_name_copy = buf;
+    }
+
     // Build ARRAY node to hold the matrix structure
-    MathASTNode* array_node = make_math_array(arena, "c", 0);  // Default column spec
+    MathASTNode* array_node = make_math_array(arena, "c", 0, env_name_copy);
 
     if (!ts_node_is_null(body_node)) {
         // Parse the body - contains expressions, row_sep (\\), and col_sep (&)
@@ -2178,11 +2188,11 @@ MathASTNode* MathASTBuilder::build_matrix_command(TSNode node) {
     // Get body which is a group containing content with & and \cr
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
     if (ts_node_is_null(body_node)) {
-        return make_math_array(arena, "c", 0);
+        return make_math_array(arena, "c", 0, "matrix");
     }
 
     // Build ARRAY node
-    MathASTNode* array_node = make_math_array(arena, "c", 0);
+    MathASTNode* array_node = make_math_array(arena, "c", 0, "matrix");
     MathASTNode* current_row = make_math_array_row(arena);
     MathASTNode* current_cell_content = make_math_row(arena);
     int num_cols = 0;
@@ -3117,6 +3127,18 @@ static void math_ast_to_json_impl(MathASTNode* node, ::StrBuf* out, bool first_i
                 default: ::strbuf_append_str(out, "minner"); break;
             }
             ::strbuf_append_str(out, "\"");
+            break;
+
+        case MathNodeType::ARRAY:
+            // Output environment name for MathLive compatibility
+            if (node->array.environment_name) {
+                ::strbuf_append_str(out, ",\"environmentName\":");
+                json_escape_string(node->array.environment_name, out);
+            }
+            if (node->array.col_spec) {
+                ::strbuf_append_str(out, ",\"colSpec\":");
+                json_escape_string(node->array.col_spec, out);
+            }
             break;
 
         default:
