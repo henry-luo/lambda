@@ -1,8 +1,10 @@
 #include "transpiler.hpp"
+#include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "../lib/log.h"
 #include "utf_string.h"
 #include "re2_wrapper.hpp"
+#include <mpdecimal.h>  // needed for inline decimal operations
 
 #include <stdarg.h>
 #include <time.h>

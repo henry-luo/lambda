@@ -1,5 +1,7 @@
 
 #include "transpiler.hpp"
+#include "lambda-decimal.hpp"
+#include <mpdecimal.h>  // needed for inline decimal operations
 #include "../lib/log.h"
 #include <stdarg.h>
 #include <time.h>
@@ -75,9 +77,7 @@ void cleanup_temp_decimal(mpd_t* dec_val, bool is_original_decimal) {
     }
 }
 
-bool decimal_is_zero(mpd_t* dec_val) {
-    return mpd_iszero(dec_val);
-}
+// decimal_is_zero is now in lambda-decimal.cpp
 
 // helper macro for vector type detection
 #define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_INT || (t) == LMD_TYPE_ARRAY_INT64 || \

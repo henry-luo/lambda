@@ -13,7 +13,10 @@ extern "C" {
 #include <cstdint>  // C++
 #include <inttypes.h>  // for cross-platform integer formatting
 #include <math.h>
-#include <mpdecimal.h>
+
+// Forward declaration for mpdecimal types (full definition in lambda-decimal.cpp)
+typedef struct mpd_context_t mpd_context_t;
+typedef struct mpd_t mpd_t;
 
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"

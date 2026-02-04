@@ -18,6 +18,7 @@
 //   - Content strings remain fast with arena allocation
 
 #include "mark_builder.hpp"
+#include "lambda-decimal.hpp"
 #include "lambda-data.hpp"
 #include "lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
 #include "mark_reader.hpp"  // for ArrayReader
@@ -830,17 +831,8 @@ Item MarkBuilder::deep_copy_internal(Item item) {
 
     case LMD_TYPE_DECIMAL: {
         log_debug("deep copy decimal");
-        // Create new mpd_t and copy the value by converting to string and back
-        // This is the safest way to deep copy mpdecimal values
-        Decimal* src_dec = item.get_decimal();
-        mpd_context_t* ctx = InputManager::decimal_context();
-        mpd_t* new_dec_val = mpd_new(ctx);
-        mpd_qcopy_cxx(new_dec_val, src_dec->dec_val);
-        Decimal* new_dec = (Decimal*)arena_alloc(arena_, sizeof(Decimal));
-        if (!new_dec) return ItemNull;
-        new_dec->ref_cnt = 1;
-        new_dec->dec_val = new_dec_val;
-        return {.item = c2it(new_dec)};
+        // Use centralized decimal_deep_copy function
+        return decimal_deep_copy(item, arena_, false);
     }
 
     case LMD_TYPE_NUMBER: {
