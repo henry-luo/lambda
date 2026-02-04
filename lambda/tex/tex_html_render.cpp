@@ -757,7 +757,18 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
 // render horizontal spacing (kern)
 static void render_kern(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts) {
-    if (!node || node->width == 0.0f) return;
+    if (!node) return;
+
+    // Check for null delimiter flag (from \bigl., \bigr., etc.)
+    if (node->flags & TexNode::FLAG_NULLDELIM) {
+        // Output MathLive-compatible null delimiter
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__nulldelimiter\" style=\"width:0.12em\"></span>");
+        return;
+    }
+
+    if (node->width == 0.0f) return;
 
     float em = pt_to_em(node->width, opts.base_font_size_px);
 

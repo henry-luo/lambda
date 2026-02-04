@@ -795,6 +795,24 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
 
     // Handle SIZED_DELIM specially - it uses sized_delim struct, not atom
     if (node->type == MathNodeType::SIZED_DELIM) {
+        int32_t cp = node->sized_delim.delim_char;
+
+        // Check for null delimiter ('.' means empty/invisible)
+        if (cp == '.') {
+            // Create a kern with FLAG_NULLDELIM for HTML renderer to recognize
+            // Standard null delimiter width is 0.12em ≈ 1.2pt at 10pt
+            float null_width = 1.2f * (size / 10.0f);
+            TexNode* kern = make_kern(tc.arena(), null_width);
+            kern->flags |= TexNode::FLAG_NULLDELIM;
+            // Set delim_type: 0 = open, 1 = close, 2 = mid
+            if (node->sized_delim.delim_type == 0) {
+                kern->flags |= TexNode::FLAG_EXPLICIT; // Use as marker for "open"
+            }
+            log_debug("[TYPESET] typeset_atom SIZED_DELIM: null delimiter size_level=%d",
+                      node->sized_delim.size_level);
+            return kern;
+        }
+
         // Apply size scaling based on size_level (1=big, 2=Big, 3=bigg, 4=Bigg)
         float scale = 1.0f + node->sized_delim.size_level * 0.5f;
         size *= scale;
@@ -804,7 +822,6 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
         if (node->sized_delim.delim_type == 0) atom = AtomType::Open;
         else if (node->sized_delim.delim_type == 1) atom = AtomType::Close;
 
-        int32_t cp = node->sized_delim.delim_char;
         FontSpec font = tc.make_symbol_font();
         font.size_pt = size;
 

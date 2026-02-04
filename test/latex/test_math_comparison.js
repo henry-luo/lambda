@@ -483,6 +483,20 @@ function calculateTestScore(astResult, htmlResult, dviResult, compareMode) {
     const htmlScore = htmlResult ? htmlResult.passRate : 0;
     const dviScore = dviResult ? dviResult.passRate : 0;
 
+    // If DVI reference doesn't exist or failed to generate (generationError),
+    // redistribute DVI weight to AST and HTML proportionally
+    const dviUnavailable = !dviResult || dviResult.generationError || 
+        (dviResult.differences && dviResult.differences.some(d => 
+            d.issue && (d.issue.includes('Failed to generate') || d.issue.includes('did not produce'))));
+    
+    if (dviUnavailable && compareMode === 'all') {
+        // Redistribute DVI weight: AST gets 50.5%, HTML gets 49.5%
+        const totalNonDvi = weights.ast + weights.html;
+        weights.ast = weights.ast / totalNonDvi;
+        weights.html = weights.html / totalNonDvi;
+        weights.dvi = 0;
+    }
+
     const overall =
         astScore * weights.ast +
         htmlScore * weights.html +
@@ -493,7 +507,7 @@ function calculateTestScore(astResult, htmlResult, dviResult, compareMode) {
         breakdown: {
             ast: { rate: astScore, weighted: Math.round(astScore * weights.ast * 10) / 10 },
             html: { rate: htmlScore, weighted: Math.round(htmlScore * weights.html * 10) / 10 },
-            dvi: { rate: dviScore, weighted: Math.round(dviScore * weights.dvi * 10) / 10 }
+            dvi: { rate: dviScore, weighted: Math.round(dviScore * weights.dvi * 10) / 10, unavailable: dviUnavailable }
         }
     };
 }
