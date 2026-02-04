@@ -1,6 +1,7 @@
 #include <time.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
+#include "lambda-decimal.hpp"
 #include "lambda-error.h"
 
 #if _WIN32
@@ -344,9 +345,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
 
-    // Initialize decimal context
-    new_script->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
-    mpd_maxcontext(new_script->decimal_ctx);
+    // Initialize decimal context (use shared unlimited context for transpiler)
+    new_script->decimal_ctx = decimal_unlimited_context();
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
@@ -402,10 +402,9 @@ void runner_setup_context(Runner* runner) {
     runner->context.num_stack = num_stack_create(16);
     runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();  // proper URL object for current directory
-    // initialize decimal context
-    runner->context.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    // initialize decimal context (use shared fixed-precision context for runtime)
+    runner->context.decimal_ctx = decimal_fixed_context();
     runner->context.context_alloc = heap_alloc;
-    mpd_defaultcontext(runner->context.decimal_ctx);
     // init AST validator
     runner->context.validator = schema_validator_create(runner->context.pool);
     
@@ -448,12 +447,8 @@ void runner_cleanup(Runner* runner) {
         heap_destroy();
         if (runner->context.num_stack) num_stack_destroy((num_stack_t*)runner->context.num_stack);
     }
-    // free decimal context
-    if (runner->context.decimal_ctx) {
-        log_debug("freeing decimal context");
-        free(runner->context.decimal_ctx);
-        runner->context.decimal_ctx = NULL;
-    }
+    // decimal context is now shared global - don't free it
+    runner->context.decimal_ctx = NULL;
     // free AST validator
     if (runner->context.validator) {
         log_debug("freeing validator");
@@ -603,10 +598,8 @@ void runtime_cleanup(Runtime* runtime) {
             if (script->pool) pool_destroy(script->pool);
             if (script->type_list) arraylist_free(script->type_list);
             if (script->jit_context) jit_cleanup(script->jit_context);
-            if (script->decimal_ctx) {
-                free(script->decimal_ctx);
-                script->decimal_ctx = NULL;
-            }
+            // decimal context is now shared global - don't free it
+            script->decimal_ctx = NULL;
             free(script);
         }
         arraylist_free(runtime->scripts);

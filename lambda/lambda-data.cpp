@@ -1,4 +1,5 @@
 #include "ast.hpp"
+#include "lambda-decimal.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
@@ -176,16 +177,8 @@ double it2d(Item itm) {
     else if (itm._type_id == LMD_TYPE_FLOAT) {
         return itm.get_double();
     }
-    else if (itm._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec = itm.get_decimal();
-        char* endptr;
-        char* dec_str = mpd_to_sci(dec->dec_val, 0);
-        double val = strtod(dec_str, &endptr);
-        if (!dec_str || endptr == dec_str) {
-            log_error("it2d: failed to convert decimal to double");
-            return NAN; // conversion error
-        }
-        return val;
+    else if (itm._type_id == LMD_TYPE_DECIMAL || itm._type_id == LMD_TYPE_DECIMAL_BIG) {
+        return decimal_to_double(itm);
     }
     log_debug("invalid type %d", itm._type_id);
     // todo: push error
@@ -479,8 +472,8 @@ void list_push(List *list, Item item) {
     case LMD_TYPE_DECIMAL: {
         Decimal *dval = item.get_decimal();
         if (dval && dval->dec_val) {
-            char *buf = mpd_to_sci(dval->dec_val, 1);
-            if (buf) free(buf);
+            char *buf = decimal_to_string(dval);
+            if (buf) decimal_free_string(buf);
         } else {
         log_debug("DEBUG list_push: pushed null decimal value");
         }
