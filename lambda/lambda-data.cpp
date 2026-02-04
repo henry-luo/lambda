@@ -138,6 +138,7 @@ void init_type_info() {
     type_info[LMD_TYPE_FUNC] = {sizeof(void*), "function", &TYPE_FUNC, (Type*)&LIT_TYPE_FUNC};
     type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
     type_info[LMD_TYPE_ERROR] = {sizeof(void*), "error", &TYPE_ERROR, (Type*)&LIT_TYPE_ERROR};
+    type_info[LMD_TYPE_PATH] = {sizeof(void*), "path", &TYPE_SYMBOL, (Type*)&LIT_TYPE_SYMBOL};  // Path uses symbol type for now
     type_info[LMD_CONTAINER_HEAP_START] = {0, "container_start", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
 }
 
