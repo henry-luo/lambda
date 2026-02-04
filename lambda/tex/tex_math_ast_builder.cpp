@@ -63,6 +63,57 @@ const char* math_node_type_name(MathNodeType type) {
     }
 }
 
+// Parse a dimension string like "5pt", "1em", "0.5ex" and return value in points
+// Returns 0.0f if parsing fails or the string is invalid
+static float parse_dimension_to_pt(const char* dim, int len) {
+    if (!dim || len <= 0) return 0.0f;
+    
+    // Skip leading '[' if present (from row_spacing rule)
+    if (*dim == '[') { dim++; len--; }
+    // Skip trailing ']' if present
+    while (len > 0 && dim[len-1] == ']') len--;
+    
+    // Parse the numeric part
+    char buf[64];
+    int i = 0;
+    while (i < len && i < 63 && (isdigit(dim[i]) || dim[i] == '.' || dim[i] == '-')) {
+        buf[i] = dim[i];
+        i++;
+    }
+    buf[i] = '\0';
+    
+    float value = (float)atof(buf);
+    if (value == 0.0f && buf[0] != '0') return 0.0f;  // Parse error
+    
+    // Skip whitespace
+    while (i < len && isspace(dim[i])) i++;
+    
+    // Parse the unit
+    const char* unit = dim + i;
+    int unit_len = len - i;
+    
+    // Convert to points based on unit
+    // Standard TeX unit conversions:
+    // 1pt = 1pt, 1em = 10pt (approx), 1ex = 4.3pt (approx), 1bp = 1.00375pt
+    if (unit_len >= 2 && strncmp(unit, "pt", 2) == 0) {
+        return value;  // Already in points
+    } else if (unit_len >= 2 && strncmp(unit, "em", 2) == 0) {
+        return value * 10.0f;  // 1em ≈ 10pt at 10pt font size
+    } else if (unit_len >= 2 && strncmp(unit, "ex", 2) == 0) {
+        return value * 4.3f;   // 1ex ≈ 4.3pt at 10pt font size
+    } else if (unit_len >= 2 && strncmp(unit, "bp", 2) == 0) {
+        return value * 1.00375f;  // 1bp (big point) = 1/72 inch
+    } else if (unit_len >= 2 && strncmp(unit, "mm", 2) == 0) {
+        return value * 2.8346f;  // 1mm = 2.8346pt
+    } else if (unit_len >= 2 && strncmp(unit, "cm", 2) == 0) {
+        return value * 28.346f;  // 1cm = 28.346pt
+    } else if (unit_len >= 2 && strncmp(unit, "in", 2) == 0) {
+        return value * 72.27f;  // 1in = 72.27pt
+    } else {
+        // Unknown unit, treat as points
+        return value;
+    }
+}
 // ============================================================================
 // Node Allocation
 // ============================================================================
@@ -2133,6 +2184,7 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
         int num_cols = 0;
         int max_cols = 0;
         int num_rows = 0;
+        bool pending_hline = false;  // Track if we saw \hline
 
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_named_child(body_node, i);
@@ -2147,12 +2199,29 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
                 num_cols++;
                 if (num_cols > max_cols) max_cols = num_cols;
 
+                // Check for row spacing: \\[5pt] syntax
+                // Field 'spacing' contains the row_spacing node like "[5pt]"
+                TSNode spacing_node = ts_node_child_by_field_name(child, "spacing", 7);
+                if (!ts_node_is_null(spacing_node)) {
+                    int spacing_len;
+                    const char* spacing_text = node_text(spacing_node, &spacing_len);
+                    float extra_spacing = parse_dimension_to_pt(spacing_text, spacing_len);
+                    current_row->row_extra_spacing = extra_spacing;
+                    log_debug("tex_math_ast: row_sep with spacing='%.*s' -> %.2fpt", 
+                              spacing_len, spacing_text, extra_spacing);
+                }
+
                 // Add completed row to array
                 math_row_append(array_node, current_row);
                 num_rows++;
 
                 // Start new row and cell
                 current_row = make_math_array_row(arena);
+                // Apply pending hline to new row
+                if (pending_hline) {
+                    current_row->flags |= MathASTNode::FLAG_HLINE;
+                    pending_hline = false;
+                }
                 current_cell_content = make_math_row(arena);
                 num_cols = 0;
             } else if (strcmp(type, "col_sep") == 0) {
@@ -2163,6 +2232,28 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
 
                 // Start new cell
                 current_cell_content = make_math_row(arena);
+            } else if (strcmp(type, "command") == 0) {
+                // Check for \hline command
+                int len;
+                const char* cmd_text = node_text(child, &len);
+                if (cmd_text && len >= 6 && strncmp(cmd_text, "\\hline", 6) == 0) {
+                    // Mark that we have a pending hline
+                    // If we're at start of row (no content yet), apply to current row
+                    // Otherwise it will apply to next row after row_sep
+                    if (math_row_count(current_cell_content) == 0 && num_cols == 0) {
+                        current_row->flags |= MathASTNode::FLAG_HLINE;
+                        log_debug("tex_math_ast: hline at start of row %d", num_rows);
+                    } else {
+                        pending_hline = true;
+                        log_debug("tex_math_ast: pending hline for next row");
+                    }
+                } else {
+                    // Regular command - add to current cell
+                    MathASTNode* expr = build_ts_node(child);
+                    if (expr) {
+                        math_row_append(current_cell_content, expr);
+                    }
+                }
             } else {
                 // Regular expression - add to current cell
                 MathASTNode* expr = build_ts_node(child);
@@ -2180,6 +2271,15 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
             if (num_cols > max_cols) max_cols = num_cols;
         }
 
+        // Check if we have a trailing hline
+        // Case 1: pending_hline is true (hline came after content in the last row)
+        // Case 2: current_row has FLAG_HLINE but no cells (hline at start of empty row after row_sep)
+        bool has_trailing_hline = pending_hline;
+        if (!has_trailing_hline && (current_row->flags & MathASTNode::FLAG_HLINE) && math_row_count(current_row) == 0) {
+            has_trailing_hline = true;
+            log_debug("tex_math_ast: detected trailing hline from empty row with FLAG_HLINE");
+        }
+
         if (math_row_count(current_row) > 0) {
             math_row_append(array_node, current_row);
             num_rows++;
@@ -2188,6 +2288,10 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
         // Update array metadata
         array_node->array.num_cols = max_cols;
         array_node->array.num_rows = num_rows;
+        array_node->array.trailing_hline = has_trailing_hline;  // Set trailing hline if \hline at end
+        if (has_trailing_hline) {
+            log_debug("tex_math_ast: trailing hline after last row");
+        }
 
         log_debug("tex_math_ast: built array with %d rows, %d cols", num_rows, max_cols);
     }
@@ -2778,6 +2882,12 @@ void math_ast_dump(MathASTNode* node, ::StrBuf* out, int depth) {
 
         case MathNodeType::ROW:
             ::strbuf_append_format(out, " count=%d", node->row.child_count);
+            break;
+
+        case MathNodeType::ARRAY_ROW:
+            if (node->flags & MathASTNode::FLAG_HLINE) {
+                ::strbuf_append_str(out, " [hline]");
+            }
             break;
 
         case MathNodeType::FRAC:
