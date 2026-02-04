@@ -417,6 +417,8 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return {.type = *(Type**)field_ptr};
             case LMD_TYPE_FUNC:
                 return {.function = *(Function**)field_ptr};
+            case LMD_TYPE_PATH:
+                return {.path = *(Path**)field_ptr};
             case LMD_TYPE_ANY: {
                 log_debug("map_get ANY type, pointer: %p", field_ptr);
                 return typeditem_to_item((TypedItem*)field_ptr);
