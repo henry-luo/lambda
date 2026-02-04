@@ -2265,7 +2265,7 @@
         },
         {
           "type": "PATTERN",
-          "value": "[lcr|@{}p\\d.]+"
+          "value": "[lcr|@{pmb\\d.]+"
         },
         {
           "type": "STRING",

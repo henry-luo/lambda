@@ -477,6 +477,92 @@ struct TypesetContext {
     FontSpec make_extension_font() const {
         return FontSpec("cmex10", font_size(), nullptr, 0);
     }
+
+    // Get font for letters/variables based on font_variant setting
+    // Returns font name and whether it should be flagged as a special variant
+    FontSpec make_variant_font() const {
+        switch (math_ctx.font_variant) {
+            case FontVariant::Bold:
+                return FontSpec("cmbx10", font_size(), nullptr, 0);
+            case FontVariant::Roman:
+            case FontVariant::OperatorName:
+                return make_roman_font();
+            case FontVariant::Italic:
+                return make_italic_font();
+            case FontVariant::BoldItalic:
+                // cmbxti10 doesn't exist, use cmbx10 for now
+                return FontSpec("cmbx10", font_size(), nullptr, 0);
+            case FontVariant::SansSerif:
+                // cmss10 for sans-serif
+                return FontSpec("cmss10", font_size(), nullptr, 0);
+            case FontVariant::Monospace:
+                // cmtt10 for typewriter
+                return FontSpec("cmtt10", font_size(), nullptr, 0);
+            case FontVariant::Calligraphic:
+                // Calligraphic uses cmsy10 for capitals
+                return make_symbol_font();
+            case FontVariant::Blackboard:
+                // msbm10 for blackboard bold
+                return FontSpec("msbm10", font_size(), nullptr, 0);
+            case FontVariant::Fraktur:
+                // eufm10 for fraktur (or use fallback)
+                return FontSpec("eufm10", font_size(), nullptr, 0);
+            case FontVariant::Script:
+                // rsfs10 for script (or use fallback)
+                return FontSpec("rsfs10", font_size(), nullptr, 0);
+            case FontVariant::Normal:
+            default:
+                // Default: italic for letters
+                return make_italic_font();
+        }
+    }
+
+    // Get TFM for the current font variant (for metrics)
+    TFMFont* get_variant_tfm() const {
+        switch (math_ctx.font_variant) {
+            case FontVariant::Bold:
+            case FontVariant::BoldItalic:
+                // Try to get cmbx10, fallback to roman
+                if (math_ctx.fonts) {
+                    TFMFont* bold_tfm = math_ctx.fonts->get_font("cmbx10");
+                    if (bold_tfm) return bold_tfm;
+                }
+                return get_roman_tfm();
+            case FontVariant::Roman:
+            case FontVariant::OperatorName:
+                return get_roman_tfm();
+            case FontVariant::SansSerif:
+                if (math_ctx.fonts) {
+                    TFMFont* ss_tfm = math_ctx.fonts->get_font("cmss10");
+                    if (ss_tfm) return ss_tfm;
+                }
+                return get_roman_tfm();
+            case FontVariant::Monospace:
+                if (math_ctx.fonts) {
+                    TFMFont* tt_tfm = math_ctx.fonts->get_font("cmtt10");
+                    if (tt_tfm) return tt_tfm;
+                }
+                return get_roman_tfm();
+            case FontVariant::Calligraphic:
+                return get_symbol_tfm();
+            case FontVariant::Blackboard:
+                if (msbm_tfm) return msbm_tfm;
+                return get_roman_tfm();
+            case FontVariant::Fraktur:
+            case FontVariant::Script:
+                // Fallback to roman for unsupported fonts
+                return get_roman_tfm();
+            case FontVariant::Italic:
+            case FontVariant::Normal:
+            default:
+                return get_italic_tfm();
+        }
+    }
+
+    // Check if we have a non-default font variant active
+    bool has_font_variant() const {
+        return math_ctx.font_variant != FontVariant::Normal;
+    }
 };
 
 // ============================================================================
@@ -575,20 +661,61 @@ static TexNode* typeset_node(MathASTNode* node, MathContext& ctx) {
             return make_hbox(ctx.arena);
 
         case MathNodeType::STYLE: {
-            // STYLE nodes (\displaystyle, \textstyle, etc.)
-            // Save current style and apply the new one
+            // STYLE nodes (\displaystyle, \textstyle, \mathbf, etc.)
+            // Save current state and apply the new one
             MathStyle old_style = ctx.style;
+            FontVariant old_variant = ctx.font_variant;
+            const char* old_color = ctx.color;
+            bool is_color_cmd = false;
+            const char* new_color = nullptr;
+
             switch (node->style.style_type) {
                 case 0: ctx.style = MathStyle::Display; break;  // displaystyle
                 case 1: ctx.style = MathStyle::Text; break;     // textstyle
                 case 2: ctx.style = MathStyle::Script; break;   // scriptstyle
                 case 3: ctx.style = MathStyle::ScriptScript; break;  // scriptscriptstyle
+                case 4: // font variant (\mathbf, \mathrm, etc.)
+                    ctx.font_variant = parse_font_variant(node->style.command);
+                    log_debug("[TYPESET] font variant: cmd='%s' -> variant=%d",
+                              node->style.command ? node->style.command : "(null)",
+                              (int)ctx.font_variant);
+                    break;
+                case 5: // operatorname
+                    ctx.font_variant = FontVariant::OperatorName;
+                    break;
+                case 6: // color (\textcolor, \color)
+                    // Store color in context for propagation to output
+                    if (node->style.color) {
+                        ctx.color = node->style.color;
+                        new_color = node->style.color;
+                        is_color_cmd = true;
+                        log_debug("[TYPESET] color: cmd='%s' color='%s'",
+                                  node->style.command ? node->style.command : "(null)",
+                                  ctx.color);
+                    }
+                    break;
             }
+
             TexNode* result = nullptr;
             if (node->body) {
                 result = typeset_node(node->body, ctx);
             }
+
+            // For color commands, wrap result in hbox with color set
+            if (is_color_cmd && new_color && result) {
+                TexNode* wrapper = make_hbox(ctx.arena);
+                wrapper->color = new_color;
+                wrapper->append_child(result);
+                // Copy dimensions from child
+                wrapper->width = result->width;
+                wrapper->height = result->height;
+                wrapper->depth = result->depth;
+                result = wrapper;
+            }
+
             ctx.style = old_style;  // restore style
+            ctx.font_variant = old_variant;  // restore font variant
+            ctx.color = old_color;  // restore color
             return result ? result : make_hbox(ctx.arena);
         }
 
@@ -1030,9 +1157,37 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
                 tfm = tc.get_symbol_tfm();
                 cp = 106;  // cmsy10 vert
             } else if ((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z')) {
-                // Variables use italic
-                font = tc.make_italic_font();
-                tfm = tc.get_italic_tfm();
+                // Check for font variant (\mathbf, \mathrm, etc.)
+                if (tc.has_font_variant()) {
+                    font = tc.make_variant_font();
+                    tfm = tc.get_variant_tfm();
+
+                    // Special handling for calligraphic capitals (cmsy10)
+                    if (ctx.font_variant == FontVariant::Calligraphic && cp >= 'A' && cp <= 'Z') {
+                        // cmsy10 calligraphic letters: A=65 maps to position 65, etc.
+                        // Actually in cmsy10, A is at 65, B at 66, etc.
+                        cp = cp; // Already correct position
+                    }
+                    // Blackboard bold capitals use special positions in msbm10
+                    else if (ctx.font_variant == FontVariant::Blackboard && cp >= 'A' && cp <= 'Z') {
+                        // msbm10: A=65, B=66, etc.
+                        cp = cp; // Already correct position
+                    }
+                } else {
+                    // Default: variables use italic
+                    font = tc.make_italic_font();
+                    tfm = tc.get_italic_tfm();
+                }
+            } else if (cp >= '0' && cp <= '9') {
+                // Digits always use roman font (even in font variant modes)
+                font = tc.make_roman_font();
+                tfm = tc.get_roman_tfm();
+
+                // Except for bold which uses bold digits
+                if (ctx.font_variant == FontVariant::Bold || ctx.font_variant == FontVariant::BoldItalic) {
+                    font = tc.make_variant_font();
+                    tfm = tc.get_variant_tfm();
+                }
             } else {
                 font = tc.make_roman_font();
                 tfm = tc.get_roman_tfm();
@@ -1142,7 +1297,13 @@ static TexNode* typeset_frac(MathASTNode* node, MathContext& ctx) {
 
     // Use existing typeset_fraction
     float rule = (node->frac.rule_thickness < 0) ? ctx.rule_thickness : node->frac.rule_thickness;
-    return typeset_fraction(numer, denom, rule, ctx);
+    TexNode* frac = typeset_fraction(numer, denom, rule, ctx);
+
+    // Store delimiter info in the TexNode for HTML rendering
+    frac->content.frac.left_delim = node->frac.left_delim;
+    frac->content.frac.right_delim = node->frac.right_delim;
+
+    return frac;
 }
 
 // ============================================================================

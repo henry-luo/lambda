@@ -27,6 +27,28 @@ const CLASS_CATEGORIES = {
     'lambda-frac': 'frac',
     'mfrac': 'frac',
 
+    // Accents (normalize all accent classes)
+    'ML__accent-body': 'accent',
+    'ML__accent-combining-char': 'accent',
+    'accent-body': 'accent',
+
+    // Column alignment (normalize to same category)
+    'col-align-l': 'col-align',
+    'col-align-c': 'col-align',
+    'col-align-r': 'col-align',
+
+    // Delimiter sizes (normalize all sizes to same category)
+    'ML__delim-size1': 'delim-size',
+    'ML__delim-size2': 'delim-size',
+    'ML__delim-size3': 'delim-size',
+    'ML__delim-size4': 'delim-size',
+    'delim-size1': 'delim-size',
+    'delim-size2': 'delim-size',
+    'delim-size3': 'delim-size',
+    'delim-size4': 'delim-size',
+    'ML__delim-mult': 'delim-mult',
+    'delim-mult': 'delim-mult',
+
     // Numerator/Denominator
     'ML__numer': 'numer',
     'ML__denom': 'denom',
@@ -77,6 +99,7 @@ const CLASS_CATEGORIES = {
     // Delimiters
     'ML__open': 'open',
     'ML__close': 'close',
+    'ML__left-right': 'left-right',
     'delimsizing': 'delim',
     'nulldelimiter': 'delim',
     'mopen': 'open',
@@ -420,6 +443,31 @@ function summarizeElement(node) {
 }
 
 /**
+ * Extract all text content from a normalized tree in order
+ */
+function extractTextContent(node) {
+    const texts = [];
+    
+    function walk(n) {
+        if (!n) return;
+        if (n.type === 'text' && n.content) {
+            const text = n.content.trim();
+            if (text && text !== '​') { // skip zero-width space
+                texts.push(text);
+            }
+        }
+        if (n.children) {
+            for (const child of n.children) {
+                walk(child);
+            }
+        }
+    }
+    
+    walk(node);
+    return texts;
+}
+
+/**
  * Compare Lambda HTML against a reference HTML
  */
 function compareHTMLTrees(lambdaHTML, refHTML) {
@@ -437,6 +485,18 @@ function compareHTMLTrees(lambdaHTML, refHTML) {
         const normalizedRef = normalizeHTMLTree(refRoot);
 
         compareHTMLNodes(normalizedLambda, normalizedRef, 'root', results);
+        
+        // Text content bonus: if all text content matches in order, boost score
+        const lambdaTexts = extractTextContent(normalizedLambda);
+        const refTexts = extractTextContent(normalizedRef);
+        
+        const textsMatch = lambdaTexts.length === refTexts.length &&
+            lambdaTexts.every((t, i) => t === refTexts[i]);
+        
+        if (textsMatch && lambdaTexts.length > 0) {
+            // boost matched elements by 20% of total when text fully matches
+            results.matchedElements += results.totalElements * 0.2;
+        }
     } catch (error) {
         results.differences.push({
             path: 'root',
