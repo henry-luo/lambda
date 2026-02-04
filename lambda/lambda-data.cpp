@@ -15,6 +15,7 @@ Type TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
+Type TYPE_PATH = {.type_id = LMD_TYPE_PATH};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_LIST = {.type_id = LMD_TYPE_LIST};
 Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
@@ -51,6 +52,7 @@ TypeType LIT_TYPE_NUMBER;
 TypeType LIT_TYPE_STRING;
 TypeType LIT_TYPE_BINARY;
 TypeType LIT_TYPE_SYMBOL;
+TypeType LIT_TYPE_PATH;
 TypeType LIT_TYPE_DTIME;
 TypeType LIT_TYPE_LIST;
 TypeType LIT_TYPE_RANGE;
@@ -92,6 +94,7 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_STRING) = LIT_TYPE;  LIT_TYPE_STRING.type = &TYPE_STRING;
     *(Type*)(&LIT_TYPE_BINARY) = LIT_TYPE;  LIT_TYPE_BINARY.type = &TYPE_BINARY;
     *(Type*)(&LIT_TYPE_SYMBOL) = LIT_TYPE;  LIT_TYPE_SYMBOL.type = &TYPE_SYMBOL;
+    *(Type*)(&LIT_TYPE_PATH) = LIT_TYPE;  LIT_TYPE_PATH.type = &TYPE_PATH;
     *(Type*)(&LIT_TYPE_DTIME) = LIT_TYPE;  LIT_TYPE_DTIME.type = &TYPE_DTIME;
     *(Type*)(&LIT_TYPE_LIST) = LIT_TYPE;  LIT_TYPE_LIST.type = &TYPE_LIST;
     *(Type*)(&LIT_TYPE_RANGE) = LIT_TYPE;  LIT_TYPE_RANGE.type = &TYPE_RANGE;
@@ -138,6 +141,7 @@ void init_type_info() {
     type_info[LMD_TYPE_FUNC] = {sizeof(void*), "function", &TYPE_FUNC, (Type*)&LIT_TYPE_FUNC};
     type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
     type_info[LMD_TYPE_ERROR] = {sizeof(void*), "error", &TYPE_ERROR, (Type*)&LIT_TYPE_ERROR};
+    type_info[LMD_TYPE_PATH] = {sizeof(void*), "path", &TYPE_PATH, (Type*)&LIT_TYPE_PATH};
     type_info[LMD_CONTAINER_HEAP_START] = {0, "container_start", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
 }
 
@@ -609,6 +613,10 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(void**)field_ptr = (void*)item.function;  // use function pointer accessor
                 break;
             }
+            case LMD_TYPE_PATH: {
+                *(Path**)field_ptr = item.path;
+                break;
+            }
             case LMD_TYPE_ANY: { // a special case
                 TypeId type_id = get_type_id(item);
                 log_debug("set field of ANY type to type: %d", type_id);
@@ -642,6 +650,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     break;
                 case LMD_TYPE_FUNC:
                     titem.function = item.function;
+                    break;
+                case LMD_TYPE_PATH:
+                    titem.path = item.path;
                     break;
                 default:
                     log_error("unknown type %d in set_fields", type_id);
@@ -745,6 +756,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:  case LMD_TYPE_LIST:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+    case LMD_TYPE_PATH:
         result.container = *(Container**)field_ptr;
         break;
     case LMD_TYPE_ANY: {

@@ -771,9 +771,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_LIST:
         transpile_expr(tp, item);  // list_end() -> Item 
         break;
+    case LMD_TYPE_PATH:
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
-        // All container types including Function* are direct pointers
+        // All container types including Function* and Path* are direct pointers
         strbuf_append_str(tp->code_buf, "(Item)(");
         transpile_expr(tp, item);  // raw pointer treated as Item
         strbuf_append_char(tp->code_buf, ')');
@@ -3364,6 +3365,42 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
 }
 
+// transpile path expression like file.etc.hosts to runtime path construction
+void transpile_path_expr(Transpiler* tp, AstPathNode *path_node) {
+    log_debug("transpile_path_expr: scheme=%d, segments=%d", path_node->scheme, path_node->segment_count);
+    
+    // C2MIR does not support variadic functions, so we use fixed-arity path_build1-5
+    int seg_count = path_node->segment_count;
+    if (seg_count < 1 || seg_count > 5) {
+        log_error("transpile_path_expr: unsupported segment count %d (must be 1-5)", seg_count);
+        strbuf_append_str(tp->code_buf, "ItemError /* path segment count out of range */");
+        return;
+    }
+    
+    // Generate: path_buildN(rt->pool, scheme, "seg1", "seg2", ...)
+    strbuf_append_str(tp->code_buf, "path_build");
+    strbuf_append_int(tp->code_buf, seg_count);
+    strbuf_append_str(tp->code_buf, "(rt->pool,");
+    strbuf_append_int(tp->code_buf, (int)path_node->scheme);
+    
+    // Emit each segment as a string literal
+    for (int i = 0; i < seg_count; i++) {
+        strbuf_append_char(tp->code_buf, ',');
+        strbuf_append_char(tp->code_buf, '"');
+        String* seg = path_node->segments[i];
+        // Escape the string content
+        for (size_t j = 0; j < seg->len; j++) {
+            char c = seg->chars[j];
+            if (c == '"' || c == '\\') {
+                strbuf_append_char(tp->code_buf, '\\');
+            }
+            strbuf_append_char(tp->code_buf, c);
+        }
+        strbuf_append_char(tp->code_buf, '"');
+    }
+    strbuf_append_char(tp->code_buf, ')');
+}
+
 void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     // defensive check: if object or field is null, emit error and skip
     if (!field_node->object || !field_node->field) {
@@ -3923,6 +3960,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_INDEX_EXPR:
         transpile_index_expr(tp, (AstFieldNode*)expr_node);
+        break;
+    case AST_NODE_PATH_EXPR:
+        transpile_path_expr(tp, (AstPathNode*)expr_node);
         break;
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);

@@ -6,6 +6,8 @@
 
 #include "../lambda/transpiler.hpp"
 
+// Thread-local eval context for tests
+__thread EvalContext* context = nullptr;
 
 // Stub implementation of load_script for test builds
 Script* load_script(Runtime* runtime, const char* script_path, const char* source) {
@@ -21,3 +23,15 @@ void find_errors(TSNode node) {
     // Stub implementation - do nothing for tests
 }
 
+// Helper functions for C code to access EvalContext members (used by path.c)
+extern "C" {
+Pool* eval_context_get_pool(EvalContext* ctx) {
+    if (!ctx || !ctx->heap) return nullptr;
+    return ctx->heap->pool;
+}
+
+NamePool* eval_context_get_name_pool(EvalContext* ctx) {
+    if (!ctx) return nullptr;
+    return ctx->name_pool;
+}
+}

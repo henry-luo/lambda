@@ -59,6 +59,7 @@ typedef struct Item {
         Element* element;
         Type* type;
         Function* function;
+        Path* path;
     };
 
     inline TypeId type_id() {
