@@ -127,6 +127,15 @@ else
     echo "Warning: tree-sitter CLI may need to be downloaded on first use"
 fi
 
+# Install npm dependencies (jsdom for test comparators, puppeteer for browser tests)
+echo "Installing npm dependencies..."
+if [ -f "package.json" ]; then
+    npm install
+    echo "npm dependencies installed"
+else
+    echo "Warning: package.json not found, skipping npm install"
+fi
+
 # Check for cmake (needed for some dependencies)
 if ! command -v cmake >/dev/null 2>&1; then
     echo "Installing cmake..."

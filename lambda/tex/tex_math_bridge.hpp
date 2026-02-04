@@ -33,6 +33,28 @@ namespace tex {
 float style_size_factor(MathStyle style);
 
 // ============================================================================
+// Font Variant for \mathbf, \mathrm, etc.
+// ============================================================================
+
+enum class FontVariant : uint8_t {
+    Normal = 0,     // default (math italic for letters, roman for digits)
+    Roman,          // \mathrm - upright roman
+    Bold,           // \mathbf - bold
+    Italic,         // \mathit - text italic
+    BoldItalic,     // \mathbfit - bold italic
+    SansSerif,      // \mathsf - sans-serif
+    Monospace,      // \mathtt - typewriter/monospace
+    Calligraphic,   // \mathcal - calligraphic
+    Script,         // \mathscr - script
+    Fraktur,        // \mathfrak - fraktur
+    Blackboard,     // \mathbb - blackboard bold
+    OperatorName,   // \operatorname - upright for operator names
+};
+
+// Parse font variant from command name (e.g., "mathbf" -> Bold)
+FontVariant parse_font_variant(const char* cmd);
+
+// ============================================================================
 // Math Context for Typesetting
 // ============================================================================
 
@@ -56,6 +78,12 @@ struct MathContext {
     // Current font (set based on what we're typesetting)
     TFMFont* current_tfm;
 
+    // Current font variant (\mathbf, \mathrm, etc.)
+    FontVariant font_variant;
+
+    // Current text color (for \textcolor, \color commands)
+    const char* color;
+
     // Font parameters (from cmr10)
     float x_height;              // Height of 'x' (for positioning)
     float quad;                  // 1em width
@@ -69,6 +97,8 @@ struct MathContext {
         ctx.fonts = fonts;
         ctx.font_provider = nullptr;  // Set separately if dual font support needed
         ctx.style = MathStyle::Text;
+        ctx.font_variant = FontVariant::Normal;
+        ctx.color = nullptr;  // No color override by default
         ctx.base_size_pt = size_pt;
 
         // Set up fonts
@@ -106,6 +136,7 @@ struct MathContext {
         ctx.fonts = nullptr;  // Not used when provider is set
         ctx.font_provider = provider;
         ctx.style = MathStyle::Text;
+        ctx.font_variant = FontVariant::Normal;
         ctx.base_size_pt = size_pt;
 
         // Set up font specs

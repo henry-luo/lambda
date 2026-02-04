@@ -40,6 +40,7 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
 static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_scripts(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+static void render_mathop(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
@@ -265,9 +266,11 @@ static const char* font_to_class(const char* font_name) {
     if (strncmp(font_name, "cmsy", 4) == 0) return "cmr";     // symbols (use roman class)
     if (strncmp(font_name, "cmex", 4) == 0) return "delim-size1";  // delimiters
     if (strncmp(font_name, "cmbx", 4) == 0) return "mathbf";  // bold
+    if (strncmp(font_name, "cmss", 4) == 0) return "mathsf";  // sans-serif
     if (strncmp(font_name, "cmtt", 4) == 0) return "mathtt";  // typewriter
     if (strncmp(font_name, "cmsl", 4) == 0) return "mathit";  // slanted
-    if (strncmp(font_name, "msbm", 4) == 0) return "ams";     // AMS symbols
+    if (strncmp(font_name, "msbm", 4) == 0) return "mathbb";  // blackboard bold
+    if (strncmp(font_name, "eufm", 4) == 0) return "mathfrak";// fraktur
     if (strncmp(font_name, "lasy", 4) == 0) return "cmr";     // LaTeX symbols
 
     return "mathit";  // default to italic
@@ -281,6 +284,7 @@ static int32_t cmsy10_to_unicode(int32_t code) {
         // Not commonly used from cmsy10, usually from cmr10
 
         // Binary operators
+        case 0:  return 0x2212; // minus −
         case 1:  return 0x22C5; // cdot ⋅
         case 2:  return 0x00D7; // times ×
         case 3:  return 0x2217; // ast ∗
@@ -484,6 +488,67 @@ static int32_t cmmi10_to_unicode(int32_t code) {
     }
 }
 
+// Map cmr10 (Computer Modern Roman) character codes to Unicode for HTML output
+// cmr10 contains roman text including uppercase Greek letters at positions 0-10
+static int32_t cmr10_to_unicode(int32_t code) {
+    switch (code) {
+        // Uppercase Greek letters (positions 0-10 in OT1/cmr encoding)
+        case 0: return 0x0393;   // Gamma Γ
+        case 1: return 0x0394;   // Delta Δ
+        case 2: return 0x0398;   // Theta Θ
+        case 3: return 0x039B;   // Lambda Λ
+        case 4: return 0x039E;   // Xi Ξ
+        case 5: return 0x03A0;   // Pi Π
+        case 6: return 0x03A3;   // Sigma Σ
+        case 7: return 0x03A5;   // Upsilon Υ
+        case 8: return 0x03A6;   // Phi Φ
+        case 9: return 0x03A8;   // Psi Ψ
+        case 10: return 0x03A9;  // Omega Ω
+
+        // Ligatures and special characters
+        case 11: return 0xFB00;  // ff ligature ﬀ
+        case 12: return 0xFB01;  // fi ligature ﬁ
+        case 13: return 0xFB02;  // fl ligature ﬂ
+        case 14: return 0xFB03;  // ffi ligature ﬃ
+        case 15: return 0xFB04;  // ffl ligature ﬄ
+        case 16: return 0x0131;  // dotless i ı
+        case 17: return 0x0237;  // dotless j ȷ
+
+        // Accents
+        case 18: return 0x0060;  // grave `
+        case 19: return 0x00B4;  // acute ´
+        case 20: return 0x02C7;  // caron ˇ
+        case 21: return 0x02D8;  // breve ˘
+        case 22: return 0x00AF;  // macron ¯
+        case 23: return 0x02DA;  // ring above ˚
+        case 24: return 0x00B8;  // cedilla ¸
+        case 25: return 0x00DF;  // eszett ß
+        case 26: return 0x00E6;  // ae æ
+        case 27: return 0x0153;  // oe œ
+        case 28: return 0x00F8;  // o-slash ø
+        case 29: return 0x00C6;  // AE Æ
+        case 30: return 0x0152;  // OE Œ
+        case 31: return 0x00D8;  // O-slash Ø
+
+        // Special quote characters
+        case 34: return 0x201D;  // right double quote "
+        case 39: return 0x2019;  // right single quote '
+        case 60: return 0x00A1;  // inverted exclamation ¡
+        case 62: return 0x00BF;  // inverted question ¿
+        case 92: return 0x201C;  // left double quote "
+        case 123: return 0x2013; // en dash –
+        case 124: return 0x2014; // em dash —
+        case 125: return 0x02DD; // double acute ˝
+        case 126: return 0x0303; // tilde ~
+        case 127: return 0x00A8; // diaeresis ¨
+
+        default:
+            // Standard ASCII range (32-126) maps directly
+            if (code >= 32 && code < 127) return code;
+            return code;
+    }
+}
+
 // Map cmex10 character codes to Unicode for HTML output
 // cmex10 contains extensible delimiters and large operators
 static int32_t cmex10_to_unicode(int32_t code) {
@@ -514,18 +579,99 @@ static int32_t cmex10_to_unicode(int32_t code) {
         case 26: return '{';   // left brace medium
         case 27: return '}';   // right brace medium
 
-        // Big operators
+        // Big operators (small sizes)
         case 80: return 0x2211; // summation ∑
         case 81: return 0x220F; // product ∏
         case 82: return 0x222B; // integral ∫
         case 83: return 0x22C3; // big union ⋃
         case 84: return 0x22C2; // big intersection ⋂
-        case 86: return 0x2A00; // big circled operator
+        case 85: return 0x2A04; // big multiset union ⊎
+        case 86: return 0x22C0; // big wedge ⋀
+        case 87: return 0x22C1; // big vee ⋁
+        // Big operators (large sizes, same symbols displayed larger)
+        case 88: return 0x2211; // summation ∑ (large)
+        case 89: return 0x220F; // product ∏ (large)
+        case 90: return 0x222B; // integral ∫ (large)
+        case 91: return 0x22C3; // big union ⋃ (large)
+        case 92: return 0x22C2; // big intersection ⋂ (large)
+        case 93: return 0x2A04; // big multiset union ⊎ (large)
+        case 94: return 0x22C0; // big wedge ⋀ (large)
+        case 95: return 0x22C1; // big vee ⋁ (large)
+        // coproduct
+        case 96: return 0x2210; // coproduct ∐ (small)
+        case 97: return 0x2210; // coproduct ∐ (large)
+        // oint (contour integral)
+        case 72: return 0x222E; // contour integral ∮ (small)
+        case 73: return 0x222E; // contour integral ∮ (large)
+        // circled operators
+        case 76: return 0x2A01; // bigoplus ⨁ (small)
+        case 77: return 0x2A01; // bigoplus ⨁ (large)
+        case 78: return 0x2A02; // bigotimes ⨂ (small)
+        case 79: return 0x2A02; // bigotimes ⨂ (large)
 
         default:
             // for unmapped codes, just return as-is (may render as empty)
             return (code >= 32 && code < 127) ? code : 0;
     }
+}
+
+// Map msbm10 (AMS Blackboard Bold) character codes to Unicode for HTML output
+// msbm10 contains blackboard bold letters and special symbols
+static int32_t msbm10_to_unicode(int32_t code) {
+    // Blackboard bold uppercase letters A-Z at positions 65-90
+    if (code >= 65 && code <= 90) {
+        // Map to Unicode Mathematical Double-Struck Capital letters
+        // A=65 → 𝔸 U+1D538, but use simpler ℂ, ℕ, ℙ, ℚ, ℝ, ℤ when available
+        switch (code) {
+            case 67: return 0x2102;  // C → ℂ
+            case 72: return 0x210D;  // H → ℍ
+            case 78: return 0x2115;  // N → ℕ
+            case 80: return 0x2119;  // P → ℙ
+            case 81: return 0x211A;  // Q → ℚ
+            case 82: return 0x211D;  // R → ℝ
+            case 90: return 0x2124;  // Z → ℤ
+            default:
+                // Use Mathematical Double-Struck for others
+                return 0x1D538 + (code - 65);  // A=𝔸, B=𝔹, etc.
+        }
+    }
+    // Lowercase blackboard bold a-z at positions 97-122 (if present)
+    if (code >= 97 && code <= 122) {
+        return 0x1D552 + (code - 97);  // a=𝕒, b=𝕓, etc.
+    }
+    // Additional symbols
+    switch (code) {
+        case 107: return 0x2127;  // mho ℧
+        default:
+            return (code >= 32 && code < 127) ? code : 0;
+    }
+}
+
+// Map eufm10 (Euler Fraktur) character codes to Unicode for HTML output
+// eufm10 contains Fraktur/blackletter style letters
+static int32_t eufm10_to_unicode(int32_t code) {
+    // Fraktur uppercase A-Z at positions 65-90
+    if (code >= 65 && code <= 90) {
+        // Use Unicode Mathematical Fraktur Capital letters
+        // Some have dedicated Unicode points, others use Plane 1
+        switch (code) {
+            case 67: return 0x212D;  // C → ℭ
+            case 72: return 0x210C;  // H → ℌ
+            case 73: return 0x2111;  // I → ℑ
+            case 82: return 0x211C;  // R → ℜ
+            case 90: return 0x2128;  // Z → ℨ
+            default:
+                // Mathematical Fraktur Capital: A=𝔄 at U+1D504
+                return 0x1D504 + (code - 65);
+        }
+    }
+    // Fraktur lowercase a-z at positions 97-122
+    if (code >= 97 && code <= 122) {
+        // Mathematical Fraktur Small: a=𝔞 at U+1D51E
+        return 0x1D51E + (code - 97);
+    }
+    // Pass through other codes
+    return (code >= 32 && code < 127) ? code : 0;
 }
 
 // render a single character node
@@ -548,12 +694,24 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
     // Convert TFM character codes to Unicode based on font
     if (font_name) {
-        if (strncmp(font_name, "cmex", 4) == 0) {
+        if (strncmp(font_name, "cmr", 3) == 0) {
+            codepoint = cmr10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "cmex", 4) == 0) {
             codepoint = cmex10_to_unicode(codepoint);
         } else if (strncmp(font_name, "cmsy", 4) == 0) {
             codepoint = cmsy10_to_unicode(codepoint);
         } else if (strncmp(font_name, "cmmi", 4) == 0) {
             codepoint = cmmi10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "msbm", 4) == 0) {
+            codepoint = msbm10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "eufm", 4) == 0) {
+            codepoint = eufm10_to_unicode(codepoint);
+        }
+        // cmbx, cmss, cmtt use same encoding as cmr
+        else if (strncmp(font_name, "cmbx", 4) == 0 ||
+                 strncmp(font_name, "cmss", 4) == 0 ||
+                 strncmp(font_name, "cmtt", 4) == 0) {
+            codepoint = cmr10_to_unicode(codepoint);
         }
     }
 
@@ -694,19 +852,47 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    char class_buf[64];
-    // use ML__base for MathLive compatibility
-    snprintf(class_buf, sizeof(class_buf), "%s__base", opts.class_prefix);
+    // At root level (depth=0, inside ML__base), we usually don't add extra wrapper.
+    // However, if the hlist contains complex structures (mtable, delimiter with mtable),
+    // we need the wrapper for proper layout like MathLive.
+    bool needs_wrapper = (depth > 0);
+    bool has_color = (node->color != nullptr);
 
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\"");
-
-    if (opts.include_styles) {
-        strbuf_append_str(out, " style=\"display:inline-block\"");
+    if (!needs_wrapper && !has_color) {
+        // Check if this hlist contains complex structures that need wrapping
+        // Complex structures: mtable (for bmatrix/pmatrix/etc), or delimiter + mtable combo
+        bool has_mtable = false;
+        bool has_delimiter = false;
+        for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+            if (child->node_class == NodeClass::MTable) has_mtable = true;
+            if (child->node_class == NodeClass::Char) {
+                // Check for delimiter characters (brackets, parens, etc)
+                int32_t cp = child->content.ch.codepoint;
+                if (cp == '(' || cp == ')' || cp == '[' || cp == ']' ||
+                    cp == '{' || cp == '}' || cp == '|' ||
+                    cp == 0 || cp == 1 || cp == 2 || cp == 3) {  // cmex10 delimiters
+                    has_delimiter = true;
+                }
+            }
+        }
+        // Wrap if we have both delimiter(s) and mtable - that's a delimited matrix
+        if (has_mtable && has_delimiter) {
+            needs_wrapper = true;
+        }
     }
 
-    strbuf_append_str(out, ">");
+    if (needs_wrapper || has_color) {
+        strbuf_append_str(out, "<span");
+        if (opts.include_styles || has_color) {
+            strbuf_append_str(out, " style=\"display:inline-block");
+            if (has_color) {
+                strbuf_append_str(out, ";color:");
+                strbuf_append_str(out, node->color);
+            }
+            strbuf_append_str(out, "\"");
+        }
+        strbuf_append_str(out, ">");
+    }
 
     // render children
     TexNode* child = node->first_child;
@@ -715,7 +901,9 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         child = child->next_sibling;
     }
 
-    strbuf_append_str(out, "</span>");
+    if (needs_wrapper || has_color) {
+        strbuf_append_str(out, "</span>");
+    }
 }
 
 // render vertical list (stack of items) - MathLive vlist structure
@@ -798,18 +986,40 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
     float total_height = -numer_shift + numer_height;
     float total_depth = denom_shift + denom_depth;
 
-    // MathLive structure: ML__mfrac > (nulldelim + vlist-t + nulldelim)
+    // MathLive structure: ML__mfrac > (delim/nulldelim + vlist-t + delim/nulldelim)
     // fraction container
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, opts.class_prefix);
     strbuf_append_str(out, "__mfrac\">");
 
-    // null delimiter (open) - inside mfrac
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__nulldelimiter ");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__open\" style=\"width:0.12em\"></span>");
+    // Left delimiter - real delimiter or null
+    int32_t left_delim = node->content.frac.left_delim;
+    if (left_delim != 0) {
+        // Use real delimiter (e.g., for \binom)
+        // Calculate size based on fraction height
+        float delim_height = total_height + total_depth;
+        const char* size_class;
+        if (delim_height < 1.5f) {
+            size_class = "delim-size1";
+        } else if (delim_height < 2.4f) {
+            size_class = "ML__delim-size2";
+        } else if (delim_height < 3.0f) {
+            size_class = "delim-size3";
+        } else {
+            size_class = "ML__delim-size4";
+        }
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class + 6); // skip "delim-" prefix
+        strbuf_append_str(out, buf);
+        append_codepoint(out, (uint32_t)left_delim);
+        strbuf_append_str(out, "</span>");
+    } else {
+        // null delimiter (open) - inside mfrac
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__nulldelimiter ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__open\" style=\"width:0.12em\"></span>");
+    }
 
     // vlist-t vlist-t2 (two rows for above/below baseline)
     strbuf_append_str(out, "<span class=\"");
@@ -828,18 +1038,18 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
              opts.class_prefix, total_height);
     strbuf_append_str(out, buf);
 
-    // denominator (bottom position)
+    // numerator (top position) - rendered first to match MathLive DOM order
     snprintf(buf, sizeof(buf), "<span class=\"%s__center\" style=\"top:%.2fem\">",
-             opts.class_prefix, -pstrut_size + denom_shift);
+             opts.class_prefix, -pstrut_size + numer_shift);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
              opts.class_prefix, pstrut_size);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">",
-             denom_height + denom_depth);
+             numer_height + numer_depth);
     strbuf_append_str(out, buf);
-    if (node->content.frac.denominator) {
-        render_node(node->content.frac.denominator, out, opts, depth + 1);
+    if (node->content.frac.numerator) {
+        render_node(node->content.frac.numerator, out, opts, depth + 1);
     }
     strbuf_append_str(out, "</span></span>");
 
@@ -857,18 +1067,18 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
         strbuf_append_str(out, "</span>");
     }
 
-    // numerator (top position)
+    // denominator (bottom position) - rendered second to match MathLive DOM order
     snprintf(buf, sizeof(buf), "<span class=\"%s__center\" style=\"top:%.2fem\">",
-             opts.class_prefix, -pstrut_size + numer_shift);
+             opts.class_prefix, -pstrut_size + denom_shift);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
              opts.class_prefix, pstrut_size);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">",
-             numer_height + numer_depth);
+             denom_height + denom_depth);
     strbuf_append_str(out, buf);
-    if (node->content.frac.numerator) {
-        render_node(node->content.frac.numerator, out, opts, depth + 1);
+    if (node->content.frac.denominator) {
+        render_node(node->content.frac.denominator, out, opts, depth + 1);
     }
     strbuf_append_str(out, "</span></span>");
 
@@ -891,12 +1101,33 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
 
     strbuf_append_str(out, "</span>");  // close vlist-t
 
-    // null delimiter (close) - inside mfrac
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__nulldelimiter ");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__close\" style=\"width:0.12em\"></span>");
+    // Right delimiter - real delimiter or null
+    int32_t right_delim = node->content.frac.right_delim;
+    if (right_delim != 0) {
+        // Use real delimiter (e.g., for \binom)
+        float delim_height = total_height + total_depth;
+        const char* size_class;
+        if (delim_height < 1.5f) {
+            size_class = "delim-size1";
+        } else if (delim_height < 2.4f) {
+            size_class = "ML__delim-size2";
+        } else if (delim_height < 3.0f) {
+            size_class = "delim-size3";
+        } else {
+            size_class = "ML__delim-size4";
+        }
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class + 6);
+        strbuf_append_str(out, buf);
+        append_codepoint(out, (uint32_t)right_delim);
+        strbuf_append_str(out, "</span>");
+    } else {
+        // null delimiter (close) - inside mfrac
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__nulldelimiter ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__close\" style=\"width:0.12em\"></span>");
+    }
 
     strbuf_append_str(out, "</span>");  // close mfrac
 }
@@ -1134,49 +1365,275 @@ static void render_scripts(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
     strbuf_append_str(out, "</span>");  // close msubsup
 }
 
-// render delimiter (parentheses, brackets, braces)
+// check if delimiter should be stacked (extensible delimiters like |, \|)
+static bool is_stackable_delimiter(int32_t cp) {
+    switch (cp) {
+        case '|':
+        case 0x2016:  // \|
+        case 0x2223:  // \mid, ∣
+        case 0x2225:  // \parallel
+            return true;
+        default:
+            return false;
+    }
+}
+
+// render delimiter (parentheses, brackets, braces) - MathLive-compatible
+// For delimiters that need to scale (from \left...\right), build appropriate structure:
+// - Brackets, parens, braces: use delim-size class with single character
+// - Vertical bars: stack multiple characters in vlist
 static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    char class_buf[64];
+    char buf[256];
     const char* delim_class = node->content.delim.is_left ? "open" : "close";
-    snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, delim_class);
+    int32_t cp = node->content.delim.codepoint;
+    float target_size = node->content.delim.target_size / opts.base_font_size_px;  // convert to em
 
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\">");
+    // threshold for using scaled delimiter (in em)
+    const float SCALE_THRESHOLD = 1.2f;
+    
+    // for small delimiters or size 0, use simple character
+    if (target_size < SCALE_THRESHOLD) {
+        snprintf(buf, sizeof(buf), "<span class=\"%s__%s\">", opts.class_prefix, delim_class);
+        strbuf_append_str(out, buf);
+        append_codepoint(out, cp);
+        strbuf_append_str(out, "</span>");
+        return;
+    }
 
-    // output delimiter character
-    append_codepoint(out, node->content.delim.codepoint);
+    // outer left-right wrapper for scaled delimiters
+    float margin_top = -target_size / 2.0f + 0.25f;  // center vertically around axis
+    snprintf(buf, sizeof(buf), "<span class=\"%s__left-right\" style=\"margin-top:%.3fem;height:%.4fem\">",
+             opts.class_prefix, margin_top, target_size);
+    strbuf_append_str(out, buf);
 
-    strbuf_append_str(out, "</span>");
+    // determine sizing class based on target size (matches MathLive thresholds)
+    // size1: < 1.5em, size2: 1.5-2.4em, size3: 2.4-3.0em, size4: > 3.0em
+    const char* size_class;
+    if (target_size < 1.5f) {
+        size_class = "delim-size1";
+    } else if (target_size < 2.4f) {
+        size_class = "ML__delim-size2";
+    } else if (target_size < 3.0f) {
+        size_class = "delim-size3";
+    } else {
+        size_class = "delim-size4";
+    }
+
+    // for stackable delimiters (vertical bars), use stacked vlist structure
+    if (is_stackable_delimiter(cp)) {
+        // calculate how many stacked characters we need
+        float char_height = 0.61f;  // typical glyph height in em
+        int stack_count = (int)ceil(target_size / char_height);
+        if (stack_count < 2) stack_count = 2;
+        if (stack_count > 5) stack_count = 5;  // reasonable limit
+
+        // total vlist height and depth
+        float vlist_height = stack_count * char_height - char_height / 2.0f;
+        float vlist_depth = char_height / 2.0f;
+        float pstrut_size = 2.61f;  // MathLive standard for delimiters
+
+        // delim-mult wrapper for stacked delimiter
+        snprintf(buf, sizeof(buf), "<span class=\"%s__%s %s__delim-mult\">", opts.class_prefix, delim_class, opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        // vlist structure
+        snprintf(buf, sizeof(buf), "<span class=\"delim-size1 %s__vlist-t %s__vlist-t2\">",
+                 opts.class_prefix, opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        // vlist-r
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist-r\">", opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        // vlist cell
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist\" style=\"height:%.2fem\">", opts.class_prefix, vlist_height);
+        strbuf_append_str(out, buf);
+
+        // use mathematical vertical bar character for stacking
+        int32_t stack_char = 0x2223;  // ∣ (DIVIDES)
+
+        // stack delimiter characters from bottom to top
+        for (int i = 0; i < stack_count; i++) {
+            float top = -pstrut_size + (stack_count - 1 - i) * char_height + 0.47f;
+            snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", top);
+            strbuf_append_str(out, buf);
+            
+            snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+                     opts.class_prefix, pstrut_size);
+            strbuf_append_str(out, buf);
+            
+            snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">", char_height);
+            strbuf_append_str(out, buf);
+            append_codepoint(out, stack_char);
+            strbuf_append_str(out, "</span></span>");
+        }
+
+        strbuf_append_str(out, "</span>");  // close vlist
+
+        // Safari workaround
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist-s\">\xe2\x80\x8b</span>", opts.class_prefix);
+        strbuf_append_str(out, buf);
+
+        strbuf_append_str(out, "</span>");  // close vlist-r
+
+        // depth row
+        snprintf(buf, sizeof(buf), "<span class=\"%s__vlist-r\"><span class=\"%s__vlist\" style=\"height:%.2fem\"></span></span>",
+                 opts.class_prefix, opts.class_prefix, vlist_depth);
+        strbuf_append_str(out, buf);
+
+        strbuf_append_str(out, "</span>");  // close vlist-t
+        strbuf_append_str(out, "</span>");  // close delim-mult
+    } else {
+        // for brackets, parens, braces: use single scaled character with size class
+        snprintf(buf, sizeof(buf), "<span class=\"%s__%s %s\">", opts.class_prefix, delim_class, size_class);
+        strbuf_append_str(out, buf);
+        append_codepoint(out, cp);
+        strbuf_append_str(out, "</span>");
+    }
+
+    strbuf_append_str(out, "</span>");  // close left-right
 }
 
-// render accent (hat, bar, etc.)
+// render large math operator (sum, product, integral, etc.) - MathLive-compatible
+static void render_mathop(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node || node->node_class != NodeClass::MathOp) return;
+
+    char buf[128];
+    int32_t codepoint = node->content.math_op.codepoint;
+    const char* font_name = node->content.math_op.font.name;
+
+    // Convert TFM code to Unicode based on font
+    if (font_name && strncmp(font_name, "cmex", 4) == 0) {
+        codepoint = cmex10_to_unicode(codepoint);
+    }
+
+    // MathLive wraps large ops in ML__op-group > ML__op-symbol ML__large-op
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__op-group\"><span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__op-symbol ");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__large-op\">");
+
+    // Output the operator character
+    if (codepoint > 0) {
+        append_codepoint(out, codepoint);
+    }
+
+    strbuf_append_str(out, "</span></span>");
+}
+
+// render accent (hat, bar, etc.) - MathLive vlist-compatible structure
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    char class_buf[64];
-    snprintf(class_buf, sizeof(class_buf), "%s__accent", opts.class_prefix);
+    char buf[256];
+    float font_size_px = opts.base_font_size_px;
 
+    // calculate dimensions
+    float base_height = 0.43f;  // approximate height of base character in em
+    float base_depth = 0.0f;
+    float accent_height = 0.72f;  // typical accent height in em
+
+    if (node->content.accent.base) {
+        base_height = pt_to_em(node->content.accent.base->height, font_size_px);
+        base_depth = pt_to_em(node->content.accent.base->depth, font_size_px);
+    }
+
+    // MathLive uses vlist structure for accents
+    // Height = accent_height, Depth = base_depth
+    float total_height = base_height + accent_height;
+    float pstrut_size = total_height + 2.0f;  // MathLive adds 2em buffer
+
+    // determine if we need depth row
+    bool has_depth = base_depth > 0.01f;
+
+    // vlist wrapper
     strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"display:inline-flex;flex-direction:column;align-items:center\">");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__vlist-t");
+    if (has_depth) {
+        strbuf_append_str(out, " ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-t2");
+    }
+    strbuf_append_str(out, "\">");
 
-    // accent character on top
-    snprintf(class_buf, sizeof(class_buf), "%s__accent-char", opts.class_prefix);
+    // vlist-r
     strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"line-height:0.5\">");
-    append_codepoint(out, node->content.accent.accent_char);
-    strbuf_append_str(out, "</span>");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__vlist-r\">");
 
-    // base
+    // vlist with height
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    snprintf(buf, sizeof(buf), "__vlist\" style=\"height:%.2fem\">", total_height);
+    strbuf_append_str(out, buf);
+
+    // base element (bottom position)
+    float base_top = -pstrut_size + base_height;
+    snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", base_top);
+    strbuf_append_str(out, buf);
+
+    // pstrut
+    snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+             opts.class_prefix, pstrut_size);
+    strbuf_append_str(out, buf);
+
+    // content wrapper with height
+    snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">", base_height + base_depth);
+    strbuf_append_str(out, buf);
+
+    // render base
     if (node->content.accent.base) {
         render_node(node->content.accent.base, out, opts, depth + 1);
     }
 
-    strbuf_append_str(out, "</span>");
+    strbuf_append_str(out, "</span></span>");
+
+    // accent element (top position, with ML__center class)
+    float accent_top = -pstrut_size + total_height - 0.27f;  // adjust for accent positioning
+    snprintf(buf, sizeof(buf), "<span class=\"%s__center\" style=\"top:%.2fem;margin-left:0.16em\">",
+             opts.class_prefix, accent_top);
+    strbuf_append_str(out, buf);
+
+    // pstrut
+    snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+             opts.class_prefix, pstrut_size);
+    strbuf_append_str(out, buf);
+
+    // accent body
+    snprintf(buf, sizeof(buf), "<span class=\"%s__accent-body\" style=\"height:%.2fem;display:inline-block\">",
+             opts.class_prefix, accent_height);
+    strbuf_append_str(out, buf);
+    append_codepoint(out, node->content.accent.accent_char);
+    strbuf_append_str(out, "</span></span>");
+
+    strbuf_append_str(out, "</span>");  // close vlist
+
+    // Safari workaround
+    if (has_depth) {
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-s\">\xe2\x80\x8b</span>");
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist-r
+
+    // depth row if needed
+    if (has_depth) {
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-r\"><span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        snprintf(buf, sizeof(buf), "__vlist\" style=\"height:%.2fem\"></span></span>", base_depth);
+        strbuf_append_str(out, buf);
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist-t
 }
 
 // Custom content renderer for mtable cells - skips wrapper HBox to match MathLive
@@ -1285,6 +1742,11 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
     strbuf_append_str(out, opts.class_prefix);
     strbuf_append_str(out, "__mtable\">");
 
+    // MathLive adds leading arraycolsep (0.5em)
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__arraycolsep\" style=\"width:0.5em\"></span>");
+
     // render children (columns and column separators)
     int col_idx = 0;
     TexNode* child = node->first_child;
@@ -1305,6 +1767,11 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
         }
         child = child->next_sibling;
     }
+
+    // MathLive adds trailing arraycolsep (0.5em)
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__arraycolsep\" style=\"width:0.5em\"></span>");
 
     strbuf_append_str(out, "</span>");
 }
@@ -1366,6 +1833,10 @@ static void render_node(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
             render_delimiter(node, out, opts, depth);
             break;
 
+        case NodeClass::MathOp:
+            render_mathop(node, out, opts, depth);
+            break;
+
         case NodeClass::Accent:
             render_accent(node, out, opts, depth);
             break;
@@ -1397,11 +1868,21 @@ static void render_node(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 }
 
 // add struts for baseline handling (like MathLive's makeStruts)
+// MathLive uses minimum strut heights to ensure consistent baseline positioning
 static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts) {
     if (!root) return;
 
     float height_em = pt_to_em(root->height, opts.base_font_size_px);
     float depth_em = pt_to_em(root->depth, opts.base_font_size_px);
+
+    // MathLive uses minimum strut heights for consistent baseline
+    // Minimum height is approximately 0.7em for typical math content
+    const float MIN_STRUT_HEIGHT = 0.7f;
+    const float MIN_STRUT_DEPTH = 0.2f;
+
+    // Use at least minimum values
+    if (height_em < MIN_STRUT_HEIGHT) height_em = MIN_STRUT_HEIGHT;
+    if (depth_em < MIN_STRUT_DEPTH && depth_em > 0.01f) depth_em = MIN_STRUT_DEPTH;
 
     char class_buf[64];
 
@@ -1412,7 +1893,7 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     strbuf_append_str(out, "\" style=\"display:inline-block;height:");
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.3fem", round3(height_em));
+    snprintf(buf, sizeof(buf), "%.2fem", round3(height_em));
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 
@@ -1422,7 +1903,7 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     strbuf_append_str(out, class_buf);
     strbuf_append_str(out, "\" style=\"display:inline-block;height:");
 
-    snprintf(buf, sizeof(buf), "%.3fem;vertical-align:%.3fem",
+    snprintf(buf, sizeof(buf), "%.2fem;vertical-align:%.2fem",
              round3(height_em + depth_em), round3(-depth_em));
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
@@ -1452,10 +1933,18 @@ void render_texnode_to_html(TexNode* node, StrBuf* out, const HtmlRenderOptions&
     // add struts for baseline
     add_struts(node, out, opts);
 
+    // ML__base wrapper for MathLive compatibility
+    char base_class[64];
+    snprintf(base_class, sizeof(base_class), "%s__base", opts.class_prefix);
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, base_class);
+    strbuf_append_str(out, "\">");
+
     // render the content
     render_node(node, out, opts, 0);
 
-    strbuf_append_str(out, "</span>");
+    strbuf_append_str(out, "</span>");  // close ML__base
+    strbuf_append_str(out, "</span>");  // close ML__latex
 }
 
 // public API: render to allocated string
