@@ -281,6 +281,7 @@ static int32_t cmsy10_to_unicode(int32_t code) {
         // Not commonly used from cmsy10, usually from cmr10
 
         // Binary operators
+        case 0:  return 0x2212; // minus −
         case 1:  return 0x22C5; // cdot ⋅
         case 2:  return 0x00D7; // times ×
         case 3:  return 0x2217; // ast ∗
@@ -484,6 +485,67 @@ static int32_t cmmi10_to_unicode(int32_t code) {
     }
 }
 
+// Map cmr10 (Computer Modern Roman) character codes to Unicode for HTML output
+// cmr10 contains roman text including uppercase Greek letters at positions 0-10
+static int32_t cmr10_to_unicode(int32_t code) {
+    switch (code) {
+        // Uppercase Greek letters (positions 0-10 in OT1/cmr encoding)
+        case 0: return 0x0393;   // Gamma Γ
+        case 1: return 0x0394;   // Delta Δ
+        case 2: return 0x0398;   // Theta Θ
+        case 3: return 0x039B;   // Lambda Λ
+        case 4: return 0x039E;   // Xi Ξ
+        case 5: return 0x03A0;   // Pi Π
+        case 6: return 0x03A3;   // Sigma Σ
+        case 7: return 0x03A5;   // Upsilon Υ
+        case 8: return 0x03A6;   // Phi Φ
+        case 9: return 0x03A8;   // Psi Ψ
+        case 10: return 0x03A9;  // Omega Ω
+
+        // Ligatures and special characters
+        case 11: return 0xFB00;  // ff ligature ﬀ
+        case 12: return 0xFB01;  // fi ligature ﬁ
+        case 13: return 0xFB02;  // fl ligature ﬂ
+        case 14: return 0xFB03;  // ffi ligature ﬃ
+        case 15: return 0xFB04;  // ffl ligature ﬄ
+        case 16: return 0x0131;  // dotless i ı
+        case 17: return 0x0237;  // dotless j ȷ
+
+        // Accents
+        case 18: return 0x0060;  // grave `
+        case 19: return 0x00B4;  // acute ´
+        case 20: return 0x02C7;  // caron ˇ
+        case 21: return 0x02D8;  // breve ˘
+        case 22: return 0x00AF;  // macron ¯
+        case 23: return 0x02DA;  // ring above ˚
+        case 24: return 0x00B8;  // cedilla ¸
+        case 25: return 0x00DF;  // eszett ß
+        case 26: return 0x00E6;  // ae æ
+        case 27: return 0x0153;  // oe œ
+        case 28: return 0x00F8;  // o-slash ø
+        case 29: return 0x00C6;  // AE Æ
+        case 30: return 0x0152;  // OE Œ
+        case 31: return 0x00D8;  // O-slash Ø
+
+        // Special quote characters
+        case 34: return 0x201D;  // right double quote "
+        case 39: return 0x2019;  // right single quote '
+        case 60: return 0x00A1;  // inverted exclamation ¡
+        case 62: return 0x00BF;  // inverted question ¿
+        case 92: return 0x201C;  // left double quote "
+        case 123: return 0x2013; // en dash –
+        case 124: return 0x2014; // em dash —
+        case 125: return 0x02DD; // double acute ˝
+        case 126: return 0x0303; // tilde ~
+        case 127: return 0x00A8; // diaeresis ¨
+
+        default:
+            // Standard ASCII range (32-126) maps directly
+            if (code >= 32 && code < 127) return code;
+            return code;
+    }
+}
+
 // Map cmex10 character codes to Unicode for HTML output
 // cmex10 contains extensible delimiters and large operators
 static int32_t cmex10_to_unicode(int32_t code) {
@@ -548,7 +610,9 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
     // Convert TFM character codes to Unicode based on font
     if (font_name) {
-        if (strncmp(font_name, "cmex", 4) == 0) {
+        if (strncmp(font_name, "cmr", 3) == 0) {
+            codepoint = cmr10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "cmex", 4) == 0) {
             codepoint = cmex10_to_unicode(codepoint);
         } else if (strncmp(font_name, "cmsy", 4) == 0) {
             codepoint = cmsy10_to_unicode(codepoint);
@@ -874,18 +938,18 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
              opts.class_prefix, total_height);
     strbuf_append_str(out, buf);
 
-    // denominator (bottom position)
+    // numerator (top position) - rendered first to match MathLive DOM order
     snprintf(buf, sizeof(buf), "<span class=\"%s__center\" style=\"top:%.2fem\">",
-             opts.class_prefix, -pstrut_size + denom_shift);
+             opts.class_prefix, -pstrut_size + numer_shift);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
              opts.class_prefix, pstrut_size);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">",
-             denom_height + denom_depth);
+             numer_height + numer_depth);
     strbuf_append_str(out, buf);
-    if (node->content.frac.denominator) {
-        render_node(node->content.frac.denominator, out, opts, depth + 1);
+    if (node->content.frac.numerator) {
+        render_node(node->content.frac.numerator, out, opts, depth + 1);
     }
     strbuf_append_str(out, "</span></span>");
 
@@ -903,18 +967,18 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
         strbuf_append_str(out, "</span>");
     }
 
-    // numerator (top position)
+    // denominator (bottom position) - rendered second to match MathLive DOM order
     snprintf(buf, sizeof(buf), "<span class=\"%s__center\" style=\"top:%.2fem\">",
-             opts.class_prefix, -pstrut_size + numer_shift);
+             opts.class_prefix, -pstrut_size + denom_shift);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
              opts.class_prefix, pstrut_size);
     strbuf_append_str(out, buf);
     snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">",
-             numer_height + numer_depth);
+             denom_height + denom_depth);
     strbuf_append_str(out, buf);
-    if (node->content.frac.numerator) {
-        render_node(node->content.frac.numerator, out, opts, depth + 1);
+    if (node->content.frac.denominator) {
+        render_node(node->content.frac.denominator, out, opts, depth + 1);
     }
     strbuf_append_str(out, "</span></span>");
 
