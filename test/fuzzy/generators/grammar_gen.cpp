@@ -449,6 +449,168 @@ std::string generate_closure_pattern(std::mt19937& rng, int depth) {
     }
 }
 
+// Forward declarations for type generation
+std::string generate_type_expr(std::mt19937& rng, int depth = 0);
+
+// Generate random base type
+static std::string random_base_type(std::mt19937& rng) {
+    static const std::vector<std::string> BASE_TYPES = {
+        "int", "int64", "string", "bool", "float", "decimal",
+        "null", "datetime", "symbol", "binary", "number", "any"
+    };
+    return BASE_TYPES[std::uniform_int_distribution<>(0, (int)BASE_TYPES.size() - 1)(rng)];
+}
+
+// Generate type expression
+std::string generate_type_expr(std::mt19937& rng, int depth) {
+    if (depth > 4) {
+        // Base case: simple type
+        return random_base_type(rng);
+    }
+    
+    int type = std::uniform_int_distribution<>(0, 12)(rng);
+    
+    if (type < 3) {
+        // Base type (possibly with optional)
+        std::string base = random_base_type(rng);
+        if (std::uniform_int_distribution<>(0, 2)(rng) == 0) {
+            base += "?";
+        }
+        return base;
+    } else if (type < 5) {
+        // Array type with occurrence
+        std::string nested = generate_type_expr(rng, depth + 1);
+        std::string occur = "";
+        int occur_type = std::uniform_int_distribution<>(0, 3)(rng);
+        if (occur_type == 1) occur = "*";
+        else if (occur_type == 2) occur = "+";
+        else if (occur_type == 3) occur = "?";
+        return "[" + nested + occur + "]";
+    } else if (type < 7) {
+        // Map type
+        int field_count = std::uniform_int_distribution<>(1, 4)(rng);
+        std::string result = "{";
+        for (int i = 0; i < field_count; i++) {
+            if (i > 0) result += ", ";
+            result += random_identifier(rng) + ": " + generate_type_expr(rng, depth + 1);
+        }
+        result += "}";
+        return result;
+    } else if (type < 8) {
+        // Tuple type
+        int elem_count = std::uniform_int_distribution<>(1, 4)(rng);
+        std::string result = "(";
+        for (int i = 0; i < elem_count; i++) {
+            if (i > 0) result += ", ";
+            result += generate_type_expr(rng, depth + 1);
+        }
+        result += ")";
+        return result;
+    } else if (type < 9) {
+        // Union type
+        int alt_count = std::uniform_int_distribution<>(2, 4)(rng);
+        std::string result = generate_type_expr(rng, depth + 1);
+        for (int i = 1; i < alt_count; i++) {
+            result += " | " + generate_type_expr(rng, depth + 1);
+        }
+        return "(" + result + ")";
+    } else if (type < 10) {
+        // Intersection type
+        std::string left = "{" + random_identifier(rng) + ": " + random_base_type(rng) + "}";
+        std::string right = "{" + random_identifier(rng) + ": " + random_base_type(rng) + "}";
+        return left + " & " + right;
+    } else if (type < 11) {
+        // Function type
+        int param_count = std::uniform_int_distribution<>(0, 3)(rng);
+        std::string params = "";
+        for (int i = 0; i < param_count; i++) {
+            if (i > 0) params += ", ";
+            if (std::uniform_int_distribution<>(0, 1)(rng)) {
+                params += random_identifier(rng) + ": ";
+            }
+            params += generate_type_expr(rng, depth + 1);
+        }
+        return "fn(" + params + ") " + generate_type_expr(rng, depth + 1);
+    } else if (type < 12) {
+        // Element type
+        std::string tag = random_identifier(rng);
+        std::string attrs = "";
+        std::string content = "";
+        
+        // Optional attributes
+        if (std::uniform_int_distribution<>(0, 1)(rng)) {
+            int attr_count = std::uniform_int_distribution<>(1, 3)(rng);
+            for (int i = 0; i < attr_count; i++) {
+                if (i > 0) attrs += ", ";
+                attrs += random_identifier(rng) + ": " + random_base_type(rng);
+            }
+        }
+        
+        // Optional content
+        if (std::uniform_int_distribution<>(0, 1)(rng)) {
+            content = generate_type_expr(rng, depth + 1);
+            std::string occur = "";
+            int occur_type = std::uniform_int_distribution<>(0, 3)(rng);
+            if (occur_type == 1) occur = "*";
+            else if (occur_type == 2) occur = "+";
+            content += occur;
+        }
+        
+        std::string result = "<" + tag;
+        if (!attrs.empty()) result += " " + attrs;
+        if (!content.empty()) result += "; " + content;
+        result += ">";
+        return result;
+    } else {
+        // Type reference (identifier)
+        return "T" + std::to_string(std::uniform_int_distribution<>(1, 10)(rng));
+    }
+}
+
+// Generate type definition statement
+std::string generate_type_definition(std::mt19937& rng) {
+    std::string name = "Type" + random_identifier(rng);
+    std::string type_expr = generate_type_expr(rng, 0);
+    return "type " + name + " = " + type_expr;
+}
+
+// Generate is-expression (type check)
+std::string generate_type_check(std::mt19937& rng) {
+    std::string expr = generate_expression(rng, 2);
+    std::string type_expr = generate_type_expr(rng, 2);
+    return expr + " is " + type_expr;
+}
+
+// Generate typed variable declaration
+std::string generate_typed_declaration(std::mt19937& rng) {
+    std::string name = random_identifier(rng);
+    std::string type_expr = generate_type_expr(rng, 2);
+    std::string value = generate_expression(rng, 2);
+    return "let " + name + ": " + type_expr + " = " + value;
+}
+
+// Generate type pattern focused program
+std::string generate_type_pattern_program(std::mt19937& rng, int definition_count) {
+    std::string result;
+    
+    // Generate some type definitions
+    for (int i = 0; i < definition_count; i++) {
+        result += generate_type_definition(rng) + "\n";
+    }
+    
+    // Add some typed declarations
+    for (int i = 0; i < 3; i++) {
+        result += generate_typed_declaration(rng) + "\n";
+    }
+    
+    // Add some type checks
+    for (int i = 0; i < 3; i++) {
+        result += generate_type_check(rng) + "\n";
+    }
+    
+    return result;
+}
+
 std::string generate_valid_program(std::mt19937& rng, int statement_count) {
     std::string result;
     
@@ -467,6 +629,8 @@ std::string generate_focused_program(std::mt19937& rng, const std::string& focus
         return "fn f(x) => x + 1;\nfn g(x) => x * 2;\n" + generate_nested_call(rng, 0);
     } else if (focus == "closures") {
         return generate_closure_pattern(rng, 0) + "\n";
+    } else if (focus == "type_patterns") {
+        return generate_type_pattern_program(rng, 5);
     } else {
         return generate_valid_program(rng, 5);
     }
