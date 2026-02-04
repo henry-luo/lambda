@@ -3,7 +3,6 @@
 
 // Include standard integer types from system
 #include <stdint.h>
-#include <stddef.h>  // for size_t
 
 // Define size_t only when compiled by MIR C compiler (not standard C/C++ compiler)
 // MIR doesn't include stddef.h so size_t won't be defined
@@ -259,6 +258,9 @@ Item fn_call1(Function* fn, Item a);
 Item fn_call2(Function* fn, Item a, Item b);
 Item fn_call3(Function* fn, Item a, Item b, Item c);
 
+// Forward declaration for Pool (full definition at line ~359)
+typedef struct Pool Pool;
+
 // Path: segmented symbol for file/URL paths
 // A path is a linked chain of segments from leaf to root
 // Example: file.etc.hosts -> Path("hosts") -> Path("etc") -> Path("file") -> ROOT
@@ -292,6 +294,12 @@ bool path_is_root(Path* path);                          // Check if path is a ro
 int path_depth(Path* path);                             // Get path depth (segment count)
 void path_to_string(Path* path, void* out);             // Convert to string (StrBuf*)
 void path_to_os_path(Path* path, void* out);            // Convert to OS path (StrBuf*)
+// Fixed-arity path builders for JIT (no variadic functions in C2MIR)
+Path* path_build1(Pool* pool, int scheme, const char* s1);
+Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2);
+Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3);
+Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4);
+Path* path_build5(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5);
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);

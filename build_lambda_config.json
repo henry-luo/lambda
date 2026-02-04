@@ -311,6 +311,7 @@
                 "lambda/format/format.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
+                "lambda/path.c",
                 "lambda/input/parse_error.cpp",
                 "lambda/input/source_tracker.cpp",
                 "lambda/input/input-context.cpp",
@@ -1349,6 +1350,20 @@
                         ],
                         "binary": "test_name_pool_gtest.exe",
                         "icon": "\ud83d\udd24"
+                    },
+                    {
+                        "source": "test_path_gtest.cpp",
+                        "name": "Path Segmented Symbol Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_path_gtest.exe",
+                        "icon": "\ud83d\udcc2"
                     },
                     {
                         "source": "test_mark_reader_gtest.cpp",
