@@ -1147,31 +1147,114 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
     strbuf_append_str(out, "</span>");
 }
 
-// render accent (hat, bar, etc.)
+// render accent (hat, bar, etc.) - MathLive vlist-compatible structure
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    char class_buf[64];
-    snprintf(class_buf, sizeof(class_buf), "%s__accent", opts.class_prefix);
+    char buf[256];
+    float font_size_px = opts.base_font_size_px;
 
+    // calculate dimensions
+    float base_height = 0.43f;  // approximate height of base character in em
+    float base_depth = 0.0f;
+    float accent_height = 0.72f;  // typical accent height in em
+
+    if (node->content.accent.base) {
+        base_height = pt_to_em(node->content.accent.base->height, font_size_px);
+        base_depth = pt_to_em(node->content.accent.base->depth, font_size_px);
+    }
+
+    // MathLive uses vlist structure for accents
+    // Height = accent_height, Depth = base_depth
+    float total_height = base_height + accent_height;
+    float pstrut_size = total_height + 2.0f;  // MathLive adds 2em buffer
+
+    // determine if we need depth row
+    bool has_depth = base_depth > 0.01f;
+
+    // vlist wrapper
     strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"display:inline-flex;flex-direction:column;align-items:center\">");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__vlist-t");
+    if (has_depth) {
+        strbuf_append_str(out, " ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-t2");
+    }
+    strbuf_append_str(out, "\">");
 
-    // accent character on top
-    snprintf(class_buf, sizeof(class_buf), "%s__accent-char", opts.class_prefix);
+    // vlist-r
     strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"line-height:0.5\">");
-    append_codepoint(out, node->content.accent.accent_char);
-    strbuf_append_str(out, "</span>");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__vlist-r\">");
 
-    // base
+    // vlist with height
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    snprintf(buf, sizeof(buf), "__vlist\" style=\"height:%.2fem\">", total_height);
+    strbuf_append_str(out, buf);
+
+    // base element (bottom position)
+    float base_top = -pstrut_size + base_height;
+    snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", base_top);
+    strbuf_append_str(out, buf);
+
+    // pstrut
+    snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+             opts.class_prefix, pstrut_size);
+    strbuf_append_str(out, buf);
+
+    // content wrapper with height
+    snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">", base_height + base_depth);
+    strbuf_append_str(out, buf);
+
+    // render base
     if (node->content.accent.base) {
         render_node(node->content.accent.base, out, opts, depth + 1);
     }
 
-    strbuf_append_str(out, "</span>");
+    strbuf_append_str(out, "</span></span>");
+
+    // accent element (top position, with ML__center class)
+    float accent_top = -pstrut_size + total_height - 0.27f;  // adjust for accent positioning
+    snprintf(buf, sizeof(buf), "<span class=\"%s__center\" style=\"top:%.2fem;margin-left:0.16em\">",
+             opts.class_prefix, accent_top);
+    strbuf_append_str(out, buf);
+
+    // pstrut
+    snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+             opts.class_prefix, pstrut_size);
+    strbuf_append_str(out, buf);
+
+    // accent body
+    snprintf(buf, sizeof(buf), "<span class=\"%s__accent-body %s__accent-combining-char\" style=\"height:%.2fem;display:inline-block\">",
+             opts.class_prefix, opts.class_prefix, accent_height);
+    strbuf_append_str(out, buf);
+    append_codepoint(out, node->content.accent.accent_char);
+    strbuf_append_str(out, "</span></span>");
+
+    strbuf_append_str(out, "</span>");  // close vlist
+
+    // Safari workaround
+    if (has_depth) {
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-s\">\xe2\x80\x8b</span>");
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist-r
+
+    // depth row if needed
+    if (has_depth) {
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-r\"><span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        snprintf(buf, sizeof(buf), "__vlist\" style=\"height:%.2fem\"></span></span>", base_depth);
+        strbuf_append_str(out, buf);
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist-t
 }
 
 // Custom content renderer for mtable cells - skips wrapper HBox to match MathLive
@@ -1280,6 +1363,11 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
     strbuf_append_str(out, opts.class_prefix);
     strbuf_append_str(out, "__mtable\">");
 
+    // MathLive adds leading arraycolsep (0.5em)
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__arraycolsep\" style=\"width:0.5em\"></span>");
+
     // render children (columns and column separators)
     int col_idx = 0;
     TexNode* child = node->first_child;
@@ -1300,6 +1388,11 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
         }
         child = child->next_sibling;
     }
+
+    // MathLive adds trailing arraycolsep (0.5em)
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__arraycolsep\" style=\"width:0.5em\"></span>");
 
     strbuf_append_str(out, "</span>");
 }
@@ -1392,11 +1485,21 @@ static void render_node(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 }
 
 // add struts for baseline handling (like MathLive's makeStruts)
+// MathLive uses minimum strut heights to ensure consistent baseline positioning
 static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts) {
     if (!root) return;
 
     float height_em = pt_to_em(root->height, opts.base_font_size_px);
     float depth_em = pt_to_em(root->depth, opts.base_font_size_px);
+
+    // MathLive uses minimum strut heights for consistent baseline
+    // Minimum height is approximately 0.7em for typical math content
+    const float MIN_STRUT_HEIGHT = 0.7f;
+    const float MIN_STRUT_DEPTH = 0.2f;
+
+    // Use at least minimum values
+    if (height_em < MIN_STRUT_HEIGHT) height_em = MIN_STRUT_HEIGHT;
+    if (depth_em < MIN_STRUT_DEPTH && depth_em > 0.01f) depth_em = MIN_STRUT_DEPTH;
 
     char class_buf[64];
 
@@ -1407,7 +1510,7 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     strbuf_append_str(out, "\" style=\"display:inline-block;height:");
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.3fem", round3(height_em));
+    snprintf(buf, sizeof(buf), "%.2fem", round3(height_em));
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 
@@ -1417,7 +1520,7 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     strbuf_append_str(out, class_buf);
     strbuf_append_str(out, "\" style=\"display:inline-block;height:");
 
-    snprintf(buf, sizeof(buf), "%.3fem;vertical-align:%.3fem",
+    snprintf(buf, sizeof(buf), "%.2fem;vertical-align:%.2fem",
              round3(height_em + depth_em), round3(-depth_em));
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
