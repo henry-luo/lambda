@@ -266,9 +266,11 @@ static const char* font_to_class(const char* font_name) {
     if (strncmp(font_name, "cmsy", 4) == 0) return "cmr";     // symbols (use roman class)
     if (strncmp(font_name, "cmex", 4) == 0) return "delim-size1";  // delimiters
     if (strncmp(font_name, "cmbx", 4) == 0) return "mathbf";  // bold
+    if (strncmp(font_name, "cmss", 4) == 0) return "mathsf";  // sans-serif
     if (strncmp(font_name, "cmtt", 4) == 0) return "mathtt";  // typewriter
     if (strncmp(font_name, "cmsl", 4) == 0) return "mathit";  // slanted
-    if (strncmp(font_name, "msbm", 4) == 0) return "ams";     // AMS symbols
+    if (strncmp(font_name, "msbm", 4) == 0) return "mathbb";  // blackboard bold
+    if (strncmp(font_name, "eufm", 4) == 0) return "mathfrak";// fraktur
     if (strncmp(font_name, "lasy", 4) == 0) return "cmr";     // LaTeX symbols
 
     return "mathit";  // default to italic
@@ -613,6 +615,65 @@ static int32_t cmex10_to_unicode(int32_t code) {
     }
 }
 
+// Map msbm10 (AMS Blackboard Bold) character codes to Unicode for HTML output
+// msbm10 contains blackboard bold letters and special symbols
+static int32_t msbm10_to_unicode(int32_t code) {
+    // Blackboard bold uppercase letters A-Z at positions 65-90
+    if (code >= 65 && code <= 90) {
+        // Map to Unicode Mathematical Double-Struck Capital letters
+        // A=65 → 𝔸 U+1D538, but use simpler ℂ, ℕ, ℙ, ℚ, ℝ, ℤ when available
+        switch (code) {
+            case 67: return 0x2102;  // C → ℂ
+            case 72: return 0x210D;  // H → ℍ
+            case 78: return 0x2115;  // N → ℕ
+            case 80: return 0x2119;  // P → ℙ
+            case 81: return 0x211A;  // Q → ℚ
+            case 82: return 0x211D;  // R → ℝ
+            case 90: return 0x2124;  // Z → ℤ
+            default:
+                // Use Mathematical Double-Struck for others
+                return 0x1D538 + (code - 65);  // A=𝔸, B=𝔹, etc.
+        }
+    }
+    // Lowercase blackboard bold a-z at positions 97-122 (if present)
+    if (code >= 97 && code <= 122) {
+        return 0x1D552 + (code - 97);  // a=𝕒, b=𝕓, etc.
+    }
+    // Additional symbols
+    switch (code) {
+        case 107: return 0x2127;  // mho ℧
+        default:
+            return (code >= 32 && code < 127) ? code : 0;
+    }
+}
+
+// Map eufm10 (Euler Fraktur) character codes to Unicode for HTML output
+// eufm10 contains Fraktur/blackletter style letters
+static int32_t eufm10_to_unicode(int32_t code) {
+    // Fraktur uppercase A-Z at positions 65-90
+    if (code >= 65 && code <= 90) {
+        // Use Unicode Mathematical Fraktur Capital letters
+        // Some have dedicated Unicode points, others use Plane 1
+        switch (code) {
+            case 67: return 0x212D;  // C → ℭ
+            case 72: return 0x210C;  // H → ℌ
+            case 73: return 0x2111;  // I → ℑ
+            case 82: return 0x211C;  // R → ℜ
+            case 90: return 0x2128;  // Z → ℨ
+            default:
+                // Mathematical Fraktur Capital: A=𝔄 at U+1D504
+                return 0x1D504 + (code - 65);
+        }
+    }
+    // Fraktur lowercase a-z at positions 97-122
+    if (code >= 97 && code <= 122) {
+        // Mathematical Fraktur Small: a=𝔞 at U+1D51E
+        return 0x1D51E + (code - 97);
+    }
+    // Pass through other codes
+    return (code >= 32 && code < 127) ? code : 0;
+}
+
 // render a single character node
 static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts) {
     if (!node) return;
@@ -641,6 +702,16 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
             codepoint = cmsy10_to_unicode(codepoint);
         } else if (strncmp(font_name, "cmmi", 4) == 0) {
             codepoint = cmmi10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "msbm", 4) == 0) {
+            codepoint = msbm10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "eufm", 4) == 0) {
+            codepoint = eufm10_to_unicode(codepoint);
+        }
+        // cmbx, cmss, cmtt use same encoding as cmr
+        else if (strncmp(font_name, "cmbx", 4) == 0 ||
+                 strncmp(font_name, "cmss", 4) == 0 ||
+                 strncmp(font_name, "cmtt", 4) == 0) {
+            codepoint = cmr10_to_unicode(codepoint);
         }
     }
 
@@ -785,8 +856,9 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
     // However, if the hlist contains complex structures (mtable, delimiter with mtable),
     // we need the wrapper for proper layout like MathLive.
     bool needs_wrapper = (depth > 0);
+    bool has_color = (node->color != nullptr);
 
-    if (!needs_wrapper) {
+    if (!needs_wrapper && !has_color) {
         // Check if this hlist contains complex structures that need wrapping
         // Complex structures: mtable (for bmatrix/pmatrix/etc), or delimiter + mtable combo
         bool has_mtable = false;
@@ -809,10 +881,15 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         }
     }
 
-    if (needs_wrapper) {
+    if (needs_wrapper || has_color) {
         strbuf_append_str(out, "<span");
-        if (opts.include_styles) {
-            strbuf_append_str(out, " style=\"display:inline-block\"");
+        if (opts.include_styles || has_color) {
+            strbuf_append_str(out, " style=\"display:inline-block");
+            if (has_color) {
+                strbuf_append_str(out, ";color:");
+                strbuf_append_str(out, node->color);
+            }
+            strbuf_append_str(out, "\"");
         }
         strbuf_append_str(out, ">");
     }
@@ -824,7 +901,7 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         child = child->next_sibling;
     }
 
-    if (needs_wrapper) {
+    if (needs_wrapper || has_color) {
         strbuf_append_str(out, "</span>");
     }
 }
