@@ -278,6 +278,12 @@ func_obj_t func_list[] = {
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},
     {"stringbuf_append_str_n", (fn_ptr) stringbuf_append_str_n},
     {"stringbuf_to_string", (fn_ptr) stringbuf_to_string},
+    // Path functions (fixed-arity for C2MIR compatibility)
+    {"path_build1", (fn_ptr) path_build1},
+    {"path_build2", (fn_ptr) path_build2},
+    {"path_build3", (fn_ptr) path_build3},
+    {"path_build4", (fn_ptr) path_build4},
+    {"path_build5", (fn_ptr) path_build5},
 };
 
 void *import_resolver(const char *name) {
