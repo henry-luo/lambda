@@ -1,8 +1,51 @@
 #include "validator_internal.hpp"
 #include "../mark_reader.hpp"  // MarkReader API for type-safe traversal
+#include "../re2_wrapper.hpp"  // for pattern_full_match
 
 // Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors, 
 // init_validation_session) are now in validate_helpers.cpp
+
+ValidationResult* validate_against_pattern_type(SchemaValidator* validator, ConstItem item, TypePattern* pattern) {
+    log_debug("[VALIDATOR] Validating pattern: is_symbol=%d, item type=%d", pattern->is_symbol, item.type_id());
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    
+    // Use ItemReader for type-safe access
+    ItemReader item_reader(item);
+    
+    // Pattern validates strings (or symbols if pattern->is_symbol)
+    if (pattern->is_symbol) {
+        if (!item_reader.isSymbol()) {
+            add_type_mismatch_error(result, validator, "symbol", item_reader.getType());
+            return result;
+        }
+    } else {
+        if (!item_reader.isString()) {
+            add_type_mismatch_error(result, validator, "string", item_reader.getType());
+            return result;
+        }
+    }
+    
+    // Get the string value
+    String* str = pattern->is_symbol ? item_reader.asSymbol() : item_reader.asString();
+    
+    // Use existing pattern_full_match from re2_wrapper
+    if (pattern_full_match(pattern, str)) {
+        result->valid = true;
+    } else {
+        char error_msg[512];
+        const char* pattern_source = pattern->source ? pattern->source->chars : "<unknown>";
+        int pattern_len = pattern->source ? (int)pattern->source->len : 9;
+        snprintf(error_msg, sizeof(error_msg),
+            "String '%.*s' does not match pattern '%.*s'",
+            (int)str->len, str->chars,
+            pattern_len, pattern_source);
+        add_validation_error(result, create_validation_error(
+            VALID_ERROR_PATTERN_MISMATCH, error_msg, 
+            validator->get_current_path(), validator->get_pool()));
+    }
+    
+    return result;
+}
 
 ValidationResult* validate_against_primitive_type(SchemaValidator* validator, ConstItem item, Type* type) {
     log_debug("[VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id());
@@ -48,6 +91,11 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
     // Handle TypeBinary (union/intersection: |, &, \)
     if (base_type->type_id == LMD_TYPE_TYPE_BINARY) {
         return validate_binary_type(validator, item, (TypeBinary*)base_type);
+    }
+
+    // Handle Pattern type (string/symbol pattern)
+    if (base_type->type_id == LMD_TYPE_PATTERN) {
+        return validate_against_pattern_type(validator, item, (TypePattern*)base_type);
     }
 
     // Handle numeric types with promotion
@@ -444,6 +492,11 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_TYPE_BINARY:
             // TypeBinary passed directly - delegate to binary type validation
             result = validate_binary_type(validator, item, (TypeBinary*)type);
+            break;
+        
+        case LMD_TYPE_PATTERN:
+            // Pattern type - validate string/symbol against regex pattern
+            result = validate_against_pattern_type(validator, item, (TypePattern*)type);
             break;
             
         default:

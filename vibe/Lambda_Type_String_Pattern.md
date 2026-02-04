@@ -153,6 +153,33 @@ type User = {
 }
 ```
 
+#### Important: String Enum vs. String Pattern
+
+Lambda distinguishes between **string enums** (type definitions with string literal unions) and **string patterns** (regex-based string format definitions):
+
+| Concept | Syntax | Purpose | Example |
+|---------|--------|---------|---------|
+| **String Enum** | `type T = "a" \| "b" \| "c"` | Exact value constraint | `type Status = "active" \| "inactive" \| "pending"` |
+| **String Pattern** | `string S = "a" \| "b" \| "c"` | Character/format matching | `string digit = "0" to "9"` |
+Key Differences
+```lambda
+// STRING ENUM - defines exact allowed string values
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
+// Only these 4 exact strings are valid HttpMethod values
+
+// STRING PATTERN - defines a regex-like format constraint
+string identifier = ("a" to "z") ("a" to "z" | "0" to "9")*
+// Any string matching the pattern is valid (e.g., "hello123", "x", "abc")
+```
+
+**When to use which:**
+- **String Enum**: Known, finite set of exact values (status codes, HTTP methods, config keys)
+- **String Pattern**: Format validation (emails, phone numbers, identifiers, URLs)
+
+**Semantic difference in `|` operator:**
+- In `type T = "a" | "b"`: The `|` means "value is exactly 'a' OR exactly 'b'"
+- In `string S = "a" | "b"`: The `|` means "matches character 'a' OR character 'b'" (regex alternation)
+
 ### 2.2 Pattern Matching with `is` Operator
 
 The `is` operator checks if a string matches a pattern:

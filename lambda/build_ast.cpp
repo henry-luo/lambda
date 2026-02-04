@@ -964,6 +964,15 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 log_debug("Wrapped type definition %.*s in TypeType",
                     (int)entry->name->len, entry->name->chars);
             }
+            // Handle string/symbol pattern definitions - wrap in TypeType for use in type expressions
+            else if (entry->node->node_type == AST_NODE_STRING_PATTERN ||
+                     entry->node->node_type == AST_NODE_SYMBOL_PATTERN) {
+                TypeType* type_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                type_type->type = entry->node->type;  // TypePattern*
+                ast_node->type = (Type*)type_type;
+                log_debug("Wrapped pattern definition %.*s in TypeType",
+                    (int)entry->name->len, entry->name->chars);
+            }
         }
         if (ast_node->type) {
             log_debug("ident %p type: %d", ast_node->type, ast_node->type->type_id);
