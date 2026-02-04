@@ -121,7 +121,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     case LMD_TYPE_INT: {
         int64_t int_val = value.get_int56();
-        log_debug("map_put INT: value.item=0x%llx, get_int56()=%lld", 
+        log_debug("map_put INT: value.item=0x%llx, get_int56()=%lld",
                   (unsigned long long)value.item, (long long)int_val);
         *(int64_t*)field_ptr = int_val;
         break;
@@ -144,6 +144,9 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     case LMD_TYPE_TYPE:
         *(Type**)field_ptr = value.type;
+        break;
+    case LMD_TYPE_PATH:
+        *(Path**)field_ptr = value.path;
         break;
     case LMD_TYPE_ANY: {
         Item item = value;
@@ -179,6 +182,9 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
             break;
         case LMD_TYPE_FUNC:
             titem.function = item.function;
+            break;
+        case LMD_TYPE_PATH:
+            titem.path = item.path;
             break;
         default:
             log_error("unknown type %d in set_fields", type_id);
@@ -251,6 +257,9 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         *(void**)field_ptr = container;
         break;
     }
+    case LMD_TYPE_PATH:
+        *(Path**)field_ptr = value.path;
+        break;
     default:
         log_debug("unknown type %d\n", value._type_id);
     }
