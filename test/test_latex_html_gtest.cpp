@@ -205,3 +205,39 @@ TEST_F(LatexHtmlTest, NoStyles) {
     // Should still have classes but minimal styles
     EXPECT_TRUE(strstr(html, "class=\"") != nullptr);
 }
+
+TEST_F(LatexHtmlTest, ArrayWithHline) {
+    // Test \hline support in arrays
+    const char* latex = "\\begin{array}{cc} \\hline a & b \\\\ c & d \\\\ \\hline \\end{array}";
+    const char* html = render_math_html(latex);
+    ASSERT_NE(html, nullptr) << "Should render array with hline";
+    
+    // Check for mtable structure
+    EXPECT_TRUE(strstr(html, "ML__mtable") != nullptr) << "Should have mtable class";
+    
+    // Check for hline class on cells (appears on rows with hline before them)
+    EXPECT_TRUE(strstr(html, "class=\"hline\"") != nullptr) << "Should have hline class for horizontal lines";
+    
+    // Check for border-top style (inline style for hline rendering)
+    EXPECT_TRUE(strstr(html, "border-top") != nullptr) << "Should have border-top style for hline";
+    
+    // Check for trailing hline (hline after last row)
+    EXPECT_TRUE(strstr(html, "class=\"hline-after\"") != nullptr) << "Should have hline-after class for trailing hline";
+    EXPECT_TRUE(strstr(html, "border-bottom") != nullptr) << "Should have border-bottom style for trailing hline";
+}
+
+TEST_F(LatexHtmlTest, ArrayWithRowSpacing) {
+    // Test \\[Xpt] row spacing syntax
+    const char* latex = "\\begin{array}{c} a \\\\[5pt] b \\\\[1em] c \\end{array}";
+    const char* html = render_math_html(latex);
+    ASSERT_NE(html, nullptr) << "Should render array with row spacing";
+    
+    // Check for mtable structure
+    EXPECT_TRUE(strstr(html, "ML__mtable") != nullptr) << "Should have mtable class";
+    
+    // The HTML should render (we can't easily verify spacing from HTML alone,
+    // but if it renders without error, the parsing/typesetting worked)
+    EXPECT_TRUE(strstr(html, ">a<") != nullptr) << "Should contain 'a'";
+    EXPECT_TRUE(strstr(html, ">b<") != nullptr) << "Should contain 'b'";
+    EXPECT_TRUE(strstr(html, ">c<") != nullptr) << "Should contain 'c'";
+}

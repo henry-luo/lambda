@@ -2294,15 +2294,57 @@
       }
     },
     "row_sep": {
-      "type": "CHOICE",
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\\\\"
+              },
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "FIELD",
+                    "name": "spacing",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "row_spacing"
+                    }
+                  },
+                  {
+                    "type": "BLANK"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "STRING",
+            "value": "\\cr"
+          }
+        ]
+      }
+    },
+    "row_spacing": {
+      "type": "SEQ",
       "members": [
         {
           "type": "STRING",
-          "value": "\\\\"
+          "value": "["
+        },
+        {
+          "type": "PATTERN",
+          "value": "[^\\]]+"
         },
         {
           "type": "STRING",
-          "value": "\\cr"
+          "value": "]"
         }
       ]
     },
