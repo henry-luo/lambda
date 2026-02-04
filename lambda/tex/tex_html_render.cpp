@@ -793,18 +793,40 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
     float total_height = -numer_shift + numer_height;
     float total_depth = denom_shift + denom_depth;
 
-    // MathLive structure: ML__mfrac > (nulldelim + vlist-t + nulldelim)
+    // MathLive structure: ML__mfrac > (delim/nulldelim + vlist-t + delim/nulldelim)
     // fraction container
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, opts.class_prefix);
     strbuf_append_str(out, "__mfrac\">");
 
-    // null delimiter (open) - inside mfrac
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__nulldelimiter ");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__open\" style=\"width:0.12em\"></span>");
+    // Left delimiter - real delimiter or null
+    int32_t left_delim = node->content.frac.left_delim;
+    if (left_delim != 0) {
+        // Use real delimiter (e.g., for \binom)
+        // Calculate size based on fraction height
+        float delim_height = total_height + total_depth;
+        const char* size_class;
+        if (delim_height < 1.5f) {
+            size_class = "delim-size1";
+        } else if (delim_height < 2.4f) {
+            size_class = "ML__delim-size2";
+        } else if (delim_height < 3.0f) {
+            size_class = "delim-size3";
+        } else {
+            size_class = "ML__delim-size4";
+        }
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class + 6); // skip "delim-" prefix
+        strbuf_append_str(out, buf);
+        append_codepoint(out, (uint32_t)left_delim);
+        strbuf_append_str(out, "</span>");
+    } else {
+        // null delimiter (open) - inside mfrac
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__nulldelimiter ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__open\" style=\"width:0.12em\"></span>");
+    }
 
     // vlist-t vlist-t2 (two rows for above/below baseline)
     strbuf_append_str(out, "<span class=\"");
@@ -886,12 +908,33 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
 
     strbuf_append_str(out, "</span>");  // close vlist-t
 
-    // null delimiter (close) - inside mfrac
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__nulldelimiter ");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__close\" style=\"width:0.12em\"></span>");
+    // Right delimiter - real delimiter or null
+    int32_t right_delim = node->content.frac.right_delim;
+    if (right_delim != 0) {
+        // Use real delimiter (e.g., for \binom)
+        float delim_height = total_height + total_depth;
+        const char* size_class;
+        if (delim_height < 1.5f) {
+            size_class = "delim-size1";
+        } else if (delim_height < 2.4f) {
+            size_class = "ML__delim-size2";
+        } else if (delim_height < 3.0f) {
+            size_class = "delim-size3";
+        } else {
+            size_class = "ML__delim-size4";
+        }
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class + 6);
+        strbuf_append_str(out, buf);
+        append_codepoint(out, (uint32_t)right_delim);
+        strbuf_append_str(out, "</span>");
+    } else {
+        // null delimiter (close) - inside mfrac
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__nulldelimiter ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__close\" style=\"width:0.12em\"></span>");
+    }
 
     strbuf_append_str(out, "</span>");  // close mfrac
 }
