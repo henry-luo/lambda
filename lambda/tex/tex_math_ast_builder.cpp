@@ -259,10 +259,11 @@ MathASTNode* make_math_box(Arena* arena, MathASTNode* content, uint8_t box_type,
     return node;
 }
 
-MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content) {
+MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content, const char* color) {
     MathASTNode* node = alloc_math_node(arena, MathNodeType::STYLE);
     node->style.style_type = style_type;
     node->style.command = command;
+    node->style.color = color;
     node->body = content;
     return node;
 }
@@ -1884,7 +1885,7 @@ MathASTNode* MathASTBuilder::build_color_command(TSNode node) {
 
     // Wrap content in a STYLE node with the color command
     if (content) {
-        return make_math_style(arena, 6, cmd ? cmd : "textcolor", content);  // 6=color style
+        return make_math_style(arena, 6, cmd ? cmd : "textcolor", content, color_str);  // 6=color style
     }
 
     return nullptr;

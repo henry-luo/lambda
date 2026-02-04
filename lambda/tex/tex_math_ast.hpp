@@ -179,8 +179,9 @@ struct MathASTNode {
 
         // For STYLE (\displaystyle, \textstyle, \scriptstyle, \scriptscriptstyle)
         struct {
-            uint8_t style_type;     // 0=display, 1=text, 2=script, 3=scriptscript
+            uint8_t style_type;     // 0=display, 1=text, 2=script, 3=scriptscript, 4=font variant, 5=operatorname, 6=color
             const char* command;    // Original command name
+            const char* color;      // Color specification (for style_type=6)
         } style;
 
         // For SIZED_DELIM (\big, \Big, \bigg, \Bigg variants)
@@ -242,9 +243,9 @@ MathASTNode* make_math_not(Arena* arena, MathASTNode* operand);
 MathASTNode* make_math_box(Arena* arena, MathASTNode* content, uint8_t box_type,
                            const char* color = nullptr, const char* padding = nullptr);
 
-// Create style node (\displaystyle, \textstyle, \scriptstyle, \scriptscriptstyle)
-// style_type: 0=display, 1=text, 2=script, 3=scriptscript
-MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content);
+// Create style node (\displaystyle, \textstyle, \scriptstyle, \scriptscriptstyle, color commands)
+// style_type: 0=display, 1=text, 2=script, 3=scriptscript, 4=font variant, 5=operatorname, 6=color
+MathASTNode* make_math_style(Arena* arena, uint8_t style_type, const char* command, MathASTNode* content, const char* color = nullptr);
 
 // Create sized delimiter (\big, \Big, \bigg, \Bigg variants)
 // size_level: 0=normal, 1=big, 2=Big, 3=bigg, 4=Bigg

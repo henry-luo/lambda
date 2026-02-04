@@ -81,6 +81,9 @@ struct MathContext {
     // Current font variant (\mathbf, \mathrm, etc.)
     FontVariant font_variant;
 
+    // Current text color (for \textcolor, \color commands)
+    const char* color;
+
     // Font parameters (from cmr10)
     float x_height;              // Height of 'x' (for positioning)
     float quad;                  // 1em width
@@ -95,6 +98,7 @@ struct MathContext {
         ctx.font_provider = nullptr;  // Set separately if dual font support needed
         ctx.style = MathStyle::Text;
         ctx.font_variant = FontVariant::Normal;
+        ctx.color = nullptr;  // No color override by default
         ctx.base_size_pt = size_pt;
 
         // Set up fonts

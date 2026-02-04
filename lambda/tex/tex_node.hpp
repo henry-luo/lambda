@@ -231,6 +231,11 @@ struct TexNode {
     SourceLoc source;
 
     // ========================================
+    // Color (optional, for \textcolor, \color)
+    // ========================================
+    const char* color;      // Color name/value (e.g., "red", "#ff0000") or null
+
+    // ========================================
     // Content data (discriminated by node_class)
     // ========================================
     union Content {
@@ -391,7 +396,7 @@ struct TexNode {
           x(0), y(0),
           parent(nullptr), first_child(nullptr), last_child(nullptr),
           next_sibling(nullptr), prev_sibling(nullptr),
-          source{0, 0, 0, 0} {
+          source{0, 0, 0, 0}, color(nullptr) {
         memset(&content, 0, sizeof(content));
     }
 
