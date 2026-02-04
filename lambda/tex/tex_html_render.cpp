@@ -694,13 +694,8 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    char class_buf[64];
-    // use ML__base for MathLive compatibility
-    snprintf(class_buf, sizeof(class_buf), "%s__base", opts.class_prefix);
-
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\"");
+    // Simple span wrapper for horizontal list (MathLive doesn't use ML__base here)
+    strbuf_append_str(out, "<span");
 
     if (opts.include_styles) {
         strbuf_append_str(out, " style=\"display:inline-block\"");
@@ -1452,10 +1447,18 @@ void render_texnode_to_html(TexNode* node, StrBuf* out, const HtmlRenderOptions&
     // add struts for baseline
     add_struts(node, out, opts);
 
+    // ML__base wrapper for MathLive compatibility
+    char base_class[64];
+    snprintf(base_class, sizeof(base_class), "%s__base", opts.class_prefix);
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, base_class);
+    strbuf_append_str(out, "\">");
+
     // render the content
     render_node(node, out, opts, 0);
 
-    strbuf_append_str(out, "</span>");
+    strbuf_append_str(out, "</span>");  // close ML__base
+    strbuf_append_str(out, "</span>");  // close ML__latex
 }
 
 // public API: render to allocated string
