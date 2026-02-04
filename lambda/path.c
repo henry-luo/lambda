@@ -308,3 +308,76 @@ Path* path_get_root_by_name(const char* name) {
 
     return NULL;  // unknown scheme
 }
+
+/**
+ * Build a path segment by segment (for transpiled code).
+ * Returns a new Path with the segment appended.
+ */
+static Path* path_append_segment(Pool* pool, Path* parent, const char* segment) {
+    if (!parent || !segment) return parent;
+
+    Path* new_path = (Path*)pool_calloc(pool, sizeof(Path));
+    new_path->type_id = LMD_TYPE_PATH;
+    new_path->flags = 0;
+    new_path->ref_cnt = 0;
+    new_path->parent = parent;
+
+    // Copy segment name into pool memory
+    size_t len = strlen(segment);
+    char* name_copy = (char*)pool_alloc(pool, len + 1);
+    memcpy(name_copy, segment, len);
+    name_copy[len] = '\0';
+    new_path->name = name_copy;
+
+    return new_path;
+}
+
+/**
+ * Build a path with 1 segment (for transpiled code).
+ */
+Path* path_build1(Pool* pool, int scheme, const char* s1) {
+    Path* path = path_get_root((PathScheme)scheme);
+    return path_append_segment(pool, path, s1);
+}
+
+/**
+ * Build a path with 2 segments (for transpiled code).
+ */
+Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment(pool, path, s1);
+    return path_append_segment(pool, path, s2);
+}
+
+/**
+ * Build a path with 3 segments (for transpiled code).
+ */
+Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment(pool, path, s1);
+    path = path_append_segment(pool, path, s2);
+    return path_append_segment(pool, path, s3);
+}
+
+/**
+ * Build a path with 4 segments (for transpiled code).
+ */
+Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment(pool, path, s1);
+    path = path_append_segment(pool, path, s2);
+    path = path_append_segment(pool, path, s3);
+    return path_append_segment(pool, path, s4);
+}
+
+/**
+ * Build a path with 5 segments (for transpiled code).
+ */
+Path* path_build5(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment(pool, path, s1);
+    path = path_append_segment(pool, path, s2);
+    path = path_append_segment(pool, path, s3);
+    path = path_append_segment(pool, path, s4);
+    return path_append_segment(pool, path, s5);
+}
