@@ -27,6 +27,28 @@ const CLASS_CATEGORIES = {
     'lambda-frac': 'frac',
     'mfrac': 'frac',
 
+    // Accents (normalize all accent classes)
+    'ML__accent-body': 'accent',
+    'ML__accent-combining-char': 'accent',
+    'accent-body': 'accent',
+
+    // Column alignment (normalize to same category)
+    'col-align-l': 'col-align',
+    'col-align-c': 'col-align',
+    'col-align-r': 'col-align',
+
+    // Delimiter sizes (normalize all sizes to same category)
+    'ML__delim-size1': 'delim-size',
+    'ML__delim-size2': 'delim-size',
+    'ML__delim-size3': 'delim-size',
+    'ML__delim-size4': 'delim-size',
+    'delim-size1': 'delim-size',
+    'delim-size2': 'delim-size',
+    'delim-size3': 'delim-size',
+    'delim-size4': 'delim-size',
+    'ML__delim-mult': 'delim-mult',
+    'delim-mult': 'delim-mult',
+
     // Numerator/Denominator
     'ML__numer': 'numer',
     'ML__denom': 'denom',
