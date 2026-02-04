@@ -333,7 +333,10 @@ void math_row_append(MathASTNode* row, MathASTNode* child) {
         child->prev_sibling = last;
         child->next_sibling = nullptr;
     }
-    row->row.child_count++;
+    // Only increment child_count for ROW type - ARRAY uses different union members
+    if (row->type == MathNodeType::ROW) {
+        row->row.child_count++;
+    }
 }
 
 int math_row_count(MathASTNode* row) {
@@ -341,7 +344,20 @@ int math_row_count(MathASTNode* row) {
     if (row->type != MathNodeType::ROW &&
         row->type != MathNodeType::ARRAY &&
         row->type != MathNodeType::ARRAY_ROW) return 0;
-    return row->row.child_count;
+    
+    // For ROW type, we have child_count. For ARRAY/ARRAY_ROW, count the linked list.
+    if (row->type == MathNodeType::ROW) {
+        return row->row.child_count;
+    } else {
+        // Count children by traversing linked list
+        int count = 0;
+        MathASTNode* child = row->body;
+        while (child) {
+            count++;
+            child = child->next_sibling;
+        }
+        return count;
+    }
 }
 
 // ============================================================================
@@ -2078,6 +2094,21 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     // Get body content
     TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
 
+    // Get column specification (e.g., {ll} for \begin{array}{ll})
+    TSNode columns_node = ts_node_child_by_field_name(node, "columns", 7);
+    const char* col_spec = nullptr;
+    if (!ts_node_is_null(columns_node)) {
+        int col_len;
+        const char* col_text = node_text(columns_node, &col_len);
+        // col_text includes braces like "{ll}", extract inner part
+        if (col_text && col_len > 2 && col_text[0] == '{') {
+            char* buf = (char*)arena_alloc(arena, col_len - 1);  // -2 for braces, +1 for null
+            memcpy(buf, col_text + 1, col_len - 2);
+            buf[col_len - 2] = '\0';
+            col_spec = buf;
+        }
+    }
+
     // Copy environment name to arena for persistence
     const char* env_name_copy = nullptr;
     if (env_name && env_name_len > 0) {
@@ -2088,7 +2119,8 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     }
 
     // Build ARRAY node to hold the matrix structure
-    MathASTNode* array_node = make_math_array(arena, "c", 0, env_name_copy);
+    // Use col_spec if available, otherwise default to center-aligned
+    MathASTNode* array_node = make_math_array(arena, col_spec ? col_spec : "c", 0, env_name_copy);
 
     if (!ts_node_is_null(body_node)) {
         // Parse the body - contains expressions, row_sep (\\), and col_sep (&)

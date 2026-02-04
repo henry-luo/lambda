@@ -446,7 +446,8 @@ module.exports = grammar({
     ),
 
     // Column spec for arrays: {ccc} or {|c|c|c|}
-    env_columns: $ => seq('{', /[lcr|@{}p\d.]+/, '}'),
+    // Regex matches: l/c/r for alignment, | for borders, @{} for custom separators, p/m/b for fixed-width
+    env_columns: $ => seq('{', /[lcr|@{pmb\d.]+/, '}'),
 
     // Environment body - content between \begin and \end
     // Can contain expressions, row separators (\\), and column separators (&)
