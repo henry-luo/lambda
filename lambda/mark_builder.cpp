@@ -993,6 +993,10 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         return createMetaType(((TypeType*)item.type)->type->type_id);
     }
 
+    case LMD_TYPE_PATH:
+        // Path is a pointer type, just return as-is (no deep copy needed)
+        return item;
+
     case LMD_TYPE_ANY:
         return deep_copy_internal(item);
 

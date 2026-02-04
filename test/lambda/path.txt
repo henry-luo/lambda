@@ -1,0 +1,15 @@
+"Basic path expressions"
+file.etc.hosts
+file.usr.local.bin
+http.api.example.com
+https.secure.api.example.com
+sys.config
+"Path in let binding"
+file.etc.config
+"Path in array"
+[file.a, file.b, http.x]
+"Path in map"
+{
+  input: file.data.input,
+  output: file.data.output
+}

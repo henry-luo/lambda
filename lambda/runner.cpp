@@ -76,6 +76,19 @@ void clear_persistent_last_error() {
     }
 }
 
+// Helper functions for C code to access EvalContext members (used by path.c)
+extern "C" {
+Pool* eval_context_get_pool(EvalContext* ctx) {
+    if (!ctx || !ctx->heap) return nullptr;
+    return ctx->heap->pool;
+}
+
+NamePool* eval_context_get_name_pool(EvalContext* ctx) {
+    if (!ctx) return nullptr;
+    return ctx->name_pool;
+}
+}
+
 void find_errors(TSNode node) {
     const char *node_type = ts_node_type(node);
     TSPoint start_point = ts_node_start_point(node);
@@ -236,14 +249,14 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // build the AST from the syntax tree
     get_time(&start);
-    
+
     // Initialize Input base class (Script extends Input)
     Input* input_base = Input::create(pool_create(), nullptr);
     if (!input_base) {
         log_error("Error: Failed to initialize Input base");
         return;
     }
-    
+
     // Copy Input fields to Script (Script extends Input)
     tp->pool = input_base->pool;
     tp->arena = input_base->arena;
@@ -252,7 +265,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     tp->url = input_base->url;
     tp->path = input_base->path;
     tp->root = input_base->root;
-    
+
     // Initialize Script-specific fields
     tp->const_list = arraylist_new(16);
 
@@ -264,13 +277,13 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     tp->ast_root = build_script(tp, root_node);
     get_time(&end);
     print_elapsed_time("building AST", start, end);
-    
+
     // Check for errors during AST building
     if (tp->error_count > 0) {
         log_error("compiled '%s' with error!!", script_path);
         return;
     }
-    
+
     // print the AST for debugging
     log_debug("AST: %s ---------", tp->reference);
     print_ast_root(tp);
@@ -282,7 +295,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     transpile_ast_root(tp, (AstScript*)tp->ast_root);
     get_time(&end);
     print_elapsed_time("transpiling", start, end);
-    
+
     // Check for errors during transpilation
     if (tp->error_count > 0) {
         log_error("compiled '%s' with error!!", script_path);
@@ -305,11 +318,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // generate native code and return the function
     tp->main_func = (main_func_t)jit_gen_func(tp->jit_context, "main");
     get_time(&end);
-    
+
     // Build debug info table for stack traces (after MIR_link has assigned addresses)
     // Pass func_name_map so MIR internal names are mapped to Lambda user-friendly names
     tp->debug_info = (ArrayList*)build_debug_info_table(tp->jit_context, tp->func_name_map);
-    
+
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
 
@@ -355,7 +368,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
     transpiler.errors = arraylist_new(8);  // initialize error list for structured errors
     transpile_script(&transpiler, new_script, script_path);
-    
+
     // Print structured errors if any
     if (transpiler.errors && transpiler.errors->length > 0) {
         fprintf(stderr, "\n");
@@ -366,7 +379,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
         fprintf(stderr, "%d error(s) found.\n", transpiler.errors->length);
     }
-    
+
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
@@ -381,22 +394,22 @@ void runner_init(Runtime *runtime, Runner* runner) {
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");
-    
+
     // Initialize stack overflow protection (once per thread)
     lambda_stack_init();
-    
+
     // Store stack_limit in context for fast access from JIT-compiled code
     runner->context.stack_limit = _lambda_stack_limit;
-    
+
     runner->context.pool = runner->script->pool;
     runner->context.type_list = runner->script->type_list;
-    
+
     // Initialize name_pool for runtime-generated names (separate from script's name_pool)
     runner->context.name_pool = name_pool_create(runner->context.pool, nullptr);
     if (!runner->context.name_pool) {
         log_error("Failed to create runtime name_pool");
     }
-    
+
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
     runner->context.num_stack = num_stack_create(16);
@@ -407,13 +420,13 @@ void runner_setup_context(Runner* runner) {
     runner->context.context_alloc = heap_alloc;
     // init AST validator
     runner->context.validator = schema_validator_create(runner->context.pool);
-    
+
     // Initialize error handling and stack trace support
     // Use debug_info from script (built after MIR compilation for address → function mapping)
     runner->context.debug_info = runner->script->debug_info;
     runner->context.current_file = runner->script->reference;  // source file for error reporting
     runner->context.last_error = NULL;
-    
+
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
@@ -426,7 +439,7 @@ void runner_cleanup(Runner* runner) {
         log_debug("runner is NULL, skipping cleanup");
         return;
     }
-    
+
     // Only call frame_end if we set up a heap (which means runner_setup_context was called)
     if (runner->context.heap) {
         log_debug("calling frame_end");
@@ -435,7 +448,7 @@ void runner_cleanup(Runner* runner) {
     } else {
         log_debug("no heap, skipping frame_end");
     }
-    
+
     // free final result
     if (runner->context.heap) {
         log_debug("cleaning up heap");
@@ -483,7 +496,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         runner_cleanup(runner);
         return output;
     }
-    
+
     log_notice("Executing JIT compiled code...");
     runner_setup_context(runner);
 
@@ -514,18 +527,18 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         runner_cleanup(runner);
         return nullptr;
     }
-    
+
     // Use MarkBuilder to deep copy result to output's arena
     // This ensures all data is copied to the output's memory space
     log_debug("Deep copying result using MarkBuilder, result.item=%016lx", result.item);
     MarkBuilder builder(output);
     output->root = builder.deep_copy(result);
     log_debug("Deep copy completed, root type_id: %d", get_type_id(output->root));
-    
+
     // Now we can safely clean up the execution heap since output has its own copy
     log_debug("Cleaning up execution context");
     // runner_cleanup(runner);
-    
+
     log_debug("Script execution completed, returning output Input");
     return output;
 }
@@ -547,7 +560,7 @@ Input* run_script(Runtime *runtime, const char* source, char* script_path, bool 
         output->root = ItemNull;
         return output;
     }
-    
+
     // Use common execution function with run_main=false
     return execute_script_and_create_output(&runner, false);
 }
@@ -561,7 +574,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
     Runner runner;
     runner_init(runtime, &runner);
     runner.script = load_script(runtime, script_path, NULL);
-    
+
     if (transpile_only) {
         log_info("Transpiled script %s only, not executing.", script_path);
         // Return Input with null item for transpile-only mode
@@ -575,7 +588,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
         output->root = ItemNull;
         return output;
     }
-    
+
     // Use common execution function with specified run_main flag
     return execute_script_and_create_output(&runner, run_main);
 }
