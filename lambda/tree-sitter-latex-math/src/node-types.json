@@ -2222,6 +2222,22 @@
   {
     "type": "row_sep",
     "named": true,
+    "fields": {
+      "spacing": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "row_spacing",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "row_spacing",
+    "named": true,
     "fields": {}
   },
   {
