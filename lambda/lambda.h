@@ -294,12 +294,28 @@ bool path_is_root(Path* path);                          // Check if path is a ro
 int path_depth(Path* path);                             // Get path depth (segment count)
 void path_to_string(Path* path, void* out);             // Convert to string (StrBuf*)
 void path_to_os_path(Path* path, void* out);            // Convert to OS path (StrBuf*)
+
+// New Path API: path_new, path_extend, path_concat
+Path* path_new(Pool* pool, int scheme);                           // Create new path with scheme
+Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
+Path* path_concat(Pool* pool, Path* base, Path* suffix);          // Concatenate two paths
+
+// Wildcard support for glob patterns
+Path* path_wildcard(Pool* pool, Path* base);                      // Add * wildcard segment
+Path* path_wildcard_recursive(Pool* pool, Path* base);            // Add ** wildcard segment
+bool path_is_wildcard(Path* path);                                // Check if segment is *
+bool path_is_wildcard_recursive(Path* path);                      // Check if segment is **
+bool path_has_wildcards(Path* path);                              // Check if path has any wildcards
+
 // Fixed-arity path builders for JIT (no variadic functions in C2MIR)
 Path* path_build1(Pool* pool, int scheme, const char* s1);
 Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2);
 Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3);
 Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4);
 Path* path_build5(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5);
+Path* path_build6(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6);
+Path* path_build7(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7);
+Path* path_build8(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7, const char* s8);
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);
@@ -424,6 +440,7 @@ typedef struct Context {
     bool it2b(Item item);
     int it2i(Item item);
     String* it2s(Item item);
+    const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
 
     // generic field access function
     Item fn_index(Item item, Item index);

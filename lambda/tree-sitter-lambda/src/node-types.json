@@ -2396,6 +2396,14 @@
             "named": true
           },
           {
+            "type": "path_wildcard",
+            "named": true
+          },
+          {
+            "type": "path_wildcard_recursive",
+            "named": true
+          },
+          {
             "type": "symbol",
             "named": true
           }
@@ -2677,6 +2685,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "path_wildcard",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "pattern_any_star",
@@ -3686,11 +3699,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -3801,6 +3814,10 @@
     "named": false
   },
   {
+    "type": "path_wildcard_recursive",
+    "named": true
+  },
+  {
     "type": "pattern_any",
     "named": true
   },
@@ -3842,11 +3859,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",
