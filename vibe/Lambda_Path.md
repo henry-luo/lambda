@@ -13,19 +13,25 @@ This document proposes a unified path notation system that maps file system path
 | Source | Lambda Path |
 |--------|-------------|
 | Path separator `/` | Dot `.` |
+| Absolute file path prefix | `/` |
+| Relative path prefix | `.` |
+| Parent directory prefix | `..` |
 | Scheme separator `://` | Single `.` |
-| Relative path prefix | Leading `.` |
 
-### 1.2 Built-in Schemes
+### 1.2 Built-in Schemes and Path Roots
 
-Lambda supports **4 built-in schemes** out of the box:
+Lambda supports **4 built-in path roots** out of the box:
 
-| Scheme | Purpose | Example |
-|--------|---------|--------|
-| `file` | Local file system | `file.etc.hosts` |
-| `http` | HTTP URLs | `http.'example.com'.api` |
-| `https` | HTTPS URLs | `https.'api.github.com'.users` |
-| `sys` | System/runtime paths | `sys.temp`, `sys.home` |
+| Root | Purpose | Example |
+|------|---------|--------|
+| `/` | Absolute file system path | `/etc.hosts` |
+| `.` | Relative path (current directory) | `.src.'main.ls'` |
+| `..` | Parent directory path | `..lib.'utils.ls'` |
+| `http.` | HTTP URLs | `http.'example.com'.api` |
+| `https.` | HTTPS URLs | `https.'api.github.com'.users` |
+| `sys.` | System/runtime paths | `sys.temp`, `sys.home` |
+
+> **Note**: The `.` and `..` path syntax is inspired by Python's relative import syntax (`from . import` and `from .. import`), providing familiar semantics for developers.
 
 Other schemes (e.g., `ftp`, `s3`, `ssh`) must be imported first:
 
@@ -37,33 +43,42 @@ let remote = ftp.'ftp.example.com'.pub.'file.zip';
 let bucket = s3.'my-bucket'.data.'archive.tar.gz';
 ```
 
-### 1.3 Absolute URL Mapping
+### 1.3 Absolute File Path Mapping
+
+Absolute file paths use `/` as the root:
 
 ```
-file:///etc/hosts          → file.etc.hosts
-file:///home/user/data.json → file.home.user.'data.json'
+file:///etc/hosts           → /etc.hosts
+file:///home/user/data.json → /home.user.'data.json'
+/etc/hosts                  → /etc.hosts
+/home/user/data.json        → /home.user.'data.json'
+```
+
+### 1.4 URL Mapping
+
+```
 http://example.com/api/v1   → http.'example.com'.api.v1
 https://cdn.site.io/assets  → https.'cdn.site.io'.assets
 ```
 
-### 1.4 Relative Path Mapping
+### 1.5 Relative Path Mapping
 
-Relative paths start with a leading dot, distinguishing them from absolute paths:
+Relative paths start with `.`, similar to Python's relative import syntax (`from . import module`):
 
 ```
 ./src/main.ls              → .src.'main.ls'
-../lib/utils.ls            → ..lib.'utils.ls'
 data/input.json            → .data.'input.json'
 ```
 
-### 1.5 Parent Directory Navigation
+### 1.6 Parent Directory Navigation
 
-The `..` notation refers to the parent directory:
+The `..` notation refers to the parent directory, similar to Python's `from .. import module` syntax:
 
 ```lambda
 let parent = ..;                    // Parent of current directory
 let sibling = ..other;              // ../other
 let file = ..lib.'utils.ls';        // ../lib/utils.ls
+../lib/utils.ls                     → ..lib.'utils.ls'
 ```
 
 **Important**: `...` is reserved in Lambda for **variable arguments** (variadic functions). To navigate to grandparent or beyond, use parentheses:
@@ -87,11 +102,11 @@ let file = (..)..shared.'config.json';   // ../../shared/config.json
 | `..sibling` | Sibling directory | `../sibling` |
 | `(..)..shared` | Uncle directory | `../../shared` |
 
-### 1.6 Windows Path Mapping
+### 1.7 Windows Path Mapping
 
 ```
-C:\Users\name\file.txt     → file.C.'Users'.name.'file.txt'
-D:\data\                   → file.D.data
+C:\Users\name\file.txt     → /C.'Users'.name.'file.txt'
+D:\data\                   → /D.data
 ```
 
 ---
@@ -104,9 +119,9 @@ File extensions and domain names contain dots, which conflict with the path sepa
 
 | Original | Lambda Path |
 |----------|-------------|
-| `file.txt` | `'file.txt'` |
+| `/etc/file.txt` | `/'file.txt'` |
 | `example.com` | `'example.com'` |
-| `config.dev.json` | `'config.dev.json'` |
+| `/config.dev.json` | `/'config.dev.json'` |
 
 **Rule**: Any path segment containing `.` must be quoted with single quotes.
 
@@ -125,7 +140,7 @@ data-2024.csv                 → .'data-2024.csv'
 user@host                     → .'user@host'
 100                           → .'100'        // Numeric, must quote
 v2                            → .v2           // Alphanumeric, no quote needed
-http://localhost:8080/api     → http.'localhost.:8080'.api
+http://localhost:8080/api     → http.'localhost:8080'.api
 http://api.com/?q=test&n=10   → http.'api.com'.'?q=test&n=10'
 http://docs.com/page#section  → http.'docs.com'.page.'#section'
 ftp://user:pass@host.com/file → ftp.'user:pass@host.com'.file
@@ -161,7 +176,7 @@ Match any single path segment:
 
 ```
 .src.*                     → All entries directly in src/
-file.etc.*                 → All files directly in /etc/
+/etc.*                     → All files directly in /etc/
 http.'api.com'.users.*     → All direct children of /users/
 ```
 
@@ -171,7 +186,7 @@ Match any number of path segments (recursive):
 
 ```
 .src.**                    → All files anywhere under src/
-file.home.**               → All files under /home/
+/home.**                   → All files under /home/
 .**.config                 → All 'config' files in project
 ```
 
@@ -204,7 +219,7 @@ let ls_files = all_files |> filter(f => f.extension == ".ls");
 Lambda path literals can be written directly. **Path evaluation is always lazy** - paths are references/handles until their content is actually accessed:
 
 ```lambda
-let config = file.etc.'nginx.conf';       // Just a path reference, file not read yet
+let config = /etc.'nginx.conf';           // Just a path reference, file not read yet
 let api = https.'api.github.com'.repos;   // Just a URL reference, not fetched yet
 let local = .src.main;                    // Relative path reference
 
@@ -231,7 +246,7 @@ for key in json_data {                    // File loaded & parsed here
 Paths are concatenated using the `++` operator:
 
 ```lambda
-let base = file.home.user;
+let base = /home.user;
 let full = base ++ documents ++ 'report.pdf';  // Concatenation via ++
 
 // Concatenate with string
@@ -251,11 +266,11 @@ let output = .build ++ 'dist' ++ 'bundle.js';  // .build.dist.'bundle.js'
 ### 4.3 Path Decomposition
 
 ```lambda
-let p = file.home.user.'data.json';
+let p = /home.user.'data.json';
 
 p.scheme      → "file"
 p.segments    → ["home", "user", "data.json"]
-p.parent      → file.home.user
+p.parent      → /home.user
 p.name        → "data.json"
 p.stem        → "data"
 p.extension   → ".json"
@@ -283,7 +298,7 @@ Lambda paths are lazy references. Content is loaded when accessed:
 
 ```lambda
 // Path is just a reference
-let hosts = file.etc.hosts;              // No file read yet
+let hosts = /etc.hosts;                  // No file read yet
 let config = .data.'config.json';        // No file read yet
 
 // Content loaded on access
@@ -355,22 +370,22 @@ The `sys` scheme provides access to system information, environment, and runtime
 | Scheme vs path | `http.local` (scheme or path?) | Schemes are reserved keywords; `http` as path segment must be quoted: `.'http'.local` |
 | Empty segments | `//double/slash` | Collapse or preserve as `''` empty string segment |
 
-### 7.2 Reserved Scheme Names
+### 7.2 Reserved Path Roots and Scheme Names
 
-The following are reserved as **built-in URL schemes** and cannot be used as unquoted path segments:
-- `file`, `http`, `https`, `sys` (built-in)
+The following are reserved as **built-in path roots/schemes** and cannot be used as unquoted path segments:
+- `/`, `.`, `..` (path roots)
+- `http`, `https`, `sys` (URL schemes, built-in)
 
 Other schemes become reserved **after import**:
 - After `import ftp;` → `ftp` becomes reserved
 - After `import s3;` → `s3` becomes reserved
 
 ```lambda
-// These are URL schemes:
-file.etc.hosts
+// These are path roots/schemes:
+/etc.hosts
 http.'example.com'
 
 // To use as path segments, quote them:
-.'file'.document          // ./file/document
 .'http'.requests.log      // ./http/requests.log
 .'sys'.config             // ./sys/config
 ```
@@ -393,7 +408,7 @@ http.'example.com'
 - File paths use UTF-8 encoding
 
 ```lambda
-file.home.'文档'.'报告.pdf'     // Unicode path
+/home.'文档'.'报告.pdf'          // Unicode path
 http.'example.com'.'path%20name' → http.'example.com'.'path name'  // Decoded
 ```
 
@@ -425,7 +440,7 @@ Shell scripts (Bash, Zsh, etc.) have extensive built-in path and glob support.
 
 | Feature | Shell Syntax | Lambda Equivalent | Status |
 |---------|--------------|-------------------|--------|
-| Absolute path | `/etc/hosts` | `file.etc.hosts` | ✅ |
+| Absolute path | `/etc/hosts` | `/etc.hosts` | ✅ |
 | Relative path | `./src/file` | `.src.file` | ✅ |
 | Parent dir | `../lib` | `..lib` | ✅ |
 | Grandparent | `../../shared` | `(..)..shared` | ✅ |
@@ -485,7 +500,7 @@ XPath is a query language for navigating XML/HTML documents, deeply integrated i
 
 | Feature    | XPath Syntax                | Lambda Path Analogy                 |
 | ---------- | --------------------------- | ----------------------------------- |
-| Root       | `/`                         | `file.` or `.`                      |
+| Root       | `/`                         | `/` or `.`                          |
 | Child      | `/child`                    | `.child`                            |
 | Descendant | `//descendant`              | `.**descendant` or `.**.descendant` |
 | Parent     | `..`                        | `..`                                |
@@ -626,7 +641,7 @@ builtins.pathExists /etc/hosts # → true/false
 - Built-in for reproducible builds
 
 **Lessons:**
-1. ✅ Path literals without quotes (Lambda uses `file.etc.hosts`)
+1. ✅ Path literals without quotes (Lambda uses `/etc.hosts`, `.src.main`)
 2. ✅ Path concatenation via operators
 3. ✅ Pure/functional path operations
 
@@ -740,7 +755,20 @@ glob.sync("src/{a,b}/**/*.ts");         // Brace expansion
 
 ---
 
-### 8.6 Proposed Enhancements Based on Comparison
+### 8.6 Python Relative Import Similarity
+
+Lambda's `.` and `..` path syntax is inspired by Python's relative import system:
+
+| Python Import | Lambda Path | Meaning |
+|---------------|-------------|---------|
+| `from . import module` | `.module` | Current directory |
+| `from .. import module` | `..module` | Parent directory |
+| `from .subpkg import mod` | `.subpkg.mod` | Relative to current |
+| `from ..sibling import mod` | `..sibling.mod` | Sibling directory |
+
+This familiar syntax makes Lambda paths intuitive for Python developers and provides consistent semantics for relative path navigation.
+
+### 8.7 Proposed Enhancements Based on Comparison
 
 Based on this analysis, consider adding to Lambda Path in future versions:
 
@@ -785,12 +813,14 @@ Based on this analysis, consider adding to Lambda Path in future versions:
 ### 9.1 EBNF Grammar
 
 ```ebnf
-lambda_path     = absolute_path | relative_path ;
+lambda_path     = absolute_path | relative_path | parent_path | url_path ;
 
-absolute_path   = scheme "." path_segments ;
+absolute_path   = "/" path_segments ;
 relative_path   = "." path_segments ;
+parent_path     = ".." path_segments ;
+url_path        = scheme "." path_segments ;
 
-scheme          = "file" | "http" | "https" | "sys" ;  // Built-in only
+scheme          = "http" | "https" | "sys" ;  // Built-in URL schemes
 
 path_segments   = segment ( "." segment )* ;
 
@@ -814,13 +844,17 @@ path_concat     = path "++" ( path | identifier | quoted_segment ) ;
 ### 9.2 Examples Parsed
 
 ```
-file.etc.hosts
-  → Scheme: file
+/etc.hosts
+  → Root: / (absolute file)
   → Segments: ["etc", "hosts"]
 
 .src.'main.ls'
-  → Relative: true
+  → Root: . (relative)
   → Segments: ["src", "main.ls"]
+
+..lib.'utils.ls'
+  → Root: .. (parent)
+  → Segments: ["lib", "utils.ls"]
 
 https.'api.github.com'.repos.*.issues
   → Scheme: https
@@ -901,12 +935,14 @@ let users = cached or remote_data or local_data;
 
 | Aspect            | Decision                           | Rationale                            |
 | ----------------- | ---------------------------------- | ------------------------------------ |
-| Built-in schemes  | `file`, `http`, `https`, `sys`     | Cover 99% of use cases               |
+| Absolute files    | `/` prefix                         | Intuitive, mirrors file paths        |
+| Relative paths    | `.` prefix                         | Mirrors `./`, Python imports         |
+| Parent paths      | `..` prefix                        | Mirrors `../`, Python imports        |
+| URL schemes       | `http.`, `https.`, `sys.`          | Cover common URL use cases           |
 | Other schemes     | Require `import`                   | Extensible without bloat             |
 | Separator         | `.` (dot)                          | Consistent with Lambda member access |
 | Concatenation     | `++` operator                      | Explicit runtime concatenation       |
 | Quoting           | Single quotes for special segments | Clear, unambiguous                   |
-| Relative marker   | Leading `.`                        | Mirrors `./` in file paths           |
 | Wildcards         | `*` and `**` only                  | Simple, covers most needs            |
 | Extended patterns | Deferred to future                 | Avoid complexity                     |
 | Evaluation        | Lazy (on access)                   | Efficient, no wasted I/O             |

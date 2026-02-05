@@ -187,7 +187,8 @@ int path_depth(Path* path) {
 static const char* path_get_segment_display(Path* path);
 
 /**
- * Convert path to Lambda path string (e.g., "file.etc.hosts").
+ * Convert path to Lambda path string.
+ * New syntax: "/.etc.hosts" for absolute, ".test.file" for relative.
  * Properly handles wildcards using segment type flags.
  */
 void path_to_string(Path* path, void* out_ptr) {
@@ -204,25 +205,66 @@ void path_to_string(Path* path, void* out_ptr) {
         p = p->parent;
     }
 
-    // Check if root scheme is relative ("." or "..")
+    // Check scheme type
+    bool is_file_scheme = false;
     bool is_rel_scheme = false;
+    bool is_parent_scheme = false;
     if (count > 0) {
         const char* root_name = segments[count - 1]->name;
-        is_rel_scheme = root_name && (strcmp(root_name, ".") == 0 || strcmp(root_name, "..") == 0);
+        is_file_scheme = root_name && strcmp(root_name, "file") == 0;
+        is_rel_scheme = root_name && strcmp(root_name, ".") == 0;
+        is_parent_scheme = root_name && strcmp(root_name, "..") == 0;
+    }
+    
+    // Handle bare root cases (no segments beyond root)
+    if (count == 1) {
+        if (is_file_scheme) {
+            strbuf_append_char(out, '/');
+            return;
+        }
+        if (is_rel_scheme) {
+            strbuf_append_char(out, '.');
+            return;
+        }
+        if (is_parent_scheme) {
+            strbuf_append_str(out, "..");
+            return;
+        }
     }
 
     // Output in forward order (root first)
+    bool just_output_root = false;  // tracks if we just output /, ., or ..
     for (int i = count - 1; i >= 0; i--) {
-        // Add separator dot, but for relative schemes, the scheme itself ends with dot
-        // so we skip separator after the scheme root
-        if (i < count - 1) {
-            if (!(is_rel_scheme && i == count - 2)) {
-                // not immediately after relative scheme root
-                strbuf_append_char(out, '.');
-            }
-        }
-
         Path* seg_path = segments[i];
+        
+        // For file scheme: output "/" prefix, skip "file" segment
+        if (is_file_scheme && i == count - 1) {
+            strbuf_append_char(out, '/');  // root prefix
+            just_output_root = true;
+            continue;  // skip "file" segment itself
+        }
+        
+        // For relative scheme (.): output "." prefix, skip "." segment
+        if (is_rel_scheme && i == count - 1) {
+            strbuf_append_char(out, '.');
+            just_output_root = true;
+            continue;
+        }
+        
+        // For parent scheme (..): output ".." and skip the root segment
+        if (is_parent_scheme && i == count - 1) {
+            strbuf_append_str(out, "..");
+            just_output_root = true;
+            continue;
+        }
+        
+        // Add separator dot before non-root segments
+        // But not right after root (/, ., ..) since those already form the prefix
+        if (i < count - 1 && !just_output_root) {
+            strbuf_append_char(out, '.');
+        }
+        just_output_root = false;
+
         LPathSegmentType seg_type = PATH_GET_SEG_TYPE(seg_path);
 
         // Wildcards don't need quoting
@@ -241,14 +283,6 @@ void path_to_string(Path* path, void* out_ptr) {
 
         // Normal segment - check if needs quoting
         const char* seg = seg_path->name ? seg_path->name : "";
-        
-        // Special case: relative scheme roots ("." or "..") only need quoting when they're
-        // the entire path (count == 1), otherwise print without quotes as prefix
-        if (is_rel_scheme && i == count - 1 && count > 1) {
-            // relative scheme with segments following - print without quotes
-            strbuf_append_str(out, seg);
-            continue;
-        }
         
         bool needs_quote = false;
         for (const char* c = seg; *c; c++) {
@@ -892,9 +926,12 @@ extern TypeId item_type_id(Item item);
  * Returns: bool Item (true/false)
  */
 Item fn_exists(Item path_item) {
+    log_debug("fn_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
     TypeId type_id = item_type_id(path_item);
+    log_debug("fn_exists: type_id=%d", type_id);
     
     if (type_id == LMD_TYPE_NULL) {
+        log_debug("fn_exists: NULL input");
         return b2it(false);
     }
     
@@ -915,7 +952,9 @@ Item fn_exists(Item path_item) {
     
     // Extract Path* from Item (direct pointer for container types)
     Path* path = (Path*)(uint64_t)path_item;
-    if (!path) return b2it(false);
+    if (!path) { log_debug("fn_exists: path is NULL"); return b2it(false); }
+    
+    log_debug("fn_exists: path=%p, path->name=%s", (void*)path, path->name ? path->name : "(null)");
     
     // Convert path to OS path
     StrBuf* path_buf = strbuf_new();
@@ -924,12 +963,15 @@ Item fn_exists(Item path_item) {
     const char* scheme = path_get_scheme_name(path);
     bool exists = false;
     
+    log_debug("fn_exists: scheme='%s', os_path='%s'", scheme ? scheme : "(null)", path_buf->str);
+    
     if (strcmp(scheme, "file") == 0 || 
         strcmp(scheme, ".") == 0 || 
         strcmp(scheme, "..") == 0) {
         // Local file system - use stat
         struct stat st;
         exists = (stat(path_buf->str, &st) == 0);
+        log_debug("fn_exists: stat result=%d, exists=%d", stat(path_buf->str, &st), exists);
     } else if (strcmp(scheme, "sys") == 0) {
         // System paths always "exist" if valid
         exists = true;
