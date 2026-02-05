@@ -660,7 +660,7 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
         int scheme = collect_path_segments_if_path(tp, object_node, segments);
         if (scheme >= 0) {
             // the object is part of a path, add the field as a segment
-            // field can be identifier or symbol
+            // field can be identifier, symbol, or wildcard
             TSSymbol field_sym = ts_node_symbol(field_node);
             if (field_sym == SYM_IDENT || field_sym == SYM_SYMBOL) {
                 StrView field_name = ts_node_source(tp, field_node);
@@ -670,6 +670,16 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
                     field_name.length -= 2;
                 }
                 String* pooled = name_pool_create_strview(tp->name_pool, field_name);
+                arraylist_append(segments, pooled);
+            }
+            else if (field_sym == SYM_PATH_WILDCARD) {
+                // single wildcard (*) - match one segment
+                String* pooled = name_pool_create_name(tp->name_pool, "*");
+                arraylist_append(segments, pooled);
+            }
+            else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
+                // recursive wildcard (**) - match zero or more segments
+                String* pooled = name_pool_create_name(tp->name_pool, "**");
                 arraylist_append(segments, pooled);
             }
             return scheme;
@@ -1460,8 +1470,30 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         arraylist_free(segments);
     }
     else if (symbol == SYM_INDEX_EXPR) {
-        ast_node->expr = build_field_expr(tp, child, AST_NODE_INDEX_EXPR);
-        ast_node->type = ast_node->expr->type;
+        // Check if this is a path index expression (path[expr])
+        // Path subscripts add dynamic segments, unlike regular index expressions
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        TSNode field_node = ts_node_child_by_field_id(child, FIELD_FIELD);
+
+        // Check if the object is a path expression
+        ArrayList* segments = arraylist_new(8);
+        int scheme = collect_path_segments_if_path(tp, object_node, segments);
+
+        if (scheme >= 0) {
+            // It's a path subscript expression: path[expr]
+            // Build it as a special AST_NODE_PATH_INDEX_EXPR
+            AstPathIndexNode* path_idx = (AstPathIndexNode*)alloc_ast_node(tp, AST_NODE_PATH_INDEX_EXPR, child, sizeof(AstPathIndexNode));
+            path_idx->base_path = build_path_expr(tp, object_node, (PathScheme)scheme, segments);
+            path_idx->segment_expr = build_expr(tp, field_node);
+            path_idx->type = &TYPE_PATH;  // result is still a path
+            ast_node->expr = (AstNode*)path_idx;
+            ast_node->type = path_idx->type;
+        } else {
+            // Regular index expression
+            ast_node->expr = build_field_expr(tp, child, AST_NODE_INDEX_EXPR);
+            ast_node->type = ast_node->expr->type;
+        }
+        arraylist_free(segments);
     }
     else if (symbol == SYM_CALL_EXPR) { // || symbol == SYM_SYS_FUNC
         ast_node->expr = build_call_expr(tp, child, symbol);
