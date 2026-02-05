@@ -22,6 +22,9 @@
 
 extern __thread EvalContext* context;
 
+// External path resolution function (implemented in path.c)
+extern "C" Item path_resolve_for_iteration(Path* path);
+
 // External typeset function
 
 #define stack_alloc(size) alloca(size);
@@ -1083,7 +1086,8 @@ Type* fn_type(Item item) {
 }
 
 // returns the TypeId of an item for use in MIR-compiled code
-TypeId item_type_id(Item item) {
+// declared extern "C" to allow calling from C code (path.c)
+extern "C" TypeId item_type_id(Item item) {
     return item.type_id();
 }
 
@@ -1170,7 +1174,8 @@ Item fn_input2(Item url, Item type) {
     return (input && input->root.item) ? input->root : ItemNull;
 }
 
-Item fn_input1(Item url) {
+// declared extern "C" to allow calling from C code (path.c)
+extern "C" Item fn_input1(Item url) {
     return fn_input2(url, ItemNull);
 }
 
@@ -1348,6 +1353,33 @@ int64_t fn_len(Item item) {
         // todo: binary length
         String *str = item.get_string();  // todo:: should return char length
         size = str ? utf8_char_count(str->chars) : 0;
+        break;
+    }
+    case LMD_TYPE_PATH: {
+        // Lazy evaluation: resolve path content if not cached, then get length
+        Path* path_val = item.path;
+        if (!path_val) { size = 0; break; }
+        // Check if content is already resolved (cached in path->result)
+        if (path_val->result == 0) {
+            // Use path_resolve_for_iteration which handles:
+            // - Directories: returns list of child paths
+            // - Files: returns parsed content
+            // - Wildcards: expands to list of matching paths
+            // - Non-existent: returns null (len = 0)
+            // - Access errors: returns error
+            Item resolved = path_resolve_for_iteration(path_val);
+            // result is now cached in path_val->result
+            if (resolved.item == ItemError.item) {
+                return INT64_ERROR;
+            }
+        }
+        // Get length from cached result
+        Item cached = {.item = path_val->result};
+        if (cached.item == 0) {
+            size = 0;  // null path -> length 0
+        } else {
+            size = fn_len(cached);
+        }
         break;
     }
     case LMD_TYPE_ERROR:
