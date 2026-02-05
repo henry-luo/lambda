@@ -201,6 +201,8 @@ struct TexNode {
     static constexpr uint8_t FLAG_DIRTY = 0x08;     // Needs re-layout
     static constexpr uint8_t FLAG_NULLDELIM = 0x10; // Null delimiter (for \bigl. etc)
     static constexpr uint8_t FLAG_MATHSPACING = 0x20; // Inter-atom math spacing (kern)
+    static constexpr uint8_t FLAG_DELIMITED = 0x40; // HBox from \left..\right delimited group
+    static constexpr uint8_t FLAG_MATRIX = 0x80;    // HBox from matrix environment (pmatrix, etc.)
 
     // ========================================
     // Dimensions (in CSS pixels, populated during layout)
