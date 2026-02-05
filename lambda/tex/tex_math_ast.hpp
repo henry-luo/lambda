@@ -91,6 +91,7 @@ struct MathASTNode {
     static constexpr uint8_t FLAG_LEFT = 0x10;        // Left delimiter in pair
     static constexpr uint8_t FLAG_RIGHT = 0x20;       // Right delimiter in pair
     static constexpr uint8_t FLAG_MIDDLE = 0x40;      // Middle delimiter
+    static constexpr uint8_t FLAG_HLINE = 0x80;       // Horizontal line before this row (for ARRAY_ROW)
 
     // Content (type-dependent)
     union {
@@ -157,6 +158,7 @@ struct MathASTNode {
             const char* environment_name; // Environment name (e.g., "bmatrix", "pmatrix")
             int num_cols;           // Number of columns
             int num_rows;           // Number of rows
+            bool trailing_hline;    // True if \hline after last row
         } array;
 
         // For SPACE
@@ -191,6 +193,10 @@ struct MathASTNode {
             uint8_t delim_type;     // 0=l (left), 1=r (right), 2=m (middle)
         } sized_delim;
     };
+
+    // Extra spacing after this row (for ARRAY_ROW nodes with \\[spacing])
+    // Stored in points (parsed from e.g., "5pt", "1em" in \\[5pt])
+    float row_extra_spacing;
 
     // Tree structure (named branches - inspired by MathLive)
     MathASTNode* body;          // Main content (ROW, DELIMITED, SQRT radicand, ACCENT base)

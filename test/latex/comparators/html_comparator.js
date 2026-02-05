@@ -202,8 +202,11 @@ function shouldIgnoreElement(element) {
         return true;
     }
 
-    // Ignore empty struts
-    if (element.classList.contains('strut') || element.classList.contains('ML__strut')) {
+    // Ignore struts (various class naming conventions)
+    if (element.classList.contains('strut') || 
+        element.classList.contains('ML__strut') ||
+        element.classList.contains('ML__strut--bottom') ||
+        element.classList.contains('ML__pstrut')) {
         return true;
     }
 

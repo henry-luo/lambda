@@ -457,7 +457,14 @@ module.exports = grammar({
       $.col_sep,
     )),
 
-    row_sep: $ => choice('\\\\', '\\cr'),  // Both \\ and \cr for plain TeX compatibility
+    // Row separator: \\, \cr, or \\[spacing] where spacing is like 5pt, 1em, etc.
+    // Use prec.right to prefer consuming [spacing] when present
+    row_sep: $ => prec.right(choice(
+      seq('\\\\', optional(field('spacing', $.row_spacing))),
+      '\\cr'
+    )),
+    // Row spacing: [dimension] where dimension is like 5pt, 1em, 0.5ex, etc.
+    row_spacing: $ => seq('[', /[^\]]+/, ']'),
     col_sep: $ => '&',
 
     // Plain TeX \matrix{...} command (uses \cr as row separator)

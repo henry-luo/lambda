@@ -795,6 +795,24 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
 
     // Handle SIZED_DELIM specially - it uses sized_delim struct, not atom
     if (node->type == MathNodeType::SIZED_DELIM) {
+        int32_t cp = node->sized_delim.delim_char;
+
+        // Check for null delimiter ('.' means empty/invisible)
+        if (cp == '.') {
+            // Create a kern with FLAG_NULLDELIM for HTML renderer to recognize
+            // Standard null delimiter width is 0.12em ≈ 1.2pt at 10pt
+            float null_width = 1.2f * (size / 10.0f);
+            TexNode* kern = make_kern(tc.arena(), null_width);
+            kern->flags |= TexNode::FLAG_NULLDELIM;
+            // Set delim_type: 0 = open, 1 = close, 2 = mid
+            if (node->sized_delim.delim_type == 0) {
+                kern->flags |= TexNode::FLAG_EXPLICIT; // Use as marker for "open"
+            }
+            log_debug("[TYPESET] typeset_atom SIZED_DELIM: null delimiter size_level=%d",
+                      node->sized_delim.size_level);
+            return kern;
+        }
+
         // Apply size scaling based on size_level (1=big, 2=Big, 3=bigg, 4=Bigg)
         float scale = 1.0f + node->sized_delim.size_level * 0.5f;
         size *= scale;
@@ -804,7 +822,6 @@ static TexNode* typeset_atom(MathASTNode* node, MathContext& ctx) {
         if (node->sized_delim.delim_type == 0) atom = AtomType::Open;
         else if (node->sized_delim.delim_type == 1) atom = AtomType::Close;
 
-        int32_t cp = node->sized_delim.delim_char;
         FontSpec font = tc.make_symbol_font();
         font.size_pt = size;
 
@@ -1830,10 +1847,31 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
         row_depths[r] = min_depth;
     }
 
+    // Track hlines (bitmask: bit i set means hline before row i)
+    uint32_t hlines = 0;
+    
+    // Track extra spacing after each row (from \\[5pt] syntax)
+    float* row_extra_spacing = (float*)alloca(num_rows * sizeof(float));
+    for (int r = 0; r < num_rows; r++) {
+        row_extra_spacing[r] = 0.0f;
+    }
+
     // Iterate through rows and collect cells
     int row_idx = 0;
     for (MathASTNode* row = node->body; row && row_idx < num_rows; row = row->next_sibling) {
         if (row->type != MathNodeType::ARRAY_ROW) continue;
+
+        // Check for hline flag
+        if ((row->flags & MathASTNode::FLAG_HLINE) && row_idx < 32) {
+            hlines |= (1u << row_idx);
+            log_debug("tex_math_ast_typeset: hline before row %d", row_idx);
+        }
+        
+        // Store extra row spacing
+        row_extra_spacing[row_idx] = row->row_extra_spacing;
+        if (row->row_extra_spacing > 0.0f) {
+            log_debug("tex_math_ast_typeset: row %d has extra spacing %.2fpt", row_idx, row->row_extra_spacing);
+        }
 
         int col_idx = 0;
         for (MathASTNode* cell = row->body; cell && col_idx < num_cols; cell = cell->next_sibling) {
@@ -1862,11 +1900,11 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
         row_idx++;
     }
 
-    // Calculate total height (all rows stacked with jot spacing)
+    // Calculate total height (all rows stacked with jot spacing + extra spacing)
     float total_height = 0;
     for (int r = 0; r < num_rows; r++) {
         total_height += row_heights[r] + row_depths[r];
-        if (r < num_rows - 1) total_height += jot;
+        if (r < num_rows - 1) total_height += jot + row_extra_spacing[r];
     }
 
     // Calculate total width (all columns with arraycolsep)
@@ -1927,8 +1965,10 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
             link_node(vlist_first, vlist_last, cell_hbox);
 
             // Add jot spacing between rows (except after last row)
+            // Include any extra spacing from \\[Xpt] syntax
             if (r < num_rows - 1) {
-                TexNode* jot_glue = make_glue(arena, Glue::fixed(jot), "jot");
+                float total_spacing = jot + row_extra_spacing[r];
+                TexNode* jot_glue = make_glue(arena, Glue::fixed(total_spacing), "jot");
                 link_node(vlist_first, vlist_last, jot_glue);
             }
         }
@@ -1975,6 +2015,8 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
     result->content.mtable.num_rows = num_rows;
     result->content.mtable.arraycolsep = arraycolsep;
     result->content.mtable.jot = jot;
+    result->content.mtable.hlines = hlines;
+    result->content.mtable.trailing_hline = node->array.trailing_hline;
 
     // Center vertically around math axis
     float axis = size * 0.25f;
