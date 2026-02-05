@@ -4,8 +4,8 @@
 
 ✅ **Completed Features:**
 - Path type (`LMD_TYPE_PATH`) with linked segment structure
-- Path schemes: `file`, `http`, `https`, `sys`, `cwd` (relative `.`)
-- Path string representation with proper quoting (`.test.input.dir.'file.txt'`)
+- Path schemes: `/` (absolute file), `.` (relative), `..` (parent), `http`, `https`, `sys`
+- Path string representation with proper quoting (`/etc.'nginx.conf'`, `.test.input.dir`)
 - Wildcard support: `*` (single level), `**` (recursive)
 - `exists(path)` system function
 - `len(path)` for directories (returns entry count)
@@ -51,13 +51,16 @@ typedef struct PathMeta {
 
 ### Path Schemes
 
-| Scheme | Keyword | Example | Resolves To |
-|--------|---------|---------|-------------|
-| File (absolute) | `file` | `file.etc.hosts` | `/etc/hosts` |
-| Relative (cwd) | `cwd` | `cwd.test.input` | `./test/input` |
+| Scheme | Syntax | Example | Resolves To |
+|--------|--------|---------|-------------|
+| File (absolute) | `/` | `/etc.hosts` | `/etc/hosts` |
+| Relative (cwd) | `.` | `.test.input` | `./test/input` |
+| Parent | `..` | `..config.json` | `../config.json` |
 | HTTP | `http` | `http.api.example.com` | `http://api.example.com` |
 | HTTPS | `https` | `https.secure.api` | `https://secure.api` |
 | System | `sys` | `sys.env.PATH` | System info |
+
+> **Note:** The `.` and `..` syntax is inspired by Python's relative import syntax (`from . import` and `from .. import`) and Unix path conventions. Like Python, `.` refers to the current context (directory) and `..` refers to the parent.
 
 ---
 
@@ -92,7 +95,7 @@ A Path can be in one of these states:
 **Non-existent paths resolve to `null`** (not error), following Lambda's optional chaining semantics:
 
 ```lambda
-let f = file.nonexistent.path
+let f = /nonexistent.path
 f                    // null
 f.name               // null (chained access on null)
 for x in f { x }     // empty iteration (for-loop over null)
@@ -102,7 +105,7 @@ len(f)               // 0 (len of null)
 **Access errors resolve to `error`** (path exists but cannot be opened):
 
 ```lambda
-let f = file.root.protected_file   // file exists but no read permission
+let f = /root.protected_file   // file exists but no read permission
 f                    // error
 for x in f { x }     // error propagates
 len(f)               // error
@@ -118,8 +121,8 @@ len(f)               // error
 **Use `exists(path)` to check if a path truly exists**:
 
 ```lambda
-if exists(file.data.'config.json') {
-    let config = file.data.'config.json'
+if exists(/data.'config.json') {
+    let config = /data.'config.json'
     // use config...
 }
 ```
@@ -145,12 +148,12 @@ When a path is resolved, its `result` can be:
 When iterating over a directory path, each entry should be a **new Path** extending the parent:
 
 ```
-file.src.*  (directory path with wildcard)
+/src.*  (directory path with wildcard)
     │
-    ├── file.src.main.ls      (child path - file)
-    ├── file.src.utils.ls     (child path - file)  
-    ├── file.src.lib          (child path - directory)
-    └── file.src.test         (child path - directory)
+    ├── /src.main.ls      (child path - file)
+    ├── /src.utils.ls     (child path - file)  
+    ├── /src.lib          (child path - directory)
+    └── /src.test         (child path - directory)
 ```
 
 **Key principle**: Directory children are paths, not loaded content.
@@ -623,13 +626,13 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
 
 ```lambda
 // List files in /etc (non-recursive)
-let etc = file.etc.*
+let etc = /etc.*
 for f in etc {
     print(f.name + " - " + f.size + " bytes")
 }
 
 // Recursive listing
-let all_src = file.src.**
+let all_src = /src.**
 for f in all_src where f.is_file {
     print(f.name)
 }
@@ -638,8 +641,8 @@ for f in all_src where f.is_file {
 ### 5.2 JSON File Iteration
 
 ```lambda
-// file.data.'config.json' is just a path
-let config = file.data.'config.json'
+// /data.'config.json' is just a path
+let config = /data.'config.json'
 
 // Iteration triggers lazy load + parse
 for key, value at config {
@@ -654,7 +657,7 @@ let port = config.server.port
 
 ```lambda
 // Iterate over characters
-let hosts = file.etc.hosts
+let hosts = /etc.hosts
 for ch in hosts {
     // ch is each character
 }
@@ -668,7 +671,7 @@ for line in split(hosts, "\n") {
 ### 5.4 Metadata Access (No Content Loading)
 
 ```lambda
-let f = file.data.'large_file.bin'
+let f = /data.'large_file.bin'
 
 // These don't load file content:
 f.name       // "large_file.bin"
@@ -726,8 +729,8 @@ len(f)       // triggers load for length
 
 ### 6.5 Tests
 
-- [ ] Test directory iteration: `for f in file.test.*`
-- [ ] Test recursive wildcard: `for f in file.test.**`
+- [ ] Test directory iteration: `for f in /test.*`
+- [ ] Test recursive wildcard: `for f in /test.**`
 - [ ] Test JSON file iteration: `for k, v at json_path`
 - [ ] Test text file as string
 - [ ] Test metadata access without content load
@@ -763,9 +766,11 @@ len(f)       // triggers load for length
 The `exists(path)` function checks if a file or directory exists at the given path:
 
 ```lambda
-exists(file.etc.hosts)              // true
-exists(file.nonexistent)            // false
-exists(file.home.user.documents)    // true (directory)
+exists(/etc.hosts)                  // true
+exists(/nonexistent)                // false
+exists(/home.user.documents)        // true (directory)
+exists(.test.input.dir)             // true (relative path)
+exists(..Lambda.test)               // true (parent path)
 exists(http.'api.example.com')      // true if reachable (HTTP HEAD)
 ```
 
@@ -817,9 +822,9 @@ Item fn_exists(Item path_item) {
     const char* scheme = path_get_scheme_name(path);
     bool exists = false;
     
-    if (strcmp(scheme, "file") == 0 || 
-        strcmp(scheme, ".") == 0 || 
-        strcmp(scheme, "..") == 0) {
+    if (strcmp(scheme, "file") == 0 ||   // / absolute paths 
+        strcmp(scheme, ".") == 0 ||       // . relative paths
+        strcmp(scheme, "..") == 0) {      // .. parent paths
         // Local file system - use stat
         struct stat st;
         exists = (stat(path_buf->str, &st) == 0);
@@ -852,19 +857,22 @@ Item fn_exists(Item path);
 
 ```lambda
 // Guard file access
-let config_path = file.data.'config.json'
+let config_path = /data.'config.json'
 let config = if exists(config_path) { config_path } else { {} }
 
 // Check before iteration
-let src = file.src.*
+let src = /src.*
 for f in src where exists(f) {
     // f is guaranteed to exist
 }
 
 // Conditional loading
-let data = exists(file.cache.data) 
-    ? file.cache.data 
+let data = exists(/cache.data) 
+    ? /cache.data 
     : fetch_from_remote()
+
+// Relative and parent paths
+let local_config = if exists(.config.json) { .config.json } else { ..default.config }
 ```
 
 ---
@@ -920,8 +928,8 @@ int64_t path_len(Path* path);                 // Get length (entry count for dir
 bool fn_exists(Path* path);                   // Check existence
 
 // Path conversion
-void path_to_string(Path* path, StrBuf* out);    // Lambda syntax: file.etc.hosts
-void path_to_os_path(Path* path, StrBuf* out);   // OS path: /etc/hosts
+void path_to_string(Path* path, StrBuf* out);    // Lambda syntax: /etc.hosts, .src.main
+void path_to_os_path(Path* path, StrBuf* out);   // OS path: /etc/hosts, ./src/main
 ```
 
 ### Grammar (tree-sitter-lambda/grammar.js)
@@ -944,20 +952,29 @@ member_expr: $ => prec.left(PREC.MEMBER, seq(
 ### Example Usage
 
 ```lambda
-// Absolute paths (file scheme)
-file.etc.hosts                    // /etc/hosts
-file.home.user.'config.json'      // /home/user/config.json
+// Absolute paths (/ prefix)
+/etc.hosts                        // /etc/hosts
+/home.user.'config.json'          // /home/user/config.json
 
-// Relative paths (cwd scheme)  
-cwd.test.input.dir                // ./test/input/dir
+// Relative paths (. prefix)  
+.test.input.dir                   // ./test/input/dir
+
+// Parent paths (.. prefix)
+..config.json                     // ../config.json
+..Lambda.test.input               // ../Lambda/test/input
+
+// Bare roots
+/                                 // root directory
+.                                 // current directory
+..                                // parent directory
 
 // Wildcards
-cwd.src.*                         // All entries in ./src
-cwd.src.**                        // All entries recursively
+.src.*                            // All entries in ./src
+.src.**                           // All entries recursively
 
 // Operations
-exists(cwd.test.input.dir)        // true/false
-len(cwd.test.input.dir)           // entry count
-for (item in cwd.src.*) item      // iterate as Path items
+exists(.test.input.dir)           // true/false
+len(.test.input.dir)              // entry count
+for (item in .src.*) item         // iterate as Path items
 input("./test/input/dir")         // returns List of Path items
 ```
