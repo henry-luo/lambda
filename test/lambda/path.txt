@@ -34,11 +34,11 @@ http.api.**
 path
 "File content (lazy loading)"
 213
-"exists() function - directory exists"
+"fs.exists() function - directory exists"
 true
-"exists() function - file exists"
+"fs.exists() function - file exists"
 true
-"exists() function - non-existent path"
+"fs.exists() function - non-existent path"
 false
 "len() on directory - counts entries"
 true
@@ -48,7 +48,7 @@ true
 path
 "Relative path with . scheme"
 .test.input.dir
-"exists() on relative path"
+"fs.exists() on relative path"
 true
 "len() on relative directory"
 3
@@ -87,7 +87,7 @@ true
 ..test.input.dir
 "Parent path type checking"
 path
-"exists() on parent path"
+"fs.exists() on parent path"
 true
 "Parent path in let binding"
 ..Lambda.test
