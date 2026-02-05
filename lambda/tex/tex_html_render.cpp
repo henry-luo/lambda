@@ -824,7 +824,17 @@ static void render_kern(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
     if (node->width == 0.0f) return;
 
-    float em = pt_to_em(node->width, opts.base_font_size_px);
+    float em;
+    if (node->flags & TexNode::FLAG_MATHSPACING) {
+        // Inter-atom spacing: use MathLive-compatible scale
+        // MathLive uses mu/18 directly as em, while TeX uses mu*quad/18 as pt
+        // Scale factor: MathLive treats 1em = 18mu, TeX uses quad = 18mu where quad ≈ 10pt
+        // For 16px base font, we need to convert from TeX pt to MathLive em
+        // The ratio is approximately 16/10 = 1.6 to match MathLive spacing
+        em = pt_to_em(node->width, opts.base_font_size_px) * 1.65f;
+    } else {
+        em = pt_to_em(node->width, opts.base_font_size_px);
+    }
 
     // use a span with inline-block width for spacing (MathLive compatible)
     strbuf_append_str(out, "<span style=\"display:inline-block;width:");
@@ -1283,10 +1293,17 @@ static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
     float sqrt_line_top = -pstrut_size - total_height + 0.1f;
     float content_top = -pstrut_size;
 
-    // MathLive structure: inline-block wrapper containing sqrt-index?, sqrt-sign, vlist-t
-    snprintf(buf, sizeof(buf), "<span style=\"display:inline-block;height:%.2fem\">",
-             total_height + total_depth);
-    strbuf_append_str(out, buf);
+    // MathLive structure differs:
+    // - Simple sqrt (\sqrt{x}): has inline-block wrapper
+    // - Nth-root (\sqrt[n]{x}): no inline-block wrapper
+    bool has_degree = (node->content.radical.degree != nullptr);
+
+    if (!has_degree) {
+        // Simple sqrt - add wrapper like MathLive
+        snprintf(buf, sizeof(buf), "<span style=\"display:inline-block;height:%.2fem\">",
+                 total_height + total_depth);
+        strbuf_append_str(out, buf);
+    }
 
     // index (if present) - for \sqrt[n]{x}
     if (node->content.radical.degree) {
@@ -1368,7 +1385,11 @@ static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
 
     strbuf_append_str(out, "</span>");  // close vlist
     strbuf_append_str(out, "</span></span>");  // close vlist-r, vlist-t
-    strbuf_append_str(out, "</span>");  // close inline-block wrapper
+
+    // close wrapper for simple sqrt (no degree)
+    if (!has_degree) {
+        strbuf_append_str(out, "</span>");
+    }
 }
 
 // render subscript/superscript - MathLive-compatible vlist structure
@@ -2018,33 +2039,33 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     // MathLive uses minimum strut heights for consistent baseline
     // Minimum height is approximately 0.7em for typical math content
     const float MIN_STRUT_HEIGHT = 0.7f;
-    const float MIN_STRUT_DEPTH = 0.2f;
+    const float MIN_STRUT_DEPTH = 0.08f;
 
-    // Use at least minimum values
+    // Use at least minimum values like MathLive
     if (height_em < MIN_STRUT_HEIGHT) height_em = MIN_STRUT_HEIGHT;
-    if (depth_em < MIN_STRUT_DEPTH && depth_em > 0.01f) depth_em = MIN_STRUT_DEPTH;
+    if (depth_em < MIN_STRUT_DEPTH) depth_em = MIN_STRUT_DEPTH;
 
     char class_buf[64];
 
-    // top strut
+    // top strut - MathLive style (no display:inline-block)
     snprintf(class_buf, sizeof(class_buf), "%s__strut", opts.class_prefix);
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"display:inline-block;height:");
+    strbuf_append_str(out, "\" style=\"height:");
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.2fem", round3(height_em));
+    snprintf(buf, sizeof(buf), "%.2gem", height_em);
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 
-    // bottom strut - use MathLive-compatible class name
+    // bottom strut - MathLive-compatible class name (no display:inline-block)
     snprintf(class_buf, sizeof(class_buf), "%s__strut--bottom", opts.class_prefix);
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"display:inline-block;height:");
+    strbuf_append_str(out, "\" style=\"height:");
 
-    snprintf(buf, sizeof(buf), "%.2fem;vertical-align:%.2fem",
-             round3(height_em + depth_em), round3(-depth_em));
+    snprintf(buf, sizeof(buf), "%.2gem;vertical-align:%.2gem",
+             height_em + depth_em, -depth_em);
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 }
@@ -2062,13 +2083,7 @@ void render_texnode_to_html(TexNode* node, StrBuf* out, const HtmlRenderOptions&
 
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\"");
-
-    if (opts.include_styles) {
-        strbuf_append_str(out, " style=\"display:inline-block;white-space:nowrap\"");
-    }
-
-    strbuf_append_str(out, ">");
+    strbuf_append_str(out, "\">");
 
     // add struts for baseline
     add_struts(node, out, opts);

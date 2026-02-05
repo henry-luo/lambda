@@ -773,6 +773,7 @@ static TexNode* typeset_row(MathASTNode* node, MathContext& ctx) {
             if (spacing_mu > 0) {
                 float spacing_pt = mu_to_pt(spacing_mu, ctx);
                 TexNode* kern = make_kern(ctx.arena, spacing_pt);
+                kern->flags |= TexNode::FLAG_MATHSPACING;  // mark as inter-atom spacing
                 link_node(first, last, kern);
             }
         }
@@ -1849,7 +1850,7 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
 
     // Track hlines (bitmask: bit i set means hline before row i)
     uint32_t hlines = 0;
-    
+
     // Track extra spacing after each row (from \\[5pt] syntax)
     float* row_extra_spacing = (float*)alloca(num_rows * sizeof(float));
     for (int r = 0; r < num_rows; r++) {
@@ -1866,7 +1867,7 @@ static TexNode* typeset_array_node(MathASTNode* node, MathContext& ctx) {
             hlines |= (1u << row_idx);
             log_debug("tex_math_ast_typeset: hline before row %d", row_idx);
         }
-        
+
         // Store extra row spacing
         row_extra_spacing[row_idx] = row->row_extra_spacing;
         if (row->row_extra_spacing > 0.0f) {
