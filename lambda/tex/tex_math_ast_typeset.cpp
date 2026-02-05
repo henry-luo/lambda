@@ -1398,7 +1398,15 @@ static TexNode* typeset_scripts_node(MathASTNode* node, MathContext& ctx) {
 static TexNode* typeset_delimited_node(MathASTNode* node, MathContext& ctx) {
     TexNode* content = node->body ? typeset_node(node->body, ctx) : make_hbox(ctx.arena);
 
-    return typeset_delimited(node->delimited.left_delim, content, node->delimited.right_delim, ctx, node->delimited.extensible);
+    TexNode* result = typeset_delimited(node->delimited.left_delim, content, node->delimited.right_delim, ctx, node->delimited.extensible);
+
+    // If body is an ARRAY (matrix environment), mark result with FLAG_MATRIX
+    // This causes HTML renderer to use display:inline-block wrapper
+    if (node->body && node->body->type == MathNodeType::ARRAY) {
+        result->flags |= TexNode::FLAG_MATRIX;
+    }
+
+    return result;
 }
 
 // ============================================================================
