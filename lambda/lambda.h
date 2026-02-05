@@ -265,13 +265,47 @@ typedef struct Pool Pool;
 // A path is a linked chain of segments from leaf to root
 // Example: file.etc.hosts -> Path("hosts") -> Path("etc") -> Path("file") -> ROOT
 typedef struct Path Path;
+typedef struct PathMeta PathMeta;
+
+// Path metadata structure (optional, allocated on demand)
+// Stores file/directory metadata without loading content
+struct PathMeta {
+    int64_t size;           // file size in bytes (-1 for dirs or unknown)
+    DateTime modified;      // last modification time
+    uint8_t flags;          // is_dir (bit 0), is_link (bit 1)
+    uint8_t mode;           // Unix permissions (compressed to 8 bits: rwx for owner)
+};
+
+// Path metadata flags
+#define PATH_META_IS_DIR   0x01
+#define PATH_META_IS_LINK  0x02
+
+// Path segment type flags (stored in flags field)
+// These distinguish between regular segments, wildcards, and dynamic segments
+// Note: Named with LPATH_ prefix to avoid conflict with validator's PathSegmentType
+typedef enum {
+    LPATH_SEG_NORMAL = 0,        // regular segment (literal string)
+    LPATH_SEG_WILDCARD = 1,      // single wildcard (*) - match one segment
+    LPATH_SEG_WILDCARD_REC = 2,  // recursive wildcard (**) - match zero or more segments
+    LPATH_SEG_DYNAMIC = 3,       // dynamic segment (runtime-computed, name is NULL until resolved)
+} LPathSegmentType;
+
+// Path flags (bits 0-1 for segment type, bit 7 for metadata loaded)
+#define PATH_FLAG_META_LOADED  0x80  // bit 7: metadata has been stat'd and loaded
+
 struct Path {
     TypeId type_id;         // LMD_TYPE_PATH
-    uint8_t flags;          // reserved
+    uint8_t flags;          // segment type (bits 0-1), metadata loaded (bit 7)
     uint16_t ref_cnt;       // reference count
-    const char* name;       // segment name (interned via name_pool)
+    const char* name;       // segment name (interned via name_pool), NULL for wildcards
     Path* parent;           // parent segment (NULL for root schemes)
+    uint64_t result;        // cached resolved content (0 = not resolved yet)
+    PathMeta* meta;         // optional metadata (NULL until stat'd)
 };
+
+// Helper macros for path segment type
+#define PATH_GET_SEG_TYPE(p)      ((LPathSegmentType)((p)->flags & 0x03))
+#define PATH_SET_SEG_TYPE(p, t)   ((p)->flags = ((p)->flags & 0xFC) | ((t) & 0x03))
 
 // Path scheme identifiers (predefined roots)
 typedef enum {
@@ -307,15 +341,18 @@ bool path_is_wildcard(Path* path);                                // Check if se
 bool path_is_wildcard_recursive(Path* path);                      // Check if segment is **
 bool path_has_wildcards(Path* path);                              // Check if path has any wildcards
 
-// Fixed-arity path builders for JIT (no variadic functions in C2MIR)
-Path* path_build1(Pool* pool, int scheme, const char* s1);
-Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2);
-Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3);
-Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4);
-Path* path_build5(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5);
-Path* path_build6(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6);
-Path* path_build7(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7);
-Path* path_build8(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7, const char* s8);
+// Path content loading (lazy evaluation support)
+Item path_load_content(Path* path);                               // Load path content (file/URL)
+int64_t path_get_length(Path* path);                              // Get path content length (triggers load)
+Item path_get_item(Path* path, int64_t index);                    // Get item at index (triggers load)
+
+// Path resolution for iteration (returns list for dirs, content for files)
+Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration
+bool path_ends_with_wildcard(Path* path);                         // Check if leaf is * or **
+void path_load_metadata(Path* path);                              // Load metadata via stat()
+
+// System function: exists()
+Item fn_exists(Item path);                                        // Check if path exists
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);

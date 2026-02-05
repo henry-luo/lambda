@@ -7,6 +7,29 @@ void array_set(Array* arr, int index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 Item typeditem_to_item(TypedItem *titem);
+Item fn_input1(Item url);
+
+// External: path resolution for iteration (implemented in path.c)
+extern "C" Item path_resolve_for_iteration(Path* path);
+
+// Internal helper: resolve path content and cache it
+// Uses the new path_resolve_for_iteration which handles directories and files properly
+static Item resolve_path_content(Path* path) {
+    if (!path) return ItemNull;
+    
+    // Check if already resolved
+    if (path->result != 0) {
+        return {.item = path->result};
+    }
+    
+    // Use the new path resolution which handles:
+    // - Directories: returns list of child paths
+    // - Files: returns parsed content
+    // - Wildcards: expands to list of matching paths
+    // - Non-existent: returns null
+    // - Access errors: returns error
+    return path_resolve_for_iteration(path);
+}
 
 Array* array() {
     Array *arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -526,6 +549,11 @@ Item item_at(Item data, int index) {
         String *ch_str = heap_strcpy(buf, 1);
         if (type_id == LMD_TYPE_SYMBOL) return {.item = y2it(ch_str)};
         else return {.item = s2it(ch_str)};
+    }
+    case LMD_TYPE_PATH: {
+        // Lazy evaluation: resolve path content and delegate to it
+        Item resolved = resolve_path_content(data.path);
+        return item_at(resolved, index);
     }
     // case LMD_TYPE_BINARY: todo - proper binary data access
     default:

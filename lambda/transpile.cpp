@@ -3366,11 +3366,10 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
 }
 
 // transpile path expression like file.etc.hosts to runtime path construction
+// Uses path_new() + path_extend()/path_wildcard()/path_wildcard_recursive() chain
 void transpile_path_expr(Transpiler* tp, AstPathNode *path_node) {
     log_debug("transpile_path_expr: scheme=%d, segments=%d", path_node->scheme, path_node->segment_count);
 
-    // C2MIR does not support variadic functions, so we use fixed-arity path_build1-8
-    // For paths with more segments, we chain path_extend calls
     int seg_count = path_node->segment_count;
 
     if (seg_count == 0) {
@@ -3381,70 +3380,48 @@ void transpile_path_expr(Transpiler* tp, AstPathNode *path_node) {
         return;
     }
 
-    if (seg_count <= 8) {
-        // Use fixed-arity path_buildN function
-        strbuf_append_str(tp->code_buf, "path_build");
-        strbuf_append_int(tp->code_buf, seg_count);
-        strbuf_append_str(tp->code_buf, "(rt->pool,");
-        strbuf_append_int(tp->code_buf, (int)path_node->scheme);
-
-        // Emit each segment as a string literal
-        for (int i = 0; i < seg_count; i++) {
-            strbuf_append_char(tp->code_buf, ',');
-            strbuf_append_char(tp->code_buf, '"');
-            String* seg = path_node->segments[i];
-            // Escape the string content
-            for (size_t j = 0; j < seg->len; j++) {
-                char c = seg->chars[j];
-                if (c == '"' || c == '\\') {
-                    strbuf_append_char(tp->code_buf, '\\');
-                }
-                strbuf_append_char(tp->code_buf, c);
-            }
-            strbuf_append_char(tp->code_buf, '"');
+    // Build path using chained path_extend/path_wildcard/path_wildcard_recursive calls
+    // Start with opening all the nested calls
+    for (int i = seg_count - 1; i >= 0; i--) {
+        AstPathSegment* seg = &path_node->segments[i];
+        switch (seg->type) {
+            case LPATH_SEG_WILDCARD:
+                strbuf_append_str(tp->code_buf, "path_wildcard(rt->pool,");
+                break;
+            case LPATH_SEG_WILDCARD_REC:
+                strbuf_append_str(tp->code_buf, "path_wildcard_recursive(rt->pool,");
+                break;
+            default:  // LPATH_SEG_NORMAL
+                strbuf_append_str(tp->code_buf, "path_extend(rt->pool,");
+                break;
         }
-        strbuf_append_char(tp->code_buf, ')');
-    } else {
-        // For paths with more than 8 segments, use path_new + path_extend chain
-        // Build first 8 segments with path_build8, then extend with remaining
-        strbuf_append_str(tp->code_buf, "path_extend(rt->pool,");
+    }
 
-        // Recursively handle remaining segments
-        int remaining = seg_count - 8;
-        for (int r = remaining - 1; r >= 0; r--) {
-            strbuf_append_str(tp->code_buf, "path_extend(rt->pool,");
-        }
+    // The innermost call is path_new for the scheme
+    strbuf_append_str(tp->code_buf, "path_new(rt->pool,");
+    strbuf_append_int(tp->code_buf, (int)path_node->scheme);
+    strbuf_append_char(tp->code_buf, ')');
 
-        // Build first 8 segments
-        strbuf_append_str(tp->code_buf, "path_build8(rt->pool,");
-        strbuf_append_int(tp->code_buf, (int)path_node->scheme);
-        for (int i = 0; i < 8; i++) {
-            strbuf_append_char(tp->code_buf, ',');
-            strbuf_append_char(tp->code_buf, '"');
-            String* seg = path_node->segments[i];
-            for (size_t j = 0; j < seg->len; j++) {
-                char c = seg->chars[j];
-                if (c == '"' || c == '\\') {
-                    strbuf_append_char(tp->code_buf, '\\');
-                }
-                strbuf_append_char(tp->code_buf, c);
-            }
-            strbuf_append_char(tp->code_buf, '"');
-        }
-        strbuf_append_char(tp->code_buf, ')');
-
-        // Add remaining segments via path_extend
-        for (int i = 8; i < seg_count; i++) {
+    // Now close each call in order with the segment arguments
+    for (int i = 0; i < seg_count; i++) {
+        AstPathSegment* seg = &path_node->segments[i];
+        if (seg->type == LPATH_SEG_NORMAL) {
+            // Normal segment: pass the string literal
             strbuf_append_str(tp->code_buf, ",\"");
-            String* seg = path_node->segments[i];
-            for (size_t j = 0; j < seg->len; j++) {
-                char c = seg->chars[j];
-                if (c == '"' || c == '\\') {
-                    strbuf_append_char(tp->code_buf, '\\');
+            if (seg->name) {
+                // Escape the string content
+                for (size_t j = 0; j < seg->name->len; j++) {
+                    char c = seg->name->chars[j];
+                    if (c == '"' || c == '\\') {
+                        strbuf_append_char(tp->code_buf, '\\');
+                    }
+                    strbuf_append_char(tp->code_buf, c);
                 }
-                strbuf_append_char(tp->code_buf, c);
             }
             strbuf_append_str(tp->code_buf, "\")");
+        } else {
+            // Wildcard: no additional argument needed, just close
+            strbuf_append_char(tp->code_buf, ')');
         }
     }
 }
