@@ -172,6 +172,41 @@ bool path_is_root(Path* path) {
 }
 
 /**
+ * Get the scheme type of a path.
+ * Walks to root and returns the scheme identifier.
+ * Returns -1 if path is invalid.
+ */
+PathScheme path_get_scheme(Path* path) {
+    if (!path) return (PathScheme)-1;
+
+    // Walk to root
+    while (path->parent && path->parent != &ROOT_SENTINEL) {
+        path = path->parent;
+    }
+
+    // Check against known scheme roots
+    for (int i = 0; i < PATH_SCHEME_COUNT; i++) {
+        if (path == scheme_roots[i]) {
+            return (PathScheme)i;
+        }
+    }
+
+    return (PathScheme)-1;  // unknown scheme
+}
+
+/**
+ * Check if a path is absolute (file, http, https, sys).
+ * Returns false for relative (.) and parent (..) paths.
+ */
+bool path_is_absolute(Path* path) {
+    PathScheme scheme = path_get_scheme(path);
+    return scheme == PATH_SCHEME_FILE ||
+           scheme == PATH_SCHEME_HTTP ||
+           scheme == PATH_SCHEME_HTTPS ||
+           scheme == PATH_SCHEME_SYS;
+}
+
+/**
  * Get the depth of a path (number of segments including scheme).
  */
 int path_depth(Path* path) {
@@ -465,6 +500,7 @@ Path* path_extend(Pool* pool, Path* base, const char* segment) {
 /**
  * Extend an existing path with another path's segments.
  * Appends all segments from suffix to base.
+ * Skips the scheme root of the suffix (only appends actual path segments).
  * Returns a new path.
  */
 Path* path_concat(Pool* pool, Path* base, Path* suffix) {
@@ -472,11 +508,12 @@ Path* path_concat(Pool* pool, Path* base, Path* suffix) {
     if (!suffix) return base;
 
     // Collect suffix segments info in reverse order
+    // Stop before the scheme root (which has parent == &ROOT_SENTINEL)
     struct { const char* name; LPathSegmentType type; } segments[64];
     int count = 0;
 
     Path* p = suffix;
-    while (p && p->parent && count < 64) {
+    while (p && p->parent && p->parent != &ROOT_SENTINEL && count < 64) {
         segments[count].name = p->name;
         segments[count].type = PATH_GET_SEG_TYPE(p);
         count++;

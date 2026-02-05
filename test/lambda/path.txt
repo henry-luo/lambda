@@ -93,3 +93,17 @@ true
 ..Lambda.test
 "Parent path with quoted segment"
 ..Lambda.'README.md'
+"Path ++ string: append segment"
+/etc.hosts
+"Path ++ string: multiple appends"
+/home.user.documents
+"Path ++ symbol: append symbol segment"
+/var.log
+"Path ++ relative path: concat relative path"
+/home.user.documents.file
+"Path ++ parent path: concat parent path"
+/home.user.projects.shared.lib
+"Path type preserved after ++"
+path
+"Chained ++ operations"
+/home.user.documents.'file.txt'

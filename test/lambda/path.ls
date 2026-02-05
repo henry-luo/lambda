@@ -144,3 +144,32 @@ parent_dir
 
 "Parent path with quoted segment"
 ..Lambda.'README.md'
+
+"Path ++ string: append segment"
+let base = /etc
+base ++ "hosts"
+
+"Path ++ string: multiple appends"
+let p1 = /home
+let p2 = p1 ++ "user"
+p2 ++ "documents"
+
+"Path ++ symbol: append symbol segment"
+let dir = /var
+dir ++ 'log'
+
+"Path ++ relative path: concat relative path"
+let abs = /home.user
+let rel = .documents.file
+abs ++ rel
+
+"Path ++ parent path: concat parent path"
+let base_path = /home.user.projects
+let parent_rel = ..shared.lib
+base_path ++ parent_rel
+
+"Path type preserved after ++"
+type(/etc ++ "hosts")
+
+"Chained ++ operations"
+/home ++ "user" ++ "documents" ++ "file.txt"
