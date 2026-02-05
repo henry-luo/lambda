@@ -276,7 +276,7 @@ static const char* font_to_class(const char* font_name) {
     if (strncmp(font_name, "cmr", 3) == 0) return "cmr";      // roman
     if (strncmp(font_name, "cmmi", 4) == 0) return "mathit";  // math italic
     if (strncmp(font_name, "cmsy", 4) == 0) return "cmr";     // symbols (use roman class)
-    if (strncmp(font_name, "cmex", 4) == 0) return "delim-size1";  // delimiters
+    if (strncmp(font_name, "cmex", 4) == 0) return "cmr";       // delimiters (use roman class)
     if (strncmp(font_name, "cmbx", 4) == 0) return "mathbf";  // bold
     if (strncmp(font_name, "cmss", 4) == 0) return "mathsf";  // sans-serif
     if (strncmp(font_name, "cmtt", 4) == 0) return "mathtt";  // typewriter
@@ -1266,6 +1266,16 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
         denom_depth = node->content.frac.denominator->depth / opts.base_font_size_px;
     }
 
+    // Apply minimum heights for fraction components (MathLive-style)
+    // Ensures fractions have consistent sizing similar to MathLive rendering
+    const float MIN_FRAC_COMPONENT_HEIGHT = 0.50f;  // minimum height for numerator/denominator
+    if (numer_height < MIN_FRAC_COMPONENT_HEIGHT) {
+        numer_height = MIN_FRAC_COMPONENT_HEIGHT;
+    }
+    if (denom_height < MIN_FRAC_COMPONENT_HEIGHT) {
+        denom_height = MIN_FRAC_COMPONENT_HEIGHT;
+    }
+
     // calculate positions (MathLive-style)
     // axis is at 0.25em above baseline typically
     float axis_height = 0.25f;
@@ -1296,15 +1306,15 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
         float delim_height = total_height + total_depth;
         const char* size_class;
         if (delim_height < 1.5f) {
-            size_class = "delim-size1";
+            size_class = "size1";
         } else if (delim_height < 2.4f) {
-            size_class = "ML__delim-size2";
+            size_class = "size2";
         } else if (delim_height < 3.0f) {
-            size_class = "delim-size3";
+            size_class = "size3";
         } else {
-            size_class = "ML__delim-size4";
+            size_class = "size4";
         }
-        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class + 6); // skip "delim-" prefix
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class);
         strbuf_append_str(out, buf);
         append_codepoint(out, (uint32_t)left_delim);
         strbuf_append_str(out, "</span>");
@@ -1404,15 +1414,15 @@ static void render_fraction(TexNode* node, StrBuf* out, const HtmlRenderOptions&
         float delim_height = total_height + total_depth;
         const char* size_class;
         if (delim_height < 1.5f) {
-            size_class = "delim-size1";
+            size_class = "size1";
         } else if (delim_height < 2.4f) {
-            size_class = "ML__delim-size2";
+            size_class = "size2";
         } else if (delim_height < 3.0f) {
-            size_class = "delim-size3";
+            size_class = "size3";
         } else {
-            size_class = "ML__delim-size4";
+            size_class = "size4";
         }
-        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class + 6);
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-%s\">", opts.class_prefix, size_class);
         strbuf_append_str(out, buf);
         append_codepoint(out, (uint32_t)right_delim);
         strbuf_append_str(out, "</span>");
@@ -1833,13 +1843,13 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
     // size1: < 1.5em, size2: 1.5-2.4em, size3: 2.4-3.0em, size4: > 3.0em
     const char* size_class;
     if (target_size < 1.5f) {
-        size_class = "delim-size1";
+        size_class = "ML__delim-size1";
     } else if (target_size < 2.4f) {
         size_class = "ML__delim-size2";
     } else if (target_size < 3.0f) {
-        size_class = "delim-size3";
+        size_class = "ML__delim-size3";
     } else {
-        size_class = "delim-size4";
+        size_class = "ML__delim-size4";
     }
 
     // for stackable delimiters (vertical bars), use stacked vlist structure
@@ -1860,8 +1870,8 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
         strbuf_append_str(out, buf);
 
         // vlist structure
-        snprintf(buf, sizeof(buf), "<span class=\"delim-size1 %s__vlist-t %s__vlist-t2\">",
-                 opts.class_prefix, opts.class_prefix);
+        snprintf(buf, sizeof(buf), "<span class=\"%s__delim-size1 %s__vlist-t %s__vlist-t2\">",
+                 opts.class_prefix, opts.class_prefix, opts.class_prefix);
         strbuf_append_str(out, buf);
 
         // vlist-r
