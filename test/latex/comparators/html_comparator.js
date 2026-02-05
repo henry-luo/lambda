@@ -19,23 +19,29 @@ import { JSDOM } from 'jsdom';
 
 // Class name normalization to semantic categories
 const CLASS_CATEGORIES = {
-    // Fractions
+    // Fractions (MathLive, KaTeX, Lambda)
     'ML__frac': 'frac',
     'ML__frac-line': 'frac-line',
+    'ML__mfrac': 'frac',
     'frac': 'frac',
     'frac-line': 'frac-line',
     'lambda-frac': 'frac',
     'mfrac': 'frac',
 
     // Accents (normalize all accent classes)
+    'ML__accent': 'accent',
     'ML__accent-body': 'accent',
+    'ML__accent-char': 'accent',
     'ML__accent-combining-char': 'accent',
+    'accent': 'accent',
     'accent-body': 'accent',
 
     // Column alignment (normalize to same category)
     'col-align-l': 'col-align',
     'col-align-c': 'col-align',
     'col-align-r': 'col-align',
+    'ML__arraycolsep': 'col-sep',
+    'arraycolsep': 'col-sep',
 
     // Delimiter sizes (normalize all sizes to same category)
     'ML__delim-size1': 'delim-size',
@@ -55,7 +61,7 @@ const CLASS_CATEGORIES = {
     'numer': 'numer',
     'denom': 'denom',
 
-    // Roots
+    // Roots (MathLive and Lambda variants)
     'ML__sqrt': 'sqrt',
     'ML__sqrt-index': 'sqrt-index',
     'ML__sqrt-sign': 'sqrt-sign',
@@ -63,10 +69,11 @@ const CLASS_CATEGORIES = {
     'ML__sqrt-symbol': 'sqrt-sign',
     'ML__sqrt-body': 'sqrt-body',
     'ML__root': 'sqrt-index',
-    'ML__delim-size1': 'delim-size',
-    'ML__delim-size2': 'delim-size',
     'sqrt': 'sqrt',
     'sqrt-sign': 'sqrt-sign',
+    'sqrt-index': 'sqrt-index',
+    'sqrt-line': 'sqrt-line',
+    'sqrt-body': 'sqrt-body',
     'lambda-sqrt': 'sqrt',
     'msqrt': 'sqrt',
     'mroot': 'sqrt',
@@ -75,9 +82,12 @@ const CLASS_CATEGORIES = {
     'ML__sup': 'superscript',
     'ML__sub': 'subscript',
     'ML__supsub': 'scripts',
+    'ML__msubsup': 'scripts',
+    'sup': 'superscript',
+    'sub': 'subscript',
+    'msubsup': 'scripts',
 
     // Scripts (KaTeX)
-    'msupsub': 'scripts',
     'vlist': 'vlist',
     'vlist-t': 'vlist',
     'vlist-t2': 'vlist',
@@ -91,8 +101,6 @@ const CLASS_CATEGORIES = {
     'ML__vlist-r': 'vlist',
     'ML__vlist-s': 'vlist',
     'ML__pstrut': 'strut',
-    'ML__msubsup': 'scripts',
-    'ML__mfrac': 'frac',
     'ML__center': 'center',
     'ML__nulldelimiter': 'delim',
 
@@ -100,12 +108,15 @@ const CLASS_CATEGORIES = {
     'ML__open': 'open',
     'ML__close': 'close',
     'ML__left-right': 'left-right',
+    'left-right': 'left-right',
     'delimsizing': 'delim',
     'nulldelimiter': 'delim',
     'mopen': 'open',
     'mclose': 'close',
+    'open': 'open',
+    'close': 'close',
 
-    // Atoms
+    // Atoms (MathLive, KaTeX, Lambda)
     'ML__mord': 'ord',
     'ML__mbin': 'bin',
     'ML__mrel': 'rel',
@@ -117,17 +128,63 @@ const CLASS_CATEGORIES = {
     'mpunct': 'punct',
     'minner': 'inner',
 
+    // Font/style classes (Lambda generates these)
+    'ML__mathit': 'mathit',
+    'ML__cmr': 'mathrm',
+    'mathit': 'mathit',
+    'mathrm': 'mathrm',
+    'mathbf': 'mathbf',
+    'mathsf': 'mathsf',
+    'mathtt': 'mathtt',
+    'mathbb': 'mathbb',
+    'mathfrak': 'mathfrak',
+    'cmr': 'mathrm',  // Lambda uses cmr for roman
+
     // Layout
     'ML__base': 'base',
     'ML__strut': 'strut',
+    'ML__strut--bottom': 'strut',
+    'ML__hlist': 'hlist',
+    'ML__latex': 'math-container',
     'base': 'base',
     'strut': 'strut',
+    'hlist': 'hlist',
 
     // Containers
     'katex': 'math-container',
     'katex-html': 'math-html',
-    'ML__latex': 'math-container',
     'lambda-math': 'math-container',
+
+    // Spacing classes (Lambda)
+    'ML__quad': 'space',
+    'ML__qquad': 'space',
+    'ML__thinspace': 'space',
+    'ML__mediumspace': 'space',
+    'ML__thickspace': 'space',
+    'ML__negativethinspace': 'space',
+    'ML__mspace': 'space',
+    'quad': 'space',
+    'qquad': 'space',
+    'thinspace': 'space',
+    'mediumspace': 'space',
+    'thickspace': 'space',
+    'negativethinspace': 'space',
+
+    // Operators
+    'ML__op-group': 'op',
+    'ML__op-symbol': 'op',
+    'ML__large-op': 'op',
+    'op-group': 'op',
+    'op-symbol': 'op',
+    'large-op': 'op',
+
+    // Tables/Arrays
+    'ML__mtable': 'mtable',
+    'mtable': 'mtable',
+
+    // Rules
+    'ML__rule': 'rule',
+    'rule': 'rule',
 
     // Sizing
     'sizing': 'sizing',
@@ -136,7 +193,6 @@ const CLASS_CATEGORIES = {
     // Text
     'ML__text': 'text',
     'text': 'text',
-    'mathrm': 'text',
     'textord': 'text'
 };
 
@@ -203,7 +259,7 @@ function shouldIgnoreElement(element) {
     }
 
     // Ignore struts (various class naming conventions)
-    if (element.classList.contains('strut') || 
+    if (element.classList.contains('strut') ||
         element.classList.contains('ML__strut') ||
         element.classList.contains('ML__strut--bottom') ||
         element.classList.contains('ML__pstrut')) {
@@ -450,7 +506,7 @@ function summarizeElement(node) {
  */
 function extractTextContent(node) {
     const texts = [];
-    
+
     function walk(n) {
         if (!n) return;
         if (n.type === 'text' && n.content) {
@@ -465,7 +521,7 @@ function extractTextContent(node) {
             }
         }
     }
-    
+
     walk(node);
     return texts;
 }
@@ -488,14 +544,14 @@ function compareHTMLTrees(lambdaHTML, refHTML) {
         const normalizedRef = normalizeHTMLTree(refRoot);
 
         compareHTMLNodes(normalizedLambda, normalizedRef, 'root', results);
-        
+
         // Text content bonus: if all text content matches in order, boost score
         const lambdaTexts = extractTextContent(normalizedLambda);
         const refTexts = extractTextContent(normalizedRef);
-        
+
         const textsMatch = lambdaTexts.length === refTexts.length &&
             lambdaTexts.every((t, i) => t === refTexts[i]);
-        
+
         if (textsMatch && lambdaTexts.length > 0) {
             // boost matched elements by 20% of total when text fully matches
             results.matchedElements += results.totalElements * 0.2;
