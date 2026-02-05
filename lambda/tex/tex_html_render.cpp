@@ -1057,9 +1057,19 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
     strbuf_append_str(out, "\"></span>");
 }
 
+// forward declaration for delimited group rendering
+static void render_delimited_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+
 // render horizontal list (row of items)
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
+
+    // Check if this is a delimited group (\left..\right)
+    // If so, render with special ML__left-right wrapper structure
+    if (node->flags & TexNode::FLAG_DELIMITED) {
+        render_delimited_hlist(node, out, opts, depth);
+        return;
+    }
 
     // Determine if this hlist needs a wrapper span.
     // We wrap hlists that contain complex structures (mtable, vlist, fraction, etc.)
@@ -1200,6 +1210,68 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
     if (needs_wrapper || has_color) {
         strbuf_append_str(out, "</span>");
     }
+}
+
+// render delimited group (\left..\right) with MathLive-compatible structure
+// MathLive wraps the entire group in a single ML__left-right span:
+// <span class="ML__left-right" style="margin-top:Xem;height:Yem">
+//   <span class="ML__open [ML__small-delim|ML__delim-sizeN]">(</span>
+//   ... content ...
+//   <span class="ML__close [ML__small-delim|ML__delim-sizeN]">)</span>
+// </span>
+static void render_delimited_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node) return;
+
+    char buf[256];
+
+    // calculate overall height for the left-right wrapper
+    float height_em = pt_to_em(node->height + node->depth, opts.base_font_size_px);
+    float axis_height = 0.25f;  // math axis in em
+    float margin_top = -height_em / 2.0f + axis_height;
+
+    // MathLive small-delim threshold is approximately 1.0em
+    const float SMALL_DELIM_THRESHOLD = 1.2f;
+
+    // open ML__left-right wrapper
+    snprintf(buf, sizeof(buf), "<span class=\"%s__left-right\" style=\"margin-top:%.3fem;height:%.5fem\">",
+             opts.class_prefix, margin_top, height_em);
+    strbuf_append_str(out, buf);
+
+    // render children, with special handling for Delimiter nodes
+    for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+        if (child->node_class == NodeClass::Delimiter) {
+            // render delimiter inline without its own ML__left-right wrapper
+            const char* delim_class = child->content.delim.is_left ? "open" : "close";
+            int32_t cp = child->content.delim.codepoint;
+            float target_size = child->content.delim.target_size / opts.base_font_size_px;
+
+            // determine size class
+            const char* size_class;
+            if (target_size < SMALL_DELIM_THRESHOLD) {
+                size_class = "small-delim";
+            } else if (target_size < 1.5f) {
+                size_class = "delim-size1";
+            } else if (target_size < 2.4f) {
+                size_class = "delim-size2";
+            } else if (target_size < 3.0f) {
+                size_class = "delim-size3";
+            } else {
+                size_class = "delim-size4";
+            }
+
+            snprintf(buf, sizeof(buf), "<span class=\"%s__%s %s__%s\">",
+                     opts.class_prefix, size_class, opts.class_prefix, delim_class);
+            strbuf_append_str(out, buf);
+            append_codepoint(out, cp);
+            strbuf_append_str(out, "</span>");
+        } else {
+            // render non-delimiter children normally
+            render_node(child, out, opts, depth + 1);
+        }
+    }
+
+    // close ML__left-right wrapper
+    strbuf_append_str(out, "</span>");
 }
 
 // render vertical list (stack of items) - MathLive vlist structure
