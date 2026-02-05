@@ -69,3 +69,24 @@ let etc_items = for (item in file.etc) item
 "Path iteration - collect types"
 let item_types = for (item in file.etc) type(item)
 item_types[0]
+
+"Relative path with cwd scheme"
+let rel_dir = cwd.test.input.dir
+rel_dir
+
+"exists() on relative path"
+exists(cwd.test.input.dir)
+
+"len() on relative directory"
+len(cwd.test.input.dir)
+
+"Relative path iteration with single wildcard (*) - list paths"
+for (item in cwd.test.input.dir.*) item
+
+"Relative path iteration with recursive wildcard (**) - list paths"
+for (item in cwd.test.input.dir.**) item
+
+"Wildcard finds nested items"
+let single_wildcard = for (item in cwd.test.input.dir.*) item
+let recursive_wildcard = for (item in cwd.test.input.dir.**) item
+(len(recursive_wildcard) > len(single_wildcard))
