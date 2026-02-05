@@ -898,42 +898,26 @@ TexNode* typeset_delimited(int32_t left_delim, TexNode* content,
     TexNode* left = nullptr;
     TexNode* right = nullptr;
 
-    // For non-extensible delimiters (matrix environments), use cmex10 next-larger chain
-    // to find best-fit delimiter size without using extensible recipes
-    // For extensible delimiters (\left/\right), use Delimiter nodes that trigger
-    // the full extensible recipe in DVI output
-    if (!extensible) {
-        // Non-extensible: use cmex10 next-larger chain for properly sized delimiters
-        left = make_sized_delimiter(arena, left_delim, true, delim_size, ctx);
-        if (left) {
-            total_width += left->width;
-            total_height = fmaxf(total_height, left->height);
-            total_depth = fmaxf(total_depth, left->depth);
-        }
+    // Both extensible and non-extensible use Delimiter nodes for HTML renderer
+    // The 'extensible' flag affects DVI output behavior, not HTML structure
+    if (left_delim != 0) {
+        left = make_delimiter(arena, left_delim, delim_size, true);
+        left->width = ctx.base_size_pt * 0.4f;
+        left->height = delim_size / 2.0f + ctx.axis_height;
+        left->depth = delim_size / 2.0f - ctx.axis_height;
+        total_width += left->width;
+        total_height = fmaxf(total_height, left->height);
+        total_depth = fmaxf(total_depth, left->depth);
+    }
 
-        right = make_sized_delimiter(arena, right_delim, false, delim_size, ctx);
-        if (right) {
-            total_width += right->width;
-            total_height = fmaxf(total_height, right->height);
-            total_depth = fmaxf(total_depth, right->depth);
-        }
-    } else {
-        // Extensible: use Delimiter nodes (will be sized by DVI output)
-        if (left_delim != 0) {
-            left = make_delimiter(arena, left_delim, delim_size, true);
-            left->width = ctx.base_size_pt * 0.4f;
-            left->height = delim_size / 2.0f + ctx.axis_height;
-            left->depth = delim_size / 2.0f - ctx.axis_height;
-            total_width += left->width;
-        }
-
-        if (right_delim != 0) {
-            right = make_delimiter(arena, right_delim, delim_size, false);
-            right->width = ctx.base_size_pt * 0.4f;
-            right->height = delim_size / 2.0f + ctx.axis_height;
-            right->depth = delim_size / 2.0f - ctx.axis_height;
-            total_width += right->width;
-        }
+    if (right_delim != 0) {
+        right = make_delimiter(arena, right_delim, delim_size, false);
+        right->width = ctx.base_size_pt * 0.4f;
+        right->height = delim_size / 2.0f + ctx.axis_height;
+        right->depth = delim_size / 2.0f - ctx.axis_height;
+        total_width += right->width;
+        total_height = fmaxf(total_height, right->height);
+        total_depth = fmaxf(total_depth, right->depth);
     }
 
     // Create containing HBox
