@@ -3462,6 +3462,40 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_str(tp->code_buf, "elmt_get(");
         transpile_expr(tp, field_node->object);
     }
+    else if (field_node->object->type->type_id == LMD_TYPE_PATH) {
+        // For paths, check if the field is a known property (name, is_dir, is_file, is_link)
+        // In that case use item_attr; otherwise use fn_member to extend the path
+        bool is_property = false;
+        if (field_node->field->node_type == AST_NODE_IDENT) {
+            // extract the identifier text to check against known properties
+            TSNode field_ts_node = field_node->field->node;
+            uint32_t len = ts_node_end_byte(field_ts_node) - ts_node_start_byte(field_ts_node);
+            const char* text = tp->source + ts_node_start_byte(field_ts_node);
+            if ((len == 4 && strncmp(text, "name", 4) == 0) ||
+                (len == 6 && strncmp(text, "is_dir", 6) == 0) ||
+                (len == 7 && strncmp(text, "is_file", 7) == 0) ||
+                (len == 7 && strncmp(text, "is_link", 7) == 0) ||
+                (len == 4 && strncmp(text, "size", 4) == 0) ||
+                (len == 8 && strncmp(text, "modified", 8) == 0)) {
+                is_property = true;
+            }
+        }
+        if (is_property) {
+            // use item_attr for property access - pass key as const char*
+            strbuf_append_str(tp->code_buf, "item_attr(");
+            transpile_box_item(tp, field_node->object);
+            strbuf_append_str(tp->code_buf, ",\"");
+            TSNode field_ts_node = field_node->field->node;
+            uint32_t len = ts_node_end_byte(field_ts_node) - ts_node_start_byte(field_ts_node);
+            const char* text = tp->source + ts_node_start_byte(field_ts_node);
+            strbuf_append_str_n(tp->code_buf, text, len);
+            strbuf_append_str(tp->code_buf, "\")");
+            return;  // early return - we've handled this case completely
+        } else {
+            strbuf_append_str(tp->code_buf, "fn_member(");
+            transpile_expr(tp, field_node->object);
+        }
+    }
     else {
         strbuf_append_str(tp->code_buf, "fn_member(");
         transpile_expr(tp, field_node->object);

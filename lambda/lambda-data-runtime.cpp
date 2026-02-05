@@ -11,6 +11,7 @@ Item fn_input1(Item url);
 
 // External: path resolution for iteration (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
+extern "C" void path_load_metadata(Path* path);
 
 // Internal helper: resolve path content and cache it
 // Uses the new path_resolve_for_iteration which handles directories and files properly
@@ -575,6 +576,54 @@ Item item_attr(Item data, const char* key) {
         Element* elmt = data.element;
         bool is_found;
         return _map_get((TypeMap*)elmt->type, elmt->data, (char*)key, &is_found);
+    }
+    case LMD_TYPE_PATH: {
+        Path* path = data.path;
+        if (!path) return ItemNull;
+        
+        // path.name - returns the leaf segment name as a string
+        if (strcmp(key, "name") == 0) {
+            if (!path->name) return ItemNull;
+            String* name_str = heap_strcpy((char*)path->name, strlen(path->name));
+            return (Item){.item = s2it(name_str)};
+        }
+        
+        // Metadata-based properties - require loading metadata first
+        if (strcmp(key, "is_dir") == 0 || strcmp(key, "is_file") == 0 || strcmp(key, "is_link") == 0 ||
+            strcmp(key, "size") == 0 || strcmp(key, "modified") == 0) {
+            // Load metadata if not already loaded
+            if (!(path->flags & PATH_FLAG_META_LOADED)) {
+                path_load_metadata(path);
+            }
+            
+            PathMeta* meta = path->meta;
+            if (!meta) {
+                // Path doesn't exist or couldn't be stat'd
+                if (strcmp(key, "size") == 0) return (Item){.item = i2it(-1)};  // -1 for unknown/error
+                if (strcmp(key, "modified") == 0) return ItemNull;  // null for unknown
+                return (Item){.item = b2it(false)};  // false for boolean flags
+            }
+            
+            if (strcmp(key, "is_dir") == 0) {
+                return (Item){.item = b2it((meta->flags & PATH_META_IS_DIR) != 0)};
+            }
+            if (strcmp(key, "is_file") == 0) {
+                return (Item){.item = b2it((meta->flags & PATH_META_IS_DIR) == 0)};
+            }
+            if (strcmp(key, "is_link") == 0) {
+                return (Item){.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
+            }
+            if (strcmp(key, "size") == 0) {
+                return push_l(meta->size);  // int64_t size
+            }
+            if (strcmp(key, "modified") == 0) {
+                return push_k(meta->modified);  // DateTime
+            }
+        }
+        
+        // Unknown property
+        log_debug("item_attr: unknown path property '%s'", key);
+        return ItemNull;
     }
     default:
         log_debug("item_attr: unsupported type %d", type_id);

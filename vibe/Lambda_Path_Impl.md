@@ -1,5 +1,66 @@
 # Lambda Path Implementation: Lazy Loading for Files and Directories
 
+## Implementation Status (Feb 2026)
+
+✅ **Completed Features:**
+- Path type (`LMD_TYPE_PATH`) with linked segment structure
+- Path schemes: `file`, `http`, `https`, `sys`, `cwd` (relative `.`)
+- Path string representation with proper quoting (`.test.input.dir.'file.txt'`)
+- Wildcard support: `*` (single level), `**` (recursive)
+- `exists(path)` system function
+- `len(path)` for directories (returns entry count)
+- `for item in path` iteration over directories
+- `input(dir)` returns list of Path items (unified with path semantics)
+- PathMeta for file metadata (size, modified, flags, mode)
+
+🔄 **In Progress / TODO:**
+- Path property access (`path.name`, `path.is_dir`, `path.is_file`, `path.is_link`)
+- Metadata properties: `path.size`, `path.modified`
+- HTTP path resolution
+- Content caching in `path->result`
+
+⏳ **Deferred to Future:**
+- Extended properties: `path.stem`, `path.extension`, `path.segments`, `path.scheme`
+- Boolean properties: `path.is_absolute`, `path.is_relative`
+- Conversion functions: `to_string(path)`, `to_uri(path)`
+
+---
+
+## Data Structure
+
+```c
+// Path segment linked list (leaf → root direction)
+struct Path {
+    TypeId type_id;         // LMD_TYPE_PATH
+    uint8_t flags;          // segment type + PATH_FLAG_META_LOADED
+    uint16_t ref_cnt;       // reference count
+    const char* name;       // segment name (interned via name_pool)
+    Path* parent;           // parent segment (NULL for root sentinel)
+    uint64_t result;        // cached resolved content (0 = not resolved)
+    PathMeta* meta;         // optional metadata (NULL until stat'd)
+};
+
+// Metadata (lazy-loaded via stat)
+typedef struct PathMeta {
+    int64_t size;           // file size (-1 for unknown)
+    DateTime modified;      // last modification time
+    uint8_t flags;          // PATH_META_IS_DIR, PATH_META_IS_LINK
+    uint8_t mode;           // Unix permissions (user bits only)
+} PathMeta;
+```
+
+### Path Schemes
+
+| Scheme | Keyword | Example | Resolves To |
+|--------|---------|---------|-------------|
+| File (absolute) | `file` | `file.etc.hosts` | `/etc/hosts` |
+| Relative (cwd) | `cwd` | `cwd.test.input` | `./test/input` |
+| HTTP | `http` | `http.api.example.com` | `http://api.example.com` |
+| HTTPS | `https` | `https.secure.api` | `https://secure.api` |
+| System | `sys` | `sys.env.PATH` | System info |
+
+---
+
 ## Overview
 
 This document specifies how to implement proper lazy loading for Lambda paths, enabling paths to behave as first-class collection types that can be iterated, indexed, and queried without eagerly loading content.
@@ -21,10 +82,10 @@ This document specifies how to implement proper lazy loading for Lambda paths, e
 
 A Path can be in one of these states:
 
-| State | `result` field | Description |
-|-------|----------------|-------------|
-| **Unresolved** | `0` | Path is just a reference, nothing loaded |
-| **Resolved** | Non-zero `Item` | Content has been loaded and cached |
+| State          | `result` field  | Description                              |
+| -------------- | --------------- | ---------------------------------------- |
+| **Unresolved** | `NULL`          | Path is just a reference, nothing loaded |
+| **Resolved**   | Non-zero `Item` | Content has been loaded and cached       |
 
 ### 1.2 Resolution Semantics
 
@@ -287,13 +348,19 @@ static Item resolve_file_content(Path* path, const char* file_path) {
 | `for x in path` | Iterate children (paths) | Iterate content items |
 | `path[i]` | Get i-th child path | Get i-th content item |
 | `path.name` | Last segment name | Last segment name |
-| `path.size` | Dir total size (or -1) | File size in bytes |
-| `path.modified` | Dir mtime | File mtime |
-| `path.parent` | Parent path | Parent path |
-| `path.scheme` | "file", "http", etc. | "file", "http", etc. |
 | `path.is_dir` | true | false |
 | `path.is_file` | false | true |
+| `path.is_link` | true if symlink | true if symlink |
+| `path.size` | -1 (future: total) | File size in bytes |
+| `path.modified` | Dir mtime | File mtime |
 | `exists(path)` | true/false | true/false |
+
+**Deferred to future:**
+- `path.stem`, `path.extension` - name parsing
+- `path.segments`, `path.scheme` - path decomposition
+- `path.is_absolute`, `path.is_relative` - path type checks
+- `path.parent` - parent path navigation
+- `to_string(path)`, `to_uri(path)` - conversion functions
 
 ### 3.2 fn_len() for PATH
 
@@ -362,11 +429,6 @@ case LMD_TYPE_PATH: {
     if (strcmp(key, "parent") == 0) {
         if (!path->parent || path_is_root(path)) return ItemNull;
         return (Item){.path = path->parent};
-    }
-    if (strcmp(key, "scheme") == 0) {
-        const char* scheme = path_get_scheme_name(path);
-        String* s = heap_strcpy(scheme, strlen(scheme));
-        return (Item){.item = s2it(s)};
     }
     
     // Metadata properties (require stat, but not content loading)
@@ -641,19 +703,28 @@ len(f)       // triggers load for length
 - [ ] Add PATH case to `item_attr()` for property access
 - [ ] Ensure for-loop transpilation works with PATH (uses `fn_len` + `item_at`)
 
-### 6.3 Path Property Functions
+### 6.3 Path Property Functions (Priority)
 
-- [ ] `path.name` - segment name
-- [ ] `path.parent` - parent path
-- [ ] `path.scheme` - scheme name
-- [ ] `path.size` - file/dir size (from metadata)
-- [ ] `path.modified` - modification time (from metadata)
+- [ ] `path.name` - segment name (leaf segment)
 - [ ] `path.is_dir` - directory check (from metadata)
 - [ ] `path.is_file` - file check (from metadata)
 - [ ] `path.is_link` - symlink check (from metadata)
-- [ ] `path.mode` - Unix permissions (from metadata)
+- [ ] `path.size` - file/dir size (from metadata)
+- [ ] `path.modified` - modification time (from metadata)
 
-### 6.4 Tests
+### 6.4 Path Property Functions (Deferred)
+
+- [ ] `path.stem` - name without extension
+- [ ] `path.extension` - file extension (e.g. ".json")
+- [ ] `path.parent` - parent path
+- [ ] `path.scheme` - scheme name ("file", "http", "cwd", etc.)
+- [ ] `path.segments` - list of all segment names
+- [ ] `path.is_absolute` - check if it is absolute path
+- [ ] `path.mode` - Unix permissions (from metadata)
+- [ ] `to_string(path)` - Convert path to OS path string
+- [ ] `to_uri(path)` - Convert path to URI
+
+### 6.5 Tests
 
 - [ ] Test directory iteration: `for f in file.test.*`
 - [ ] Test recursive wildcard: `for f in file.test.**`
@@ -820,3 +891,73 @@ let data = exists(file.cache.data)
 
 4. **Memory Management**: Who owns the resolved content?
    - **Recommendation**: Use heap allocation with ref counting (existing pattern)
+---
+
+## 10. Implementation Reference
+
+### Key Source Files
+
+| File | Purpose |
+|------|---------|
+| [lambda/path.c](../lambda/path.c) | Core path implementation: creation, resolution, iteration, wildcards |
+| [lambda/lambda.h](../lambda/lambda.h) | Path struct, PathMeta, PathScheme enum, API declarations |
+| [lambda/build_ast.cpp](../lambda/build_ast.cpp) | Path literal parsing, scheme detection (`get_path_scheme_from_name`) |
+| [lambda/transpile.cpp](../lambda/transpile.cpp) | Code generation for path expressions |
+| [lambda/input/input_dir.cpp](../lambda/input/input_dir.cpp) | `input(dir)` returns List of Path items |
+
+### Core API (path.c)
+
+```c
+// Path creation
+Path* path_new(Pool* pool, int scheme);                    // Create root path
+Path* path_extend(Pool* pool, Path* base, const char* seg); // Append segment
+Path* path_wildcard(Pool* pool, Path* base);               // Append *
+Path* path_wildcard_recursive(Pool* pool, Path* base);     // Append **
+
+// Path resolution
+Item path_resolve_for_iteration(Path* path);  // Resolve for for-loop
+int64_t path_len(Path* path);                 // Get length (entry count for dirs)
+bool fn_exists(Path* path);                   // Check existence
+
+// Path conversion
+void path_to_string(Path* path, StrBuf* out);    // Lambda syntax: file.etc.hosts
+void path_to_os_path(Path* path, StrBuf* out);   // OS path: /etc/hosts
+```
+
+### Grammar (tree-sitter-lambda/grammar.js)
+
+```javascript
+// Path fields can be identifiers, symbols, or wildcards
+member_expr: $ => prec.left(PREC.MEMBER, seq(
+  field('object', $.primary_expr),
+  ".",
+  field('field', choice(
+    $.identifier,
+    $.symbol,           // 'quoted.name'
+    $.index,            // [expr]
+    $.path_wildcard,    // *
+    $.path_wildcard_recursive  // **
+  ))
+)),
+```
+
+### Example Usage
+
+```lambda
+// Absolute paths (file scheme)
+file.etc.hosts                    // /etc/hosts
+file.home.user.'config.json'      // /home/user/config.json
+
+// Relative paths (cwd scheme)  
+cwd.test.input.dir                // ./test/input/dir
+
+// Wildcards
+cwd.src.*                         // All entries in ./src
+cwd.src.**                        // All entries recursively
+
+// Operations
+exists(cwd.test.input.dir)        // true/false
+len(cwd.test.input.dir)           // entry count
+for (item in cwd.src.*) item      // iterate as Path items
+input("./test/input/dir")         // returns List of Path items
+```
