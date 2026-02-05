@@ -353,8 +353,8 @@ Item path_resolve_for_iteration(Path* path);                      // Resolve pat
 bool path_ends_with_wildcard(Path* path);                         // Check if leaf is * or **
 void path_load_metadata(Path* path);                              // Load metadata via stat()
 
-// System function: exists()
-Item fn_exists(Item path);                                        // Check if path exists
+// System function: fs.exists() - check if file/directory exists
+Item fn_fs_exists(Item path);                                     // Check if path exists
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);
@@ -629,4 +629,16 @@ typedef struct Context {
     Item pn_output2(Item source, Item url);               // output(source, url) - auto-detect format
     Item pn_output3(Item source, Item url, Item format);  // output(source, url, format) - explicit format
 
+    // fs module functions (procedural)
+    Item pn_fs_copy(Item src, Item dst);
+    Item pn_fs_move(Item src, Item dst);
+    Item pn_fs_delete(Item path);
+    Item pn_fs_mkdir(Item path);
+    Item pn_fs_touch(Item path);
+    Item pn_fs_symlink(Item target, Item link);
+    Item pn_fs_chmod(Item path, Item mode);
+    Item pn_fs_rename(Item old_path, Item new_path);
+    Item pn_fs_exists(Item path);
+
 #endif
+

@@ -67,7 +67,6 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
     {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
     {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY},  // not method-eligible
-    {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_PATH},  // exists(path) -> bool
     // string functions - method-eligible on strings
     {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
     {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
@@ -127,6 +126,16 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY},
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY},
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
+    // fs module functions - procedural (is_proc=true), not method-eligible
+    {SYSPROC_FS_COPY, "fs_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_MOVE, "fs_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_DELETE, "fs_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_MKDIR, "fs_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_TOUCH, "fs_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_SYMLINK, "fs_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_CHMOD, "fs_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FS_RENAME, "fs_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSFUNC_EXISTS, "fs_exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY},  // fs.exists(path) -> bool (pure read-only)
 };
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
@@ -895,7 +904,38 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     // For method calls, first build the object to get its type for validation
     AstNode* method_object = NULL;
     TypeId obj_type_id = LMD_TYPE_ANY;
+    
+    // Check if this is a built-in module call (e.g., fs.copy())
+    // Built-in modules are identified by name and don't require building the object
+    bool is_builtin_module_call = false;
+    StrView module_name = {0};
     if (is_method_call && !ts_node_is_null(object_node)) {
+        // Check if object is a simple identifier that matches a built-in module
+        TSSymbol obj_symbol = ts_node_symbol(object_node);
+        if (obj_symbol == SYM_PRIMARY_EXPR) {
+            TSNode inner = ts_node_child(object_node, 0);
+            if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
+                module_name = ts_node_source(tp, inner);
+                // Check for known built-in modules
+                if (strview_equal(&module_name, "fs")) {
+                    is_builtin_module_call = true;
+                    log_debug("builtin module call detected: %.*s.%.*s()",
+                        (int)module_name.length, module_name.str,
+                        (int)method_name.length, method_name.str);
+                }
+            }
+        } else if (obj_symbol == sym_identifier) {
+            module_name = ts_node_source(tp, object_node);
+            if (strview_equal(&module_name, "fs")) {
+                is_builtin_module_call = true;
+                log_debug("builtin module call detected: %.*s.%.*s()",
+                    (int)module_name.length, module_name.str,
+                    (int)method_name.length, method_name.str);
+            }
+        }
+    }
+    
+    if (is_method_call && !is_builtin_module_call && !ts_node_is_null(object_node)) {
         method_object = build_expr(tp, object_node);
         if (method_object && method_object->type) {
             obj_type_id = method_object->type->type_id;
@@ -906,7 +946,27 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     StrView func_name = ts_node_source(tp, function_node);
     SysFuncInfo* sys_func_info = NULL;
 
-    if (is_method_call) {
+    // For built-in module calls, construct the full function name (e.g., fs_copy)
+    if (is_builtin_module_call) {
+        char full_name[128];
+        snprintf(full_name, sizeof(full_name), "%.*s_%.*s",
+            (int)module_name.length, module_name.str,
+            (int)method_name.length, method_name.str);
+        StrView full_name_view = {full_name, strlen(full_name)};
+        sys_func_info = get_sys_func_info(&full_name_view, arg_count);
+        if (sys_func_info) {
+            log_debug("builtin module call resolved to sys func: %s", sys_func_info->name);
+        } else {
+            // Report unknown module function
+            record_semantic_error(tp, call_node, ERR_UNDEFINED_FUNCTION,
+                "unknown function '%.*s.%.*s'",
+                (int)module_name.length, module_name.str,
+                (int)method_name.length, method_name.str);
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
+    }
+    else if (is_method_call) {
         // Try method-style lookup: obj.method(args) -> method(obj, args)
         sys_func_info = get_sys_func_for_method(&method_name, arg_count, obj_type_id);
         if (sys_func_info) {

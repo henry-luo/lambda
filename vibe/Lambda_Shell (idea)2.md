@@ -1,5 +1,6 @@
 # Lambda Shell Scripting Proposal
 
+> **Author**: Claude Opus 4.5
 > **Version**: Draft 0.1
 > **Status**: Proposal
 > **Last Updated**: February 2026
@@ -19,14 +20,14 @@ This proposal defines file system operations and shell-like capabilities for Lam
 | `cat`, `less` | Read file | ❌ Need `read()` |
 | `echo > file` | Write file | ❌ Need `write()` |
 | `>>` | Append to file | ❌ Need `append()` |
-| `cp` | Copy | ❌ Need `copy()` |
-| `mv` | Move/rename | ❌ Need `move()` |
-| `rm` | Delete | ❌ Need `delete()` |
-| `mkdir -p` | Create directory | ❌ Need `mkdir()` |
-| `rmdir` | Remove directory | ❌ Need `rmdir()` |
-| `touch` | Create/update mtime | ❌ Need `touch()` |
-| `ln -s` | Create symlink | ❌ Need `symlink()` |
-| `chmod` | Change permissions | ❌ Need `chmod()` |
+| `cp` | Copy | ✅ `fs_copy()` implemented |
+| `mv` | Move/rename | ✅ `fs_move()` implemented |
+| `rm` | Delete | ✅ `fs_delete()` implemented |
+| `mkdir -p` | Create directory | ✅ `fs_mkdir()` implemented |
+| `rmdir` | Remove directory | ✅ `fs_rmdir()` implemented |
+| `touch` | Create/update mtime | ✅ `fs_touch()` implemented |
+| `ln -s` | Create symlink | ✅ `fs_symlink()` implemented |
+| `chmod` | Change permissions | ✅ `fs_chmod()` implemented |
 | `stat` | File metadata | ⚠️ Path properties proposed |
 
 ### Text Processing
@@ -126,16 +127,16 @@ write(/out.json, format(data, 'json'));
 
 ### File Operations
 
-| Function | Description |
-|----------|-------------|
-| `copy(src, dst)` | Copy file or directory |
-| `move(src, dst)` | Move/rename file or directory |
-| `delete(path)` | Delete file or directory |
-| `mkdir(path)` | Create directory (recursive) |
-| `rmdir(path)` | Remove empty directory |
-| `touch(path)` | Create file or update mtime |
-| `symlink(target, link)` | Create symbolic link |
-| `chmod(path, mode)` | Change permissions (e.g., "755") |
+| Function                | Description                      | Status |
+| ----------------------- | -------------------------------- | ------ |
+| `fs_copy(src, dst)`     | Copy file or directory           | ✅ Implemented |
+| `fs_move(src, dst)`     | Move/rename file or directory    | ✅ Implemented |
+| `fs_delete(path)`       | Delete file or directory         | ✅ Implemented |
+| `fs_mkdir(path)`        | Create directory (recursive)     | ✅ Implemented |
+| `fs_rmdir(path)`        | Remove empty directory           | ✅ Implemented |
+| `fs_touch(path)`        | Create file or update mtime      | ✅ Implemented |
+| `fs_symlink(target, link)` | Create symbolic link          | ✅ Implemented |
+| `fs_chmod(path, mode)`  | Change permissions (e.g., "755") | ✅ Implemented |
 
 ### Text Processing
 
