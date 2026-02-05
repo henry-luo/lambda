@@ -16,8 +16,8 @@
 extern void lambda_stack_overflow_error(const char* func_name);
 
 // Path resolution functions (implemented in path.c)
-extern Item fn_exists(Item path);
 extern Item path_resolve_for_iteration(Path* path);
+extern Item fn_fs_exists(Item path);
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
@@ -221,7 +221,6 @@ func_obj_t func_list[] = {
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
     {"fn_join", (fn_ptr) fn_join},
-    {"fn_exists", (fn_ptr) fn_exists},
     {"path_resolve_for_iteration", (fn_ptr) path_resolve_for_iteration},
     // variadic parameter access
     {"set_vargs", (fn_ptr) set_vargs},
@@ -233,6 +232,17 @@ func_obj_t func_list[] = {
     {"pn_fetch", (fn_ptr) pn_fetch},
     {"pn_output2", (fn_ptr) pn_output2},
     {"pn_output3", (fn_ptr) pn_output3},
+    // fs module procedures
+    {"pn_fs_copy", (fn_ptr) pn_fs_copy},
+    {"pn_fs_move", (fn_ptr) pn_fs_move},
+    {"pn_fs_delete", (fn_ptr) pn_fs_delete},
+    {"pn_fs_mkdir", (fn_ptr) pn_fs_mkdir},
+    {"pn_fs_touch", (fn_ptr) pn_fs_touch},
+    {"pn_fs_symlink", (fn_ptr) pn_fs_symlink},
+    {"pn_fs_chmod", (fn_ptr) pn_fs_chmod},
+    {"pn_fs_rename", (fn_ptr) pn_fs_rename},
+    // fs.exists is a pure function (no side effects)
+    {"fn_fs_exists", (fn_ptr) fn_fs_exists},
     // shared runtime context pointer
     {"_lambda_rt", (fn_ptr) &_lambda_rt},
 

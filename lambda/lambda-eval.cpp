@@ -118,13 +118,14 @@ Item fn_error(Item message) {
 }
 
 Bool is_truthy(Item item) {
-    log_debug("is_truthy: item type %d", item._type_id);
+    log_debug("is_truthy: item=0x%llx, type=%d, bool_val=%d", (unsigned long long)item.item, item._type_id, (int)item.bool_val);
     switch (item._type_id) {
     case LMD_TYPE_NULL:
         return BOOL_FALSE;
     case LMD_TYPE_ERROR:
         return BOOL_ERROR;
     case LMD_TYPE_BOOL:
+        log_debug("is_truthy: BOOL case, bool_val=%d, returning %d", (int)item.bool_val, item.bool_val ? BOOL_TRUE : BOOL_FALSE);
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
     default: // all other value considered truthy
         return item.item ? BOOL_TRUE : BOOL_FALSE;  // should null be considered ERROR?
