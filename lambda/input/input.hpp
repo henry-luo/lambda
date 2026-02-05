@@ -52,7 +52,7 @@ char* input_trim_whitespace(const char* str);
 char** input_split_lines(const char* text, int* line_count);
 void input_free_lines(char** lines, int line_count);
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
-Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
+Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 // Math parsing functions (from input-math.cpp)
@@ -80,7 +80,7 @@ void parse_jsx(Input* input, const char* jsx_string);
 Item input_mdx(Input* input, const char* mdx_string);
 
 // Directory listing functions (from input_dir.cpp)
-Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
+Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 
 // HTTP/HTTPS functions (from input_http.cpp)
 typedef struct {

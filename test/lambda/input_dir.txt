@@ -1,15 +1,3 @@
-{
-  name: "test.txt",
-  size: 9,
-  is_link: null
-}
-{
-  name: "child_dir",
-  size: 96,
-  is_link: null
-}
-{
-  name: "readme_link",
-  size: 4622,
-  is_link: true
-}
+.test.input.dir.'test.txt'
+.test.input.dir.child_dir
+.test.input.dir.readme_link
