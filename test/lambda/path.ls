@@ -38,3 +38,34 @@ http.api.users.*
 "Wildcard patterns (recursive match)"
 file.src.**
 http.api.**
+
+"Quoted wildcard (literal asterisk, not a wildcard)"
+file.data.'*'
+file.data.'**'
+
+"Path type checking"
+type(file.etc.hosts)
+
+"File content (lazy loading)"
+let hosts = file.etc.hosts
+len(hosts)
+
+"exists() function - directory exists"
+exists(file.etc)
+
+"exists() function - file exists"
+exists(file.etc.hosts)
+
+"exists() function - non-existent path"
+exists(file.this_path_does_not_exist)
+
+"len() on directory - counts entries"
+(len(file.etc) > 0)
+
+"Path iteration - for loop over directory"
+let etc_items = for (item in file.etc) item
+(len(etc_items) > 0)
+
+"Path iteration - collect types"
+let item_types = for (item in file.etc) type(item)
+item_types[0]

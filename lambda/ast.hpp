@@ -256,10 +256,16 @@ typedef struct AstCallNode : AstNode {
     AstNode *argument;
 } AstCallNode;
 
+// Path segment info for AstPathNode
+typedef struct AstPathSegment {
+    String* name;           // segment name (NULL for wildcards)
+    LPathSegmentType type;   // LPATH_SEG_NORMAL, LPATH_SEG_WILDCARD, etc.
+} AstPathSegment;
+
 typedef struct AstPathNode : AstNode {
-    PathScheme scheme;       // file, http, https, sys, PATH_RELATIVE, PATH_PARENT
-    int segment_count;       // number of path segments
-    String** segments;       // array of pooled strings (allocated in pool)
+    PathScheme scheme;           // file, http, https, sys, PATH_RELATIVE, PATH_PARENT
+    int segment_count;           // number of path segments
+    AstPathSegment* segments;    // array of segment info (allocated in pool)
 } AstPathNode;
 
 // Path index expression: path[expr] - adds a dynamic segment to the path

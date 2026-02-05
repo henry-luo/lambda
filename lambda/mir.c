@@ -15,6 +15,10 @@
 // Stack overflow protection functions
 extern void lambda_stack_overflow_error(const char* func_name);
 
+// Path resolution functions (implemented in path.c)
+extern Item fn_exists(Item path);
+extern Item path_resolve_for_iteration(Path* path);
+
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
@@ -217,6 +221,8 @@ func_obj_t func_list[] = {
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
     {"fn_join", (fn_ptr) fn_join},
+    {"fn_exists", (fn_ptr) fn_exists},
+    {"path_resolve_for_iteration", (fn_ptr) path_resolve_for_iteration},
     // variadic parameter access
     {"set_vargs", (fn_ptr) set_vargs},
     {"fn_varg0", (fn_ptr) fn_varg0},
@@ -285,15 +291,6 @@ func_obj_t func_list[] = {
     {"path_concat", (fn_ptr) path_concat},
     {"path_wildcard", (fn_ptr) path_wildcard},
     {"path_wildcard_recursive", (fn_ptr) path_wildcard_recursive},
-    // Path functions (fixed-arity for C2MIR compatibility)
-    {"path_build1", (fn_ptr) path_build1},
-    {"path_build2", (fn_ptr) path_build2},
-    {"path_build3", (fn_ptr) path_build3},
-    {"path_build4", (fn_ptr) path_build4},
-    {"path_build5", (fn_ptr) path_build5},
-    {"path_build6", (fn_ptr) path_build6},
-    {"path_build7", (fn_ptr) path_build7},
-    {"path_build8", (fn_ptr) path_build8},
 };
 
 void *import_resolver(const char *name) {
