@@ -2687,6 +2687,66 @@
     }
   },
   {
+    "type": "path_expr",
+    "named": true,
+    "fields": {
+      "field": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "index",
+            "named": true
+          },
+          {
+            "type": "path_wildcard",
+            "named": true
+          },
+          {
+            "type": "path_wildcard_recursive",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "path_parent",
+          "named": true
+        },
+        {
+          "type": "path_root",
+          "named": true
+        },
+        {
+          "type": "path_self",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "path_root",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "path_self",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "path_wildcard",
     "named": true,
     "fields": {}
@@ -2928,6 +2988,10 @@
         },
         {
           "type": "null",
+          "named": true
+        },
+        {
+          "type": "path_expr",
           "named": true
         },
         {
@@ -3814,6 +3878,10 @@
     "named": false
   },
   {
+    "type": "path_parent",
+    "named": true
+  },
+  {
     "type": "path_wildcard_recursive",
     "named": true
   },
@@ -3859,11 +3927,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

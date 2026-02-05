@@ -1,35 +1,35 @@
 "Basic path expressions"
-file.etc.hosts
-file.usr.local.bin
+/etc.hosts
+/usr.local.bin
 http.api.example.com
 https.secure.api.example.com
 sys.config
 "Path with 6+ segments (tests extended path_build)"
-file.home.user.documents.projects.lambda.test
+/home.user.documents.projects.lambda.test
 "Path in let binding"
-file.etc.config
+/etc.config
 "Path in array"
-[file.a, file.b, http.x]
+[/a, /b, http.x]
 "Path in map"
 {
-  input: file.data.input,
-  output: file.data.output
+  input: /data.input,
+  output: /data.output
 }
 "Path with quoted segments (dots in filenames)"
-file.etc.'nginx.conf'
-file.home.user.'config.json'
+/etc.'nginx.conf'
+/home.user.'config.json'
 http.'api.github.com'.users
 "Dynamic path segment with subscript"
-file.etc.config
+/etc.config
 "Wildcard patterns (single segment match)"
-file.src.*
+/src.*
 http.api.users.*
 "Wildcard patterns (recursive match)"
-file.src.**
+/src.**
 http.api.**
 "Quoted wildcard (literal asterisk, not a wildcard)"
-file.data.'*'
-file.data.'**'
+/data.'*'
+/data.'**'
 "Path type checking"
 path
 "File content (lazy loading)"
@@ -46,7 +46,7 @@ true
 true
 "Path iteration - collect types"
 path
-"Relative path with cwd scheme"
+"Relative path with . scheme"
 .test.input.dir
 "exists() on relative path"
 true
@@ -81,3 +81,15 @@ t'2025-10-08 07:58:54z'
 true
 "Path property: filter using is_dir"
 true
+"Parent path with .. scheme"
+..
+"Parent path with segment"
+..test.input.dir
+"Parent path type checking"
+path
+"exists() on parent path"
+true
+"Parent path in let binding"
+..Lambda.test
+"Parent path with quoted segment"
+..Lambda.'README.md'
