@@ -1,6 +1,6 @@
 // test_dir_gtest.cpp
 // Comprehensive GTest unit tests for directory listing via input_from_directory
-// Tests the new directory listing feature implemented for Lambda input system
+// Tests the directory listing feature - returns a List of Path items
 
 #include <gtest/gtest.h>
 #include "../lambda/input/input.hpp"
@@ -60,83 +60,85 @@ protected:
 // Static member definition
 char InputDirTest::test_dir_name[256];
 
-// Test basic directory listing functionality
+// Test basic directory listing functionality - returns List of Path items
 TEST_F(InputDirTest, ListCurrentDirectory) {
     const char* dir = ".";
-    Input* input = input_from_directory(dir, false, 1);
+    Input* input = input_from_directory(dir, dir, false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL";
 
-    // Use get_type_id() to properly check the type
+    // Use get_type_id() to properly check the type - should now be a list
     TypeId root_type = get_type_id(input->root);
-    ASSERT_EQ(root_type, LMD_TYPE_ELEMENT) << "Root is not an element (got type " << root_type << ", expected " << LMD_TYPE_ELEMENT << ")";
+    ASSERT_EQ(root_type, LMD_TYPE_LIST) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_LIST << ")";
 
-    Element* root = (Element*)input->root.element;
-    ASSERT_NE(root, nullptr) << "Root element is NULL";
+    List* root = (List*)input->root.list;
+    ASSERT_NE(root, nullptr) << "Root list is NULL";
 
-    // Basic validation that we got a valid element structure
-    ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
+    // Verify list contains Path items
+    ASSERT_GT(root->length, 0) << "Directory listing should not be empty";
 }
 
 // Test directory listing with custom test structure
 TEST_F(InputDirTest, ListTestDirectory) {
-    Input* input = input_from_directory(test_dir_name, false, 1);
+    Input* input = input_from_directory(test_dir_name, test_dir_name, false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for test directory";
 
     TypeId root_type = get_type_id(input->root);
-    ASSERT_EQ(root_type, LMD_TYPE_ELEMENT) << "Root is not an element (got type " << root_type << ", expected " << LMD_TYPE_ELEMENT << ")";
+    ASSERT_EQ(root_type, LMD_TYPE_LIST) << "Root is not a list (got type " << root_type << ", expected " << LMD_TYPE_LIST << ")";
 
-    Element* root = (Element*)input->root.element;
-    ASSERT_NE(root, nullptr) << "Root element is NULL";
+    List* root = (List*)input->root.list;
+    ASSERT_NE(root, nullptr) << "Root list is NULL";
 
-    // Basic validation that we got a valid element structure
-    ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
+    // Test directory has: file1.txt, empty.txt, subdir1, subdir2 = 4 items
+    ASSERT_EQ(root->length, 4) << "Expected 4 items in test directory";
 
-    // For now, just verify we can create the directory listing without crashing
-    // More detailed structure validation would require understanding the exact Lambda data model
+    // Verify items are Path type
+    for (int64_t i = 0; i < root->length; i++) {
+        Item item = root->items[i];
+        TypeId item_type = get_type_id(item);
+        ASSERT_EQ(item_type, LMD_TYPE_PATH) << "Item " << i << " should be a Path";
+    }
+    
     SUCCEED() << "Directory listing created successfully";
 }
 
-// Test recursive directory listing
+// Test recursive directory listing (note: not fully implemented in new version)
 TEST_F(InputDirTest, RecursiveDirectoryListing) {
-    Input* input = input_from_directory(test_dir_name, true, 2);
+    Input* input = input_from_directory(test_dir_name, test_dir_name, true, 2);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for recursive listing";
 
-    Element* root = (Element*)input->root.element;
-    ASSERT_NE(root, nullptr) << "Root element is NULL";
-    ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
+    List* root = (List*)input->root.list;
+    ASSERT_NE(root, nullptr) << "Root list is NULL";
 
-    // Basic test that recursive listing works without crashing
+    // Basic test that listing works without crashing
     SUCCEED() << "Recursive directory listing completed successfully";
 }
 
 // Test depth limiting in recursive traversal
 TEST_F(InputDirTest, DepthLimitedTraversal) {
     // Test with max_depth = 1 (should not go into nested subdirectories)
-    Input* input = input_from_directory(test_dir_name, true, 1);
+    Input* input = input_from_directory(test_dir_name, test_dir_name, true, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for depth-limited listing";
 
-    Element* root = (Element*)input->root.element;
-    ASSERT_NE(root, nullptr) << "Root element is NULL";
-    ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
+    List* root = (List*)input->root.list;
+    ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     SUCCEED() << "Depth limiting test completed successfully";
 }
 
 // Test non-recursive directory listing
 TEST_F(InputDirTest, NonRecursiveListing) {
-    Input* input = input_from_directory(test_dir_name, false, 0);
+    Input* input = input_from_directory(test_dir_name, test_dir_name, false, 0);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for non-recursive listing";
 
-    Element* root = (Element*)input->root.element;
-    ASSERT_NE(root, nullptr) << "Root element is NULL";
-    ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
+    List* root = (List*)input->root.list;
+    ASSERT_NE(root, nullptr) << "Root list is NULL";
 
     SUCCEED() << "Non-recursive directory listing completed successfully";
 }
 
 // Test error handling for non-existent directory
 TEST_F(InputDirTest, NonexistentDirectoryError) {
-    Input* input = input_from_directory("nonexistent_directory_12345", false, 1);
+    Input* input = input_from_directory("nonexistent_directory_12345", "nonexistent_directory_12345", false, 1);
     ASSERT_EQ(input, nullptr) << "input_from_directory should return NULL for non-existent directory";
 }
 
@@ -144,7 +146,7 @@ TEST_F(InputDirTest, NonexistentDirectoryError) {
 TEST_F(InputDirTest, FileInsteadOfDirectoryError) {
     char file_path[512];
     snprintf(file_path, sizeof(file_path), "%s/file1.txt", test_dir_name);
-    Input* input = input_from_directory(file_path, false, 1);
+    Input* input = input_from_directory(file_path, file_path, false, 1);
     ASSERT_EQ(input, nullptr) << "input_from_directory should return NULL when given a file instead of directory";
 }
 
@@ -166,12 +168,12 @@ protected:
 TEST_F(InputDirTestSimple, EmptyDirectoryHandling) {
     system("mkdir -p test_empty_dir");
 
-    Input* input = input_from_directory("test_empty_dir", false, 1);
+    Input* input = input_from_directory("test_empty_dir", "test_empty_dir", false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory should handle empty directories";
 
-    Element* root = (Element*)input->root.element;
-    ASSERT_NE(root, nullptr) << "Root element should exist for empty directory";
-    ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
+    List* root = (List*)input->root.list;
+    ASSERT_NE(root, nullptr) << "Root list should exist for empty directory";
+    ASSERT_EQ(root->length, 0) << "Empty directory should have 0 items";
 
     system("rm -rf test_empty_dir");
 }
