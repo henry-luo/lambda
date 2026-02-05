@@ -332,7 +332,7 @@ private:
     // ========================================
     // Style-aware font selection (Phase 1a)
     // ========================================
-    
+
     // Get the appropriate font name for current style
     // TeX uses different fonts for different styles:
     //   Display/Text: cmr10, cmmi10, cmsy10
@@ -341,12 +341,12 @@ private:
     const char* get_roman_font_name() const;
     const char* get_italic_font_name() const;
     const char* get_symbol_font_name() const;
-    
+
     // Get TFM font for current style
     TFMFont* get_roman_tfm() const;
     TFMFont* get_italic_tfm() const;
     TFMFont* get_symbol_tfm() const;
-    
+
     // Create FontSpec with correct font name for current style
     FontSpec make_roman_font() const;
     FontSpec make_italic_font() const;
@@ -374,7 +374,7 @@ MathTypesetter::MathTypesetter(MathContext& c, const char* src, size_t len)
     roman5_tfm = ctx.fonts ? ctx.fonts->get_font("cmr5") : nullptr;
     italic5_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi5") : nullptr;
     symbol5_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy5") : nullptr;
-    
+
     log_debug("tex_math_ts: loaded script fonts - cmr7=%p cmmi7=%p cmsy7=%p cmr5=%p cmmi5=%p cmsy5=%p",
               roman7_tfm, italic7_tfm, symbol7_tfm, roman5_tfm, italic5_tfm, symbol5_tfm);
 }
@@ -607,6 +607,7 @@ void MathTypesetter::add_atom_spacing(TexNode*& last, AtomType prev, AtomType cu
     if (spacing_mu > 0 && last) {
         float spacing_pt = mu_to_pt(spacing_mu, ctx);
         TexNode* kern = make_kern(ctx.arena, spacing_pt);
+        kern->flags |= TexNode::FLAG_MATHSPACING;  // mark as inter-atom spacing
         last->next_sibling = kern;
         kern->prev_sibling = last;
         last = kern;
@@ -813,7 +814,7 @@ TexNode* MathTypesetter::build_punctuation(TSNode node) {
 
     int32_t cp = text[0];
     AtomType atom = AtomType::Punct;
-    
+
     // Handle escaped braces (\{ and \}) - use cmsy positions
     FontSpec font;
     TFMFont* tfm;
@@ -940,20 +941,20 @@ TexNode* MathTypesetter::build_symbol_command(const char* cmd, size_t len) {
     if (len == 5 && strncmp(cmd, "notin", 5) == 0) {
         TexNode* first = nullptr;
         TexNode* last = nullptr;
-        
+
         // NOT slash (cmsy position 54)
         TexNode* not_char = make_char_node(54, AtomType::Rel, font, tfm);
         link_node(first, last, not_char);
-        
+
         // Negative kern to overlap the characters
         float kern_amount = -0.55f * size / 10.0f;
         TexNode* kern = make_kern(ctx.arena, kern_amount);
         link_node(first, last, kern);
-        
+
         // IN symbol (cmsy position 50)
         TexNode* in_char = make_char_node(50, AtomType::Rel, font, tfm);
         link_node(first, last, in_char);
-        
+
         return wrap_in_hbox(first, last);
     }
 
@@ -991,11 +992,11 @@ TexNode* MathTypesetter::build_dots_command(const char* cmd, size_t len) {
     //   - cdots: 3× cdot(1) from cmsy10 with kerns
     //   - vdots: single char(61) from cmsy10
     //   - ddots: single char(62) from cmsy10
-    
+
     int dot_code = -1;
     bool is_triple = false;
     bool use_cmmi = false;  // true for ldots (cmmi10), false for cdots/vdots/ddots (cmsy10)
-    
+
     if ((len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
         (len == 4 && strncmp(cmd, "dots", 4) == 0)) {
         dot_code = 58;  // period in cmmi
@@ -1016,20 +1017,20 @@ TexNode* MathTypesetter::build_dots_command(const char* cmd, size_t len) {
     } else {
         return nullptr;  // Not a dots command
     }
-    
+
     float size = current_size();
     FontSpec font = use_cmmi ? make_italic_font() : make_symbol_font();
     TFMFont* tfm = use_cmmi ? get_italic_tfm() : get_symbol_tfm();
-    
+
     if (is_triple) {
         // Build 3 dots with proper spacing (like TeX does)
         TexNode* first = nullptr;
         TexNode* last = nullptr;
-        
+
         for (int i = 0; i < 3; i++) {
             TexNode* dot = make_char_node(dot_code, AtomType::Inner, font, tfm);
             link_node(first, last, dot);
-            
+
             // Add kern between dots (except after last)
             if (i < 2) {
                 // TeX uses thin space kerns between dots
@@ -1037,7 +1038,7 @@ TexNode* MathTypesetter::build_dots_command(const char* cmd, size_t len) {
                 link_node(first, last, space);
             }
         }
-        
+
         return wrap_in_hbox(first, last);
     } else {
         // Single character for vdots/ddots
@@ -1278,7 +1279,7 @@ TexNode* MathTypesetter::build_delimiter_group(TSNode node) {
             //   Positions 0-15 are small delimiters
             //   Positions 104/105 ('h'/'i') are bracket variants used by TeX
             if (d[0] == '(' || d[0] == ')') {
-                // cmex10 codepoints 0,1 (small) 
+                // cmex10 codepoints 0,1 (small)
                 cp = is_left ? 0 : 1;
             } else if (d[0] == '[' || d[0] == ']') {
                 // cmex10 codepoints 104,105 ('h','i') - matches TeX output
@@ -1489,7 +1490,7 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
     // Integrals use scripts to the right even in display mode
     // Note: op_name points into op_text, so check before freeing
     bool use_limits_display = is_display && op_uses_limits_display(op_name, op_len);
-    
+
     // Now we can free op_text since we've captured the limits style decision
     free(op_text);
 
@@ -1528,7 +1529,7 @@ TexNode* MathTypesetter::build_big_operator(TSNode node) {
         if (upper) {
             upper_y = op->height + gap + upper->depth;  // positive = up from baseline
         }
-        // Lower limit goes below the operator  
+        // Lower limit goes below the operator
         float lower_y = 0;
         if (lower) {
             lower_y = -(op->depth + gap + lower->height);  // negative = down from baseline
@@ -1763,7 +1764,7 @@ public:
         roman5_tfm = ctx.fonts ? ctx.fonts->get_font("cmr5") : nullptr;
         italic5_tfm = ctx.fonts ? ctx.fonts->get_font("cmmi5") : nullptr;
         symbol5_tfm = ctx.fonts ? ctx.fonts->get_font("cmsy5") : nullptr;
-        
+
         log_debug("tex_math_ast: loaded script fonts - cmr7=%p cmmi7=%p cmsy7=%p cmr5=%p cmmi5=%p cmsy5=%p",
                   roman7_tfm, italic7_tfm, symbol7_tfm, roman5_tfm, italic5_tfm, symbol5_tfm);
     }
@@ -1790,7 +1791,7 @@ private:
     TFMFont* symbol5_tfm;
 
     float current_size() const { return ctx.font_size(); }
-    
+
     // Style-aware font name selection
     const char* get_roman_font_name() const {
         if (is_script(ctx.style)) {
@@ -1799,7 +1800,7 @@ private:
         }
         return "cmr10";
     }
-    
+
     const char* get_italic_font_name() const {
         if (is_script(ctx.style)) {
             if (ctx.style >= MathStyle::ScriptScript) return "cmmi5";
@@ -1807,7 +1808,7 @@ private:
         }
         return "cmmi10";
     }
-    
+
     const char* get_symbol_font_name() const {
         if (is_script(ctx.style)) {
             if (ctx.style >= MathStyle::ScriptScript) return "cmsy5";
@@ -1815,7 +1816,7 @@ private:
         }
         return "cmsy10";
     }
-    
+
     // Style-aware TFM font selection
     TFMFont* get_roman_tfm() const {
         if (is_script(ctx.style)) {
@@ -1824,7 +1825,7 @@ private:
         }
         return roman_tfm;
     }
-    
+
     TFMFont* get_italic_tfm() const {
         if (is_script(ctx.style)) {
             if (ctx.style >= MathStyle::ScriptScript) return italic5_tfm ? italic5_tfm : italic_tfm;
@@ -1832,7 +1833,7 @@ private:
         }
         return italic_tfm;
     }
-    
+
     TFMFont* get_symbol_tfm() const {
         if (is_script(ctx.style)) {
             if (ctx.style >= MathStyle::ScriptScript) return symbol5_tfm ? symbol5_tfm : symbol_tfm;
@@ -1840,20 +1841,20 @@ private:
         }
         return symbol_tfm;
     }
-    
+
     // Style-aware FontSpec creation
     FontSpec make_roman_font() const {
         return FontSpec(get_roman_font_name(), current_size(), nullptr, 0);
     }
-    
+
     FontSpec make_italic_font() const {
         return FontSpec(get_italic_font_name(), current_size(), nullptr, 0);
     }
-    
+
     FontSpec make_symbol_font() const {
         return FontSpec(get_symbol_font_name(), current_size(), nullptr, 0);
     }
-    
+
     FontSpec make_extension_font() const {
         return FontSpec("cmex10", current_size(), nullptr, 0);
     }
@@ -1999,7 +2000,7 @@ private:
             int dot_code = -1;
             bool is_triple = false;
             bool use_cmmi = false;
-            
+
             if ((len == 5 && strncmp(cmd, "ldots", 5) == 0) ||
                 (len == 4 && strncmp(cmd, "dots", 4) == 0)) {
                 dot_code = 58;  // period in cmmi
@@ -2018,12 +2019,12 @@ private:
                 is_triple = false;
                 use_cmmi = false;
             }
-            
+
             if (dot_code >= 0) {
                 float size = current_size();
                 FontSpec font = use_cmmi ? make_italic_font() : make_symbol_font();
                 TFMFont* tfm = use_cmmi ? get_italic_tfm() : get_symbol_tfm();
-                
+
                 if (is_triple) {
                     TexNode* first = nullptr;
                     TexNode* last = nullptr;
@@ -2112,7 +2113,7 @@ private:
         AtomType atom = AtomType::Punct;
         FontSpec font;
         TFMFont* tfm;
-        
+
         // Handle escaped braces (\{ and \}) - use cmsy positions
         if (len >= 2 && value[0] == '\\') {
             if (value[1] == '{' || strncmp(value, "\\lbrace", 7) == 0) {
@@ -2285,7 +2286,7 @@ private:
             FontSpec font = ctx.extension_font;  // Use extension font for big operators
             font.size_pt = op_size;
 
-            log_debug("build_big_operator: op='%s' code=%d font='%s' size=%.1f display=%d", 
+            log_debug("build_big_operator: op='%s' code=%d font='%s' size=%.1f display=%d",
                       op_cmd, op_code, font.name ? font.name : "null", op_size, is_display);
 
             // Handle \iint and \iiint as multiple integral symbols
@@ -2703,6 +2704,7 @@ private:
         if (spacing_mu > 0 && last) {
             float spacing_pt = mu_to_pt(spacing_mu, ctx);
             TexNode* kern = make_kern(ctx.arena, spacing_pt);
+            kern->flags |= TexNode::FLAG_MATHSPACING;  // mark as inter-atom spacing
             last->next_sibling = kern;
             kern->prev_sibling = last;
             last = kern;
