@@ -830,47 +830,9 @@ https.'api.github.com'.repos.*.issues
 
 ---
 
-## 10. Implementation Notes
+## 10. Usage Examples
 
-### 10.1 Path Type
-
-```cpp
-struct LambdaPath {
-    enum Scheme { FILE, HTTP, HTTPS, SYS, RELATIVE, IMPORTED };  // SYS is built-in
-    Scheme scheme;
-    std::vector<Segment> segments;
-    bool is_absolute;
-
-    struct Segment {
-        enum Type { LITERAL, WILDCARD, RECURSIVE_WILDCARD, DYNAMIC };
-        Type type;
-        std::string value;  // For LITERAL
-        Item expr;          // For DYNAMIC (bracket expression)
-    };
-};
-```
-
-### 10.2 Conversion Functions
-
-```cpp
-LambdaPath from_file_path(const char* path);
-LambdaPath from_url(const char* url);
-std::string to_file_path(LambdaPath path);
-std::string to_url(LambdaPath path);
-```
-
-### 10.3 Pattern Matching
-
-```cpp
-bool matches(LambdaPath pattern, LambdaPath target);
-std::vector<LambdaPath> glob(LambdaPath pattern);
-```
-
----
-
-## 11. Usage Examples
-
-### 11.1 Configuration Loading
+### 10.1 Configuration Loading
 
 ```lambda
 // Load config with fallback (lazy evaluation)
@@ -884,7 +846,7 @@ let config_path = .config ++ [env + ".json"];
 let config = config_path;  // Loaded when accessed
 ```
 
-### 11.2 Asset Pipeline
+### 10.2 Asset Pipeline
 
 ```lambda
 // Find all source files (lazy)
@@ -898,7 +860,7 @@ for src in sources {
 }
 ```
 
-### 11.3 API Integration
+### 10.3 API Integration
 
 ```lambda
 let github = https.'api.github.com';
@@ -919,7 +881,7 @@ proc create_issue(owner: string, repo: string, title: string, body: string) {
 }
 ```
 
-### 11.4 Multi-Source Data
+### 10.4 Multi-Source Data
 
 ```lambda
 // Merge data from multiple sources (all lazy)
@@ -933,200 +895,9 @@ let users = cached or remote_data or local_data;
 
 ---
 
-## 12. Implementation Notes
+## 11. Summary
 
-This section provides guidance for implementing paths in the Lambda runtime.
-
-### 12.1 Path as Segmented Symbol
-
-Paths are implemented as a special form of **Symbol** with a parent chain:
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Symbol      │     │ Symbol      │     │ Symbol      │
-│ name: "etc" │────▶│ name: "file"│────▶│ name: null  │ (root)
-│ parent: ────│     │ parent: ────│     │ parent: null│
-└─────────────┘     └─────────────┘     └─────────────┘
-
-file.etc.hosts = Symbol("hosts", parent=Symbol("etc", parent=Symbol("file", parent=ROOT)))
-```
-
-**Key insight**: A path is simply a linked chain of symbols.
-
-### 12.2 Symbol Structure Extension
-
-Extend the existing `Symbol` type with a `parent` field:
-
-```c
-// In lambda/lambda-data.hpp or lambda.h
-struct Symbol {
-    const char* name;      // Interned string from name_pool
-    Symbol* parent;        // NULL for normal symbols, non-NULL for paths
-    // ... other fields
-};
-```
-
-**Rules:**
-- Normal symbol: `parent == NULL`
-- Path segment: `parent != NULL`
-- Root schemes: `parent` points to a sentinel root symbol
-
-### 12.3 Predefined Root Symbols
-
-Initialize these root symbols at runtime startup:
-
-| Root Symbol | Purpose | Parent |
-|-------------|---------|--------|
-| `file` | Local file system | `ROOT` sentinel |
-| `http` | HTTP URLs | `ROOT` sentinel |
-| `https` | HTTPS URLs | `ROOT` sentinel |
-| `sys` | System information | `ROOT` sentinel |
-| `.` | Relative path (CWD) | `ROOT` sentinel |
-| `..` | Parent relative path | `ROOT` sentinel |
-
-> **Note**: `...` is **reserved** for variable arguments in Lambda. To express grandparent navigation, use `(..)..` which parses as "parent of parent" rather than the reserved `...` token.
-
-```c
-// Pseudo-code for initialization
-static Symbol ROOT_SENTINEL = { NULL, NULL };  // Sentinel for scheme roots
-
-Symbol* sym_file  = create_symbol("file",  &ROOT_SENTINEL);
-Symbol* sym_http  = create_symbol("http",  &ROOT_SENTINEL);
-Symbol* sym_https = create_symbol("https", &ROOT_SENTINEL);
-Symbol* sym_sys   = create_symbol("sys",   &ROOT_SENTINEL);
-Symbol* sym_dot   = create_symbol(".",     &ROOT_SENTINEL);  // Relative
-Symbol* sym_ddot  = create_symbol("..",    &ROOT_SENTINEL);  // Parent
-```
-
-### 12.4 Path Construction
-
-Building a path `file.etc.hosts`:
-
-```c
-// Approach: chain symbols via parent pointer
-Symbol* build_path(Symbol* parent, const char* name) {
-    Symbol* seg = alloc_symbol();
-    seg->name = name_pool_intern(name);  // Use name_pool for string interning
-    seg->parent = parent;
-    return seg;
-}
-
-// Usage:
-Symbol* p = sym_file;                    // Start with root
-p = build_path(p, "etc");                // file.etc
-p = build_path(p, "hosts");              // file.etc.hosts
-```
-
-### 12.5 Path Traversal
-
-To reconstruct the full path (e.g., for I/O operations):
-
-```c
-// Collect segments into array (reverse order)
-void path_to_segments(Symbol* path, ArrayList* segments) {
-    while (path && path->parent) {  // Stop at root sentinel
-        arraylist_push(segments, path->name);
-        path = path->parent;
-    }
-    // segments is in reverse order: ["hosts", "etc", "file"]
-    arraylist_reverse(segments);
-    // Now: ["file", "etc", "hosts"]
-}
-
-// Convert to OS path string
-void path_to_string(Symbol* path, StrBuf* buf) {
-    ArrayList segments;
-    arraylist_init(&segments);
-    path_to_segments(path, &segments);
-
-    // Join with appropriate separator
-    for (int i = 0; i < segments.count; i++) {
-        if (i > 0) strbuf_append_char(buf, '/');
-        strbuf_append(buf, segments.items[i]);
-    }
-    arraylist_free(&segments);
-}
-```
-
-### 12.6 Library Usage Guidelines
-
-**Do NOT use `std::string` or `std::vector`**. Use utilities from `./lib/`:
-
-| Instead of | Use | Header |
-|------------|-----|--------|
-| `std::string` | `StrBuf` | `lib/strbuf.h` |
-| `std::vector` | `ArrayList` | `lib/arraylist.h` |
-| `std::unordered_map` | `HashMap` | `lib/hashmap.h` |
-| `malloc`/`free` | `pool_alloc()` / arena | `lib/mempool.h`, `lib/arena.h` |
-| String duplication | `name_pool_intern()` | `lambda/name_pool.hpp` |
-
-**Example using lib utilities:**
-
-```c
-#include "lib/strbuf.h"
-#include "lib/arraylist.h"
-#include "lambda/name_pool.hpp"
-
-void example_path_handling(Symbol* path) {
-    // Use StrBuf for dynamic strings
-    StrBuf buf;
-    strbuf_init(&buf);
-    path_to_string(path, &buf);
-
-    // Use ArrayList for dynamic arrays
-    ArrayList parts;
-    arraylist_init(&parts);
-    path_to_segments(path, &parts);
-
-    // Use name_pool for string interning
-    const char* interned = name_pool_intern("segment");
-
-    // Cleanup
-    strbuf_free(&buf);
-    arraylist_free(&parts);
-}
-```
-
-### 12.7 Memory Management
-
-- **Symbols**: Allocate from arena (long-lived) or pool (session-scoped)
-- **Name strings**: Always intern via `name_pool` for deduplication
-- **Path segments**: Share interned names across paths
-- **Temp buffers**: Use stack-allocated `StrBuf` with `strbuf_free()`
-
-```c
-// Good: Uses arena allocation
-Symbol* seg = arena_alloc(sizeof(Symbol));
-seg->name = name_pool_intern("data");  // Shared, never freed individually
-
-// Bad: Uses std::string (forbidden)
-// std::string name = "data";  // ❌ Don't do this
-```
-
-### 12.8 Detecting Path vs Normal Symbol
-
-```c
-bool is_path(Symbol* sym) {
-    return sym->parent != NULL;
-}
-
-bool is_root_scheme(Symbol* sym) {
-    return sym->parent == &ROOT_SENTINEL;
-}
-
-const char* get_scheme(Symbol* path) {
-    while (path->parent && path->parent != &ROOT_SENTINEL) {
-        path = path->parent;
-    }
-    return path->name;  // "file", "http", "sys", etc.
-}
-```
-
----
-
-## 13. Summary
-
-### 13.1 Key Design Decisions
+### 11.1 Key Design Decisions
 
 | Aspect            | Decision                           | Rationale                            |
 | ----------------- | ---------------------------------- | ------------------------------------ |
@@ -1142,7 +913,7 @@ const char* get_scheme(Symbol* path) {
 | Dynamic segments  | `[expr]` brackets                  | Consistent with array access         |
 | Complex URLs      | Via `input()`                      | Separation of concerns               |
 
-### 13.2 Benefits
+### 11.2 Benefits
 
 1. **Unified**: Single notation for files, URLs, and namespaces
 2. **Familiar**: Dot notation is intuitive for programmers
@@ -1152,7 +923,7 @@ const char* get_scheme(Symbol* path) {
 6. **Safe**: Quoting rules prevent ambiguity
 7. **Composable**: Paths are first-class values with `++` concatenation
 
-### 13.3 Open Questions
+### 11.3 Open Questions
 
 1. How to handle very long paths (URL length limits)?
 2. Should there be a path literal syntax (like regex `/pattern/`)?
