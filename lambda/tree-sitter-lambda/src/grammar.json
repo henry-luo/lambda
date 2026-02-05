@@ -4620,11 +4620,33 @@
               {
                 "type": "SYMBOL",
                 "name": "index"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "path_wildcard"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "path_wildcard_recursive"
               }
             ]
           }
         }
       ]
+    },
+    "path_wildcard": {
+      "type": "TOKEN",
+      "content": {
+        "type": "STRING",
+        "value": "*"
+      }
+    },
+    "path_wildcard_recursive": {
+      "type": "TOKEN",
+      "content": {
+        "type": "STRING",
+        "value": "**"
+      }
     },
     "binary_expr": {
       "type": "CHOICE",

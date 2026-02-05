@@ -255,6 +255,21 @@ String* it2s(Item itm) {
     return nullptr;
 }
 
+// Convert item to C string (for use in path segment names)
+// Returns the chars pointer from a string/symbol
+// For other types, returns empty string (path segments must be strings)
+const char* fn_to_cstr(Item itm) {
+    TypeId type_id = itm._type_id;
+    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        String* str = itm.get_string();
+        return str ? str->chars : "";
+    }
+    // For non-string types in path segments, return empty string
+    // The calling code should ensure the expression evaluates to a string
+    log_warn("fn_to_cstr: expected string type for path segment, got type_id=%d", type_id);
+    return "";
+}
+
 } // extern "C"
 
 void expand_list(List *list, Arena* arena = nullptr) {

@@ -42,7 +42,7 @@ const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
 // need to exclude relational exprs in attr, optionally exclude pipe operators
 function binary_expr($, in_attr, exclude_pipe = false) {
-  let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr)) 
+  let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr))
                         : (exclude_pipe ? $._expression_no_pipe : $._expression);
   let ops = [
     ['+', 'binary_plus'],
@@ -508,8 +508,12 @@ module.exports = grammar({
 
     member_expr: $ => seq(
       field('object', $.primary_expr), ".",
-      field('field', choice($.identifier, $.symbol, $.index))
+      field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive))
     ),
+
+    // Path wildcards for glob patterns
+    path_wildcard: _ => token('*'),               // single wildcard: match one segment
+    path_wildcard_recursive: _ => token('**'),    // recursive wildcard: match zero or more segments
 
     binary_expr: $ => choice(
       ...binary_expr($, false),

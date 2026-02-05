@@ -36,25 +36,25 @@ static void register_func_name(Transpiler* tp, AstFuncNode* fn_node) {
     if (!fn_node->name || !fn_node->name->chars) {
         return;
     }
-    
+
     // create the map if it doesn't exist
     if (!tp->func_name_map) {
         tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, NULL, NULL);
     }
-    
+
     // build MIR name (internal name like _outer36)
     StrBuf* mir_name_buf = strbuf_new_cap(64);
     write_fn_name(mir_name_buf, fn_node, NULL);
     char* mir_name = strdup(mir_name_buf->str);
     strbuf_free(mir_name_buf);
-    
+
     // use the function name
     const char* lambda_name = fn_node->name->chars;
-    
+
     // store in map: key is MIR name, value is Lambda name (strdup both for ownership)
     char* entry[2] = { mir_name, strdup(lambda_name) };
     hashmap_set(tp->func_name_map, entry);
-    
+
     log_debug("register_func_name: '%s' -> '%s'", mir_name, lambda_name);
 }
 
@@ -64,13 +64,13 @@ static void register_func_name_with_context(Transpiler* tp, AstFuncNode* fn_node
     if (!tp->func_name_map) {
         tp->func_name_map = hashmap_new(sizeof(char*[2]), 64, 0, 0, func_name_hash, func_name_cmp, NULL, NULL);
     }
-    
+
     // build MIR name (internal name like _f317)
     StrBuf* mir_name_buf = strbuf_new_cap(64);
     write_fn_name(mir_name_buf, fn_node, NULL);
     char* mir_name = strdup(mir_name_buf->str);
     strbuf_free(mir_name_buf);
-    
+
     // determine Lambda name: prefer fn name, then current_assign_name, then <anonymous>
     const char* lambda_name = NULL;
     if (fn_node->name && fn_node->name->chars) {
@@ -80,11 +80,11 @@ static void register_func_name_with_context(Transpiler* tp, AstFuncNode* fn_node
     } else {
         lambda_name = "<anonymous>";
     }
-    
+
     // store in map: key is MIR name, value is Lambda name (strdup both for ownership)
     char* entry[2] = { mir_name, strdup(lambda_name) };
     hashmap_set(tp->func_name_map, entry);
-    
+
     log_debug("register_func_name_with_context: '%s' -> '%s'", mir_name, lambda_name);
 }
 
@@ -116,7 +116,7 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
     if (!bi_node->left->type || !bi_node->right->type) return false;
     TypeId left_type = bi_node->left->type->type_id;
     TypeId right_type = bi_node->right->type->type_id;
-    
+
     // Fast path for same types
     if (left_type == right_type) {
         if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT) {
@@ -128,11 +128,11 @@ static bool can_use_native_comparison(AstBinaryNode* bi_node, bool is_equality_o
         }
         return false;
     }
-    
+
     // Fast path for int/int64/float combinations (C handles promotion)
     bool left_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT);
     bool right_numeric = (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_INT64 || right_type == LMD_TYPE_FLOAT);
-    
+
     return left_numeric && right_numeric;
 }
 
@@ -163,13 +163,13 @@ static const NativeMathFunc native_math_funcs[] = {
 // Returns the C function name if applicable, NULL otherwise
 static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg) {
     if (!sys_fn_node || !sys_fn_node->fn_info || !arg || !arg->type) return NULL;
-    
+
     // Check if argument has known numeric type
     TypeId arg_type = arg->type->type_id;
     if (arg_type != LMD_TYPE_INT && arg_type != LMD_TYPE_INT64 && arg_type != LMD_TYPE_FLOAT) {
         return NULL;
     }
-    
+
     // Look up the function name
     const char* fn_name = sys_fn_node->fn_info->name;
     for (int i = 0; native_math_funcs[i].lambda_name != NULL; i++) {
@@ -184,30 +184,30 @@ static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg
 // Returns true if we can call the _u version directly
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     if (!fn_node || !has_typed_params(fn_node)) return false;
-    
+
     // Don't use unboxed for TCO functions - they need the goto-based implementation
     if (should_use_tco(fn_node) && is_tco_function_safe(fn_node)) {
         return false;
     }
-    
+
     // Check that the function has a specific return type (not ANY)
     // This is required so transpile_box_item can properly wrap the result
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     Type* ret_type = fn_type ? fn_type->returned : nullptr;
-    
-    log_debug("can_use_unboxed_call: fn=%.*s ret_type=%d", 
+
+    log_debug("can_use_unboxed_call: fn=%.*s ret_type=%d",
         (int)fn_node->name->len, fn_node->name->chars,
         ret_type ? ret_type->type_id : -1);
-    
+
     // If the boxed version already returns a native type (explicit scalar return),
     // there's no benefit to using the unboxed version - they're the same
-    if (ret_type && (ret_type->type_id == LMD_TYPE_INT || 
+    if (ret_type && (ret_type->type_id == LMD_TYPE_INT ||
                      ret_type->type_id == LMD_TYPE_FLOAT ||
                      ret_type->type_id == LMD_TYPE_BOOL)) {
         log_debug("can_use_unboxed_call: returning false (boxed already returns native)");
         return false;
     }
-    
+
     // If return type is ANY, try to infer from body's last expression
     if ((!ret_type || ret_type->type_id == LMD_TYPE_ANY) && fn_node->body) {
         if (fn_node->body->node_type == AST_NODE_CONTENT) {
@@ -225,18 +225,18 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
             log_debug("inferred ret_type from body: %d", ret_type->type_id);
         }
     }
-    
+
     // Only use unboxed if return type is a specific scalar (INT for now)
     if (!ret_type || ret_type->type_id != LMD_TYPE_INT) {
         log_debug("can_use_unboxed_call: returning false (ret_type not INT)");
         return false;
     }
-    
+
     log_debug("can_use_unboxed_call: checking params");
-        
+
     AstNode* arg = call_node->argument;
     AstNamedNode* param = fn_node->param;
-    
+
     while (arg && param) {
         TypeParam* pt = (TypeParam*)param->type;
         // Skip if param is optional (uses Item type in unboxed)
@@ -245,31 +245,31 @@ bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
             param = (AstNamedNode*)param->next;
             continue;
         }
-        
+
         TypeId param_type_id = pt->type_id;
         TypeId arg_type_id = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
-        
+
         // If param is ANY, doesn't affect unboxed decision
         if (param_type_id == LMD_TYPE_ANY) {
             arg = arg->next;
             param = (AstNamedNode*)param->next;
             continue;
         }
-        
+
         // If arg type is unknown (ANY), can't use unboxed
         if (arg_type_id == LMD_TYPE_ANY) {
             return false;
         }
-        
+
         // Check type compatibility
         if (!is_type_compatible_for_unboxed(arg_type_id, param_type_id)) {
             return false;
         }
-        
+
         arg = arg->next;
         param = (AstNamedNode*)param->next;
     }
-    
+
     return true;
 }
 
@@ -330,11 +330,11 @@ void write_env_name(StrBuf *strbuf, AstFuncNode* fn_node) {
 // define closure environment struct for a function with captures
 void define_closure_env(Transpiler* tp, AstFuncNode *fn_node) {
     if (!fn_node->captures) return;
-    
+
     strbuf_append_str(tp->code_buf, "\ntypedef struct ");
     write_env_name(tp->code_buf, fn_node);
     strbuf_append_str(tp->code_buf, " {\n");
-    
+
     // add each captured variable to the struct
     CaptureInfo* cap = fn_node->captures;
     while (cap) {
@@ -345,7 +345,7 @@ void define_closure_env(Transpiler* tp, AstFuncNode *fn_node) {
         strbuf_append_str(tp->code_buf, ";\n");
         cap = cap->next;
     }
-    
+
     strbuf_append_str(tp->code_buf, "} ");
     write_env_name(tp->code_buf, fn_node);
     strbuf_append_str(tp->code_buf, ";\n");
@@ -356,7 +356,7 @@ CaptureInfo* find_capture(AstFuncNode* closure, String* name) {
     if (!closure || !closure->captures) return nullptr;
     CaptureInfo* cap = closure->captures;
     while (cap) {
-        if (cap->name->len == name->len && 
+        if (cap->name->len == name->len &&
             strncmp(cap->name->chars, name->chars, name->len) == 0) {
             return cap;
         }
@@ -373,7 +373,7 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node);
 // Also emits forward declarations for closure functions
 void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
     if (!node) return;
-    
+
     switch (node->node_type) {
     case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC: {
         AstFuncNode* fn = (AstFuncNode*)node;
@@ -648,24 +648,24 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             emit_captured_var_item(tp, item);  // emit _env->varname directly (already an Item)
             break;
         }
-        
+
         // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, OPERATOR_IDIV, or OPERATOR_MOD,
         // don't wrap with i2it because these functions already return an Item
         if (item->node_type == AST_NODE_BINARY) {
             AstBinaryNode* bin_node = (AstBinaryNode*)item;
-            if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || 
+            if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV ||
                 bin_node->op == OPERATOR_IDIV || bin_node->op == OPERATOR_MOD) {
                 transpile_expr(tp, item);
                 break;
             }
         }
-        
+
         strbuf_append_str(tp->code_buf, "i2it(");
         transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
         break;
     }
-    case LMD_TYPE_INT64: 
+    case LMD_TYPE_INT64:
         // Check if this is an optional parameter or closure parameter (already Item type at runtime)
         if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
             emit_param_item(tp, item);  // emit _paramname directly (already an Item)
@@ -691,7 +691,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             log_leave();
         }
         break;
-    case LMD_TYPE_FLOAT: 
+    case LMD_TYPE_FLOAT:
         // Check if this is an optional parameter or closure parameter (already Item type at runtime)
         if (is_optional_param_ref(item) || is_closure_param_ref(tp, item)) {
             emit_param_item(tp, item);  // emit _paramname directly (already an Item)
@@ -714,7 +714,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
-    case LMD_TYPE_DTIME: 
+    case LMD_TYPE_DTIME:
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_k2it(");
             TypeConst *item_type = (TypeConst*)item->type;
@@ -725,10 +725,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             // non-literal datetime expression
             strbuf_append_str(tp->code_buf, "push_k(");
             transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');            
+            strbuf_append_char(tp->code_buf, ')');
         }
         break;
-    case LMD_TYPE_DECIMAL: 
+    case LMD_TYPE_DECIMAL:
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_c2it(");
             TypeConst *item_type = (TypeConst*)item->type;
@@ -753,7 +753,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             break;
         }
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
-            item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
+            item->type->type_id == LMD_TYPE_SYMBOL ? 'y' :
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
         if (item->type->is_literal) {
             strbuf_append_format(tp->code_buf, "const_%c2it(", t);
@@ -769,7 +769,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         break;
     }
     case LMD_TYPE_LIST:
-        transpile_expr(tp, item);  // list_end() -> Item 
+        transpile_expr(tp, item);  // list_end() -> Item
         break;
     case LMD_TYPE_PATH:
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
@@ -861,7 +861,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
         // skip let declaration and pattern definitions
-        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || 
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM ||
             item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
             item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
             item = item->next;  continue;
@@ -879,9 +879,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
-            log_debug("transpile_primary_expr: identifier %.*s, type: %d", 
+            log_debug("transpile_primary_expr: identifier %.*s, type: %d",
                 (int)ident_node->name->len, ident_node->name->chars, pri_node->type->type_id);
-            
+
             // check if this is a captured variable in the current closure
             if (tp->current_closure) {
                 CaptureInfo* cap = find_capture(tp->current_closure, ident_node->name);
@@ -917,15 +917,15 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     return;
                 }
             }
-            
+
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
-            
+
             // check if this is an optional/default parameter (needs unboxing since it's passed as Item)
             if (entry_node && entry_node->node_type == AST_NODE_PARAM) {
                 TypeParam* param_type = (TypeParam*)entry_node->type;
                 // Unbox if: (1) it's in a closure, OR (2) it has default value or is optional
                 bool needs_unboxing = tp->current_closure || param_type->is_optional || param_type->default_value;
-                
+
                 if (needs_unboxing) {
                     // parameter passed as Item - needs unboxing to actual type
                     TypeId type_id = pri_node->type->type_id;
@@ -957,14 +957,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     return;
                 }
             }
-            
+
             if (entry_node) {
                 if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC) {
                     // Function reference - check if it's a closure
                     AstFuncNode* fn_node = (AstFuncNode*)entry_node;
                     TypeFunc* fn_type = fn_node->type ? (TypeFunc*)fn_node->type : nullptr;
                     int arity = fn_type ? fn_type->param_count : 0;
-                    
+
                     if (fn_node->captures) {
                         // This is a closure - need to create the env and use to_closure
                         // Generate same code as transpile_fn_expr for closures
@@ -973,14 +973,14 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                         strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
                         write_env_name(tp->code_buf, fn_node);
                         strbuf_append_str(tp->code_buf, "), 0);\n");
-                        
+
                         // populate captured variables
                         CaptureInfo* cap = fn_node->captures;
                         while (cap) {
                             strbuf_append_str(tp->code_buf, "  _closure_env->");
                             strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
                             strbuf_append_str(tp->code_buf, " = ");
-                            
+
                             // box the captured variable
                             bool from_outer = false;
                             if (tp->current_closure) {
@@ -991,7 +991,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             strbuf_append_str(tp->code_buf, ";\n");
                             cap = cap->next;
                         }
-                        
+
                         strbuf_append_str(tp->code_buf, "  to_closure_named(");
                         write_fn_name(tp->code_buf, fn_node, (AstImportNode*)ident_node->entry->import);
                         strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
@@ -1012,7 +1012,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     } else {
                         // Regular function without captures - use to_fn_named for stack traces
                         strbuf_append_format(tp->code_buf, "to_fn_named(");
-                        write_fn_name(tp->code_buf, fn_node, 
+                        write_fn_name(tp->code_buf, fn_node,
                             (AstImportNode*)ident_node->entry->import);
                         strbuf_append_format(tp->code_buf, ",%d,", arity);
                         // pass function name as string literal for stack traces
@@ -1042,15 +1042,15 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
                         (int)ident_node->name->len, ident_node->name->chars,
                         ident_node->entry->node->type->type_id);
-                    
+
                     // For decimal identifiers, we need to convert the pointer to an Item
                     if (ident_node->entry->node->type->type_id == LMD_TYPE_DECIMAL) {
                         strbuf_append_str(tp->code_buf, "c2it(");
-                        write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                        write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
                             (AstImportNode*)ident_node->entry->import);
                         strbuf_append_char(tp->code_buf, ')');
                     } else {
-                        write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                        write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
                             (AstImportNode*)ident_node->entry->import);
                     }
                 }
@@ -1062,7 +1062,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 tp->error_count++;
                 strbuf_append_str(tp->code_buf, "ItemError");
             }
-        } else { 
+        } else {
             transpile_expr(tp, pri_node->expr);
         }
     } else { // const
@@ -1127,15 +1127,15 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
             strbuf_append_char(tp->code_buf, ')');
         } else {
             strbuf_append_str(tp->code_buf, "fn_not(");
-            transpile_box_item(tp, unary_node->operand);  
+            transpile_box_item(tp, unary_node->operand);
             strbuf_append_str(tp->code_buf, ")");
         }
     }
     else if (unary_node->op == OPERATOR_POS || unary_node->op == OPERATOR_NEG) {
         TypeId operand_type = unary_node->operand->type->type_id;
-        
+
         // Fast path for numeric types that can be handled directly by C
-        if (operand_type == LMD_TYPE_INT || operand_type == LMD_TYPE_INT64 || 
+        if (operand_type == LMD_TYPE_INT || operand_type == LMD_TYPE_INT64 ||
             operand_type == LMD_TYPE_FLOAT) {
             // Direct C operator application for primitive numeric types
             if (unary_node->op == OPERATOR_POS) {
@@ -1170,7 +1170,7 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     TypeId left_type = bi_node->left->type->type_id;
-    TypeId right_type = bi_node->right->type->type_id;     
+    TypeId right_type = bi_node->right->type->type_id;
     if (bi_node->op == OPERATOR_AND || bi_node->op == OPERATOR_OR) {
         // Check if we need type error checking for mixed types
         if (left_type != LMD_TYPE_BOOL || right_type != LMD_TYPE_BOOL) {
@@ -1193,7 +1193,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_expr(tp, bi_node->right);
-            strbuf_append_char(tp->code_buf, ')');            
+            strbuf_append_char(tp->code_buf, ')');
         }
     }
     else if (bi_node->op == OPERATOR_POW) {
@@ -1229,7 +1229,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');        
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_SUB) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -1246,7 +1246,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');        
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MUL) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -1263,7 +1263,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');        
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MOD) {
         // Always call runtime fn_mod() for proper error handling (division by zero, type checking)
@@ -1271,7 +1271,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');        
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_DIV) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -1288,7 +1288,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');        
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IDIV) {
         // Always call runtime fn_idiv() for proper error handling
@@ -1296,28 +1296,28 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');        
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IS) {
         strbuf_append_str(tp->code_buf, "fn_is(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');   
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IN) {
         strbuf_append_str(tp->code_buf, "fn_in(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');   
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_TO) {
         strbuf_append_str(tp->code_buf, "fn_to(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');   
+        strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_EQ) {
         // Use native C == for numeric/bool types, fn_eq for others (strings, containers, etc.)
@@ -1414,8 +1414,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         }
-    } 
-    else if (bi_node->op == OPERATOR_JOIN) { 
+    }
+    else if (bi_node->op == OPERATOR_JOIN) {
         strbuf_append_str(tp->code_buf, "fn_join(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -1431,12 +1431,12 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
 // for both if_expr and if_stam
 void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     log_debug("transpile if expr");
-    
+
     // Check types for proper conditional expression handling
     Type* if_type = if_node->type;
     Type* then_type = if_node->then ? if_node->then->type : nullptr;
     Type* else_type = if_node->otherwise ? if_node->otherwise->type : nullptr;
-    
+
     strbuf_append_str(tp->code_buf, "(");
     if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL) {
         transpile_expr(tp, if_node->cond);
@@ -1492,7 +1492,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         strbuf_append_str(tp->code_buf, "error");
         return;
     }
-    
+
     // declare the variable type
     Type *var_type = asn_node->type;
     strbuf_append_str(tp->code_buf, "\n ");
@@ -1506,24 +1506,24 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     // set assignment name context for closure naming
     String* prev_assign_name = tp->current_assign_name;
     tp->current_assign_name = asn_node->name;
-    
+
     transpile_expr(tp, asn_node->as);
-    
+
     // restore previous context
     tp->current_assign_name = prev_assign_name;
-    
+
     strbuf_append_char(tp->code_buf, ';');
 }
 
 // Transpile decomposition: let a, b = expr OR let a, b at expr
 void transpile_decompose_expr(Transpiler* tp, AstDecomposeNode *dec_node, bool is_global = false) {
     log_debug("transpile decompose expr, name_count=%d, is_named=%d", dec_node->name_count, dec_node->is_named);
-    
+
     if (!dec_node || !dec_node->as || dec_node->name_count == 0) {
         log_error("Error: invalid decompose node");
         return;
     }
-    
+
     // For local scope: declare variables first, then use nested scope for temp
     if (!is_global) {
         // Declare all variables outside the helper scope
@@ -1534,19 +1534,19 @@ void transpile_decompose_expr(Transpiler* tp, AstDecomposeNode *dec_node, bool i
             strbuf_append_str(tp->code_buf, ";");
         }
     }
-    
+
     // Use a nested scope to avoid _dec_src redeclaration conflicts
     strbuf_append_str(tp->code_buf, "\n {Item _dec_src=");
     transpile_box_item(tp, dec_node->as);
     strbuf_append_str(tp->code_buf, ";");
-    
+
     // Assign values inside the nested scope
     for (int i = 0; i < dec_node->name_count; i++) {
         String* name = dec_node->names[i];
         strbuf_append_str(tp->code_buf, "\n _");
         strbuf_append_str_n(tp->code_buf, name->chars, name->len);
         strbuf_append_char(tp->code_buf, '=');
-        
+
         if (dec_node->is_named) {
             // Named decomposition: get attribute by name
             strbuf_append_str(tp->code_buf, "item_attr(_dec_src,\"");
@@ -1563,7 +1563,7 @@ void transpile_decompose_expr(Transpiler* tp, AstDecomposeNode *dec_node, bool i
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global = false) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!let_node) { log_error("Error: missing let_node");  return; }
-    
+
     AstNode *declare = let_node->declare;
     while (declare) {
         // Handle both regular assignments and decompositions
@@ -1587,7 +1587,7 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
     Type * expr_type = loop_node->as->type;
     Type *item_type = nullptr;
     bool is_named = loop_node->is_named;  // 'at' keyword for attribute/named iteration
-    
+
     // determine loop item type based on expression type and iteration mode
     if (is_named) {
         // 'at' iteration: iterating over attributes/fields
@@ -1606,7 +1606,7 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
     } else {
         item_type = &TYPE_ANY;
     }
-        
+
     if (!item_type) {
         log_error("Error: transpile_loop_expr failed to determine item type");
         item_type = &TYPE_ANY; // fallback to ANY type for safety
@@ -1614,7 +1614,7 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
 
     // Helper: generate index variable declaration if present
     bool has_index = loop_node->index_name != nullptr;
-    
+
     if (is_named) {
         // 'at' iteration: iterate over attributes/fields
         // for k, v at expr -> k is key name, v is value
@@ -1623,14 +1623,14 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         transpile_box_item(tp, loop_node->as);
         strbuf_append_str(tp->code_buf, ";\n ArrayList* _attr_keys=item_keys(it);\n");
         strbuf_append_str(tp->code_buf, " for (int _ki=0; _attr_keys && _ki<_attr_keys->length; _ki++) {\n");
-        
+
         if (has_index) {
             // Two-variable form: for k, v at expr
             // k (index_name) = key name, v (name) = value
             strbuf_append_str(tp->code_buf, "  String* _");
             strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
             strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
-            
+
             strbuf_append_str(tp->code_buf, "  Item _");
             strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
             strbuf_append_str(tp->code_buf, "=item_attr(it, _");
@@ -1654,12 +1654,12 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
                 nested_type_id = arr_type->nested->type_id;
             }
         }
-        
+
         bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
                                expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
                                expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
         bool is_any_array = is_typed_array || is_generic_array;
-        
+
         // Select the appropriate array pointer type
         const char* arr_decl;
         if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -1679,8 +1679,8 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         transpile_expr(tp, loop_node->as);
 
         // start the loop
-        strbuf_append_str(tp->code_buf, 
-            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " : 
+        strbuf_append_str(tp->code_buf,
+            expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " :
             is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
             ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
 
@@ -1697,14 +1697,14 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
         if (expr_type->type_id == LMD_TYPE_RANGE) {
             strbuf_append_str(tp->code_buf, "=_idx;\n");
-        } 
+        }
         else if (is_any_array) {
             if (item_type->type_id == LMD_TYPE_STRING) {
                 strbuf_append_str(tp->code_buf, "=fn_string(arr->items[_idx]);\n");
-            } 
+            }
             else {
                 strbuf_append_str(tp->code_buf, "=arr->items[_idx];\n");
-            }        
+            }
         }
         else {
             strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
@@ -1718,7 +1718,7 @@ void transpile_loop_expr(Transpiler* tp, AstLoopNode *loop_node, AstNode* then, 
         log_enter();
         transpile_loop_expr(tp, (AstLoopNode*)next_loop, then, use_array);
         log_leave();
-    } 
+    }
     else { // loop body
         Type *then_type = then->type;
         // push to array (spreadable) or list
@@ -1755,13 +1755,13 @@ void transpile_let_clauses(Transpiler* tp, AstNode* let_clause) {
     while (current) {
         AstNamedNode* let_node = (AstNamedNode*)current;
         if (!let_node->as) {
-            log_error("transpile_let_clauses: let_node->as is null for %.*s", 
+            log_error("transpile_let_clauses: let_node->as is null for %.*s",
                 (int)let_node->name->len, let_node->name->chars);
             current = current->next;
             continue;
         }
         Type* value_type = let_node->as->type ? let_node->as->type : &TYPE_ANY;
-        
+
         // Generate typed variable declaration like for-loop does
         strbuf_append_str(tp->code_buf, "  ");
         write_type(tp->code_buf, value_type);
@@ -1794,24 +1794,24 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         return;
     }
     Type *then_type = for_node->then->type;
-    
+
     bool has_where = for_node->where != NULL;
     bool has_order = for_node->order != NULL;
     bool has_group = for_node->group != NULL;
     bool has_limit = for_node->limit != NULL;
     bool has_offset = for_node->offset != NULL;
     bool has_let = for_node->let_clause != NULL;
-    
+
     // GROUP BY not yet fully implemented
     if (has_group) {
         log_error("Error: GROUP BY clause not yet implemented");
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     // init a spreadable array for for-expression results
     strbuf_append_str(tp->code_buf, "({\n Array* arr_out=array_spreadable(); \n");
-    
+
     // No GROUP BY - simpler path with optional where/let
     AstNode *loop = for_node->loop;
         if (loop) {
@@ -1819,21 +1819,21 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             AstLoopNode* loop_node = (AstLoopNode*)loop;
             Type* expr_type = loop_node->as->type ? loop_node->as->type : &TYPE_ANY;
             bool is_named = loop_node->is_named;
-            
+
             if (is_named) {
                 // 'at' iteration: iterate over attributes/fields
                 strbuf_append_str(tp->code_buf, " Item it=");
                 transpile_box_item(tp, loop_node->as);
                 strbuf_append_str(tp->code_buf, ";\n ArrayList* _attr_keys=item_keys(it);\n");
                 strbuf_append_str(tp->code_buf, " for (int _ki=0; _attr_keys && _ki<_attr_keys->length; _ki++) {\n");
-                
+
                 if (loop_node->index_name) {
                     // Two-variable form: for k, v at expr
                     // k (index_name) = key name (String*), v (name) = value (Item)
                     strbuf_append_str(tp->code_buf, "  String* _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
                     strbuf_append_str(tp->code_buf, "=_attr_keys->data[_ki];\n");
-                    
+
                     strbuf_append_str(tp->code_buf, "  Item _");
                     strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
                     strbuf_append_str(tp->code_buf, "=item_attr(it, _");
@@ -1857,7 +1857,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                         nested_type_id = arr_type->nested->type_id;
                     }
                 }
-                
+
                 bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
                                        expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
                                        expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
@@ -1866,7 +1866,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                                                             nested_type_id == LMD_TYPE_INT64 ||
                                                             nested_type_id == LMD_TYPE_FLOAT);
                 bool is_any_array = is_typed_array || is_generic_array;
-                
+
                 // Select the appropriate array pointer type
                 const char* arr_decl;
                 if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -1884,20 +1884,20 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 }
                 strbuf_append_str(tp->code_buf, arr_decl);
                 transpile_expr(tp, loop_node->as);
-                
+
                 // Start the loop
-                strbuf_append_str(tp->code_buf, 
-                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " : 
+                strbuf_append_str(tp->code_buf,
+                    expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { array_push(arr_out, ITEM_ERROR); } else { for (long _idx=rng->start; _idx<=rng->end; _idx++) {\n " :
                     is_any_array ? ";\n if (!arr) { array_push(arr_out, ITEM_ERROR); } else { for (int _idx=0; _idx<arr->length; _idx++) {\n " :
                     ";\n int ilen = fn_len(it);\n for (int _idx=0; _idx<ilen; _idx++) {\n ");
-                
+
                 // Index variable if present
                 if (loop_node->index_name) {
                     strbuf_append_str(tp->code_buf, "  long _");
                     strbuf_append_str_n(tp->code_buf, loop_node->index_name->chars, loop_node->index_name->len);
                     strbuf_append_str(tp->code_buf, "=_idx;\n");
                 }
-                
+
                 // Construct loop variable type
                 Type* item_type = &TYPE_ANY;
                 if (expr_type->type_id == LMD_TYPE_ARRAY) {
@@ -1912,7 +1912,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 } else if (expr_type->type_id == LMD_TYPE_RANGE) {
                     item_type = &TYPE_INT;
                 }
-                
+
                 write_type(tp->code_buf, item_type);
                 strbuf_append_str(tp->code_buf, " _");
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
@@ -1924,53 +1924,53 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     strbuf_append_str(tp->code_buf, "=item_at(it,_idx);\n");
                 }
             }
-            
+
             // Handle nested loops
             AstNode* next_loop = loop_node->next;
             while (next_loop) {
                 AstLoopNode* nl = (AstLoopNode*)next_loop;
                 Type* nl_expr_type = nl->as->type ? nl->as->type : &TYPE_ANY;
-                
+
                 strbuf_append_str(tp->code_buf, " Item _nl_src=");
                 transpile_box_item(tp, nl->as);
                 strbuf_append_str(tp->code_buf, ";\n int _nl_len=fn_len(_nl_src);\n");
                 strbuf_append_str(tp->code_buf, " for (int _nidx=0; _nidx<_nl_len; _nidx++) {\n");
-                
+
                 if (nl->index_name) {
                     strbuf_append_str(tp->code_buf, "  long _");
                     strbuf_append_str_n(tp->code_buf, nl->index_name->chars, nl->index_name->len);
                     strbuf_append_str(tp->code_buf, "=_nidx;\n");
                 }
-                
+
                 strbuf_append_str(tp->code_buf, "  Item _");
                 strbuf_append_str_n(tp->code_buf, nl->name->chars, nl->name->len);
                 strbuf_append_str(tp->code_buf, "=item_at(_nl_src,_nidx);\n");
-                
+
                 next_loop = next_loop->next;
             }
-            
+
             // Transpile let clauses
             if (has_let) {
                 transpile_let_clauses(tp, for_node->let_clause);
             }
-            
+
             // Transpile where clause
             if (has_where) {
                 transpile_where_check(tp, for_node->where);
             }
-            
+
             // Body - push to array
             strbuf_append_str(tp->code_buf, " array_push(arr_out,");
             transpile_box_item(tp, for_node->then);
             strbuf_append_str(tp->code_buf, ");");
-            
+
             // Close nested loops
             next_loop = loop_node->next;
             while (next_loop) {
                 strbuf_append_str(tp->code_buf, " }\n");
                 next_loop = next_loop->next;
             }
-            
+
             // Close main loop - 'at' iteration only has single brace, 'in' may have extra
             bool is_any_array_type = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
                                       expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
@@ -1981,16 +1981,16 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             }
             strbuf_append_str(tp->code_buf, " }\n");
         }
-    
+
     // Track if we've applied any post-processing that converts Array to List
     bool has_post_processing = has_order || has_offset || has_limit;
-    
+
     // For post-processing, clean up the frame FIRST so post-processing results
     // are allocated in the outer frame and survive
     if (has_post_processing) {
         strbuf_append_str(tp->code_buf, " frame_end();\n");
     }
-    
+
     // Apply ORDER BY if present - use simple sort for now
     // TODO: Support multiple order specs and complex sorting
     if (has_order) {
@@ -2002,7 +2002,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             strbuf_append_str(tp->code_buf, " _sorted = fn_reverse(_sorted);\n");
         }
     }
-    
+
     // Apply OFFSET if present
     if (has_offset) {
         if (has_order) {
@@ -2013,7 +2013,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         transpile_box_item(tp, for_node->offset);
         strbuf_append_str(tp->code_buf, ");\n");
     }
-    
+
     // Apply LIMIT if present
     if (has_limit) {
         if (has_offset) {
@@ -2026,7 +2026,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
         transpile_box_item(tp, for_node->limit);
         strbuf_append_str(tp->code_buf, ");\n");
     }
-    
+
     // return the result - determine the final variable
     if (has_limit) {
         strbuf_append_str(tp->code_buf, " _limited;})");
@@ -2056,10 +2056,10 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     TypeId left_type = pipe_node->left->type ? pipe_node->left->type->type_id : LMD_TYPE_ANY;
     bool uses_current_item = has_current_item_ref(pipe_node->right);
-    
+
     if (!uses_current_item && pipe_node->op == OPERATOR_PIPE) {
         // aggregate pipe: pass whole collection as first argument
         // For now, evaluate left and right, call fn_pipe_call
@@ -2070,7 +2070,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    
+
     // Uses ~ or ~# - need to iterate
     // Generate inline loop using statement expression
     // Use array instead of list to avoid string merging behavior
@@ -2080,13 +2080,13 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, ";\n");
     strbuf_append_str(tp->code_buf, "  TypeId _pipe_type = item_type_id(_pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "  Array* _pipe_result = array();\n");
-    
+
     // Check if collection type - if not, apply to single item
     strbuf_append_str(tp->code_buf, "  if (_pipe_type == LMD_TYPE_ARRAY || _pipe_type == LMD_TYPE_LIST || ");
     strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_RANGE || _pipe_type == LMD_TYPE_MAP || ");
     strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_INT || _pipe_type == LMD_TYPE_ARRAY_INT64 || ");
     strbuf_append_str(tp->code_buf, "_pipe_type == LMD_TYPE_ARRAY_FLOAT || _pipe_type == LMD_TYPE_ELEMENT) {\n");
-    
+
     // Map case - iterate over key-value pairs
     strbuf_append_str(tp->code_buf, "    if (_pipe_type == LMD_TYPE_MAP) {\n");
     strbuf_append_str(tp->code_buf, "      ArrayList* _pipe_keys = item_keys(_pipe_collection);\n");
@@ -2095,7 +2095,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "          String* _key_str = (String*)_pipe_keys->data[_pipe_i];\n");
     strbuf_append_str(tp->code_buf, "          Item _pipe_index = s2it(_key_str);\n");
     strbuf_append_str(tp->code_buf, "          Item _pipe_item = item_attr(_pipe_collection, _key_str->chars);\n");
-    
+
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter - only keep if condition is truthy
         strbuf_append_str(tp->code_buf, "          if (is_truthy(");
@@ -2113,13 +2113,13 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "        // Note: _pipe_keys memory managed by heap GC\n");
     strbuf_append_str(tp->code_buf, "      }\n");
     strbuf_append_str(tp->code_buf, "    } else {\n");
-    
+
     // Array/List/Range case - iterate with numeric index
     strbuf_append_str(tp->code_buf, "      int64_t _pipe_len = fn_len(_pipe_collection);\n");
     strbuf_append_str(tp->code_buf, "      for (int64_t _pipe_i = 0; _pipe_i < _pipe_len; _pipe_i++) {\n");
     strbuf_append_str(tp->code_buf, "        Item _pipe_index = i2it(_pipe_i);\n");
     strbuf_append_str(tp->code_buf, "        Item _pipe_item = item_at(_pipe_collection, (int)_pipe_i);\n");
-    
+
     if (pipe_node->op == OPERATOR_WHERE) {
         // filter
         strbuf_append_str(tp->code_buf, "        if (is_truthy(");
@@ -2136,11 +2136,11 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     strbuf_append_str(tp->code_buf, "      }\n");
     strbuf_append_str(tp->code_buf, "    }\n");
     strbuf_append_str(tp->code_buf, "  } else {\n");
-    
+
     // Scalar case - apply transform once
     strbuf_append_str(tp->code_buf, "    Item _pipe_item = _pipe_collection;\n");
     strbuf_append_str(tp->code_buf, "    Item _pipe_index = ITEM_NULL;\n");
-    
+
     if (pipe_node->op == OPERATOR_WHERE) {
         strbuf_append_str(tp->code_buf, "    if (is_truthy(");
         transpile_box_item(tp, pipe_node->right);
@@ -2153,7 +2153,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
         strbuf_append_str(tp->code_buf, ");\n");
     }
     strbuf_append_str(tp->code_buf, "  }\n");
-    
+
     // Return result - array_end finalizes and returns as Item
     strbuf_append_str(tp->code_buf, "  array_end(_pipe_result);\n");
     strbuf_append_str(tp->code_buf, "})");
@@ -2167,7 +2167,7 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     strbuf_append_str(tp->code_buf, "while (");
     if (while_node->cond->type && while_node->cond->type->type_id == LMD_TYPE_BOOL) {
         transpile_expr(tp, while_node->cond);
@@ -2195,7 +2195,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
         log_error("Error: invalid if_node");
         return;
     }
-    
+
     strbuf_append_str(tp->code_buf, "if (");
     if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL) {
         transpile_expr(tp, if_node->cond);
@@ -2205,7 +2205,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     strbuf_append_str(tp->code_buf, ") {");
-    
+
     // transpile then branch as procedural content
     if (if_node->then) {
         if (if_node->then->node_type == AST_NODE_CONTENT) {
@@ -2222,7 +2222,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
         }
     }
     strbuf_append_str(tp->code_buf, "\n}");
-    
+
     // transpile else branch if present
     if (if_node->otherwise) {
         strbuf_append_str(tp->code_buf, " else {");
@@ -2261,7 +2261,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         log_error("Error: invalid assign_node");
         return;
     }
-    
+
     strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
     strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
     strbuf_append_char(tp->code_buf, '=');
@@ -2273,12 +2273,12 @@ void transpile_items(Transpiler* tp, AstNode *item) {
     bool is_first = true;
     while (item) {
         // skip let declaration and pattern definitions
-        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || 
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM ||
             item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
             item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
             item = item->next;  continue;
         }
-        if (is_first) { is_first = false; } 
+        if (is_first) { is_first = false; }
         else { strbuf_append_str(tp->code_buf, ", "); }
         transpile_box_item(tp, item);
         item = item->next;
@@ -2302,7 +2302,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
-    
+
     // for arrays with spreadable items (for-expressions), use push path
     if (!is_int_array && !is_int64_array && !is_float_array && has_spreadable_item(array_node->item)) {
         strbuf_append_str(tp->code_buf, "({\n Array* arr = array();\n");
@@ -2316,7 +2316,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
         strbuf_append_str(tp->code_buf, " (Item)arr; })");
         return;
     }
-    
+
     if (is_int_array) {
         strbuf_append_str(tp->code_buf, "({ArrayInt* arr = array_int(); array_int_fill(arr,");
     } else if (is_int64_array) {
@@ -2326,13 +2326,13 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     } else {
         strbuf_append_str(tp->code_buf, "({Array* arr = array(); array_fill(arr,");
     }
-    
+
     strbuf_append_int(tp->code_buf, type->length);
     // only add comma if there are items to follow
     if (array_node->item) {
         strbuf_append_char(tp->code_buf, ',');
     }
-    
+
     if (is_int_array || is_int64_array || is_float_array) {
         AstNode *item = array_node->item;
         while (item) {
@@ -2358,7 +2358,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     TypeArray *type = list_node->list_type;
     log_debug("transpile_list_expr: type->length = %ld", type->length);
     // create list before the declarations, to contain all the allocations
@@ -2388,7 +2388,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_char(tp->code_buf, ',');
         transpile_items(tp, list_node->item);
         strbuf_append_str(tp->code_buf, ");})");
-    } 
+    }
     else {
         transpile_push_items(tp, list_node->item, false);
     }
@@ -2396,10 +2396,10 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile proc content");
     if (!list_node) { log_error("Error: missing list_node");  return; }
-    
+
     AstNode *item = list_node->item;
     AstNode *last_item = NULL;
-    
+
     // find the last non-declaration item for return value
     AstNode *scan = item;
     while (scan) {
@@ -2412,9 +2412,9 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         }
         scan = scan->next;
     }
-    
+
     strbuf_append_str(tp->code_buf, "({\n Item result = ITEM_NULL;");
-    
+
     while (item) {
         // handle declarations
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_VAR_STAM) {
@@ -2483,7 +2483,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         }
         item = item->next;
     }
-    
+
     strbuf_append_str(tp->code_buf, "\n result;})" );
 }
 
@@ -2525,7 +2525,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     strbuf_append_str(tp->code_buf, "({Map* m = map(");
     strbuf_append_int(tp->code_buf, ((TypeMap*)map_node->type)->type_index);
     strbuf_append_str(tp->code_buf, ");");
@@ -2567,7 +2567,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     strbuf_append_str(tp->code_buf, "\n({Element* el=elmt(");
     TypeElmt* type = (TypeElmt*)elmt_node->type;
     strbuf_append_int(tp->code_buf, type->type_index);
@@ -2619,11 +2619,11 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     }
     else { // no content
         if (elmt_node->item) {
-            strbuf_append_str(tp->code_buf, " list_end(el);})"); 
+            strbuf_append_str(tp->code_buf, " list_end(el);})");
         }
         else { // and no attr, thus no frame_end
-            strbuf_append_str(tp->code_buf, " el;})"); 
-        }  
+            strbuf_append_str(tp->code_buf, " el;})");
+        }
     }
 }
 
@@ -2632,7 +2632,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
     if (!arg) {
         // use default value if available
         if (param_type && param_type->default_value) {
-            log_debug("using default value for param type=%d, default type=%d", 
+            log_debug("using default value for param type=%d, default type=%d",
                 param_type->type_id, param_type->default_value->type->type_id);
             // for optional params with default, box since function expects Item type
             if (param_type->is_optional) {
@@ -2656,7 +2656,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
         value = named_arg->as;
     }
 
-    log_debug("transpile_call_argument: type=%d, node_type=%d", 
+    log_debug("transpile_call_argument: type=%d, node_type=%d",
         value->type ? value->type->type_id : -1, value->node_type);
 
     // For system functions, box DateTime arguments
@@ -2676,7 +2676,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
             transpile_expr(tp, value);
         }
         else if (param_type->type_id == LMD_TYPE_FLOAT) {
-            if ((value->type->type_id == LMD_TYPE_INT || value->type->type_id == LMD_TYPE_INT64 || 
+            if ((value->type->type_id == LMD_TYPE_INT || value->type->type_id == LMD_TYPE_INT64 ||
                 value->type->type_id == LMD_TYPE_FLOAT)) {
                 transpile_expr(tp, value);
             }
@@ -2762,27 +2762,27 @@ AstNamedNode* get_param_at_index(AstFuncNode* fn_node, int index) {
  * Transpile a tail-recursive call as a goto statement.
  * Transforms: factorial(n-1, acc*n) into:
  *   { int _t0 = _n - 1; int _t1 = _acc * _n; _n = _t0; _acc = _t1; goto _tco_start; }
- * 
+ *
  * Note: We use temporary variables to handle cases like f(b, a) where args are swapped.
  */
 void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tco_func) {
     log_debug("transpile_tail_call: converting recursive call to goto");
-    
+
     // Generate: ({ temp assignments; param = temp; ...; goto _tco_start; ITEM_NULL; })
     // The ITEM_NULL at end is never reached but satisfies the expression type
     strbuf_append_str(tp->code_buf, "({ ");
-    
+
     // Count params and args
     int param_count = 0;
     AstNamedNode* param = tco_func->param;
     while (param) { param_count++; param = (AstNamedNode*)param->next; }
-    
+
     // First pass: assign arguments to temporary variables
     // This handles cases like factorial(b, a) where we swap values
     AstNode* arg = call_node->argument;
     param = tco_func->param;
     int arg_idx = 0;
-    
+
     while (arg && param) {
         // Generate: TypeX _tN = <arg>;
         Type* param_type = param->type;
@@ -2790,12 +2790,12 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         strbuf_append_format(tp->code_buf, " _tco_tmp%d = ", arg_idx);
         transpile_expr(tp, arg);
         strbuf_append_str(tp->code_buf, "; ");
-        
+
         arg = arg->next;
         param = (AstNamedNode*)param->next;
         arg_idx++;
     }
-    
+
     // Second pass: assign temporaries to parameters
     param = tco_func->param;
     for (int i = 0; i < arg_idx; i++) {
@@ -2805,10 +2805,10 @@ void transpile_tail_call(Transpiler* tp, AstCallNode* call_node, AstFuncNode* tc
         strbuf_append_format(tp->code_buf, " = _tco_tmp%d; ", i);
         param = (AstNamedNode*)param->next;
     }
-    
+
     // Jump back to function start
     strbuf_append_str(tp->code_buf, "goto _tco_start; ");
-    
+
     // The expression type - never reached but keeps C happy
     Type* ret_type = ((TypeFunc*)tco_func->type)->returned;
     if (!ret_type) ret_type = &TYPE_ANY;
@@ -2839,7 +2839,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     // TCO: Check if this is a tail-recursive call that should be transformed to goto
     if (is_tco_tail_call(tp, call_node)) {
         transpile_tail_call(tp, call_node, tp->tco_func);
@@ -2857,12 +2857,12 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
-        
+
         // Check if we can use native C math function
         // Only for single-argument math functions with typed numeric arg
         AstNode* first_arg = call_node->argument;
         const char* native_func = can_use_native_math(sys_fn_node, first_arg);
-        
+
         if (native_func && first_arg && !first_arg->next) {
             // Use native C math: push_d(c_func((double)arg))
             // The result needs to be boxed since native math returns double
@@ -2873,7 +2873,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             strbuf_append_str(tp->code_buf, ")))");
             return;  // done - skip normal argument handling
         }
-        
+
         // Use the sys func name from fn_info, not from TSNode source
         // This correctly handles method-style calls (obj.method()) which are desugared to sys func calls
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
@@ -2882,28 +2882,28 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     }
     else {
         TypeId callee_type_id = call_node->function->type ? call_node->function->type->type_id : LMD_TYPE_NULL;
-        
+
         // Check if callee is a parameter or variable that should be treated as a function
         // even if it doesn't have explicit function type (e.g., let add10 = make_adder(10); add10(5))
         bool is_callable_param = false;
         bool is_callable_variable = false;  // variable that might hold a function at runtime
         bool is_callable_call_expr = false; // callee is a call expression (e.g., make_adder(10)(5))
-        AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+        AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ?
             (AstPrimaryNode*)call_node->function : null;
-        
+
         // Early check for undefined function call - prevents crash
         if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
             if (!ident_node->entry) {
                 // Calling an undefined identifier - emit error
-                log_error("Error: call to undefined function '%.*s'", 
+                log_error("Error: call to undefined function '%.*s'",
                     (int)ident_node->name->len, ident_node->name->chars);
                 tp->error_count++;
                 strbuf_append_str(tp->code_buf, "ItemError");
                 return;
             }
         }
-        
+
         if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
             AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
@@ -2915,23 +2915,23 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 // This is a let variable being called - might hold a function at runtime
                 // We can't statically know it's a function, but we'll use fn_call dynamically
                 is_callable_variable = true;
-                log_debug("callable variable (let) detected: %.*s", 
+                log_debug("callable variable (let) detected: %.*s",
                     (int)ident_node->name->len, ident_node->name->chars);
             }
         }
-        
+
         // Check if callee is a call expression (chained call like make_adder(10)(5))
         // Note: call expressions may be wrapped in a primary expression
         if (call_node->function->node_type == AST_NODE_CALL_EXPR) {
             is_callable_call_expr = true;
             log_debug("callable call expression detected (direct)");
         }
-        else if (primary_fn_node && primary_fn_node->expr && 
+        else if (primary_fn_node && primary_fn_node->expr &&
                  primary_fn_node->expr->node_type == AST_NODE_CALL_EXPR) {
             is_callable_call_expr = true;
             log_debug("callable call expression detected (wrapped in primary)");
         }
-        
+
         if (callee_type_id == LMD_TYPE_FUNC || is_callable_param || is_callable_variable || is_callable_call_expr) {
             if (callee_type_id == LMD_TYPE_FUNC) {
                 fn_type = (TypeFunc*)call_node->function->type;
@@ -2939,7 +2939,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             if (primary_fn_node && primary_fn_node->expr && primary_fn_node->expr->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident_node = (AstIdentNode*)primary_fn_node->expr;
                 AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
-                if (entry_node && (entry_node->node_type == AST_NODE_FUNC || 
+                if (entry_node && (entry_node->node_type == AST_NODE_FUNC ||
                     entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC)) {
                     // Direct function reference - use direct call
                     fn_node = (AstFuncNode*)entry_node;  // save for named args lookup
@@ -2970,20 +2970,20 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     if (need_box_wrapper) {
                         strbuf_append_str(tp->code_buf, "i2it(");
                     }
-                    write_fn_name_ex(tp->code_buf, fn_node, 
+                    write_fn_name_ex(tp->code_buf, fn_node,
                         (AstImportNode*)ident_node->entry->import,
                         use_unboxed ? "_u" : NULL);
                 } else if (entry_node && entry_node->node_type == AST_NODE_PARAM) {
                     // Function parameter - use fn_call for dynamic dispatch
                     is_fn_variable = true;
                     is_direct_call = false;
-                    log_debug("callable parameter detected: %.*s", 
+                    log_debug("callable parameter detected: %.*s",
                         (int)ident_node->name->len, ident_node->name->chars);
-                } else { 
+                } else {
                     // Variable holding a function - use fn_call for dynamic dispatch
                     is_fn_variable = true;
                     is_direct_call = false;
-                    log_debug("function variable detected: %.*s", 
+                    log_debug("function variable detected: %.*s",
                         (int)ident_node->name->len, ident_node->name->chars);
                 }
             }
@@ -3000,7 +3000,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 is_direct_call = false;
                 log_debug("function from expression");
             }
-            
+
             // For anonymous functions referenced directly (not through variable), use ->ptr
             if (fn_type && fn_type->is_anonymous && !is_fn_variable) {
                 transpile_expr(tp, call_node->function);
@@ -3010,7 +3010,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             log_debug("call function type is not func");
             strbuf_append_str(tp->code_buf, "ITEM_ERROR");
             return;
-        }       
+        }
     }
 
     // count arguments and check for named arguments
@@ -3031,9 +3031,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     // For function variables, use fn_callN() for efficiency or fn_call() for many args
     if (is_fn_variable) {
         // Get the function pointer expression
-        AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+        AstPrimaryNode *primary_fn_node = call_node->function->node_type == AST_NODE_PRIMARY ?
             (AstPrimaryNode*)call_node->function : null;
-        
+
         // Check if callee is a parameter with Item type (needs extraction from tagged pointer)
         bool needs_item_extraction = false;
         AstNode* callee_entry_node = nullptr;
@@ -3048,11 +3048,11 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 }
             }
         }
-        
+
         if (arg_count <= 3 && !is_variadic) {
             // Use specialized fn_callN for common cases (avoids list allocation)
             strbuf_append_format(tp->code_buf, "fn_call%d(", arg_count);
-            
+
             // Emit function expression - Function* is a direct pointer like other containers
             if (primary_fn_node && primary_fn_node->expr && callee_entry_node) {
                 if (needs_item_extraction) {
@@ -3066,7 +3066,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 strbuf_append_str(tp->code_buf, "(Function*)");
                 transpile_expr(tp, call_node->function);
             }
-            
+
             // Emit arguments
             arg = call_node->argument;
             while (arg) {
@@ -3078,7 +3078,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         } else {
             // Use fn_call with List for more arguments
             strbuf_append_str(tp->code_buf, "fn_call(");
-            
+
             // Emit function expression - Function* is a direct pointer like other containers
             if (primary_fn_node && primary_fn_node->expr && callee_entry_node) {
                 if (needs_item_extraction) {
@@ -3092,7 +3092,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 strbuf_append_str(tp->code_buf, "(Function*)");
                 transpile_expr(tp, call_node->function);
             }
-            
+
             // Build argument list
             strbuf_append_str(tp->code_buf, ",({Item _fa[]={");
             arg = call_node->argument;
@@ -3103,7 +3103,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 arg = arg->next;
                 first = false;
             }
-            strbuf_append_format(tp->code_buf, 
+            strbuf_append_format(tp->code_buf,
                 "}; List _fl={.type_id=%d,.items=_fa,.length=%d,.capacity=%d}; &_fl;}))",
                 LMD_TYPE_LIST, arg_count, arg_count);
         }
@@ -3123,7 +3123,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         // using stack allocation for reasonable param counts
         #define MAX_PARAMS 32
         AstNode* resolved_args[MAX_PARAMS] = {0};
-        
+
         // first pass: collect positional args and named args
         int positional_index = 0;
         arg = call_node->argument;
@@ -3217,12 +3217,12 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         // handle variadic arguments
         if (is_variadic) {
             if (has_output_arg) strbuf_append_char(tp->code_buf, ',');
-            
+
             // count variadic args
             int varg_count = 0;
             AstNode* varg = arg;
             while (varg) { varg_count++; varg = varg->next; }
-            
+
             if (varg_count == 0) {
                 strbuf_append_str(tp->code_buf, "null");  // no variadic args
             } else {
@@ -3235,7 +3235,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     arg = arg->next;
                     first_varg = false;
                 }
-                strbuf_append_format(tp->code_buf, 
+                strbuf_append_format(tp->code_buf,
                     "}; List _vl={.type_id=%d,.items=_va,.length=%d,.capacity=%d}; &_vl;})",
                     LMD_TYPE_LIST, varg_count, varg_count);
             }
@@ -3252,7 +3252,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     }
 
     strbuf_append_char(tp->code_buf, ')');
-    
+
     // Close the i2it() wrapper for unboxed INT calls (but not inside unboxed body)
     if (use_unboxed && unboxed_return_type == LMD_TYPE_INT && !tp->in_unboxed_body) {
         strbuf_append_char(tp->code_buf, ')');
@@ -3276,10 +3276,10 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    
+
     TypeId object_type = field_node->object->type->type_id;
     TypeId field_type = field_node->field->type->type_id;
-    
+
     // Check if field type is numeric (addressing the TODO comment)
     if (field_type != LMD_TYPE_INT && field_type != LMD_TYPE_INT64 && field_type != LMD_TYPE_FLOAT) {
         // Non-numeric index, must use generic fn_index
@@ -3290,7 +3290,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    
+
     // Fast path optimizations for specific type combinations
     if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
         // transpile_expr(tp, field_node->object);
@@ -3322,7 +3322,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_expr(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
         return;
-    }       
+    }
     else if (object_type == LMD_TYPE_ARRAY && field_type == LMD_TYPE_INT) {
         TypeArray* arr_type = (TypeArray*)field_node->object->type;
         if (arr_type->nested) {
@@ -3337,7 +3337,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
                     strbuf_append_str(tp->code_buf, "array_get(");
             }
         }
-        else { 
+        else {
             strbuf_append_str(tp->code_buf, "array_get(");
         }
         transpile_expr(tp, field_node->object);
@@ -3353,7 +3353,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_expr(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
         return;
-    }    
+    }
     else {
         // Generic fallback for all other cases - box both arguments
         strbuf_append_str(tp->code_buf, "fn_index(");
@@ -3361,44 +3361,107 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
-        return;    
+        return;
     }
 }
 
 // transpile path expression like file.etc.hosts to runtime path construction
 void transpile_path_expr(Transpiler* tp, AstPathNode *path_node) {
     log_debug("transpile_path_expr: scheme=%d, segments=%d", path_node->scheme, path_node->segment_count);
-    
-    // C2MIR does not support variadic functions, so we use fixed-arity path_build1-5
+
+    // C2MIR does not support variadic functions, so we use fixed-arity path_build1-8
+    // For paths with more segments, we chain path_extend calls
     int seg_count = path_node->segment_count;
-    if (seg_count < 1 || seg_count > 5) {
-        log_error("transpile_path_expr: unsupported segment count %d (must be 1-5)", seg_count);
-        strbuf_append_str(tp->code_buf, "ItemError /* path segment count out of range */");
+
+    if (seg_count == 0) {
+        // just the scheme root
+        strbuf_append_str(tp->code_buf, "path_new(rt->pool,");
+        strbuf_append_int(tp->code_buf, (int)path_node->scheme);
+        strbuf_append_char(tp->code_buf, ')');
         return;
     }
-    
-    // Generate: path_buildN(rt->pool, scheme, "seg1", "seg2", ...)
-    strbuf_append_str(tp->code_buf, "path_build");
-    strbuf_append_int(tp->code_buf, seg_count);
-    strbuf_append_str(tp->code_buf, "(rt->pool,");
-    strbuf_append_int(tp->code_buf, (int)path_node->scheme);
-    
-    // Emit each segment as a string literal
-    for (int i = 0; i < seg_count; i++) {
-        strbuf_append_char(tp->code_buf, ',');
-        strbuf_append_char(tp->code_buf, '"');
-        String* seg = path_node->segments[i];
-        // Escape the string content
-        for (size_t j = 0; j < seg->len; j++) {
-            char c = seg->chars[j];
-            if (c == '"' || c == '\\') {
-                strbuf_append_char(tp->code_buf, '\\');
+
+    if (seg_count <= 8) {
+        // Use fixed-arity path_buildN function
+        strbuf_append_str(tp->code_buf, "path_build");
+        strbuf_append_int(tp->code_buf, seg_count);
+        strbuf_append_str(tp->code_buf, "(rt->pool,");
+        strbuf_append_int(tp->code_buf, (int)path_node->scheme);
+
+        // Emit each segment as a string literal
+        for (int i = 0; i < seg_count; i++) {
+            strbuf_append_char(tp->code_buf, ',');
+            strbuf_append_char(tp->code_buf, '"');
+            String* seg = path_node->segments[i];
+            // Escape the string content
+            for (size_t j = 0; j < seg->len; j++) {
+                char c = seg->chars[j];
+                if (c == '"' || c == '\\') {
+                    strbuf_append_char(tp->code_buf, '\\');
+                }
+                strbuf_append_char(tp->code_buf, c);
             }
-            strbuf_append_char(tp->code_buf, c);
+            strbuf_append_char(tp->code_buf, '"');
         }
-        strbuf_append_char(tp->code_buf, '"');
+        strbuf_append_char(tp->code_buf, ')');
+    } else {
+        // For paths with more than 8 segments, use path_new + path_extend chain
+        // Build first 8 segments with path_build8, then extend with remaining
+        strbuf_append_str(tp->code_buf, "path_extend(rt->pool,");
+
+        // Recursively handle remaining segments
+        int remaining = seg_count - 8;
+        for (int r = remaining - 1; r >= 0; r--) {
+            strbuf_append_str(tp->code_buf, "path_extend(rt->pool,");
+        }
+
+        // Build first 8 segments
+        strbuf_append_str(tp->code_buf, "path_build8(rt->pool,");
+        strbuf_append_int(tp->code_buf, (int)path_node->scheme);
+        for (int i = 0; i < 8; i++) {
+            strbuf_append_char(tp->code_buf, ',');
+            strbuf_append_char(tp->code_buf, '"');
+            String* seg = path_node->segments[i];
+            for (size_t j = 0; j < seg->len; j++) {
+                char c = seg->chars[j];
+                if (c == '"' || c == '\\') {
+                    strbuf_append_char(tp->code_buf, '\\');
+                }
+                strbuf_append_char(tp->code_buf, c);
+            }
+            strbuf_append_char(tp->code_buf, '"');
+        }
+        strbuf_append_char(tp->code_buf, ')');
+
+        // Add remaining segments via path_extend
+        for (int i = 8; i < seg_count; i++) {
+            strbuf_append_str(tp->code_buf, ",\"");
+            String* seg = path_node->segments[i];
+            for (size_t j = 0; j < seg->len; j++) {
+                char c = seg->chars[j];
+                if (c == '"' || c == '\\') {
+                    strbuf_append_char(tp->code_buf, '\\');
+                }
+                strbuf_append_char(tp->code_buf, c);
+            }
+            strbuf_append_str(tp->code_buf, "\")");
+        }
     }
-    strbuf_append_char(tp->code_buf, ')');
+}
+
+// transpile path index expression like path[expr] to runtime path extension
+// This extends a path with a dynamic segment computed at runtime
+void transpile_path_index_expr(Transpiler* tp, AstPathIndexNode *node) {
+    log_debug("transpile_path_index_expr");
+
+    // Generate: path_extend(rt->pool, base_path, to_cstr(segment_expr))
+    // to_cstr converts the expression to a C string for the segment name
+
+    strbuf_append_str(tp->code_buf, "path_extend(rt->pool,");
+    transpile_expr(tp, node->base_path);
+    strbuf_append_str(tp->code_buf, ",fn_to_cstr(");
+    transpile_box_item(tp, node->segment_expr);
+    strbuf_append_str(tp->code_buf, "))");
 }
 
 void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
@@ -3413,11 +3476,11 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_str(tp->code_buf, "ItemError /* missing type */");
         return;
     }
-    
+
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
         strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
-    } 
+    }
     else if (field_node->object->type->type_id == LMD_TYPE_ELEMENT) {
         strbuf_append_str(tp->code_buf, "elmt_get(");
         transpile_expr(tp, field_node->object);
@@ -3431,17 +3494,17 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
         TSSymbol symbol = ts_node_symbol(field_node->field->node);
         TypeString* type = (TypeString*)build_lit_string(tp, field_node->field->node, symbol);
         strbuf_append_format(tp->code_buf, "const_s2it(%d)", type->const_index);
-    } 
+    }
     else {
         transpile_box_item(tp, field_node->field);
     }
-    strbuf_append_char(tp->code_buf, ')');    
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 // Emit a forward declaration for a function (just signature, no body)
 void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
-    
+
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
     if (is_closure) {
@@ -3457,14 +3520,14 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_char(tp->code_buf, ' ');
     write_fn_name(tp->code_buf, fn_node, NULL);
     strbuf_append_char(tp->code_buf, '(');
-    
+
     // for closures, add hidden env parameter as first param
     bool has_params = false;
     if (is_closure) {
         strbuf_append_str(tp->code_buf, "void* _env_ptr");
         has_params = true;
     }
-    
+
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
@@ -3480,24 +3543,24 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
         param = (AstNamedNode*)param->next;
         has_params = true;
     }
-    
+
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     if (fn_type && fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
         strbuf_append_str(tp->code_buf, "List* _vargs");
     }
-    
+
     strbuf_append_str(tp->code_buf, ");\n");
 }
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     bool is_closure = (fn_node->captures != nullptr);
-    
+
     // Register function name mapping for stack traces (MIR name -> Lambda name)
     register_func_name(tp, fn_node);
-    
+
     // Note: closure env struct is defined in pre_define_closure_envs()
-    
+
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
     Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
@@ -3520,14 +3583,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // write the params
     strbuf_append_char(tp->code_buf, '(');
-    
+
     // for closures, add hidden env parameter as first param
     bool has_params = false;
     if (is_closure) {
         strbuf_append_str(tp->code_buf, "void* _env_ptr");
         has_params = true;
     }
-    
+
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
@@ -3556,7 +3619,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     }
     // write fn body
     strbuf_append_str(tp->code_buf, "){\n");
-    
+
     // for closures, cast and extract captured variables from env
     if (is_closure) {
         strbuf_append_str(tp->code_buf, " ");
@@ -3565,16 +3628,16 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         write_env_name(tp->code_buf, fn_node);
         strbuf_append_str(tp->code_buf, "*)_env_ptr;\n");
     }
-    
+
     // Check if this function should use Tail Call Optimization
     // A function can only use TCO if ALL recursive calls are in tail position
     // (otherwise, transforming just the tail calls would break the function)
     bool use_tco = should_use_tco(fn_node) && is_tco_function_safe(fn_node);
-    
+
     // Stack overflow check for potentially recursive functions
     // TCO functions don't need stack checks since they won't grow the stack
     bool needs_stack_check = !use_tco;
-    
+
     if (needs_stack_check) {
         strbuf_append_str(tp->code_buf, " LAMBDA_STACK_CHECK(\"");
         // Use function name if available, otherwise use assignment name
@@ -3587,23 +3650,23 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         }
         strbuf_append_str(tp->code_buf, "\");\n");
     }
-    
+
     // TCO: Add loop label at start of function body for goto target
     if (use_tco) {
         strbuf_append_str(tp->code_buf, " _tco_start:;\n");
     }
-    
+
     // set vargs before function body for variadic functions
     if (fn_type && fn_type->is_variadic) {
         strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
     }
-    
+
     // set current_closure context for body transpilation
     AstFuncNode* prev_closure = tp->current_closure;
     if (is_closure) {
         tp->current_closure = fn_node;
     }
-    
+
     // TCO context setup
     AstFuncNode* prev_tco_func = tp->tco_func;
     bool prev_in_tail = tp->in_tail_position;
@@ -3611,7 +3674,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         tp->tco_func = fn_node;
         tp->in_tail_position = true;  // Function body is in tail position
     }
-    
+
     // for procedures, use procedural content transpilation
     bool is_proc = (fn_node->node_type == AST_NODE_PROC);
     if (is_proc && fn_node->body->node_type == AST_NODE_CONTENT) {
@@ -3632,7 +3695,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
                            body_type_id == LMD_TYPE_BINARY || body_type_id == LMD_TYPE_DECIMAL ||
                            body_type_id == LMD_TYPE_DTIME);
         }
-        
+
         if (needs_boxing) {
             transpile_box_item(tp, fn_node->body);
         } else {
@@ -3640,14 +3703,14 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         }
         strbuf_append_str(tp->code_buf, ";\n}\n");
     }
-    
+
     // Restore TCO context
     tp->tco_func = prev_tco_func;
     tp->in_tail_position = prev_in_tail;
-    
+
     // restore previous closure context
     tp->current_closure = prev_closure;
-    
+
     // For typed functions (non-closure, non-proc), generate an unboxed version
     // The unboxed version uses native types for params AND return (no boxing overhead)
     if (!is_closure && !is_proc && !as_pointer && has_typed_params(fn_node)) {
@@ -3662,15 +3725,15 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
     // Determine the native return type
     // For content blocks { expr }, get the type from the last expression
     Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
-    
+
     // If the boxed version already returns a native type (explicit scalar return),
     // there's no need to generate an unboxed version - they would be identical
-    if (ret_type && (ret_type->type_id == LMD_TYPE_INT || 
+    if (ret_type && (ret_type->type_id == LMD_TYPE_INT ||
                      ret_type->type_id == LMD_TYPE_FLOAT ||
                      ret_type->type_id == LMD_TYPE_BOOL)) {
         return;
     }
-    
+
     // If return type is ANY (implicit), try to infer from function body
     if ((!ret_type || ret_type->type_id == LMD_TYPE_ANY) && fn_node->body) {
         // If body is a content block, get the type of the last item
@@ -3688,17 +3751,17 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
             ret_type = fn_node->body->type;
         }
     }
-    
+
     if (!ret_type || ret_type->type_id == LMD_TYPE_ANY) {
         // Cannot determine a specific return type, skip generating unboxed version
         return;
     }
-    
+
     strbuf_append_char(tp->code_buf, '\n');
     write_type(tp->code_buf, ret_type);
     strbuf_append_char(tp->code_buf, ' ');
     write_fn_name_ex(tp->code_buf, fn_node, NULL, "_u");
-    
+
     // Write params with native types
     strbuf_append_char(tp->code_buf, '(');
     bool has_params = false;
@@ -3717,43 +3780,43 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node) {
         param = (AstNamedNode*)param->next;
         has_params = true;
     }
-    
+
     // Handle variadic
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     if (fn_type && fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
         strbuf_append_str(tp->code_buf, "List* _vargs");
     }
-    
+
     strbuf_append_str(tp->code_buf, "){\n");
-    
+
     // Variadic setup
     if (fn_type && fn_type->is_variadic) {
         strbuf_append_str(tp->code_buf, " set_vargs(_vargs);\n");
     }
-    
+
     // Function body - return without boxing
     // Set flag so recursive calls don't get wrapped with i2it()
     bool prev_in_unboxed = tp->in_unboxed_body;
     tp->in_unboxed_body = true;
-    
+
     strbuf_append_str(tp->code_buf, " return ");
     transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, ";\n}\n");
-    
+
     tp->in_unboxed_body = prev_in_unboxed;
 }
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env) {
     Type* type = cap->entry && cap->entry->node ? cap->entry->node->type : nullptr;
     TypeId type_id = type ? type->type_id : LMD_TYPE_ANY;
-    
+
     if (from_outer_env) {
         // already boxed in outer env, just copy
         strbuf_append_str(tp->code_buf, "_env->");
         strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
         return;
     }
-    
+
     // box based on type
     switch (type_id) {
     case LMD_TYPE_INT:
@@ -3796,14 +3859,14 @@ void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
     TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     int arity = fn_type ? fn_type->param_count : 0;
-    
+
     // Register closure name mapping for stack traces (MIR name -> Lambda name)
     // This is done here because at this point we have access to current_assign_name
     register_func_name_with_context(tp, fn_node);
-    
+
     if (fn_node->captures) {
         // closure: allocate env, populate captured values, call to_closure
-        // generate: ({ Env_fXXX* env = heap_calloc(sizeof(Env_fXXX), 0); 
+        // generate: ({ Env_fXXX* env = heap_calloc(sizeof(Env_fXXX), 0);
         //              env->var1 = i2it(_var1); env->var2 = s2it(_var2); ...
         //              to_closure_named(_fXXX, arity, env, "name"); })
         strbuf_append_str(tp->code_buf, "({ ");
@@ -3811,14 +3874,14 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         strbuf_append_str(tp->code_buf, "* _closure_env = heap_calloc(sizeof(");
         write_env_name(tp->code_buf, fn_node);
         strbuf_append_str(tp->code_buf, "), 0);\n");
-        
+
         // populate captured variables
         CaptureInfo* cap = fn_node->captures;
         while (cap) {
             strbuf_append_str(tp->code_buf, "  _closure_env->");
             strbuf_append_str_n(tp->code_buf, cap->name->chars, cap->name->len);
             strbuf_append_str(tp->code_buf, " = ");
-            
+
             // box the captured variable to Item
             // the captured variable may be in our own closure env if we're a nested closure
             bool from_outer = false;
@@ -3830,7 +3893,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
             strbuf_append_str(tp->code_buf, ";\n");
             cap = cap->next;
         }
-        
+
         strbuf_append_str(tp->code_buf, "  to_closure_named(");
         write_fn_name(tp->code_buf, fn_node, NULL);
         strbuf_append_format(tp->code_buf, ",%d,_closure_env,", arity);
@@ -3915,7 +3978,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_FOR_EXPR:
         transpile_for(tp, (AstForNode*)expr_node);
-        break;        
+        break;
     case AST_NODE_FOR_STAM:
         transpile_for(tp, (AstForNode*)expr_node);
         break;
@@ -3964,6 +4027,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_PATH_EXPR:
         transpile_path_expr(tp, (AstPathNode*)expr_node);
         break;
+    case AST_NODE_PATH_INDEX_EXPR:
+        transpile_path_index_expr(tp, (AstPathIndexNode*)expr_node);
+        break;
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
@@ -3980,31 +4046,31 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_LIST_TYPE: {
         TypeType* list_type = (TypeType*)((AstListNode*)expr_node)->type;
-        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+        strbuf_append_format(tp->code_buf, "const_type(%d)",
             ((TypeList*)list_type->type)->type_index);
         break;
     }
     case AST_NODE_ARRAY_TYPE: {
         TypeType* array_type = (TypeType*)((AstArrayNode*)expr_node)->type;
-        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+        strbuf_append_format(tp->code_buf, "const_type(%d)",
             ((TypeArray*)array_type->type)->type_index);
         break;
     }
     case AST_NODE_MAP_TYPE: {
         TypeType* map_type = (TypeType*)((AstMapNode*)expr_node)->type;
-        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+        strbuf_append_format(tp->code_buf, "const_type(%d)",
             ((TypeMap*)map_type->type)->type_index);
         break;
     }
     case AST_NODE_ELMT_TYPE: {
         TypeType* elmt_type = (TypeType*)((AstElementNode*)expr_node)->type;
-        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+        strbuf_append_format(tp->code_buf, "const_type(%d)",
             ((TypeElmt*)elmt_type->type)->type_index);
         break;
     }
     case AST_NODE_FUNC_TYPE: {
         TypeType* fn_type = (TypeType*)((AstFuncNode*)expr_node)->type;
-        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+        strbuf_append_format(tp->code_buf, "const_type(%d)",
             ((TypeFunc*)fn_type->type)->type_index);
         break;
     }
@@ -4038,7 +4104,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
         if (node->node_type == AST_NODE_CONTENT) {
             node = ((AstListNode*)node)->item;
             continue;
-        } 
+        }
         else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             log_debug("got imported fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
@@ -4046,7 +4112,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
             }
-        } 
+        }
         else if (node->node_type == AST_NODE_PUB_STAM) {
             // let declaration
             AstNode *declare = ((AstLetNode*)node)->declare;
@@ -4115,11 +4181,11 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         // Pattern definitions - compile the pattern and store in type_list
         AstPatternDefNode* pattern_def = (AstPatternDefNode*)node;
         TypePattern* pattern_type = (TypePattern*)pattern_def->type;
-        
+
         // Compile pattern to regex if not already compiled
         if (pattern_type->re2 == nullptr && pattern_def->as != nullptr) {
             const char* error_msg = nullptr;
-            TypePattern* compiled = compile_pattern_ast(tp->pool, pattern_def->as, 
+            TypePattern* compiled = compile_pattern_ast(tp->pool, pattern_def->as,
                 pattern_def->is_symbol, &error_msg);
             if (compiled) {
                 // Copy compiled info to existing type
@@ -4128,11 +4194,11 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
                 // Add to type_list for runtime access
                 arraylist_append(tp->type_list, pattern_type);
                 pattern_type->pattern_index = tp->type_list->length - 1;
-                log_debug("compiled pattern '%.*s' to regex, index=%d", 
+                log_debug("compiled pattern '%.*s' to regex, index=%d",
                     (int)pattern_def->name->len, pattern_def->name->chars, pattern_type->pattern_index);
             } else {
                 log_error("failed to compile pattern '%.*s': %s",
-                    (int)pattern_def->name->len, pattern_def->name->chars, 
+                    (int)pattern_def->name->len, pattern_def->name->chars,
                     error_msg ? error_msg : "unknown error");
             }
         }
@@ -4213,7 +4279,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         while (item) {
             define_ast_node(tp, item);
             item = item->next;
-        }        
+        }
         break;
     }
     case AST_NODE_LIST:  case AST_NODE_CONTENT: {
@@ -4221,13 +4287,13 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         while (ld) {
             define_ast_node(tp, ld);
             ld = ld->next;
-        }        
+        }
         AstNode *li = ((AstListNode*)node)->item;
         while (li) {
             define_ast_node(tp, li);
             li = li->next;
-        }        
-        break; 
+        }
+        break;
     }
     case AST_NODE_MAP:  case AST_NODE_ELEMENT: {
         AstNode *nm_item = ((AstMapNode*)node)->item;
@@ -4258,7 +4324,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         while (fn_param) {
             define_ast_node(tp, fn_param);
             fn_param = fn_param->next;
-        }        
+        }
         define_ast_node(tp, func->body);
         break;
     }
@@ -4314,14 +4380,14 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
             strbuf_append_str(tp->code_buf, "\n {Item _dec_src=");
             transpile_box_item(tp, dec_node->as);
             strbuf_append_str(tp->code_buf, ";");
-            
+
             // Decompose into individual variables (global - no type declaration)
             for (int i = 0; i < dec_node->name_count; i++) {
                 String* name = dec_node->names[i];
                 strbuf_append_str(tp->code_buf, "\n  _");
                 strbuf_append_str_n(tp->code_buf, name->chars, name->len);
                 strbuf_append_char(tp->code_buf, '=');
-                
+
                 if (dec_node->is_named) {
                     strbuf_append_str(tp->code_buf, "item_attr(_dec_src,\"");
                     strbuf_append_str_n(tp->code_buf, name->chars, name->len);
@@ -4377,7 +4443,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     // MIR import resolves to the address of _lambda_rt, so we declare it as Context*
     strbuf_append_str(tp->code_buf, "\nextern Context* _lambda_rt;\n");
     strbuf_append_str(tp->code_buf, "#define rt _lambda_rt\n");
-    
+
     // Pre-define all closure environment structs before any function definitions
     // This ensures structs are available when functions reference them
     AstNode* child = script->child;
@@ -4441,7 +4507,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     while (child) {
         switch (child->node_type) {
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
-            assign_global_var(tp, (AstLetNode*)child);       
+            assign_global_var(tp, (AstLetNode*)child);
             break;  // already handled
         case AST_NODE_IMPORT:  case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
         case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN:
@@ -4454,10 +4520,10 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             // AST_NODE_PRIMARY, AST_NODE_BINARY, etc.
             log_debug("transpile main(): boxing child, node_type=%d, type=%d", child->node_type, child->type ? child->type->type_id : -1);
             transpile_box_item(tp, child);
-            has_content = true;            
+            has_content = true;
         }
         child = child->next;
-    }    
+    }
     if (!has_content) { strbuf_append_str(tp->code_buf, "ITEM_NULL"); }
     strbuf_append_str(tp->code_buf, ";});\n");
 
