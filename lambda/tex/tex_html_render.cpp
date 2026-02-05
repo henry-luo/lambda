@@ -927,30 +927,50 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    // At root level (depth=0, inside ML__base), we usually don't add extra wrapper.
-    // However, if the hlist contains complex structures (mtable, delimiter with mtable),
-    // we need the wrapper for proper layout like MathLive.
-    bool needs_wrapper = (depth > 0);
+    // Determine if this hlist needs a wrapper span.
+    // We wrap hlists that contain complex structures (mtable, vlist, fraction, etc.)
+    // but NOT simple hlists that only contain chars/glue/kern (like numbers "123").
+    // This matches MathLive's behavior where <span class="ML__cmr">123</span> is not
+    // wrapped in an extra <span style="display:inline-block">.
     bool has_color = (node->color != nullptr);
+    bool has_complex_structure = false;
 
-    if (!needs_wrapper && !has_color) {
-        // Check if this hlist contains complex structures that need wrapping
-        // Complex structures: mtable (for bmatrix/pmatrix/etc), or delimiter + mtable combo
+    // Check if this hlist contains complex structures that need wrapping
+    for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+        NodeClass nc = child->node_class;
+        // Complex structures: anything that's not a simple character, kern, glue, or inner hlist
+        if (nc == NodeClass::VList ||
+            nc == NodeClass::Fraction ||
+            nc == NodeClass::Radical ||
+            nc == NodeClass::Scripts ||
+            nc == NodeClass::Delimiter ||
+            nc == NodeClass::MTable ||
+            nc == NodeClass::Accent ||
+            nc == NodeClass::Rule) {
+            has_complex_structure = true;
+            break;
+        }
+    }
+
+    // Wrap if we have color or complex structures
+    // At depth 0 (root), we might still wrap for delimiter+mtable combos
+    bool needs_wrapper = has_color || (has_complex_structure && depth > 0);
+
+    // Special case: at depth 0, wrap if we have both delimiters and mtable
+    if (depth == 0 && !needs_wrapper) {
         bool has_mtable = false;
         bool has_delimiter = false;
         for (TexNode* child = node->first_child; child; child = child->next_sibling) {
             if (child->node_class == NodeClass::MTable) has_mtable = true;
             if (child->node_class == NodeClass::Char) {
-                // Check for delimiter characters (brackets, parens, etc)
                 int32_t cp = child->content.ch.codepoint;
                 if (cp == '(' || cp == ')' || cp == '[' || cp == ']' ||
                     cp == '{' || cp == '}' || cp == '|' ||
-                    cp == 0 || cp == 1 || cp == 2 || cp == 3) {  // cmex10 delimiters
+                    cp == 0 || cp == 1 || cp == 2 || cp == 3) {
                     has_delimiter = true;
                 }
             }
         }
-        // Wrap if we have both delimiter(s) and mtable - that's a delimited matrix
         if (has_mtable && has_delimiter) {
             needs_wrapper = true;
         }
