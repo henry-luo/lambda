@@ -183,20 +183,24 @@ int path_depth(Path* path) {
     return depth;
 }
 
+// Forward declaration for segment display helper
+static const char* path_get_segment_display(Path* path);
+
 /**
  * Convert path to Lambda path string (e.g., "file.etc.hosts").
+ * Properly handles wildcards using segment type flags.
  */
 void path_to_string(Path* path, void* out_ptr) {
     StrBuf* out = (StrBuf*)out_ptr;
     if (!path || !out) return;
 
-    // Collect segments in reverse order
-    const char* segments[64];  // max depth 64
+    // Collect segments in reverse order (store Path* to access type info)
+    Path* segments[64];  // max depth 64
     int count = 0;
 
     Path* p = path;
     while (p && p->parent && count < 64) {
-        segments[count++] = p->name;
+        segments[count++] = p;
         p = p->parent;
     }
 
@@ -206,13 +210,30 @@ void path_to_string(Path* path, void* out_ptr) {
             strbuf_append_char(out, '.');
         }
 
-        // Check if segment needs quoting (contains dots or special chars)
-        const char* seg = segments[i];
+        Path* seg_path = segments[i];
+        LPathSegmentType seg_type = PATH_GET_SEG_TYPE(seg_path);
+
+        // Wildcards don't need quoting
+        if (seg_type == LPATH_SEG_WILDCARD) {
+            strbuf_append_char(out, '*');
+            continue;
+        }
+        if (seg_type == LPATH_SEG_WILDCARD_REC) {
+            strbuf_append_str(out, "**");
+            continue;
+        }
+        if (seg_type == LPATH_SEG_DYNAMIC) {
+            strbuf_append_str(out, "<dynamic>");
+            continue;
+        }
+
+        // Normal segment - check if needs quoting
+        const char* seg = seg_path->name ? seg_path->name : "";
         bool needs_quote = false;
         for (const char* c = seg; *c; c++) {
             if (*c == '.' || *c == ' ' || *c == '@' || *c == '#' ||
                 *c == '$' || *c == '%' || *c == '&' || *c == '?' ||
-                *c == '=' || *c == ':' || *c == '-') {
+                *c == '=' || *c == ':' || *c == '-' || *c == '*') {
                 needs_quote = true;
                 break;
             }
@@ -229,24 +250,39 @@ void path_to_string(Path* path, void* out_ptr) {
 }
 
 /**
+ * Helper to get segment name for OS path output.
+ * Returns "*" or "**" for wildcards.
+ */
+static const char* path_get_os_segment_name(Path* seg_path) {
+    LPathSegmentType seg_type = PATH_GET_SEG_TYPE(seg_path);
+    switch (seg_type) {
+        case LPATH_SEG_WILDCARD: return "*";
+        case LPATH_SEG_WILDCARD_REC: return "**";
+        case LPATH_SEG_DYNAMIC: return "<dynamic>";
+        default: return seg_path->name ? seg_path->name : "";
+    }
+}
+
+/**
  * Convert path to OS file path (e.g., "/etc/hosts" or "C:\Users\name").
+ * Handles wildcards properly using segment type flags.
  */
 void path_to_os_path(Path* path, void* out_ptr) {
     StrBuf* out = (StrBuf*)out_ptr;
     if (!path || !out) return;
 
-    // Collect segments in reverse order
-    const char* segments[64];
+    // Collect segments in reverse order (store Path* to access type info)
+    Path* segments[64];
     int count = 0;
 
     Path* p = path;
     while (p && p->parent && count < 64) {
-        segments[count++] = p->name;
+        segments[count++] = p;
         p = p->parent;
     }
 
-    // Check scheme
-    const char* scheme = (count > 0) ? segments[count - 1] : NULL;
+    // Check scheme (root segment has name set during init)
+    const char* scheme = (count > 0) ? segments[count - 1]->name : NULL;
     bool is_file = scheme && strcmp(scheme, "file") == 0;
     bool is_relative = scheme && (strcmp(scheme, ".") == 0 || strcmp(scheme, "..") == 0);
 
@@ -256,14 +292,14 @@ void path_to_os_path(Path* path, void* out_ptr) {
 #ifdef _WIN32
         // Windows: check for drive letter (e.g., file.C.Users)
         if (count > 1) {
-            const char* drive = segments[count - 2];
+            const char* drive = path_get_os_segment_name(segments[count - 2]);
             if (strlen(drive) == 1 && ((drive[0] >= 'A' && drive[0] <= 'Z') ||
                                         (drive[0] >= 'a' && drive[0] <= 'z'))) {
                 strbuf_append_char(out, drive[0]);
                 strbuf_append_str(out, ":\\");
                 for (int i = count - 3; i >= 0; i--) {
                     if (i < count - 3) strbuf_append_char(out, '\\');
-                    strbuf_append_str(out, segments[i]);
+                    strbuf_append_str(out, path_get_os_segment_name(segments[i]));
                 }
                 return;
             }
@@ -272,14 +308,14 @@ void path_to_os_path(Path* path, void* out_ptr) {
         // Unix-style absolute path
         for (int i = count - 2; i >= 0; i--) {  // skip "file"
             strbuf_append_char(out, '/');
-            strbuf_append_str(out, segments[i]);
+            strbuf_append_str(out, path_get_os_segment_name(segments[i]));
         }
     } else if (is_relative) {
         // Relative path
         strbuf_append_str(out, scheme);  // "." or ".."
         for (int i = count - 2; i >= 0; i--) {
             strbuf_append_char(out, '/');
-            strbuf_append_str(out, segments[i]);
+            strbuf_append_str(out, path_get_os_segment_name(segments[i]));
         }
     } else {
         // Other schemes: output as URL
@@ -289,7 +325,7 @@ void path_to_os_path(Path* path, void* out_ptr) {
         }
         for (int i = count - 2; i >= 0; i--) {
             if (i < count - 2) strbuf_append_char(out, '/');
-            strbuf_append_str(out, segments[i]);
+            strbuf_append_str(out, path_get_os_segment_name(segments[i]));
         }
     }
 }
@@ -312,28 +348,37 @@ Path* path_get_root_by_name(const char* name) {
 /**
  * Build a path segment by segment (internal helper).
  * Returns a new Path with the segment appended.
+ * segment_type should be one of LPATH_SEG_NORMAL, LPATH_SEG_WILDCARD, etc.
  */
-static Path* path_append_segment_pool(Pool* pool, Path* parent, const char* segment) {
-    if (!parent || !segment) return parent;
+static Path* path_append_segment_typed(Pool* pool, Path* parent, const char* segment, LPathSegmentType seg_type) {
+    if (!parent) {
+        log_error("path_append_segment_typed: NULL parent");
+        return NULL;
+    }
 
     Path* new_path = (Path*)pool_calloc(pool, sizeof(Path));
     new_path->type_id = LMD_TYPE_PATH;
-    new_path->flags = 0;
     new_path->ref_cnt = 0;
     new_path->parent = parent;
+    PATH_SET_SEG_TYPE(new_path, seg_type);
 
-    // Copy segment name into pool memory
-    size_t len = strlen(segment);
-    char* name_copy = (char*)pool_alloc(pool, len + 1);
-    memcpy(name_copy, segment, len);
-    name_copy[len] = '\0';
-    new_path->name = name_copy;
+    if (segment && seg_type == LPATH_SEG_NORMAL) {
+        // Copy segment name into pool memory for normal segments
+        size_t len = strlen(segment);
+        char* name_copy = (char*)pool_alloc(pool, len + 1);
+        memcpy(name_copy, segment, len);
+        name_copy[len] = '\0';
+        new_path->name = name_copy;
+    } else {
+        // Wildcards don't need name storage (type is in flags)
+        new_path->name = NULL;
+    }
 
     return new_path;
 }
 
 // ============================================================================
-// New Path API: path_new, path_extend, path_segment, path_wildcard, path_wildcard_recursive
+// New Path API: path_new, path_extend, path_wildcard, path_wildcard_recursive
 // ============================================================================
 
 /**
@@ -346,7 +391,7 @@ Path* path_new(Pool* pool, int scheme) {
 }
 
 /**
- * Extend an existing path with a new segment.
+ * Extend an existing path with a new normal segment.
  * Returns a new path with the segment appended.
  * The original path is not modified.
  */
@@ -359,7 +404,7 @@ Path* path_extend(Pool* pool, Path* base, const char* segment) {
         log_error("path_extend: NULL segment");
         return base;
     }
-    return path_append_segment_pool(pool, base, segment);
+    return path_append_segment_typed(pool, base, segment, LPATH_SEG_NORMAL);
 }
 
 /**
@@ -371,20 +416,22 @@ Path* path_concat(Pool* pool, Path* base, Path* suffix) {
     if (!base) return suffix;
     if (!suffix) return base;
 
-    // Collect suffix segments in reverse order
-    const char* segments[64];
+    // Collect suffix segments info in reverse order
+    struct { const char* name; LPathSegmentType type; } segments[64];
     int count = 0;
 
     Path* p = suffix;
     while (p && p->parent && count < 64) {
-        segments[count++] = p->name;
+        segments[count].name = p->name;
+        segments[count].type = PATH_GET_SEG_TYPE(p);
+        count++;
         p = p->parent;
     }
 
     // Append segments in forward order (root to leaf)
     Path* result = base;
     for (int i = count - 1; i >= 0; i--) {
-        result = path_append_segment_pool(pool, result, segments[i]);
+        result = path_append_segment_typed(pool, result, segments[i].name, segments[i].type);
     }
 
     return result;
@@ -392,42 +439,44 @@ Path* path_concat(Pool* pool, Path* base, Path* suffix) {
 
 /**
  * Create a wildcard segment (*) - matches any single path component.
- * The wildcard is stored as a special segment name.
+ * Uses LPATH_SEG_WILDCARD flag instead of storing "*" as string.
  */
 Path* path_wildcard(Pool* pool, Path* base) {
     if (!base) {
         log_error("path_wildcard: NULL base path");
         return NULL;
     }
-    return path_append_segment_pool(pool, base, "*");
+    return path_append_segment_typed(pool, base, NULL, LPATH_SEG_WILDCARD);
 }
 
 /**
  * Create a recursive wildcard segment (**) - matches zero or more path components.
- * The wildcard is stored as a special segment name.
+ * Uses LPATH_SEG_WILDCARD_REC flag instead of storing "**" as string.
  */
 Path* path_wildcard_recursive(Pool* pool, Path* base) {
     if (!base) {
         log_error("path_wildcard_recursive: NULL base path");
         return NULL;
     }
-    return path_append_segment_pool(pool, base, "**");
+    return path_append_segment_typed(pool, base, NULL, LPATH_SEG_WILDCARD_REC);
 }
 
 /**
  * Check if a path segment is a single wildcard (*).
+ * Uses the segment type flag, not string comparison.
  */
 bool path_is_wildcard(Path* path) {
-    if (!path || !path->name) return false;
-    return path->name[0] == '*' && path->name[1] == '\0';
+    if (!path) return false;
+    return PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD;
 }
 
 /**
  * Check if a path segment is a recursive wildcard (**).
+ * Uses the segment type flag, not string comparison.
  */
 bool path_is_wildcard_recursive(Path* path) {
-    if (!path || !path->name) return false;
-    return path->name[0] == '*' && path->name[1] == '*' && path->name[2] == '\0';
+    if (!path) return false;
+    return PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD_REC;
 }
 
 /**
@@ -436,7 +485,8 @@ bool path_is_wildcard_recursive(Path* path) {
 bool path_has_wildcards(Path* path) {
     Path* p = path;
     while (p && p->parent) {
-        if (path_is_wildcard(p) || path_is_wildcard_recursive(p)) {
+        LPathSegmentType seg_type = PATH_GET_SEG_TYPE(p);
+        if (seg_type == LPATH_SEG_WILDCARD || seg_type == LPATH_SEG_WILDCARD_REC) {
             return true;
         }
         p = p->parent;
@@ -445,98 +495,428 @@ bool path_has_wildcards(Path* path) {
 }
 
 // ============================================================================
-// Legacy fixed-arity path_build functions (for backwards compatibility)
-// These are still used by the C2MIR transpiler which doesn't support variadic
+// Path to string conversion - updated for segment types
 // ============================================================================
 
 /**
- * Build a path with 1 segment (for transpiled code).
+ * Get segment display name for path_to_string.
+ * Returns the segment name, or "*"/"**" for wildcards.
  */
-Path* path_build1(Pool* pool, int scheme, const char* s1) {
-    Path* path = path_get_root((PathScheme)scheme);
-    return path_append_segment_pool(pool, path, s1);
+static const char* path_get_segment_display(Path* path) {
+    if (!path) return "";
+    LPathSegmentType seg_type = PATH_GET_SEG_TYPE(path);
+    switch (seg_type) {
+        case LPATH_SEG_WILDCARD: return "*";
+        case LPATH_SEG_WILDCARD_REC: return "**";
+        case LPATH_SEG_DYNAMIC: return "<dynamic>";
+        default: return path->name ? path->name : "";
+    }
+}
+
+// ============================================================================
+// Path iteration support - lazy loading for directories and files
+// ============================================================================
+// This section requires runtime support (heap_calloc, fn_input1, etc.)
+// and is only compiled when not building standalone input library
+// Use PATH_NO_ITERATION to exclude this section (more specific than LAMBDA_STATIC)
+
+#ifndef PATH_NO_ITERATION
+
+#include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
+// Extern declaration for datetime_from_unix (defined in datetime.c)
+// In C, DateTime is uint64_t (packed bit field), so we declare return type as uint64_t*
+extern uint64_t* datetime_from_unix(Pool* pool, int64_t unix_timestamp);
+
+/**
+ * Check if the leaf segment of a path is a wildcard (* or **).
+ */
+bool path_ends_with_wildcard(Path* path) {
+    if (!path) return false;
+    LPathSegmentType seg_type = PATH_GET_SEG_TYPE(path);
+    return seg_type == LPATH_SEG_WILDCARD || seg_type == LPATH_SEG_WILDCARD_REC;
 }
 
 /**
- * Build a path with 2 segments (for transpiled code).
+ * Load path metadata via stat() without loading content.
+ * Sets path->meta and PATH_FLAG_META_LOADED flag.
  */
-Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    return path_append_segment_pool(pool, path, s2);
+void path_load_metadata(Path* path) {
+    if (!path) return;
+    if (path->flags & PATH_FLAG_META_LOADED) return;  // already loaded
+    
+    if (!context) {
+        log_error("path_load_metadata: no context");
+        return;
+    }
+    
+    Pool* pool = eval_context_get_pool(context);
+    if (!pool) {
+        log_error("path_load_metadata: no pool");
+        return;
+    }
+    
+    StrBuf* path_buf = strbuf_new();
+    path_to_os_path(path, path_buf);
+    
+    struct stat st;
+    if (stat(path_buf->str, &st) == 0) {
+        PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
+        if (meta) {
+            meta->size = st.st_size;
+            meta->modified = *datetime_from_unix(pool, (int64_t)st.st_mtime);
+            meta->flags = 0;
+            if (S_ISDIR(st.st_mode)) meta->flags |= PATH_META_IS_DIR;
+#ifndef _WIN32
+            struct stat lst;
+            if (lstat(path_buf->str, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+                meta->flags |= PATH_META_IS_LINK;
+            }
+#endif
+            meta->mode = (st.st_mode >> 6) & 0x07;  // owner permissions only
+            path->meta = meta;
+        }
+    }
+    
+    path->flags |= PATH_FLAG_META_LOADED;
+    strbuf_free(path_buf);
+}
+
+// Forward declarations for path resolution
+static Item resolve_directory_children(Path* parent_path, const char* dir_path);
+static Item resolve_file_content(Path* path, const char* file_path);
+static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive);
+
+// Extern declaration for heap_strcpy (defined in lambda-mem.cpp)
+extern String* heap_strcpy(char* src, int len);
+
+/**
+ * Resolve path content for iteration.
+ * - For directories: returns List of child Path items (with metadata)
+ * - For files: returns parsed file content (String, Map, etc.)
+ * - For wildcards: expands glob pattern to list of paths
+ * - Caches result in path->result
+ *
+ * Returns:
+ * - ITEM_NULL if path doesn't exist (ENOENT)
+ * - ITEM_ERROR if path exists but can't be accessed
+ * - Content Item on success
+ */
+Item path_resolve_for_iteration(Path* path) {
+    if (!path) return ITEM_NULL;
+    
+    // Already resolved?
+    if (path->result != 0) {
+        return path->result;
+    }
+    
+    // Handle wildcards specially
+    if (path_ends_with_wildcard(path)) {
+        Path* parent = path->parent;
+        if (!parent) {
+            log_error("path_resolve_for_iteration: wildcard has no parent");
+            return ITEM_ERROR;
+        }
+        
+        StrBuf* path_buf = strbuf_new();
+        path_to_os_path(parent, path_buf);
+        
+        bool recursive = PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD_REC;
+        Item result = expand_wildcard(parent, path_buf->str, recursive);
+        
+        strbuf_free(path_buf);
+        path->result = result;
+        return result;
+    }
+    
+    // Convert path to OS path string
+    StrBuf* path_buf = strbuf_new();
+    path_to_os_path(path, path_buf);
+    const char* os_path = path_buf->str;
+    
+    // Check if directory or file
+    struct stat st;
+    if (stat(os_path, &st) != 0) {
+        int err = errno;
+        strbuf_free(path_buf);
+        
+        // Distinguish between "doesn't exist" and "access error"
+        if (err == ENOENT || err == ENOTDIR) {
+            log_debug("path_resolve_for_iteration: path does not exist: %s", os_path);
+            return ITEM_NULL;
+        } else {
+            log_error("path_resolve_for_iteration: access error for %s: %s", os_path, strerror(err));
+            return ITEM_ERROR;
+        }
+    }
+    
+    Item result;
+    if (S_ISDIR(st.st_mode)) {
+        // Directory: list children as Path items
+        result = resolve_directory_children(path, os_path);
+    } else {
+        // File: load and parse content
+        result = resolve_file_content(path, os_path);
+    }
+    
+    strbuf_free(path_buf);
+    
+    // Cache the result (even if null/error, to avoid re-trying)
+    path->result = result;
+    return result;
 }
 
 /**
- * Build a path with 3 segments (for transpiled code).
+ * List directory children as Path items.
+ * Each child is a new Path extending the parent.
+ * File metadata (size, modified, mode) is loaded, but not file content.
+ * Returns empty list [] for empty directories.
  */
-Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    path = path_append_segment_pool(pool, path, s2);
-    return path_append_segment_pool(pool, path, s3);
+static Item resolve_directory_children(Path* parent_path, const char* dir_path) {
+    DIR* dir = opendir(dir_path);
+    if (!dir) {
+        int err = errno;
+        if (err == ENOENT || err == ENOTDIR) {
+            log_debug("resolve_directory_children: directory does not exist: %s", dir_path);
+            return ITEM_NULL;
+        } else {
+            log_error("resolve_directory_children: access error for %s: %s", dir_path, strerror(err));
+            return ITEM_ERROR;
+        }
+    }
+    
+    if (!context) {
+        closedir(dir);
+        log_error("resolve_directory_children: no context");
+        return ITEM_ERROR;
+    }
+    
+    Pool* pool = eval_context_get_pool(context);
+    if (!pool) {
+        closedir(dir);
+        log_error("resolve_directory_children: no pool");
+        return ITEM_ERROR;
+    }
+    
+    // Create result list (will be empty for empty directories)
+    List* children = (List*)heap_calloc(sizeof(List), LMD_TYPE_LIST);
+    children->type_id = LMD_TYPE_LIST;
+    
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        // Skip . and ..
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        // Create child path extending parent
+        Path* child_path = path_extend(pool, parent_path, entry->d_name);
+        if (!child_path) continue;
+        
+        // Load metadata for the child (but NOT content)
+        char full_path[4096];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        
+        struct stat st;
+        if (stat(full_path, &st) == 0) {
+            PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
+            if (meta) {
+                meta->size = st.st_size;
+                meta->modified = *datetime_from_unix(pool, (int64_t)st.st_mtime);
+                meta->flags = 0;
+                if (S_ISDIR(st.st_mode)) meta->flags |= PATH_META_IS_DIR;
+#ifndef _WIN32
+                struct stat lst;
+                if (lstat(full_path, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+                    meta->flags |= PATH_META_IS_LINK;
+                }
+#endif
+                meta->mode = (st.st_mode >> 6) & 0x07;
+                child_path->meta = meta;
+                child_path->flags |= PATH_FLAG_META_LOADED;
+            }
+        }
+        
+        // Add child path to list (cast Path* to uint64_t since Item is uint64_t in C)
+        list_push(children, (Item)(uint64_t)child_path);
+    }
+    
+    closedir(dir);
+    return (Item)(uint64_t)children;
+}
+
+// External declaration for input system
+extern Item fn_input1(Item url);
+
+/**
+ * Load and parse file content.
+ * Auto-detects content type from extension/MIME.
+ * Returns parsed structure (String, Map, Element, etc.)
+ */
+static Item resolve_file_content(Path* path, const char* file_path) {
+    // Build URL string for input system
+    StrBuf* url_buf = strbuf_new();
+    strbuf_append_str(url_buf, "file://");
+    strbuf_append_str(url_buf, file_path);
+    
+    String* url_str = heap_strcpy(url_buf->str, url_buf->length);
+    strbuf_free(url_buf);
+    
+    // Use existing input system to load and parse
+    Item content = fn_input1(s2it(url_str));
+    
+    return content;
 }
 
 /**
- * Build a path with 4 segments (for transpiled code).
+ * Expand wildcard pattern to list of matching paths.
+ * For * : matches files/dirs in the directory
+ * For **: recursively matches all files/dirs
  */
-Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    path = path_append_segment_pool(pool, path, s2);
-    path = path_append_segment_pool(pool, path, s3);
-    return path_append_segment_pool(pool, path, s4);
+static void expand_wildcard_recursive(Path* base, const char* dir_path, 
+                                       bool recursive, List* matches,
+                                       int depth, int max_depth);
+
+static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive) {
+    if (!context) {
+        log_error("expand_wildcard: no context");
+        return ITEM_ERROR;
+    }
+    
+    // Create result list
+    List* matches = (List*)heap_calloc(sizeof(List), LMD_TYPE_LIST);
+    matches->type_id = LMD_TYPE_LIST;
+    
+    expand_wildcard_recursive(base_path, dir_path, recursive, matches, 0, 16);
+    
+    return (Item)(uint64_t)matches;
 }
 
-/**
- * Build a path with 5 segments (for transpiled code).
- */
-Path* path_build5(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    path = path_append_segment_pool(pool, path, s2);
-    path = path_append_segment_pool(pool, path, s3);
-    path = path_append_segment_pool(pool, path, s4);
-    return path_append_segment_pool(pool, path, s5);
+static void expand_wildcard_recursive(Path* base, const char* dir_path, 
+                                       bool recursive, List* matches,
+                                       int depth, int max_depth) {
+    if (depth > max_depth) return;
+    
+    DIR* dir = opendir(dir_path);
+    if (!dir) return;
+    
+    Pool* pool = eval_context_get_pool(context);
+    if (!pool) {
+        closedir(dir);
+        return;
+    }
+    
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        char full_path[4096];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        
+        struct stat st;
+        if (stat(full_path, &st) != 0) continue;
+        
+        // Create child path
+        Path* child = path_extend(pool, base, entry->d_name);
+        if (!child) continue;
+        
+        // Load metadata
+        PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
+        if (meta) {
+            meta->size = st.st_size;
+            meta->modified = *datetime_from_unix(pool, (int64_t)st.st_mtime);
+            meta->flags = 0;
+            if (S_ISDIR(st.st_mode)) meta->flags |= PATH_META_IS_DIR;
+#ifndef _WIN32
+            struct stat lst;
+            if (lstat(full_path, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+                meta->flags |= PATH_META_IS_LINK;
+            }
+#endif
+            meta->mode = (st.st_mode >> 6) & 0x07;
+            child->meta = meta;
+            child->flags |= PATH_FLAG_META_LOADED;
+        }
+        
+        // Add to matches (cast Path* to uint64_t since Item is uint64_t in C)
+        list_push(matches, (Item)(uint64_t)child);
+        
+        // Recurse into subdirectories for **
+        if (recursive && S_ISDIR(st.st_mode)) {
+            expand_wildcard_recursive(child, full_path, true, matches, depth + 1, max_depth);
+        }
+    }
+    
+    closedir(dir);
 }
 
-/**
- * Build a path with 6 segments (for transpiled code).
- */
-Path* path_build6(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    path = path_append_segment_pool(pool, path, s2);
-    path = path_append_segment_pool(pool, path, s3);
-    path = path_append_segment_pool(pool, path, s4);
-    path = path_append_segment_pool(pool, path, s5);
-    return path_append_segment_pool(pool, path, s6);
-}
+// ============================================================================
+// fn_exists() - Check if path exists
+// ============================================================================
+
+// External declaration for item_type_id (defined in lambda-eval.cpp)
+extern TypeId item_type_id(Item item);
 
 /**
- * Build a path with 7 segments (for transpiled code).
+ * Check if a path exists (file or directory).
+ * For file:// paths: uses stat()
+ * For http(s):// paths: uses HTTP HEAD request (not implemented yet)
+ * Returns: bool Item (true/false)
  */
-Path* path_build7(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    path = path_append_segment_pool(pool, path, s2);
-    path = path_append_segment_pool(pool, path, s3);
-    path = path_append_segment_pool(pool, path, s4);
-    path = path_append_segment_pool(pool, path, s5);
-    path = path_append_segment_pool(pool, path, s6);
-    return path_append_segment_pool(pool, path, s7);
+Item fn_exists(Item path_item) {
+    TypeId type_id = item_type_id(path_item);
+    
+    if (type_id == LMD_TYPE_NULL) {
+        return b2it(false);
+    }
+    
+    if (type_id == LMD_TYPE_STRING) {
+        // Handle string URLs - extract String* from tagged pointer
+        String* url = (String*)(path_item & 0x00FFFFFFFFFFFFFFULL);
+        if (!url || !url->chars) return b2it(false);
+        
+        // Simple file path check
+        struct stat st;
+        bool exists = (stat(url->chars, &st) == 0);
+        return b2it(exists);
+    }
+    
+    if (type_id != LMD_TYPE_PATH) {
+        return b2it(false);
+    }
+    
+    // Extract Path* from Item (direct pointer for container types)
+    Path* path = (Path*)(uint64_t)path_item;
+    if (!path) return b2it(false);
+    
+    // Convert path to OS path
+    StrBuf* path_buf = strbuf_new();
+    path_to_os_path(path, path_buf);
+    
+    const char* scheme = path_get_scheme_name(path);
+    bool exists = false;
+    
+    if (strcmp(scheme, "file") == 0 || 
+        strcmp(scheme, ".") == 0 || 
+        strcmp(scheme, "..") == 0) {
+        // Local file system - use stat
+        struct stat st;
+        exists = (stat(path_buf->str, &st) == 0);
+    } else if (strcmp(scheme, "sys") == 0) {
+        // System paths always "exist" if valid
+        exists = true;
+    }
+    // TODO: HTTP HEAD request for http/https schemes
+    
+    strbuf_free(path_buf);
+    return b2it(exists);
 }
 
-/**
- * Build a path with 8 segments (for transpiled code).
- */
-Path* path_build8(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7, const char* s8) {
-    Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment_pool(pool, path, s1);
-    path = path_append_segment_pool(pool, path, s2);
-    path = path_append_segment_pool(pool, path, s3);
-    path = path_append_segment_pool(pool, path, s4);
-    path = path_append_segment_pool(pool, path, s5);
-    path = path_append_segment_pool(pool, path, s6);
-    path = path_append_segment_pool(pool, path, s7);
-    return path_append_segment_pool(pool, path, s8);
-}
+#endif // PATH_NO_ITERATION
