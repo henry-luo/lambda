@@ -289,6 +289,7 @@ typedef enum SysFunc {
     SYSFUNC_FORMAT1,
     SYSFUNC_FORMAT2,
     SYSFUNC_ERROR,
+    SYSFUNC_EXISTS,         // exists(path) - check if file/dir exists
     SYSFUNC_NORMALIZE,
     SYSFUNC_NORMALIZE2,     // normalize(str, form) with 2 args
     // string functions
