@@ -69,3 +69,58 @@ let etc_items = for (item in file.etc) item
 "Path iteration - collect types"
 let item_types = for (item in file.etc) type(item)
 item_types[0]
+
+"Relative path with cwd scheme"
+let rel_dir = cwd.test.input.dir
+rel_dir
+
+"exists() on relative path"
+exists(cwd.test.input.dir)
+
+"len() on relative directory"
+len(cwd.test.input.dir)
+
+"Relative path iteration with single wildcard (*) - list paths"
+for (item in cwd.test.input.dir.*) item
+
+"Relative path iteration with recursive wildcard (**) - list paths"
+for (item in cwd.test.input.dir.**) item
+
+"Wildcard finds nested items"
+let single_wildcard = for (item in cwd.test.input.dir.*) item
+let recursive_wildcard = for (item in cwd.test.input.dir.**) item
+(len(recursive_wildcard) > len(single_wildcard))
+
+"Path property: name"
+let file_path = cwd.test.input.'test.json'
+file_path.name
+
+"Path property: is_dir on directory"
+let dir_path = cwd.test.input.dir
+dir_path.is_dir
+
+"Path property: is_file on directory (should be false)"
+dir_path.is_file
+
+"Path property: is_file on file"
+file_path.is_file
+
+"Path property: is_dir on file (should be false)"
+file_path.is_dir
+
+"Path property: is_link on regular file"
+file_path.is_link
+
+"Path property: size on file (returns bytes)"
+(file_path.size > 0)
+
+"Path property: modified on file (returns datetime)"
+file_path.modified
+
+"Path property: name from iteration"
+let names = for (item in cwd.test.input.dir.*) item.name
+(len(names) > 0)
+
+"Path property: filter using is_dir"
+let first_item = cwd.test.input.dir.child_dir
+first_item.is_dir
