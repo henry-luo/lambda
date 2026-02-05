@@ -45,6 +45,7 @@ static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
 static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth, uint32_t hlines, bool trailing_hline);
 static int32_t cmr10_to_unicode(int32_t code);
+static int32_t cmmi10_to_unicode(int32_t code);
 
 // ============================================================================
 // VList Helper Structures and Functions (MathLive-compatible)
@@ -378,20 +379,25 @@ static bool is_mergeable_char(TexNode* node, int32_t* out_codepoint, const char*
                    strncmp(font_name, "cmss", 4) == 0 ||
                    strncmp(font_name, "cmtt", 4) == 0) {
             codepoint = cmr10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "cmmi", 4) == 0) {
+            // Math italic - enable merging like MathLive does for "ax", "bx" etc.
+            codepoint = cmmi10_to_unicode(codepoint);
         }
-        // For cmmi (italic), don't merge - italic letters have individual styles
         // For cmsy (symbols), don't merge - symbols may need individual handling
         // For cmex (large delimiters), don't merge
-        if (strncmp(font_name, "cmmi", 4) == 0 ||
-            strncmp(font_name, "cmsy", 4) == 0 ||
+        if (strncmp(font_name, "cmsy", 4) == 0 ||
             strncmp(font_name, "cmex", 4) == 0) {
             return false;
         }
     }
 
-    // Only merge basic printable characters (digits, punctuation, parentheses)
-    // Skip if codepoint is unusual or non-printable
-    if (codepoint < 0x20 || codepoint > 0x7E) {
+    // Merge basic printable ASCII characters and common math letters
+    // Skip unusual or non-printable codepoints
+    if (codepoint < 0x20 || (codepoint > 0x7E && codepoint < 0x391)) {
+        return false;
+    }
+    // Allow Greek letters (uppercase 0x391-0x3A9, lowercase 0x3B1-0x3C9)
+    if (codepoint > 0x3C9 && codepoint < 0x1D400) {
         return false;
     }
 
@@ -433,6 +439,30 @@ static void append_hlist_chars(TexNode* node, StrBuf* out) {
         }
     }
 }
+
+// Check if a Scripts node has a single-character mergeable nucleus
+// This allows merging "ax" before the ^2 part of "ax^2"
+// Returns true if nucleus is a single mergeable char matching target_class
+static bool is_scripts_with_mergeable_nucleus(TexNode* node, const char* target_class,
+                                               int32_t* out_codepoint) {
+    if (!node || node->node_class != NodeClass::Scripts) return false;
+
+    TexNode* nucleus = node->content.scripts.nucleus;
+    if (!nucleus) return false;
+
+    int32_t cp = 0;
+    const char* cls = nullptr;
+    if (is_mergeable_char(nucleus, &cp, &cls)) {
+        if (strcmp(cls, target_class) == 0) {
+            if (out_codepoint) *out_codepoint = cp;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Render a Scripts node without its nucleus (used when nucleus was already merged)
+static void render_scripts_without_nucleus(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 
 // Map cmsy10 (Computer Modern Symbol) character codes to Unicode for HTML output
 // cmsy10 contains mathematical symbols: operators, relations, arrows, etc.
@@ -1096,6 +1126,7 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
     // render children, merging consecutive same-class characters into single spans
     // MathLive outputs "(123)" as single span <span class="ML__cmr">(123)</span>
     // instead of separate spans for each character
+    // Also merges chars before scripts: "ax^2" becomes <span>ax</span><msubsup>...</msubsup>
     TexNode* child = node->first_child;
     while (child) {
         // check if this is a mergeable character
@@ -1114,10 +1145,17 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
             // output first character
             append_codepoint(out, char_cp);
 
-            // consume all consecutive characters/HLists with same class
+            // consume all consecutive characters with same class
+            // Also look for Scripts nodes with single-char nucleus of same class
+            // to enable MathLive-style merging: "ax^2" -> <span>ax</span><msubsup>...</msubsup>
             child = child->next_sibling;
+
+            // Track Scripts nodes whose nuclei were merged (to render without nucleus later)
+            TexNode* pending_scripts[32];
+            int pending_scripts_count = 0;
+
             while (child) {
-                // Try direct character merge
+                // Try direct character merge first
                 int32_t next_cp = 0;
                 const char* next_class = nullptr;
                 if (is_mergeable_char(child, &next_cp, &next_class)) {
@@ -1125,9 +1163,14 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
                     append_codepoint(out, next_cp);
                     child = child->next_sibling;
                 }
-                // Try merging an HList that contains only same-class characters
-                else if (is_mergeable_hlist(child, char_class)) {
-                    append_hlist_chars(child, out);
+                // Check for Scripts node with mergeable single-char nucleus
+                else if (child->node_class == NodeClass::Scripts &&
+                         is_scripts_with_mergeable_nucleus(child, char_class, &next_cp) &&
+                         pending_scripts_count < 32) {
+                    // Merge the nucleus character into current span
+                    append_codepoint(out, next_cp);
+                    // Save this Scripts node to render its scripts part later
+                    pending_scripts[pending_scripts_count++] = child;
                     child = child->next_sibling;
                 }
                 else {
@@ -1136,51 +1179,17 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
             }
 
             strbuf_append_str(out, "</span>");
+
+            // Now render the scripts parts of any merged Scripts nodes
+            for (int i = 0; i < pending_scripts_count; i++) {
+                render_scripts_without_nucleus(pending_scripts[i], out, opts, depth + 1);
+            }
             // child now points to next non-mergeable or different-class, continue loop
         }
-        // Check if this is an HList that starts a mergeable sequence
-        else if (child->node_class == NodeClass::HList) {
-            // Check if this HList contains only same-class mergeable chars
-            int32_t first_cp = 0;
-            const char* first_class = nullptr;
-            TexNode* first_child = child->first_child;
-            if (first_child && is_mergeable_char(first_child, &first_cp, &first_class) &&
-                is_mergeable_hlist(child, first_class)) {
-                // Start a merged span
-                char class_buf[64];
-                snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, first_class);
-
-                strbuf_append_str(out, "<span class=\"");
-                strbuf_append_str(out, class_buf);
-                strbuf_append_str(out, "\">");
-
-                append_hlist_chars(child, out);
-                child = child->next_sibling;
-
-                // Continue merging subsequent same-class chars/hlists
-                while (child) {
-                    int32_t next_cp = 0;
-                    const char* next_class = nullptr;
-                    if (is_mergeable_char(child, &next_cp, &next_class)) {
-                        if (strcmp(first_class, next_class) != 0) break;
-                        append_codepoint(out, next_cp);
-                        child = child->next_sibling;
-                    }
-                    else if (is_mergeable_hlist(child, first_class)) {
-                        append_hlist_chars(child, out);
-                        child = child->next_sibling;
-                    }
-                    else {
-                        break;
-                    }
-                }
-
-                strbuf_append_str(out, "</span>");
-            } else {
-                // Non-mergeable HList, render normally
-                render_node(child, out, opts, depth + 1);
-                child = child->next_sibling;
-            }
+        // HLists/HBoxes need normal rendering to preserve potential styling
+        else if (child->node_class == NodeClass::HList || child->node_class == NodeClass::HBox) {
+            render_node(child, out, opts, depth + 1);
+            child = child->next_sibling;
         }
         else {
             render_node(child, out, opts, depth + 1);
@@ -1651,6 +1660,120 @@ static void render_scripts(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
     // second row (depth strut) for subscript
     if (has_sub) {
         float depth_em = sub_depth + 0.25f;  // depth based on subscript
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-r\"><span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        snprintf(buf, sizeof(buf), "__vlist\" style=\"height:%.2fem\"></span></span>", depth_em);
+        strbuf_append_str(out, buf);
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist-t
+    strbuf_append_str(out, "</span>");  // close msubsup
+}
+
+// Render a Scripts node without its nucleus (nucleus was already merged into a preceding span)
+// This is used for MathLive-style merging: "ax^2" becomes <span>ax</span><msubsup>^2</msubsup>
+static void render_scripts_without_nucleus(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node) return;
+
+    char buf[256];
+
+    bool has_sub = node->content.scripts.subscript != nullptr;
+    bool has_sup = node->content.scripts.superscript != nullptr;
+
+    // if no scripts, nothing to render
+    if (!has_sub && !has_sup) return;
+
+    // calculate dimensions
+    float sup_height = 0.0f, sup_depth = 0.0f;
+    float sub_height = 0.0f, sub_depth = 0.0f;
+
+    if (has_sup) {
+        sup_height = node->content.scripts.superscript->height / opts.base_font_size_px;
+        sup_depth = node->content.scripts.superscript->depth / opts.base_font_size_px;
+    }
+    if (has_sub) {
+        sub_height = node->content.scripts.subscript->height / opts.base_font_size_px;
+        sub_depth = node->content.scripts.subscript->depth / opts.base_font_size_px;
+    }
+
+    // MathLive-compatible positioning
+    float pstrut_size = 3.0f;
+    float sup_top = -3.41f;
+    float sub_top = -2.75f;
+
+    // msubsup wrapper
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__msubsup\">");
+
+    // vlist-t [vlist-t2 if subscript]
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__vlist-t");
+    if (has_sub) {
+        strbuf_append_str(out, " ");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-t2");
+    }
+    strbuf_append_str(out, "\">");
+
+    // first row
+    strbuf_append_str(out, "<span class=\"");
+    strbuf_append_str(out, opts.class_prefix);
+    strbuf_append_str(out, "__vlist-r\">");
+
+    // calculate total height
+    float total_height = has_sup ? (sup_height + 0.4f) : 0.3f;
+
+    // vlist cell
+    snprintf(buf, sizeof(buf), "<span class=\"%s__vlist\" style=\"height:%.2fem\">",
+             opts.class_prefix, total_height);
+    strbuf_append_str(out, buf);
+
+    // subscript (if present)
+    if (has_sub) {
+        snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", sub_top);
+        strbuf_append_str(out, buf);
+        snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+                 opts.class_prefix, pstrut_size);
+        strbuf_append_str(out, buf);
+        snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block;font-size: 70%%\">",
+                 sub_height + sub_depth);
+        strbuf_append_str(out, buf);
+        render_node(node->content.scripts.subscript, out, opts, depth + 1);
+        strbuf_append_str(out, "</span></span>");
+    }
+
+    // superscript (if present)
+    if (has_sup) {
+        snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem;margin-right:0.05em\">", sup_top);
+        strbuf_append_str(out, buf);
+        snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
+                 opts.class_prefix, pstrut_size);
+        strbuf_append_str(out, buf);
+        snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block;font-size: 70%%\">",
+                 sup_height + sup_depth);
+        strbuf_append_str(out, buf);
+        render_node(node->content.scripts.superscript, out, opts, depth + 1);
+        strbuf_append_str(out, "</span></span>");
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist
+
+    // Safari workaround for subscripts
+    if (has_sub) {
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__vlist-s\">\xe2\x80\x8b</span>");
+    }
+
+    strbuf_append_str(out, "</span>");  // close vlist-r
+
+    // second row (depth strut) for subscript
+    if (has_sub) {
+        float depth_em = sub_depth + 0.25f;
         strbuf_append_str(out, "<span class=\"");
         strbuf_append_str(out, opts.class_prefix);
         strbuf_append_str(out, "__vlist-r\"><span class=\"");
