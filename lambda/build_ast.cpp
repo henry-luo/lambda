@@ -67,6 +67,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
     {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
     {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY},  // not method-eligible
+    {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_PATH},  // exists(path) -> bool
     // string functions - method-eligible on strings
     {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
     {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
@@ -670,17 +671,25 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
                     field_name.length -= 2;
                 }
                 String* pooled = name_pool_create_strview(tp->name_pool, field_name);
-                arraylist_append(segments, pooled);
+                // Store segment with type info
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = pooled;
+                seg->type = LPATH_SEG_NORMAL;
+                arraylist_append(segments, seg);
             }
             else if (field_sym == SYM_PATH_WILDCARD) {
                 // single wildcard (*) - match one segment
-                String* pooled = name_pool_create_name(tp->name_pool, "*");
-                arraylist_append(segments, pooled);
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = NULL;
+                seg->type = LPATH_SEG_WILDCARD;
+                arraylist_append(segments, seg);
             }
             else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
                 // recursive wildcard (**) - match zero or more segments
-                String* pooled = name_pool_create_name(tp->name_pool, "**");
-                arraylist_append(segments, pooled);
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = NULL;
+                seg->type = LPATH_SEG_WILDCARD_REC;
+                arraylist_append(segments, seg);
             }
             return scheme;
         }
@@ -708,10 +717,15 @@ static AstNode* build_path_expr(Transpiler* tp, TSNode node, PathScheme scheme, 
 
     // allocate array for segments in the pool
     if (segments->length > 0) {
-        path_node->segments = (String**)pool_calloc(tp->pool, segments->length * sizeof(String*));
+        path_node->segments = (AstPathSegment*)pool_calloc(tp->pool, segments->length * sizeof(AstPathSegment));
         for (int i = 0; i < segments->length; i++) {
-            path_node->segments[i] = (String*)segments->data[i];
-            log_debug("  segment[%d]: %.*s", i, (int)path_node->segments[i]->len, path_node->segments[i]->chars);
+            AstPathSegment* src = (AstPathSegment*)segments->data[i];
+            path_node->segments[i] = *src;  // copy the segment info
+            if (src->name) {
+                log_debug("  segment[%d]: %.*s (type=%d)", i, (int)src->name->len, src->name->chars, src->type);
+            } else {
+                log_debug("  segment[%d]: <wildcard> (type=%d)", i, src->type);
+            }
         }
     } else {
         path_node->segments = NULL;
