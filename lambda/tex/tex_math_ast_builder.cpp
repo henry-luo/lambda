@@ -67,12 +67,12 @@ const char* math_node_type_name(MathNodeType type) {
 // Returns 0.0f if parsing fails or the string is invalid
 static float parse_dimension_to_pt(const char* dim, int len) {
     if (!dim || len <= 0) return 0.0f;
-    
+
     // Skip leading '[' if present (from row_spacing rule)
     if (*dim == '[') { dim++; len--; }
     // Skip trailing ']' if present
     while (len > 0 && dim[len-1] == ']') len--;
-    
+
     // Parse the numeric part
     char buf[64];
     int i = 0;
@@ -81,17 +81,17 @@ static float parse_dimension_to_pt(const char* dim, int len) {
         i++;
     }
     buf[i] = '\0';
-    
+
     float value = (float)atof(buf);
     if (value == 0.0f && buf[0] != '0') return 0.0f;  // Parse error
-    
+
     // Skip whitespace
     while (i < len && isspace(dim[i])) i++;
-    
+
     // Parse the unit
     const char* unit = dim + i;
     int unit_len = len - i;
-    
+
     // Convert to points based on unit
     // Standard TeX unit conversions:
     // 1pt = 1pt, 1em = 10pt (approx), 1ex = 4.3pt (approx), 1bp = 1.00375pt
@@ -396,7 +396,7 @@ int math_row_count(MathASTNode* row) {
     if (row->type != MathNodeType::ROW &&
         row->type != MathNodeType::ARRAY &&
         row->type != MathNodeType::ARRAY_ROW) return 0;
-    
+
     // For ROW type, we have child_count. For ARRAY/ARRAY_ROW, count the linked list.
     if (row->type == MathNodeType::ROW) {
         return row->row.child_count;
@@ -2171,8 +2171,10 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
     }
 
     // Build ARRAY node to hold the matrix structure
-    // Use col_spec if available, otherwise default to center-aligned
-    MathASTNode* array_node = make_math_array(arena, col_spec ? col_spec : "c", 0, env_name_copy);
+    // Use col_spec if available, otherwise use environment-specific default
+    // cases/dcases/rcases use left alignment, matrices use center
+    const char* default_align = is_cases ? "l" : "c";
+    MathASTNode* array_node = make_math_array(arena, col_spec ? col_spec : default_align, 0, env_name_copy);
 
     if (!ts_node_is_null(body_node)) {
         // Parse the body - contains expressions, row_sep (\\), and col_sep (&)
@@ -2207,7 +2209,7 @@ MathASTNode* MathASTBuilder::build_environment(TSNode node) {
                     const char* spacing_text = node_text(spacing_node, &spacing_len);
                     float extra_spacing = parse_dimension_to_pt(spacing_text, spacing_len);
                     current_row->row_extra_spacing = extra_spacing;
-                    log_debug("tex_math_ast: row_sep with spacing='%.*s' -> %.2fpt", 
+                    log_debug("tex_math_ast: row_sep with spacing='%.*s' -> %.2fpt",
                               spacing_len, spacing_text, extra_spacing);
                 }
 

@@ -1059,12 +1059,23 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
 // forward declaration for delimited group rendering
 static void render_delimited_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+// forward declaration for matrix group rendering
+static void render_matrix_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 
 // render horizontal list (row of items)
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
     // Check if this is a delimited group (\left..\right)
+    // Check if this is a matrix (pmatrix, bmatrix, cases, etc.)
+    // Matrices use display:inline-block wrapper with delim-size classes
+    // This check must come BEFORE FLAG_DELIMITED since matrices are also delimited
+    if (node->flags & TexNode::FLAG_MATRIX) {
+        render_matrix_hlist(node, out, opts, depth);
+        return;
+    }
+
+    // Check if this is a delimited group (from \left...\right or specific commands).
     // If so, render with special ML__left-right wrapper structure
     if (node->flags & TexNode::FLAG_DELIMITED) {
         render_delimited_hlist(node, out, opts, depth);
@@ -1271,6 +1282,57 @@ static void render_delimited_hlist(TexNode* node, StrBuf* out, const HtmlRenderO
     }
 
     // close ML__left-right wrapper
+    strbuf_append_str(out, "</span>");
+}
+
+// render matrix group (pmatrix, bmatrix, etc.) with MathLive-compatible structure
+// MathLive uses display:inline-block wrapper (not ML__left-right) for matrices:
+// <span style="display:inline-block">
+//   <span class="ML__delim-sizeN">(</span>
+//   <span class="ML__mtable">...</span>
+//   <span class="ML__delim-sizeN">)</span>
+// </span>
+static void render_matrix_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+    if (!node) return;
+
+    char buf[256];
+
+    // calculate delimiter size class based on content height
+    float height_em = pt_to_em(node->height + node->depth, opts.base_font_size_px);
+
+    // MathLive matrix delimiter sizing thresholds (em)
+    const char* size_class;
+    if (height_em < 1.5f) {
+        size_class = "delim-size1";
+    } else if (height_em < 2.4f) {
+        size_class = "delim-size2";
+    } else if (height_em < 3.0f) {
+        size_class = "delim-size3";
+    } else {
+        size_class = "delim-size4";
+    }
+
+    // open display:inline-block wrapper (MathLive style for matrices)
+    strbuf_append_str(out, "<span style=\"display:inline-block\">");
+
+    // render children, with special handling for Delimiter nodes
+    for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+        if (child->node_class == NodeClass::Delimiter) {
+            // render delimiter with proper size class (no open/close class for matrices)
+            int32_t cp = child->content.delim.codepoint;
+
+            snprintf(buf, sizeof(buf), "<span class=\"%s__%s\">",
+                     opts.class_prefix, size_class);
+            strbuf_append_str(out, buf);
+            append_codepoint(out, cp);
+            strbuf_append_str(out, "</span>");
+        } else {
+            // render non-delimiter children normally
+            render_node(child, out, opts, depth + 1);
+        }
+    }
+
+    // close wrapper
     strbuf_append_str(out, "</span>");
 }
 
@@ -2255,10 +2317,8 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
     strbuf_append_str(out, opts.class_prefix);
     strbuf_append_str(out, "__mtable\">");
 
-    // MathLive adds leading arraycolsep (0.5em)
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__arraycolsep\" style=\"width:0.5em\"></span>");
+    // Note: MathLive does NOT add leading/trailing arraycolsep for matrices
+    // Only arrays use outer padding. We detect this by checking if parent is delimited.
 
     // render children (columns and column separators)
     int col_idx = 0;
@@ -2280,11 +2340,6 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
         }
         child = child->next_sibling;
     }
-
-    // MathLive adds trailing arraycolsep (0.5em)
-    strbuf_append_str(out, "<span class=\"");
-    strbuf_append_str(out, opts.class_prefix);
-    strbuf_append_str(out, "__arraycolsep\" style=\"width:0.5em\"></span>");
 
     strbuf_append_str(out, "</span>");
 }
