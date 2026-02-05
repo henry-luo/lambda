@@ -286,6 +286,60 @@ static const char* font_to_class(const char* font_name) {
     return "mathit";  // default to italic
 }
 
+// Check if a node is a digit character (0-9)
+// Returns the codepoint if it's a digit, 0 otherwise
+static int32_t get_digit_codepoint(TexNode* node) {
+    if (!node) return 0;
+
+    int32_t codepoint = 0;
+    const char* font_name = nullptr;
+
+    if (node->node_class == NodeClass::Char) {
+        codepoint = node->content.ch.codepoint;
+        font_name = node->content.ch.font.name;
+    } else if (node->node_class == NodeClass::MathChar) {
+        codepoint = node->content.math_char.codepoint;
+        font_name = node->content.math_char.font.name;
+    } else {
+        return 0;
+    }
+
+    // Convert font-specific encoding to Unicode if needed
+    if (font_name) {
+        if (strncmp(font_name, "cmr", 3) == 0 ||
+            strncmp(font_name, "cmbx", 4) == 0) {
+            // cmr10/cmbx digits are at positions 48-57 (same as ASCII)
+            if (codepoint >= 48 && codepoint <= 57) {
+                return codepoint;  // already ASCII/Unicode digit
+            }
+        }
+    }
+
+    // Check if it's a Unicode digit (0-9)
+    if (codepoint >= '0' && codepoint <= '9') {
+        return codepoint;
+    }
+
+    return 0;
+}
+
+// Get the CSS class for a digit character node
+static const char* get_digit_class(TexNode* node, const HtmlRenderOptions& opts) {
+    const char* font_name = nullptr;
+
+    if (node->node_class == NodeClass::Char) {
+        font_name = node->content.ch.font.name;
+    } else if (node->node_class == NodeClass::MathChar) {
+        font_name = node->content.math_char.font.name;
+    }
+
+    if (font_name) {
+        return font_to_class(font_name);
+    }
+
+    return "cmr";  // digits use roman font by default
+}
+
 // Map cmsy10 (Computer Modern Symbol) character codes to Unicode for HTML output
 // cmsy10 contains mathematical symbols: operators, relations, arrows, etc.
 static int32_t cmsy10_to_unicode(int32_t code) {
@@ -915,11 +969,46 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         strbuf_append_str(out, ">");
     }
 
-    // render children
+    // render children, merging consecutive digits into single spans
+    // MathLive outputs numbers as single spans like <span>123</span>
+    // instead of <span>1</span><span>2</span><span>3</span>
     TexNode* child = node->first_child;
     while (child) {
-        render_node(child, out, opts, depth + 1);
-        child = child->next_sibling;
+        // check if this is a digit that could be part of a number
+        int32_t digit_cp = get_digit_codepoint(child);
+        if (digit_cp) {
+            // start collecting consecutive digits
+            const char* digit_class = get_digit_class(child, opts);
+            char class_buf[64];
+            snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, digit_class);
+
+            strbuf_append_str(out, "<span class=\"");
+            strbuf_append_str(out, class_buf);
+            strbuf_append_str(out, "\">");
+
+            // output first digit
+            append_codepoint(out, digit_cp);
+
+            // consume all consecutive digits with same class
+            child = child->next_sibling;
+            while (child) {
+                int32_t next_digit_cp = get_digit_codepoint(child);
+                if (!next_digit_cp) break;
+
+                // check if same class (same font)
+                const char* next_class = get_digit_class(child, opts);
+                if (strcmp(digit_class, next_class) != 0) break;
+
+                append_codepoint(out, next_digit_cp);
+                child = child->next_sibling;
+            }
+
+            strbuf_append_str(out, "</span>");
+            // child now points to next non-digit or null, continue loop
+        } else {
+            render_node(child, out, opts, depth + 1);
+            child = child->next_sibling;
+        }
     }
 
     if (needs_wrapper || has_color) {
@@ -1413,7 +1502,7 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
 
     // threshold for using scaled delimiter (in em)
     const float SCALE_THRESHOLD = 1.2f;
-    
+
     // for small delimiters or size 0, use simple character
     if (target_size < SCALE_THRESHOLD) {
         snprintf(buf, sizeof(buf), "<span class=\"%s__%s\">", opts.class_prefix, delim_class);
@@ -1480,11 +1569,11 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
             float top = -pstrut_size + (stack_count - 1 - i) * char_height + 0.47f;
             snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", top);
             strbuf_append_str(out, buf);
-            
+
             snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
                      opts.class_prefix, pstrut_size);
             strbuf_append_str(out, buf);
-            
+
             snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">", char_height);
             strbuf_append_str(out, buf);
             append_codepoint(out, stack_char);
