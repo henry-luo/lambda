@@ -27,3 +27,22 @@ http.api.users.*
 "Wildcard patterns (recursive match)"
 file.src.**
 http.api.**
+"Quoted wildcard (literal asterisk, not a wildcard)"
+file.data.'*'
+file.data.'**'
+"Path type checking"
+path
+"File content (lazy loading)"
+213
+"exists() function - directory exists"
+true
+"exists() function - file exists"
+true
+"exists() function - non-existent path"
+false
+"len() on directory - counts entries"
+true
+"Path iteration - for loop over directory"
+true
+"Path iteration - collect types"
+path

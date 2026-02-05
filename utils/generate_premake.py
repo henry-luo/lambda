@@ -1143,8 +1143,8 @@ class PremakeGenerator:
                     if not self.use_windows_config:
                         for framework in special_flags_frameworks:
                             self.premake_content.append(f'        "{framework}.framework",')
-                    for lib in dynamic_libs:
-                        self.premake_content.append(f'        "{lib}",')
+                    for dyn_lib in dynamic_libs:
+                        self.premake_content.append(f'        "{dyn_lib}",')
                     for dep in internal_deps:
                         self.premake_content.append(f'        "{dep}",')
                     # Add late-binding static libraries (must come after internal deps)
