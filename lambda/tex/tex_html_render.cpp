@@ -44,6 +44,7 @@ static void render_mathop(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth, uint32_t hlines, bool trailing_hline);
+static int32_t cmr10_to_unicode(int32_t code);
 
 // ============================================================================
 // VList Helper Structures and Functions (MathLive-compatible)
@@ -338,6 +339,99 @@ static const char* get_digit_class(TexNode* node, const HtmlRenderOptions& opts)
     }
 
     return "cmr";  // digits use roman font by default
+}
+
+// Check if a character node is mergeable (for text merging optimization)
+// Returns true if this is a simple character that can be merged with adjacent chars
+// of the same CSS class (like MathLive does for "(123)" -> single span)
+static bool is_mergeable_char(TexNode* node, int32_t* out_codepoint, const char** out_class) {
+    if (!node) return false;
+
+    int32_t codepoint = 0;
+    const char* font_name = nullptr;
+
+    if (node->node_class == NodeClass::Char) {
+        codepoint = node->content.ch.codepoint;
+        font_name = node->content.ch.font.name;
+    } else if (node->node_class == NodeClass::MathChar) {
+        codepoint = node->content.math_char.codepoint;
+        font_name = node->content.math_char.font.name;
+    } else if (node->node_class == NodeClass::Delimiter) {
+        // Small delimiters (non-scaled parentheses, brackets) can be merged
+        // They use cmr class just like digits
+        codepoint = node->content.delim.codepoint;
+        // Only merge small delimiters - check target size threshold (same as render_delimiter)
+        float target_size_em = node->content.delim.target_size / 16.0f;  // assume 16px base
+        if (target_size_em >= 1.2f) {
+            return false;  // scaled delimiters need special rendering
+        }
+        font_name = "cmr";  // delimiters use roman font class
+    } else {
+        return false;
+    }
+
+    // Convert TFM character codes to Unicode based on font
+    if (font_name) {
+        if (strncmp(font_name, "cmr", 3) == 0) {
+            codepoint = cmr10_to_unicode(codepoint);
+        } else if (strncmp(font_name, "cmbx", 4) == 0 ||
+                   strncmp(font_name, "cmss", 4) == 0 ||
+                   strncmp(font_name, "cmtt", 4) == 0) {
+            codepoint = cmr10_to_unicode(codepoint);
+        }
+        // For cmmi (italic), don't merge - italic letters have individual styles
+        // For cmsy (symbols), don't merge - symbols may need individual handling
+        // For cmex (large delimiters), don't merge
+        if (strncmp(font_name, "cmmi", 4) == 0 ||
+            strncmp(font_name, "cmsy", 4) == 0 ||
+            strncmp(font_name, "cmex", 4) == 0) {
+            return false;
+        }
+    }
+
+    // Only merge basic printable characters (digits, punctuation, parentheses)
+    // Skip if codepoint is unusual or non-printable
+    if (codepoint < 0x20 || codepoint > 0x7E) {
+        return false;
+    }
+
+    if (out_codepoint) *out_codepoint = codepoint;
+    if (out_class) *out_class = font_to_class(font_name);
+
+    return true;
+}
+
+// Check if an HList/HBox contains only simple mergeable characters of the given class
+// Returns true if all children are mergeable with the specified class
+// Note: Nested ROWs become HBox after typesetting, so we check both HList and HBox
+static bool is_mergeable_hlist(TexNode* node, const char* target_class) {
+    if (!node) return false;
+    if (node->node_class != NodeClass::HList && node->node_class != NodeClass::HBox) return false;
+
+    // Must have at least one child to be mergeable
+    if (!node->first_child) return false;
+
+    // Check each child - must be mergeable char or kern (for inter-atom spacing)
+    for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+        // Skip kerns (inter-atom spacing) - they don't affect mergeability
+        if (child->node_class == NodeClass::Kern) continue;
+
+        int32_t cp = 0;
+        const char* cls = nullptr;
+        if (!is_mergeable_char(child, &cp, &cls)) return false;
+        if (strcmp(cls, target_class) != 0) return false;
+    }
+    return true;
+}
+
+// Append all characters from a mergeable HList to the output
+static void append_hlist_chars(TexNode* node, StrBuf* out) {
+    for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+        int32_t cp = 0;
+        if (is_mergeable_char(child, &cp, nullptr)) {
+            append_codepoint(out, cp);
+        }
+    }
 }
 
 // Map cmsy10 (Computer Modern Symbol) character codes to Unicode for HTML output
@@ -999,43 +1093,96 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         strbuf_append_str(out, ">");
     }
 
-    // render children, merging consecutive digits into single spans
-    // MathLive outputs numbers as single spans like <span>123</span>
-    // instead of <span>1</span><span>2</span><span>3</span>
+    // render children, merging consecutive same-class characters into single spans
+    // MathLive outputs "(123)" as single span <span class="ML__cmr">(123)</span>
+    // instead of separate spans for each character
     TexNode* child = node->first_child;
     while (child) {
-        // check if this is a digit that could be part of a number
-        int32_t digit_cp = get_digit_codepoint(child);
-        if (digit_cp) {
-            // start collecting consecutive digits
-            const char* digit_class = get_digit_class(child, opts);
+        // check if this is a mergeable character
+        int32_t char_cp = 0;
+        const char* char_class = nullptr;
+
+        if (is_mergeable_char(child, &char_cp, &char_class)) {
+            // start collecting consecutive same-class characters (or HLists containing them)
             char class_buf[64];
-            snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, digit_class);
+            snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, char_class);
 
             strbuf_append_str(out, "<span class=\"");
             strbuf_append_str(out, class_buf);
             strbuf_append_str(out, "\">");
 
-            // output first digit
-            append_codepoint(out, digit_cp);
+            // output first character
+            append_codepoint(out, char_cp);
 
-            // consume all consecutive digits with same class
+            // consume all consecutive characters/HLists with same class
             child = child->next_sibling;
             while (child) {
-                int32_t next_digit_cp = get_digit_codepoint(child);
-                if (!next_digit_cp) break;
-
-                // check if same class (same font)
-                const char* next_class = get_digit_class(child, opts);
-                if (strcmp(digit_class, next_class) != 0) break;
-
-                append_codepoint(out, next_digit_cp);
-                child = child->next_sibling;
+                // Try direct character merge
+                int32_t next_cp = 0;
+                const char* next_class = nullptr;
+                if (is_mergeable_char(child, &next_cp, &next_class)) {
+                    if (strcmp(char_class, next_class) != 0) break;
+                    append_codepoint(out, next_cp);
+                    child = child->next_sibling;
+                }
+                // Try merging an HList that contains only same-class characters
+                else if (is_mergeable_hlist(child, char_class)) {
+                    append_hlist_chars(child, out);
+                    child = child->next_sibling;
+                }
+                else {
+                    break;
+                }
             }
 
             strbuf_append_str(out, "</span>");
-            // child now points to next non-digit or null, continue loop
-        } else {
+            // child now points to next non-mergeable or different-class, continue loop
+        }
+        // Check if this is an HList that starts a mergeable sequence
+        else if (child->node_class == NodeClass::HList) {
+            // Check if this HList contains only same-class mergeable chars
+            int32_t first_cp = 0;
+            const char* first_class = nullptr;
+            TexNode* first_child = child->first_child;
+            if (first_child && is_mergeable_char(first_child, &first_cp, &first_class) &&
+                is_mergeable_hlist(child, first_class)) {
+                // Start a merged span
+                char class_buf[64];
+                snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, first_class);
+
+                strbuf_append_str(out, "<span class=\"");
+                strbuf_append_str(out, class_buf);
+                strbuf_append_str(out, "\">");
+
+                append_hlist_chars(child, out);
+                child = child->next_sibling;
+
+                // Continue merging subsequent same-class chars/hlists
+                while (child) {
+                    int32_t next_cp = 0;
+                    const char* next_class = nullptr;
+                    if (is_mergeable_char(child, &next_cp, &next_class)) {
+                        if (strcmp(first_class, next_class) != 0) break;
+                        append_codepoint(out, next_cp);
+                        child = child->next_sibling;
+                    }
+                    else if (is_mergeable_hlist(child, first_class)) {
+                        append_hlist_chars(child, out);
+                        child = child->next_sibling;
+                    }
+                    else {
+                        break;
+                    }
+                }
+
+                strbuf_append_str(out, "</span>");
+            } else {
+                // Non-mergeable HList, render normally
+                render_node(child, out, opts, depth + 1);
+                child = child->next_sibling;
+            }
+        }
+        else {
             render_node(child, out, opts, depth + 1);
             child = child->next_sibling;
         }
