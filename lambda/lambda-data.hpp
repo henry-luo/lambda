@@ -349,6 +349,16 @@ typedef enum SysFunc {
     SYSPROC_OUTPUT2,         // output(source, url) - auto-detect format
     SYSPROC_OUTPUT3,         // output(source, url, format) - explicit format
     SYSPROC_CMD,
+    // fs module functions
+    SYSPROC_FS_COPY,
+    SYSPROC_FS_MOVE,
+    SYSPROC_FS_DELETE,
+    SYSPROC_FS_MKDIR,
+    SYSPROC_FS_TOUCH,
+    SYSPROC_FS_SYMLINK,
+    SYSPROC_FS_CHMOD,
+    SYSPROC_FS_RENAME,
+    SYSPROC_FS_EXISTS,
 } SysFunc;
 
 typedef struct TypeBinary : Type {

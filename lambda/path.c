@@ -962,10 +962,10 @@ extern TypeId item_type_id(Item item);
  * For http(s):// paths: uses HTTP HEAD request (not implemented yet)
  * Returns: bool Item (true/false)
  */
-Item fn_exists(Item path_item) {
-    log_debug("fn_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
+Item fn_fs_exists(Item path_item) {
+    log_debug("fn_fs_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
     TypeId type_id = item_type_id(path_item);
-    log_debug("fn_exists: type_id=%d", type_id);
+    log_debug("fn_fs_exists: type_id=%d", type_id);
     
     if (type_id == LMD_TYPE_NULL) {
         log_debug("fn_exists: NULL input");
@@ -980,6 +980,7 @@ Item fn_exists(Item path_item) {
         // Simple file path check
         struct stat st;
         bool exists = (stat(url->chars, &st) == 0);
+        log_debug("fn_exists: string path='%s', exists=%d", url->chars, exists);
         return b2it(exists);
     }
     

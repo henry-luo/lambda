@@ -10,11 +10,18 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
+#include <direct.h>  // for _mkdir
+#include <io.h>      // for _access
 // Windows doesn't have these macros, provide simple equivalents
 #define WIFEXITED(status) (1)
 #define WEXITSTATUS(status) (status)
 #else
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
+#include <sys/stat.h>  // for mkdir, chmod
+#include <unistd.h>    // for symlink, rmdir, access
+#include <dirent.h>    // for opendir, readdir
+#include <utime.h>     // for utime (touch)
+#include <ftw.h>       // for nftw (recursive delete)
 #endif
 #include <string.h>  // for strlen
 #include "input/input.hpp"
@@ -473,3 +480,399 @@ Item pn_cmd(Item cmd, Item args) {
     // TODO: Could return a map with {stdout: string, exit_code: int} for more info
     return result;
 }
+
+// ============================================================================
+// File System Functions (fs module)
+// These are procedural functions for file/directory operations
+// ============================================================================
+
+// Helper: Get path string from Item (supports Path and String types)
+static const char* get_path_string(Item path_item, StrBuf** buf_out) {
+    TypeId type_id = get_type_id(path_item);
+    if (type_id == LMD_TYPE_PATH) {
+        Path* path = path_item.path;
+        if (!path) return NULL;
+        StrBuf* buf = strbuf_new();
+        path_to_os_path(path, buf);
+        *buf_out = buf;
+        return buf->str;
+    } else if (type_id == LMD_TYPE_STRING) {
+        String* str = path_item.get_string();
+        if (!str) return NULL;
+        *buf_out = NULL;
+        return str->chars;
+    }
+    return NULL;
+}
+
+// Helper: Free path buffer if allocated
+static void free_path_buf(StrBuf* buf) {
+    if (buf) strbuf_free(buf);
+}
+
+#ifndef _WIN32
+// Callback for nftw to remove files/directories recursively
+static int remove_callback(const char* path, const struct stat* sb, int typeflag, struct FTW* ftwbuf) {
+    (void)sb; (void)ftwbuf;
+    int rv;
+    if (typeflag == FTW_D || typeflag == FTW_DP) {
+        rv = rmdir(path);
+    } else {
+        rv = remove(path);
+    }
+    if (rv != 0) {
+        log_error("fs.delete: failed to remove %s: %s", path, strerror(errno));
+    }
+    return rv;
+}
+#endif
+
+// fs.copy(src, dst) - Copy file or directory
+Item pn_fs_copy(Item src_item, Item dst_item) {
+    StrBuf *src_buf = NULL, *dst_buf = NULL;
+    const char* src_path = get_path_string(src_item, &src_buf);
+    const char* dst_path = get_path_string(dst_item, &dst_buf);
+    
+    if (!src_path || !dst_path) {
+        log_error("fs.copy: invalid path argument");
+        free_path_buf(src_buf);
+        free_path_buf(dst_buf);
+        return ItemError;
+    }
+    
+    log_debug("fs.copy: %s -> %s", src_path, dst_path);
+    
+    // Use platform command for simplicity (handles directories too)
+#ifdef _WIN32
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "copy /Y \"%s\" \"%s\" >nul 2>&1 || xcopy /E /I /Y \"%s\" \"%s\" >nul 2>&1", 
+             src_path, dst_path, src_path, dst_path);
+#else
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", src_path, dst_path);
+#endif
+    
+    int result = system(cmd);
+    free_path_buf(src_buf);
+    free_path_buf(dst_buf);
+    
+    if (result != 0) {
+        log_error("fs.copy: failed to copy %s to %s", src_path, dst_path);
+        return ItemError;
+    }
+    return ItemNull;
+}
+
+// fs.move(src, dst) - Move/rename file or directory
+Item pn_fs_move(Item src_item, Item dst_item) {
+    StrBuf *src_buf = NULL, *dst_buf = NULL;
+    const char* src_path = get_path_string(src_item, &src_buf);
+    const char* dst_path = get_path_string(dst_item, &dst_buf);
+    
+    if (!src_path || !dst_path) {
+        log_error("fs.move: invalid path argument");
+        free_path_buf(src_buf);
+        free_path_buf(dst_buf);
+        return ItemError;
+    }
+    
+    log_debug("fs.move: %s -> %s", src_path, dst_path);
+    
+    int result = rename(src_path, dst_path);
+    
+    // If rename fails (cross-device), fall back to copy+delete
+    if (result != 0 && errno == EXDEV) {
+        log_debug("fs.move: cross-device move, using copy+delete");
+        Item copy_result = pn_fs_copy(src_item, dst_item);
+        if (copy_result.item == ItemError.item) {
+            free_path_buf(src_buf);
+            free_path_buf(dst_buf);
+            return ItemError;
+        }
+        // Delete source after successful copy
+#ifdef _WIN32
+        result = _unlink(src_path);
+        if (result != 0) {
+            // Try as directory
+            result = _rmdir(src_path);
+        }
+#else
+        result = remove(src_path);
+        if (result != 0) {
+            // Try as directory with recursive delete
+            result = nftw(src_path, remove_callback, 64, FTW_DEPTH | FTW_PHYS);
+        }
+#endif
+    }
+    
+    free_path_buf(src_buf);
+    free_path_buf(dst_buf);
+    
+    if (result != 0) {
+        log_error("fs.move: failed to move %s to %s: %s", src_path, dst_path, strerror(errno));
+        return ItemError;
+    }
+    return ItemNull;
+}
+
+// fs.delete(path) - Delete file or directory
+Item pn_fs_delete(Item path_item) {
+    StrBuf* path_buf = NULL;
+    const char* path = get_path_string(path_item, &path_buf);
+    
+    if (!path) {
+        log_error("fs.delete: invalid path argument");
+        return ItemError;
+    }
+    
+    log_debug("fs.delete: %s", path);
+    
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        log_error("fs.delete: path does not exist: %s", path);
+        free_path_buf(path_buf);
+        return ItemError;
+    }
+    
+    int result;
+    if (S_ISDIR(st.st_mode)) {
+        // Directory - use recursive delete
+#ifdef _WIN32
+        char cmd[4096];
+        snprintf(cmd, sizeof(cmd), "rmdir /S /Q \"%s\"", path);
+        result = system(cmd);
+#else
+        result = nftw(path, remove_callback, 64, FTW_DEPTH | FTW_PHYS);
+#endif
+    } else {
+        // File - simple remove
+        result = remove(path);
+    }
+    
+    free_path_buf(path_buf);
+    
+    if (result != 0) {
+        log_error("fs.delete: failed to delete %s: %s", path, strerror(errno));
+        return ItemError;
+    }
+    return ItemNull;
+}
+
+// fs.mkdir(path) - Create directory (recursive)
+Item pn_fs_mkdir(Item path_item) {
+    StrBuf* path_buf = NULL;
+    const char* path = get_path_string(path_item, &path_buf);
+    
+    if (!path) {
+        log_error("fs.mkdir: invalid path argument");
+        return ItemError;
+    }
+    
+    log_debug("fs.mkdir: %s", path);
+    
+    // Use platform command for recursive mkdir
+#ifdef _WIN32
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", path);
+    int result = system(cmd);
+    // Windows mkdir returns error if dir exists, ignore it
+    if (result != 0) {
+        DWORD attr = GetFileAttributesA(path);
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            result = 0;  // Directory exists, not an error
+        }
+    }
+#else
+    // Create directory recursively
+    char* path_copy = strdup(path);
+    char* p = path_copy;
+    int result = 0;
+    
+    // Skip leading slash
+    if (*p == '/') p++;
+    
+    while (*p) {
+        while (*p && *p != '/') p++;
+        char saved = *p;
+        *p = '\0';
+        
+        if (mkdir(path_copy, 0755) != 0 && errno != EEXIST) {
+            result = -1;
+            break;
+        }
+        
+        *p = saved;
+        if (saved) p++;
+    }
+    free(path_copy);
+#endif
+    
+    free_path_buf(path_buf);
+    
+    if (result != 0) {
+        log_error("fs.mkdir: failed to create directory %s: %s", path, strerror(errno));
+        return ItemError;
+    }
+    return ItemNull;
+}
+
+// fs.touch(path) - Create file or update modification time
+Item pn_fs_touch(Item path_item) {
+    StrBuf* path_buf = NULL;
+    const char* path = get_path_string(path_item, &path_buf);
+    
+    if (!path) {
+        log_error("fs.touch: invalid path argument");
+        return ItemError;
+    }
+    
+    log_debug("fs.touch: %s", path);
+    
+    // Check if file exists
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        // File exists - update modification time
+#ifdef _WIN32
+        HANDLE hFile = CreateFileA(path, FILE_WRITE_ATTRIBUTES, 
+            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 
+            FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            FILETIME ft;
+            GetSystemTimeAsFileTime(&ft);
+            SetFileTime(hFile, NULL, NULL, &ft);
+            CloseHandle(hFile);
+        }
+#else
+        utime(path, NULL);  // NULL = current time
+#endif
+    } else {
+        // File doesn't exist - create empty file
+        FILE* f = fopen(path, "w");
+        if (f) {
+            fclose(f);
+        } else {
+            log_error("fs.touch: failed to create file %s: %s", path, strerror(errno));
+            free_path_buf(path_buf);
+            return ItemError;
+        }
+    }
+    
+    free_path_buf(path_buf);
+    return ItemNull;
+}
+
+// fs.symlink(target, link) - Create symbolic link
+Item pn_fs_symlink(Item target_item, Item link_item) {
+    StrBuf *target_buf = NULL, *link_buf = NULL;
+    const char* target_path = get_path_string(target_item, &target_buf);
+    const char* link_path = get_path_string(link_item, &link_buf);
+    
+    if (!target_path || !link_path) {
+        log_error("fs.symlink: invalid path argument");
+        free_path_buf(target_buf);
+        free_path_buf(link_buf);
+        return ItemError;
+    }
+    
+    log_debug("fs.symlink: %s -> %s", link_path, target_path);
+    
+#ifdef _WIN32
+    // Windows requires admin privileges for symlinks
+    // Use mklink command
+    char cmd[4096];
+    struct stat st;
+    const char* type_flag = "";
+    if (stat(target_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+        type_flag = "/D ";
+    }
+    snprintf(cmd, sizeof(cmd), "mklink %s\"%s\" \"%s\"", type_flag, link_path, target_path);
+    int result = system(cmd);
+#else
+    int result = symlink(target_path, link_path);
+#endif
+    
+    free_path_buf(target_buf);
+    free_path_buf(link_buf);
+    
+    if (result != 0) {
+        log_error("fs.symlink: failed to create symlink %s -> %s: %s", 
+                  link_path, target_path, strerror(errno));
+        return ItemError;
+    }
+    return ItemNull;
+}
+
+// fs.chmod(path, mode) - Change file permissions
+// mode can be string like "755" or int like 0755
+Item pn_fs_chmod(Item path_item, Item mode_item) {
+    StrBuf* path_buf = NULL;
+    const char* path = get_path_string(path_item, &path_buf);
+    
+    if (!path) {
+        log_error("fs.chmod: invalid path argument");
+        return ItemError;
+    }
+    
+    // Parse mode
+    int mode = 0;
+    TypeId mode_type = get_type_id(mode_item);
+    if (mode_type == LMD_TYPE_INT || mode_type == LMD_TYPE_INT64) {
+        mode = (int)it2l(mode_item);
+    } else if (mode_type == LMD_TYPE_STRING) {
+        String* mode_str = mode_item.get_string();
+        if (mode_str && mode_str->chars) {
+            // Parse octal string like "755"
+            mode = (int)strtol(mode_str->chars, NULL, 8);
+        }
+    } else {
+        log_error("fs.chmod: mode must be int or string");
+        free_path_buf(path_buf);
+        return ItemError;
+    }
+    
+    log_debug("fs.chmod: %s mode=%o", path, mode);
+    
+#ifdef _WIN32
+    // Windows doesn't have chmod in the same way
+    // Can only toggle read-only flag
+    int result = _chmod(path, mode);
+#else
+    int result = chmod(path, mode);
+#endif
+    
+    free_path_buf(path_buf);
+    
+    if (result != 0) {
+        log_error("fs.chmod: failed to change mode of %s: %s", path, strerror(errno));
+        return ItemError;
+    }
+    return ItemNull;
+}
+
+// fs.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
+Item pn_fs_rename(Item old_item, Item new_item) {
+    StrBuf *old_buf = NULL, *new_buf = NULL;
+    const char* old_path = get_path_string(old_item, &old_buf);
+    const char* new_path = get_path_string(new_item, &new_buf);
+    
+    if (!old_path || !new_path) {
+        log_error("fs.rename: invalid path argument");
+        free_path_buf(old_buf);
+        free_path_buf(new_buf);
+        return ItemError;
+    }
+    
+    log_debug("fs.rename: %s -> %s", old_path, new_path);
+    
+    int result = rename(old_path, new_path);
+    
+    free_path_buf(old_buf);
+    free_path_buf(new_buf);
+    
+    if (result != 0) {
+        log_error("fs.rename: failed to rename %s to %s: %s", old_path, new_path, strerror(errno));
+        return ItemError;
+    }
+    return ItemNull;
+}
+
