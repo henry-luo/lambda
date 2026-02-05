@@ -1005,6 +1005,7 @@ void apply_math_spacing(TexNode* first, MathContext& ctx) {
             if (spacing_mu > 0) {
                 float spacing_pt = mu_to_pt(spacing_mu, ctx);
                 TexNode* kern = make_kern(ctx.arena, spacing_pt);
+                kern->flags |= TexNode::FLAG_MATHSPACING;  // mark as inter-atom spacing
 
                 // Insert kern before current node
                 kern->prev_sibling = node->prev_sibling;
