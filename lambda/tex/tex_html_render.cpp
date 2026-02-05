@@ -43,7 +43,7 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
 static void render_mathop(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_accent(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
 static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
-static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth);
+static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth, uint32_t hlines, bool trailing_hline);
 
 // ============================================================================
 // VList Helper Structures and Functions (MathLive-compatible)
@@ -125,8 +125,18 @@ static void render_vlist_structure(StrBuf* out, const HtmlRenderOptions& opts,
             strbuf_append_str(out, elem->classes);
             strbuf_append_str(out, "\"");
         }
-        snprintf(buf, sizeof(buf), " style=\"top:%.2fem\">", top_em);
+        // Build style with position and optional hline
+        strbuf_append_str(out, " style=\"top:");
+        snprintf(buf, sizeof(buf), "%.2fem", top_em);
         strbuf_append_str(out, buf);
+        if (elem->classes) {
+            if (strcmp(elem->classes, "hline") == 0) {
+                strbuf_append_str(out, ";border-top:0.5px solid currentColor");
+            } else if (strcmp(elem->classes, "hline-after") == 0) {
+                strbuf_append_str(out, ";border-bottom:0.5px solid currentColor");
+            }
+        }
+        strbuf_append_str(out, "\">");
 
         // pstrut for baseline alignment
         strbuf_append_str(out, "<span class=\"");
@@ -747,7 +757,18 @@ static void render_char(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
 // render horizontal spacing (kern)
 static void render_kern(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts) {
-    if (!node || node->width == 0.0f) return;
+    if (!node) return;
+
+    // Check for null delimiter flag (from \bigl., \bigr., etc.)
+    if (node->flags & TexNode::FLAG_NULLDELIM) {
+        // Output MathLive-compatible null delimiter
+        strbuf_append_str(out, "<span class=\"");
+        strbuf_append_str(out, opts.class_prefix);
+        strbuf_append_str(out, "__nulldelimiter\" style=\"width:0.12em\"></span>");
+        return;
+    }
+
+    if (node->width == 0.0f) return;
 
     float em = pt_to_em(node->width, opts.base_font_size_px);
 
@@ -1668,7 +1689,7 @@ static void render_mtable_cell_content(TexNode* cell, StrBuf* out, const HtmlRen
 }
 
 // render math table/array column - outputs MathLive-compatible col-align-X structure
-static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
+static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth, uint32_t hlines = 0, bool trailing_hline = false) {
     if (!node) return;
 
     char buf[256];
@@ -1713,7 +1734,15 @@ static void render_mtable_column(TexNode* node, StrBuf* out, const HtmlRenderOpt
             elements[idx].shift = curr_pos;
             elements[idx].height = child->height / opts.base_font_size_px;
             elements[idx].depth = child->depth / opts.base_font_size_px;
-            elements[idx].classes = nullptr;
+            // Check if this row has an hline before it
+            if (hlines & (1u << idx)) {
+                elements[idx].classes = "hline";
+            } else if (trailing_hline && idx == child_count - 1) {
+                // Last row with trailing hline gets "hline-after" class
+                elements[idx].classes = "hline-after";
+            } else {
+                elements[idx].classes = nullptr;
+            }
 
             curr_pos += (child->height + child->depth) / opts.base_font_size_px;
             idx++;
@@ -1736,6 +1765,8 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
 
     char buf[256];
     float arraycolsep = node->content.mtable.arraycolsep;
+    uint32_t hlines = node->content.mtable.hlines;
+    bool trailing_hline = node->content.mtable.trailing_hline;
 
     // output table container with ML__mtable class
     strbuf_append_str(out, "<span class=\"");
@@ -1752,8 +1783,8 @@ static void render_mtable(TexNode* node, StrBuf* out, const HtmlRenderOptions& o
     TexNode* child = node->first_child;
     while (child) {
         if (child->node_class == NodeClass::MTableColumn) {
-            // render the column
-            render_mtable_column(child, out, opts, depth + 1);
+            // render the column with hlines info
+            render_mtable_column(child, out, opts, depth + 1, hlines, trailing_hline);
             col_idx++;
         } else if (child->node_class == NodeClass::Kern) {
             // column separator - output as ML__arraycolsep
