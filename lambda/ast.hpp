@@ -41,6 +41,10 @@ extern "C" {
 #define SYM_BINARY_EXPR sym_binary_expr
 #define SYM_BINARY_EXPR_NO_PIPE sym_binary_expr_no_pipe
 
+// Path wildcards for glob patterns
+#define SYM_PATH_WILDCARD sym_path_wildcard
+#define SYM_PATH_WILDCARD_RECURSIVE sym_path_wildcard_recursive
+
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_ITEM sym_current_item
 #define SYM_CURRENT_INDEX sym_current_index
@@ -207,7 +211,8 @@ typedef enum AstNodeType {
     AST_NODE_TYPE_STAM,
     AST_NODE_INDEX_EXPR,
     AST_NODE_MEMBER_EXPR,
-    AST_NODE_PATH_EXPR,     // path expression (file.etc.hosts, http.api.example.com)
+    AST_NODE_PATH_EXPR,         // path expression (file.etc.hosts, http.api.example.com)
+    AST_NODE_PATH_INDEX_EXPR,   // path subscript expression - adds dynamic segment: path[expr]
     AST_NODE_CALL_EXPR,
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
@@ -256,6 +261,13 @@ typedef struct AstPathNode : AstNode {
     int segment_count;       // number of path segments
     String** segments;       // array of pooled strings (allocated in pool)
 } AstPathNode;
+
+// Path index expression: path[expr] - adds a dynamic segment to the path
+// Unlike regular index_expr, this extends the path with a runtime-computed segment
+typedef struct AstPathIndexNode : AstNode {
+    AstNode* base_path;      // the base path expression
+    AstNode* segment_expr;   // expression for the dynamic segment
+} AstPathIndexNode;
 
 typedef struct SysFuncInfo {
     SysFunc fn;

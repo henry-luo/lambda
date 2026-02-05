@@ -310,10 +310,10 @@ Path* path_get_root_by_name(const char* name) {
 }
 
 /**
- * Build a path segment by segment (for transpiled code).
+ * Build a path segment by segment (internal helper).
  * Returns a new Path with the segment appended.
  */
-static Path* path_append_segment(Pool* pool, Path* parent, const char* segment) {
+static Path* path_append_segment_pool(Pool* pool, Path* parent, const char* segment) {
     if (!parent || !segment) return parent;
 
     Path* new_path = (Path*)pool_calloc(pool, sizeof(Path));
@@ -332,12 +332,129 @@ static Path* path_append_segment(Pool* pool, Path* parent, const char* segment) 
     return new_path;
 }
 
+// ============================================================================
+// New Path API: path_new, path_extend, path_segment, path_wildcard, path_wildcard_recursive
+// ============================================================================
+
+/**
+ * Create a new path starting with the given scheme.
+ * This returns the root path for the scheme.
+ */
+Path* path_new(Pool* pool, int scheme) {
+    (void)pool;  // pool not needed for root paths
+    return path_get_root((PathScheme)scheme);
+}
+
+/**
+ * Extend an existing path with a new segment.
+ * Returns a new path with the segment appended.
+ * The original path is not modified.
+ */
+Path* path_extend(Pool* pool, Path* base, const char* segment) {
+    if (!base) {
+        log_error("path_extend: NULL base path");
+        return NULL;
+    }
+    if (!segment) {
+        log_error("path_extend: NULL segment");
+        return base;
+    }
+    return path_append_segment_pool(pool, base, segment);
+}
+
+/**
+ * Extend an existing path with another path's segments.
+ * Appends all segments from suffix to base.
+ * Returns a new path.
+ */
+Path* path_concat(Pool* pool, Path* base, Path* suffix) {
+    if (!base) return suffix;
+    if (!suffix) return base;
+
+    // Collect suffix segments in reverse order
+    const char* segments[64];
+    int count = 0;
+
+    Path* p = suffix;
+    while (p && p->parent && count < 64) {
+        segments[count++] = p->name;
+        p = p->parent;
+    }
+
+    // Append segments in forward order (root to leaf)
+    Path* result = base;
+    for (int i = count - 1; i >= 0; i--) {
+        result = path_append_segment_pool(pool, result, segments[i]);
+    }
+
+    return result;
+}
+
+/**
+ * Create a wildcard segment (*) - matches any single path component.
+ * The wildcard is stored as a special segment name.
+ */
+Path* path_wildcard(Pool* pool, Path* base) {
+    if (!base) {
+        log_error("path_wildcard: NULL base path");
+        return NULL;
+    }
+    return path_append_segment_pool(pool, base, "*");
+}
+
+/**
+ * Create a recursive wildcard segment (**) - matches zero or more path components.
+ * The wildcard is stored as a special segment name.
+ */
+Path* path_wildcard_recursive(Pool* pool, Path* base) {
+    if (!base) {
+        log_error("path_wildcard_recursive: NULL base path");
+        return NULL;
+    }
+    return path_append_segment_pool(pool, base, "**");
+}
+
+/**
+ * Check if a path segment is a single wildcard (*).
+ */
+bool path_is_wildcard(Path* path) {
+    if (!path || !path->name) return false;
+    return path->name[0] == '*' && path->name[1] == '\0';
+}
+
+/**
+ * Check if a path segment is a recursive wildcard (**).
+ */
+bool path_is_wildcard_recursive(Path* path) {
+    if (!path || !path->name) return false;
+    return path->name[0] == '*' && path->name[1] == '*' && path->name[2] == '\0';
+}
+
+/**
+ * Check if a path contains any wildcard segments.
+ */
+bool path_has_wildcards(Path* path) {
+    Path* p = path;
+    while (p && p->parent) {
+        if (path_is_wildcard(p) || path_is_wildcard_recursive(p)) {
+            return true;
+        }
+        p = p->parent;
+    }
+    return false;
+}
+
+// ============================================================================
+// Legacy fixed-arity path_build functions (for backwards compatibility)
+// These are still used by the C2MIR transpiler which doesn't support variadic
+// ============================================================================
+
 /**
  * Build a path with 1 segment (for transpiled code).
  */
 Path* path_build1(Pool* pool, int scheme, const char* s1) {
     Path* path = path_get_root((PathScheme)scheme);
-    return path_append_segment(pool, path, s1);
+    return path_append_segment_pool(pool, path, s1);
 }
 
 /**
@@ -345,8 +462,8 @@ Path* path_build1(Pool* pool, int scheme, const char* s1) {
  */
 Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2) {
     Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment(pool, path, s1);
-    return path_append_segment(pool, path, s2);
+    path = path_append_segment_pool(pool, path, s1);
+    return path_append_segment_pool(pool, path, s2);
 }
 
 /**
@@ -354,9 +471,9 @@ Path* path_build2(Pool* pool, int scheme, const char* s1, const char* s2) {
  */
 Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3) {
     Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment(pool, path, s1);
-    path = path_append_segment(pool, path, s2);
-    return path_append_segment(pool, path, s3);
+    path = path_append_segment_pool(pool, path, s1);
+    path = path_append_segment_pool(pool, path, s2);
+    return path_append_segment_pool(pool, path, s3);
 }
 
 /**
@@ -364,10 +481,10 @@ Path* path_build3(Pool* pool, int scheme, const char* s1, const char* s2, const 
  */
 Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4) {
     Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment(pool, path, s1);
-    path = path_append_segment(pool, path, s2);
-    path = path_append_segment(pool, path, s3);
-    return path_append_segment(pool, path, s4);
+    path = path_append_segment_pool(pool, path, s1);
+    path = path_append_segment_pool(pool, path, s2);
+    path = path_append_segment_pool(pool, path, s3);
+    return path_append_segment_pool(pool, path, s4);
 }
 
 /**
@@ -375,9 +492,51 @@ Path* path_build4(Pool* pool, int scheme, const char* s1, const char* s2, const 
  */
 Path* path_build5(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5) {
     Path* path = path_get_root((PathScheme)scheme);
-    path = path_append_segment(pool, path, s1);
-    path = path_append_segment(pool, path, s2);
-    path = path_append_segment(pool, path, s3);
-    path = path_append_segment(pool, path, s4);
-    return path_append_segment(pool, path, s5);
+    path = path_append_segment_pool(pool, path, s1);
+    path = path_append_segment_pool(pool, path, s2);
+    path = path_append_segment_pool(pool, path, s3);
+    path = path_append_segment_pool(pool, path, s4);
+    return path_append_segment_pool(pool, path, s5);
+}
+
+/**
+ * Build a path with 6 segments (for transpiled code).
+ */
+Path* path_build6(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment_pool(pool, path, s1);
+    path = path_append_segment_pool(pool, path, s2);
+    path = path_append_segment_pool(pool, path, s3);
+    path = path_append_segment_pool(pool, path, s4);
+    path = path_append_segment_pool(pool, path, s5);
+    return path_append_segment_pool(pool, path, s6);
+}
+
+/**
+ * Build a path with 7 segments (for transpiled code).
+ */
+Path* path_build7(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment_pool(pool, path, s1);
+    path = path_append_segment_pool(pool, path, s2);
+    path = path_append_segment_pool(pool, path, s3);
+    path = path_append_segment_pool(pool, path, s4);
+    path = path_append_segment_pool(pool, path, s5);
+    path = path_append_segment_pool(pool, path, s6);
+    return path_append_segment_pool(pool, path, s7);
+}
+
+/**
+ * Build a path with 8 segments (for transpiled code).
+ */
+Path* path_build8(Pool* pool, int scheme, const char* s1, const char* s2, const char* s3, const char* s4, const char* s5, const char* s6, const char* s7, const char* s8) {
+    Path* path = path_get_root((PathScheme)scheme);
+    path = path_append_segment_pool(pool, path, s1);
+    path = path_append_segment_pool(pool, path, s2);
+    path = path_append_segment_pool(pool, path, s3);
+    path = path_append_segment_pool(pool, path, s4);
+    path = path_append_segment_pool(pool, path, s5);
+    path = path_append_segment_pool(pool, path, s6);
+    path = path_append_segment_pool(pool, path, s7);
+    return path_append_segment_pool(pool, path, s8);
 }

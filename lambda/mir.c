@@ -186,6 +186,7 @@ func_obj_t func_list[] = {
     {"it2d", (fn_ptr) it2d},
     {"it2i", (fn_ptr) it2i},
     {"it2s", (fn_ptr) it2s},
+    {"fn_to_cstr", (fn_ptr) fn_to_cstr},
     {"to_fn", (fn_ptr) to_fn},
     {"to_fn_n", (fn_ptr) to_fn_n},
     {"to_fn_named", (fn_ptr) to_fn_named},
@@ -228,7 +229,7 @@ func_obj_t func_list[] = {
     {"pn_output3", (fn_ptr) pn_output3},
     // shared runtime context pointer
     {"_lambda_rt", (fn_ptr) &_lambda_rt},
-    
+
     // JavaScript runtime functions
     {"js_to_number", (fn_ptr) js_to_number},
     {"js_to_string", (fn_ptr) js_to_string},
@@ -278,12 +279,21 @@ func_obj_t func_list[] = {
     {"stringbuf_append_str", (fn_ptr) stringbuf_append_str},
     {"stringbuf_append_str_n", (fn_ptr) stringbuf_append_str_n},
     {"stringbuf_to_string", (fn_ptr) stringbuf_to_string},
+    // Path functions - new API
+    {"path_new", (fn_ptr) path_new},
+    {"path_extend", (fn_ptr) path_extend},
+    {"path_concat", (fn_ptr) path_concat},
+    {"path_wildcard", (fn_ptr) path_wildcard},
+    {"path_wildcard_recursive", (fn_ptr) path_wildcard_recursive},
     // Path functions (fixed-arity for C2MIR compatibility)
     {"path_build1", (fn_ptr) path_build1},
     {"path_build2", (fn_ptr) path_build2},
     {"path_build3", (fn_ptr) path_build3},
     {"path_build4", (fn_ptr) path_build4},
     {"path_build5", (fn_ptr) path_build5},
+    {"path_build6", (fn_ptr) path_build6},
+    {"path_build7", (fn_ptr) path_build7},
+    {"path_build8", (fn_ptr) path_build8},
 };
 
 void *import_resolver(const char *name) {
@@ -318,16 +328,16 @@ MIR_context_t jit_init(unsigned int optimize_level) {
 // compile C code to MIR
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
-    
+
     // Check if we want to capture C2MIR debug messages via environment variable
     const char* debug_env = getenv("LAMBDA_C2MIR_DEBUG");
     bool enable_debug = (debug_env && (strcmp(debug_env, "1") == 0 || strcmp(debug_env, "true") == 0));
-    
+
     #ifdef ENABLE_C2MIR_DEBUG
         enable_debug = true;  // Force enable if compile-time flag is set
     #endif
     enable_debug = true;  // hardcode enable for now
-    
+
     if (enable_debug) {
         // Create a temporary file to capture C2MIR messages
         FILE* temp_log = tmpfile();
@@ -347,18 +357,18 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
         ops.verbose_p = 0;
         ops.debug_p = 0;
     }
-    
+
     log_notice("Compiling C code in '%s' to MIR", file_name);
     jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
     if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
         log_error("compiled '%s' with error!!", file_name);
     }
-    
+
     // Read and log the captured C2MIR messages
     if (enable_debug && ops.message_file) {
         // Rewind to beginning of temp file
         rewind(ops.message_file);
-        
+
         // Read and log each line
         char line_buffer[1024];
         while (fgets(line_buffer, sizeof(line_buffer), ops.message_file)) {
@@ -367,13 +377,13 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
             if (len > 0 && line_buffer[len - 1] == '\n') {
                 line_buffer[len - 1] = '\0';
             }
-            
+
             // Log the C2MIR message (skip empty lines)
             if (strlen(line_buffer) > 0) {
                 log_debug("C2MIR: %s", line_buffer);
             }
         }
-        
+
         // Close the temporary file
         fclose(ops.message_file);
     }
@@ -383,7 +393,7 @@ void print_module_item(MIR_item_t mitem) {
     switch (mitem->item_type) {
     case MIR_func_item:
         // Function mitem->addr is the address to call the function
-        log_debug("module item func: %d %s, addr %p, call addr %p", 
+        log_debug("module item func: %d %s, addr %p, call addr %p",
             mitem->item_type, mitem->u.func->name, mitem->addr, mitem->u.func->call_addr);
         break;
     case MIR_proto_item:
@@ -539,10 +549,10 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
         log_debug("build_debug_info_table: mir_ctx is NULL");
         return NULL;
     }
-    
+
     MIR_context_t ctx = (MIR_context_t)mir_ctx;
     struct hashmap* name_map = (struct hashmap*)func_name_map;
-    
+
     // Create list to hold debug info entries
     DebugInfoList* debug_list = (DebugInfoList*)malloc(sizeof(DebugInfoList));
     if (!debug_list) {
@@ -557,10 +567,10 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
         free(debug_list);
         return NULL;
     }
-    
+
     // Iterate all modules and collect function addresses
-    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); 
-         module != NULL; 
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+         module != NULL;
          module = DLIST_NEXT(MIR_module_t, module)) {
         for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
              item != NULL;
@@ -568,12 +578,12 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
             if (item->item_type == MIR_func_item && item->addr != NULL) {
                 FuncDebugInfo* info = (FuncDebugInfo*)calloc(1, sizeof(FuncDebugInfo));
                 if (!info) continue;
-                
+
                 // Use machine_code if available, otherwise addr
                 void* code_addr = item->u.func->machine_code ? item->u.func->machine_code : item->addr;
                 info->native_addr_start = code_addr;
                 info->native_addr_end = NULL;  // computed later
-                
+
                 // Look up Lambda name from map, fall back to MIR name
                 const char* mir_name = item->u.func->name;
                 const char* lambda_name = mir_name;  // default to MIR name
@@ -588,10 +598,10 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
                 info->lambda_func_name = lambda_name;
                 info->source_file = NULL;  // could be set from AST if available
                 info->source_line = 0;
-                
+
                 log_debug("build_debug_info_table: func '%s' addr=%p machine_code=%p call_addr=%p",
                           lambda_name, item->addr, item->u.func->machine_code, item->u.func->call_addr);
-                
+
                 // grow list if needed
                 if (debug_list->length >= debug_list->capacity) {
                     size_t new_cap = debug_list->capacity * 2;
@@ -604,23 +614,23 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
                     debug_list->capacity = new_cap;
                 }
                 debug_list->items[debug_list->length++] = info;
-                
-                log_debug("build_debug_info_table: added func '%s' at %p", 
+
+                log_debug("build_debug_info_table: added func '%s' at %p",
                           info->lambda_func_name, info->native_addr_start);
             }
         }
     }
-    
+
     if (debug_list->length == 0) {
         log_debug("build_debug_info_table: no functions found");
         free(debug_list->items);
         free(debug_list);
         return NULL;
     }
-    
+
     // Sort by address
     qsort(debug_list->items, debug_list->length, sizeof(FuncDebugInfo*), compare_debug_info);
-    
+
     // Compute end addresses using next function's start
     for (size_t i = 0; i < debug_list->length; i++) {
         FuncDebugInfo* info = debug_list->items[i];
@@ -631,10 +641,10 @@ void* build_debug_info_table(void* mir_ctx, void* func_name_map) {
             // Last function: use conservative size (64KB should cover any function)
             info->native_addr_end = (char*)info->native_addr_start + 65536;
         }
-        log_debug("build_debug_info_table: func '%s' range [%p, %p)", 
+        log_debug("build_debug_info_table: func '%s' range [%p, %p)",
                   info->lambda_func_name, info->native_addr_start, info->native_addr_end);
     }
-    
+
     log_info("build_debug_info_table: built table with %zu functions", debug_list->length);
     return debug_list;
 }
