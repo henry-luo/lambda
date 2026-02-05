@@ -944,6 +944,9 @@ TexNode* typeset_delimited(int32_t left_delim, TexNode* content,
     hbox->depth = fmaxf(total_depth, left ? left->depth : 0);
     hbox->depth = fmaxf(hbox->depth, right ? right->depth : 0);
 
+    // Mark as delimited group for HTML renderer
+    hbox->flags |= TexNode::FLAG_DELIMITED;
+
     // Link children
     float x = 0;
     TexNode* prev = nullptr;
