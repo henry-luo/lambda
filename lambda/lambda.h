@@ -324,7 +324,9 @@ Path* path_get_root(PathScheme scheme);                 // Get predefined root p
 Path* path_append(Path* parent, const char* segment);   // Append segment to path
 Path* path_append_len(Path* parent, const char* segment, size_t len);
 const char* path_get_scheme_name(Path* path);           // Get scheme name (file, http, etc.)
+PathScheme path_get_scheme(Path* path);                 // Get scheme type (PATH_SCHEME_FILE, etc.)
 bool path_is_root(Path* path);                          // Check if path is a root scheme
+bool path_is_absolute(Path* path);                      // Check if path is absolute (not . or ..)
 int path_depth(Path* path);                             // Get path depth (segment count)
 void path_to_string(Path* path, void* out);             // Convert to string (StrBuf*)
 void path_to_os_path(Path* path, void* out);            // Convert to OS path (StrBuf*)
