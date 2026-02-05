@@ -210,7 +210,19 @@ const WRAPPER_CLASSES = new Set([
     'katex-html',
     'ML__latex',
     'ML__base',
-    'ML__mord'  // Lambda uses ML__mord as wrapper like MathLive uses ML__base
+    'ML__mord',  // Lambda uses ML__mord as wrapper like MathLive uses ML__base
+    // VList structural elements (focus on content, not layout)
+    'ML__vlist',
+    'ML__vlist-t',
+    'ML__vlist-t2',
+    'ML__vlist-r',
+    'vlist',
+    'vlist-t',
+    'vlist-t2',
+    'vlist-r',
+    // Sizing wrappers (different renderers use different nesting)
+    'ML__sizing',
+    'sizing'
 ]);
 
 /**
@@ -230,6 +242,7 @@ function normalizeClassName(className) {
 
 /**
  * Extract semantic classes from a class list
+ * Filters out library-specific prefixes and size/layout classes
  */
 function getSemanticClasses(classList) {
     if (!classList || classList.length === 0) return [];
@@ -237,14 +250,26 @@ function getSemanticClasses(classList) {
     const classes = Array.from(classList);
     const normalized = classes
         .map(c => normalizeClassName(c))
-        .filter(c => !c.startsWith('ML__') && !c.startsWith('katex-') && !c.startsWith('size'));
+        .filter(c => {
+            // Skip library-specific prefixes
+            if (c.startsWith('ML__') || c.startsWith('katex-')) return false;
+            // Skip size classes (size1, size2, reset-size6, etc.)
+            if (c.startsWith('size') || c.startsWith('delim-size') || c.startsWith('reset-size')) return false;
+            // Skip layout-only classes (vlists, struts, etc.)
+            if (c.startsWith('vlist') || c.includes('strut')) return false;
+            // Skip tight variants (mtight)
+            if (c === 'mtight') return false;
+            // Skip empty class after normalization
+            if (!c || c === '') return false;
+            return true;
+        });
 
     // Deduplicate
     return [...new Set(normalized)];
 }
 
 /**
- * Check if an element should be ignored
+ * Check if an element should be ignored entirely
  */
 function shouldIgnoreElement(element) {
     if (!element || element.nodeType !== 1) return false;
@@ -262,7 +287,61 @@ function shouldIgnoreElement(element) {
     if (element.classList.contains('strut') ||
         element.classList.contains('ML__strut') ||
         element.classList.contains('ML__strut--bottom') ||
-        element.classList.contains('ML__pstrut')) {
+        element.classList.contains('ML__pstrut') ||
+        element.classList.contains('pstrut')) {
+        return true;
+    }
+
+    // Ignore vlist-s (Safari workaround elements with zero-width space)
+    if (element.classList.contains('ML__vlist-s') ||
+        element.classList.contains('vlist-s')) {
+        return true;
+    }
+
+    // Ignore nulldelimiter elements (used for spacing only)
+    if (element.classList.contains('ML__nulldelimiter') ||
+        element.classList.contains('nulldelimiter')) {
+        return true;
+    }
+
+    // Ignore empty spans that are purely for sizing/spacing
+    if (tagName === 'span') {
+        const hasOnlyStyle = element.getAttribute('style') &&
+                            element.childNodes.length === 0 &&
+                            element.classList.length === 0;
+        if (hasOnlyStyle) return true;
+
+        // Ignore spans with only zero-width characters
+        const text = element.textContent;
+        if (text && /^[\u200b\u2060\u00a0\ufeff]*$/.test(text)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Check if an element is purely for sizing/spacing (can be simplified)
+ */
+function isSizingOnlyElement(element) {
+    if (!element || element.nodeType !== 1) return false;
+
+    // Elements that exist only for sizing purposes
+    const classList = element.classList;
+    if (classList.contains('ML__pstrut') ||
+        classList.contains('pstrut') ||
+        classList.contains('strut') ||
+        classList.contains('ML__strut') ||
+        classList.contains('ML__strut--bottom')) {
+        return true;
+    }
+
+    // Empty span with only style (sizing spacer)
+    if (element.tagName.toLowerCase() === 'span' &&
+        element.childNodes.length === 0 &&
+        element.getAttribute('style') &&
+        !element.classList.length) {
         return true;
     }
 
@@ -318,6 +397,11 @@ function normalizeElement(element) {
     if (children.length === 0) {
         const text = element.textContent.trim();
         if (text) textContent = text;
+    }
+
+    // Skip empty elements (no meaningful content or semantic classes)
+    if (children.length === 0 && !textContent && semanticClasses.length === 0) {
+        return null;
     }
 
     return {

@@ -2505,63 +2505,37 @@ private:
 
         float size = current_size();
         float content_height = content->height + content->depth;
+        float delim_size = content_height + 2.0f;  // extra height for delimiter
 
-        // Matrix delimiters should use cmex10 extensible characters
-        // following TeX's delimiter sizing behavior
-        auto make_delim = [&](const char* d, bool is_left) -> TexNode* {
+        // Matrix delimiters use Delimiter nodes so HTML renderer can use proper size classes
+        auto make_delim_node = [&](const char* d, bool is_left) -> TexNode* {
             if (strcmp(d, ".") == 0) return nullptr;
             int32_t cp;
-            AtomType atom = is_left ? AtomType::Open : AtomType::Close;
-            FontSpec font;
-            TFMFont* tfm;
 
             if (d[0] == '\\') {
-                // Command delimiters use cmsy10
-                font = ctx.symbol_font;
-                font.size_pt = size;
-                tfm = symbol_tfm;
-                if (strcmp(d, "\\{") == 0 || strcmp(d, "\\lbrace") == 0) cp = 'f';
-                else if (strcmp(d, "\\}") == 0 || strcmp(d, "\\rbrace") == 0) cp = 'g';
-                else if (strcmp(d, "\\|") == 0) cp = 107;
-                else { font = ctx.roman_font; tfm = roman_tfm; cp = is_left ? '(' : ')'; }
+                // Command delimiters
+                if (strcmp(d, "\\{") == 0 || strcmp(d, "\\lbrace") == 0) cp = '{';
+                else if (strcmp(d, "\\}") == 0 || strcmp(d, "\\rbrace") == 0) cp = '}';
+                else if (strcmp(d, "\\|") == 0) cp = 0x2016;  // double vertical bar
+                else cp = is_left ? '(' : ')';
             } else {
-                // Matrix content is typically tall, so always use cmex10
-                // for parentheses/brackets to match TeX reference output
-                font = ctx.extension_font;
-                font.size_pt = size;
-                tfm = extension_tfm;
-                if (d[0] == '(' || d[0] == ')') {
-                    // cmex10 codepoints 0,1 for parentheses
-                    cp = is_left ? 0 : 1;
-                } else if (d[0] == '[' || d[0] == ']') {
-                    // cmex10 codepoints 2,3 for brackets (small)
-                    // or use 'h','i' (104,105) for medium brackets
-                    cp = is_left ? 2 : 3;
-                } else if (d[0] == '{' || d[0] == '}') {
-                    // Braces use cmsy10
-                    font = ctx.symbol_font;
-                    font.size_pt = size;
-                    tfm = symbol_tfm;
-                    cp = is_left ? 'f' : 'g';
-                } else if (d[0] == '|') {
-                    // cmex10 codepoint 12 for vertical bar
-                    cp = 12;
-                } else {
-                    cp = is_left ? 0 : 1;  // fallback to parens
-                }
+                cp = d[0];  // direct character
             }
-            return make_char_node(cp, atom, font, tfm);
+            return make_delimiter(ctx.arena, cp, delim_size, is_left);
         };
 
-        TexNode* left = make_delim(left_d, true);
-        TexNode* right = make_delim(right_d, false);
+        TexNode* left = make_delim_node(left_d, true);
+        TexNode* right = make_delim_node(right_d, false);
 
         TexNode* first = nullptr;
         TexNode* last = nullptr;
         if (left) link_node(first, last, left);
         link_node(first, last, content);
         if (right) link_node(first, last, right);
-        return wrap_in_hbox(first, last);
+
+        TexNode* hbox = wrap_in_hbox(first, last);
+        hbox->flags |= TexNode::FLAG_MATRIX;  // mark as matrix for HTML renderer
+        return hbox;
     }
 
     TexNode* build_cases(const ElementReader& elem) {
@@ -2569,15 +2543,41 @@ private:
         TexNode* content = build_node(body_item);
         if (!content) content = make_hbox(ctx.arena);
 
-        float size = current_size();
-        FontSpec font = ctx.symbol_font;
-        font.size_pt = size;
+        // Wrap content in an mtable-style box
+        TexNode* mtable = make_hbox(ctx.arena);
+        mtable->first_child = content;
+        content->parent = mtable;
 
+        // Calculate height from content
+        float total_height = content->height;
+        float total_depth = content->depth;
+
+        // cases uses left brace { only, no right delimiter
+        float delim_size = total_height + total_depth;
+        TexNode* left = make_delimiter(ctx.arena, '{', delim_size, true);
+        left->width = ctx.base_size_pt * 0.4f;
+        left->height = delim_size / 2.0f + ctx.axis_height;
+        left->depth = delim_size / 2.0f - ctx.axis_height;
+
+        // Build HBox with FLAG_MATRIX for display:inline-block rendering
+        TexNode* hbox = make_hbox(ctx.arena);
+        hbox->flags |= TexNode::FLAG_MATRIX;
+        hbox->flags |= TexNode::FLAG_DELIMITED;
+
+        // Link: left delimiter, mtable
         TexNode* first = nullptr;
         TexNode* last = nullptr;
-        link_node(first, last, make_char_node('f', AtomType::Open, font, symbol_tfm));
-        link_node(first, last, content);
-        return wrap_in_hbox(first, last);
+        link_node(first, last, left);
+        link_node(first, last, mtable);
+
+        hbox->first_child = first;
+        for (TexNode* n = first; n; n = n->next_sibling) n->parent = hbox;
+
+        hbox->width = left->width + mtable->width;
+        hbox->height = fmaxf(left->height, mtable->height);
+        hbox->depth = fmaxf(left->depth, mtable->depth);
+
+        return hbox;
     }
 
     TexNode* build_binomial(const ElementReader& elem) {

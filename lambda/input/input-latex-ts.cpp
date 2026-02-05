@@ -2308,6 +2308,43 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
         return ctx.builder.element("comment").final();
     }
 
+    // Special handling for math environments (equation, align, etc.)
+    // These need 'source' and 'ast' attributes like inline_math/display_math
+    if (is_math_environment(env_name->chars)) {
+        MarkBuilder& builder = ctx.builder;
+        ElementBuilder elem_builder = builder.element(env_name->chars);
+
+        // Extract raw content between \begin{env} and \end{env}
+        TSNode end_node = ts_node_child_by_field_name(node, "end", 3);
+        uint32_t content_start = ts_node_end_byte(begin_node);
+        uint32_t content_end = ts_node_is_null(end_node) ? ts_node_end_byte(node) : ts_node_start_byte(end_node);
+
+        // Trim leading/trailing whitespace from content
+        const char* content = source + content_start;
+        size_t content_len = content_end - content_start;
+        while (content_len > 0 && (*content == ' ' || *content == '\t' || *content == '\n' || *content == '\r')) {
+            content++;
+            content_len--;
+        }
+        while (content_len > 0 && (content[content_len - 1] == ' ' || content[content_len - 1] == '\t' ||
+                                   content[content_len - 1] == '\n' || content[content_len - 1] == '\r')) {
+            content_len--;
+        }
+
+        // Store source attribute
+        String* src_str = builder.createString(content, content_len);
+        Item src_item = {.item = s2it(src_str)};
+        elem_builder.attr("source", src_item);
+
+        // Deep parse the math content using tree-sitter-latex-math
+        Item math_ast = parse_math_to_ast(ctx, content, content_len);
+        if (math_ast.item != ITEM_NULL) {
+            elem_builder.attr("ast", math_ast);
+        }
+
+        return elem_builder.final();
+    }
+
     // Create element with environment name as tag
     MarkBuilder& builder = ctx.builder;
     ElementBuilder env_elem_builder = builder.element(env_name->chars);
