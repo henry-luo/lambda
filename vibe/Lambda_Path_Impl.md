@@ -7,6 +7,7 @@
 - Path schemes: `/` (absolute file), `.` (relative), `..` (parent), `http`, `https`, `sys`
 - Path string representation with proper quoting (`/etc.'nginx.conf'`, `.test.input.dir`)
 - Wildcard support: `*` (single level), `**` (recursive)
+- Path concatenation: `path ++ string`, `path ++ symbol`, `path ++ relative_path`
 - `exists(path)` system function
 - `len(path)` for directories (returns entry count)
 - `for item in path` iteration over directories
@@ -61,6 +62,27 @@ typedef struct PathMeta {
 | System | `sys` | `sys.env.PATH` | System info |
 
 > **Note:** The `.` and `..` syntax is inspired by Python's relative import syntax (`from . import` and `from .. import`) and Unix path conventions. Like Python, `.` refers to the current context (directory) and `..` refers to the parent.
+
+### Path Concatenation (`++` Operator)
+
+Paths can be extended using the `++` operator:
+
+| Operation | Example | Result |
+|-----------|---------|--------|
+| `path ++ string` | `/etc ++ "hosts"` | `/etc.hosts` |
+| `path ++ symbol` | `/var ++ 'log'` | `/var.log` |
+| `path ++ relative_path` | `/home.user ++ .docs.file` | `/home.user.docs.file` |
+| `path ++ parent_path` | `/home.user ++ ..shared` | `/home.user.shared` |
+| `path ++ absolute_path` | `/home ++ /etc` | **Error** |
+
+```lambda
+// Build paths dynamically
+let base = /home.user
+let config = base ++ "config" ++ "settings.json"  // /home.user.config.'settings.json'
+
+// Concatenate with relative path
+let full = /data ++ .subdir.file  // /data.subdir.file
+```
 
 ---
 
@@ -701,19 +723,19 @@ len(f)       // triggers load for length
 
 ### 6.2 Operation Updates
 
-- [ ] Update `fn_len()` for PATH to use `resolve_path_for_iteration()`
-- [ ] Update `item_at()` for PATH to use `resolve_path_for_iteration()`
-- [ ] Add PATH case to `item_attr()` for property access
-- [ ] Ensure for-loop transpilation works with PATH (uses `fn_len` + `item_at`)
+- [x] Update `fn_len()` for PATH to use `resolve_path_for_iteration()`
+- [x] Update `item_at()` for PATH to use `resolve_path_for_iteration()`
+- [x] Add PATH case to `item_attr()` for property access
+- [x] Ensure for-loop transpilation works with PATH (uses `fn_len` + `item_at`)
 
 ### 6.3 Path Property Functions (Priority)
 
-- [ ] `path.name` - segment name (leaf segment)
-- [ ] `path.is_dir` - directory check (from metadata)
-- [ ] `path.is_file` - file check (from metadata)
-- [ ] `path.is_link` - symlink check (from metadata)
-- [ ] `path.size` - file/dir size (from metadata)
-- [ ] `path.modified` - modification time (from metadata)
+- [x] `path.name` - segment name (leaf segment)
+- [x] `path.is_dir` - directory check (from metadata)
+- [x] `path.is_file` - file check (from metadata)
+- [x] `path.is_link` - symlink check (from metadata)
+- [x] `path.size` - file/dir size (from metadata)
+- [x] `path.modified` - modification time (from metadata)
 
 ### 6.4 Path Property Functions (Deferred)
 
