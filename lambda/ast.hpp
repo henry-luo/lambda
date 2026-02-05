@@ -45,6 +45,12 @@ extern "C" {
 #define SYM_PATH_WILDCARD sym_path_wildcard
 #define SYM_PATH_WILDCARD_RECURSIVE sym_path_wildcard_recursive
 
+// Path root tokens: / for absolute, . for relative, .. for parent
+#define SYM_PATH_ROOT sym_path_root
+#define SYM_PATH_SELF sym_path_self
+#define SYM_PATH_PARENT sym_path_parent
+#define SYM_PATH_EXPR sym_path_expr
+
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_ITEM sym_current_item
 #define SYM_CURRENT_INDEX sym_current_index
@@ -128,6 +134,7 @@ extern "C" {
 #define FIELD_TARGET field_target
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index
+#define FIELD_SEGMENT field_segment
 #define FIELD_DECOMPOSE field_decompose
 // For expression clause fields
 #define FIELD_LET field_let

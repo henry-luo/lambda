@@ -626,14 +626,13 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
-// check if an identifier is a path scheme keyword (file, http, https, sys)
+// check if an identifier is a path scheme keyword (http, https, sys)
+// NOTE: file and cwd are no longer keywords - use / and . instead
 // returns the PathScheme if it is, or -1 if not
 static int get_path_scheme_from_name(StrView name) {
-    if (strview_equal(&name, "file")) return PATH_SCHEME_FILE;
     if (strview_equal(&name, "http")) return PATH_SCHEME_HTTP;
     if (strview_equal(&name, "https")) return PATH_SCHEME_HTTPS;
     if (strview_equal(&name, "sys")) return PATH_SCHEME_SYS;
-    if (strview_equal(&name, "cwd")) return PATH_SCHEME_REL;  // relative to current working directory
     return -1;  // not a path scheme
 }
 
@@ -643,8 +642,59 @@ static int get_path_scheme_from_name(StrView name) {
 static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList* segments) {
     TSSymbol symbol = ts_node_symbol(node);
 
+    // New path tokens: /, ., ..
+    if (symbol == SYM_PATH_ROOT) {
+        return PATH_SCHEME_FILE;  // / is absolute file path
+    }
+    if (symbol == SYM_PATH_SELF) {
+        return PATH_SCHEME_REL;   // . is relative path
+    }
+    if (symbol == SYM_PATH_PARENT) {
+        return PATH_SCHEME_PARENT; // .. is parent path
+    }
+    
+    // path_expr: (/ | . | ..) optional(field)
+    if (symbol == SYM_PATH_EXPR) {
+        // determine scheme from first child (path_root, path_self, or path_parent)
+        TSNode first_child = ts_node_child(node, 0);
+        TSSymbol first_sym = ts_node_symbol(first_child);
+        int scheme = (first_sym == SYM_PATH_ROOT) ? PATH_SCHEME_FILE :
+                     (first_sym == SYM_PATH_PARENT) ? PATH_SCHEME_PARENT : PATH_SCHEME_REL;
+        
+        // check for optional field
+        TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
+        if (!ts_node_is_null(field_node)) {
+            TSSymbol field_sym = ts_node_symbol(field_node);
+            if (field_sym == SYM_IDENT || field_sym == SYM_SYMBOL) {
+                StrView field_name = ts_node_source(tp, field_node);
+                if (field_sym == SYM_SYMBOL && field_name.length >= 2) {
+                    field_name.str++;
+                    field_name.length -= 2;
+                }
+                String* pooled = name_pool_create_strview(tp->name_pool, field_name);
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = pooled;
+                seg->type = LPATH_SEG_NORMAL;
+                arraylist_append(segments, seg);
+            }
+            else if (field_sym == SYM_PATH_WILDCARD) {
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = NULL;
+                seg->type = LPATH_SEG_WILDCARD;
+                arraylist_append(segments, seg);
+            }
+            else if (field_sym == SYM_PATH_WILDCARD_RECURSIVE) {
+                AstPathSegment* seg = (AstPathSegment*)pool_alloc(tp->pool, sizeof(AstPathSegment));
+                seg->name = NULL;
+                seg->type = LPATH_SEG_WILDCARD_REC;
+                arraylist_append(segments, seg);
+            }
+        }
+        return scheme;
+    }
+
     if (symbol == SYM_IDENT) {
-        // base case: check if this identifier is a path scheme
+        // base case: check if this identifier is a path scheme (http, https, sys)
         StrView name = ts_node_source(tp, node);
         int scheme = get_path_scheme_from_name(name);
         if (scheme >= 0) {
@@ -735,6 +785,8 @@ static AstNode* build_path_expr(Transpiler* tp, TSNode node, PathScheme scheme, 
     path_node->type = &TYPE_PATH;
     return (AstNode*)path_node;
 }
+
+
 
 // both index and member exprs
 AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_type) {
@@ -1468,6 +1520,14 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_ELEMENT) {
         ast_node->expr = build_elmt(tp, child);
         ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_PATH_EXPR) {
+        // path_expr: (/ | . | ..) with optional field
+        ArrayList* segments = arraylist_new(8);
+        int scheme = collect_path_segments_if_path(tp, child, segments);
+        ast_node->expr = build_path_expr(tp, child, (PathScheme)scheme, segments);
+        ast_node->type = ast_node->expr->type;
+        arraylist_free(segments);
     }
     else if (symbol == SYM_MEMBER_EXPR) {
         // first check if this is a path expression (file.x.y, http.x.y, etc.)

@@ -480,6 +480,7 @@ module.exports = grammar({
       alias($._non_null_base_type, $.base_type),
       $.identifier,
       $.index_expr,  // like Go
+      $.path_expr,   // /, ., or .. paths with optional segment
       $.member_expr,
       $.call_expr,
       $._parenthesized_expr,
@@ -506,6 +507,23 @@ module.exports = grammar({
       '[', field('field', $._expression), ']',
     ),
 
+    // Path root: / for absolute file paths
+    path_root: _ => '/',
+    
+    // Path self: . for relative paths (current directory)
+    path_self: _ => '.',
+    
+    // Path parent: .. for parent directory
+    path_parent: _ => '..',
+    
+    // Path expression: /, ., or .. optionally followed by a field
+    // This allows /etc, .test, ..parent, /, ., .. as path expressions
+    path_expr: $ => prec.right(seq(
+      choice($.path_root, $.path_self, $.path_parent),
+      optional(field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive)))
+    )),
+
+    // Member access
     member_expr: $ => seq(
       field('object', $.primary_expr), ".",
       field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive))

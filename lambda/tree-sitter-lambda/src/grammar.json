@@ -4396,6 +4396,10 @@
           },
           {
             "type": "SYMBOL",
+            "name": "path_expr"
+          },
+          {
+            "type": "SYMBOL",
             "name": "member_expr"
           },
           {
@@ -4587,6 +4591,81 @@
           "value": "]"
         }
       ]
+    },
+    "path_root": {
+      "type": "STRING",
+      "value": "/"
+    },
+    "path_self": {
+      "type": "STRING",
+      "value": "."
+    },
+    "path_parent": {
+      "type": "STRING",
+      "value": ".."
+    },
+    "path_expr": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "path_root"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "path_self"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "path_parent"
+              }
+            ]
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "field",
+                "content": {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "SYMBOL",
+                      "name": "identifier"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "symbol"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "index"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "path_wildcard"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "path_wildcard_recursive"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
     },
     "member_expr": {
       "type": "SEQ",
