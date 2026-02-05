@@ -46,3 +46,20 @@ true
 true
 "Path iteration - collect types"
 path
+"Relative path with cwd scheme"
+.test.input.dir
+"exists() on relative path"
+true
+"len() on relative directory"
+3
+"Relative path iteration with single wildcard (*) - list paths"
+.test.input.dir.'test.txt'
+.test.input.dir.child_dir
+.test.input.dir.readme_link
+"Relative path iteration with recursive wildcard (**) - list paths"
+.test.input.dir.'test.txt'
+.test.input.dir.child_dir
+.test.input.dir.child_dir.'child.txt'
+.test.input.dir.readme_link
+"Wildcard finds nested items"
+true

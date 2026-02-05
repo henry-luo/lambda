@@ -633,6 +633,7 @@ static int get_path_scheme_from_name(StrView name) {
     if (strview_equal(&name, "http")) return PATH_SCHEME_HTTP;
     if (strview_equal(&name, "https")) return PATH_SCHEME_HTTPS;
     if (strview_equal(&name, "sys")) return PATH_SCHEME_SYS;
+    if (strview_equal(&name, "cwd")) return PATH_SCHEME_REL;  // relative to current working directory
     return -1;  // not a path scheme
 }
 

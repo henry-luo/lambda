@@ -204,10 +204,22 @@ void path_to_string(Path* path, void* out_ptr) {
         p = p->parent;
     }
 
+    // Check if root scheme is relative ("." or "..")
+    bool is_rel_scheme = false;
+    if (count > 0) {
+        const char* root_name = segments[count - 1]->name;
+        is_rel_scheme = root_name && (strcmp(root_name, ".") == 0 || strcmp(root_name, "..") == 0);
+    }
+
     // Output in forward order (root first)
     for (int i = count - 1; i >= 0; i--) {
+        // Add separator dot, but for relative schemes, the scheme itself ends with dot
+        // so we skip separator after the scheme root
         if (i < count - 1) {
-            strbuf_append_char(out, '.');
+            if (!(is_rel_scheme && i == count - 2)) {
+                // not immediately after relative scheme root
+                strbuf_append_char(out, '.');
+            }
         }
 
         Path* seg_path = segments[i];
@@ -229,6 +241,15 @@ void path_to_string(Path* path, void* out_ptr) {
 
         // Normal segment - check if needs quoting
         const char* seg = seg_path->name ? seg_path->name : "";
+        
+        // Special case: relative scheme roots ("." or "..") only need quoting when they're
+        // the entire path (count == 1), otherwise print without quotes as prefix
+        if (is_rel_scheme && i == count - 1 && count > 1) {
+            // relative scheme with segments following - print without quotes
+            strbuf_append_str(out, seg);
+            continue;
+        }
+        
         bool needs_quote = false;
         for (const char* c = seg; *c; c++) {
             if (*c == '.' || *c == ' ' || *c == '@' || *c == '#' ||
