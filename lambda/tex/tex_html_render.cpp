@@ -286,6 +286,60 @@ static const char* font_to_class(const char* font_name) {
     return "mathit";  // default to italic
 }
 
+// Check if a node is a digit character (0-9)
+// Returns the codepoint if it's a digit, 0 otherwise
+static int32_t get_digit_codepoint(TexNode* node) {
+    if (!node) return 0;
+
+    int32_t codepoint = 0;
+    const char* font_name = nullptr;
+
+    if (node->node_class == NodeClass::Char) {
+        codepoint = node->content.ch.codepoint;
+        font_name = node->content.ch.font.name;
+    } else if (node->node_class == NodeClass::MathChar) {
+        codepoint = node->content.math_char.codepoint;
+        font_name = node->content.math_char.font.name;
+    } else {
+        return 0;
+    }
+
+    // Convert font-specific encoding to Unicode if needed
+    if (font_name) {
+        if (strncmp(font_name, "cmr", 3) == 0 ||
+            strncmp(font_name, "cmbx", 4) == 0) {
+            // cmr10/cmbx digits are at positions 48-57 (same as ASCII)
+            if (codepoint >= 48 && codepoint <= 57) {
+                return codepoint;  // already ASCII/Unicode digit
+            }
+        }
+    }
+
+    // Check if it's a Unicode digit (0-9)
+    if (codepoint >= '0' && codepoint <= '9') {
+        return codepoint;
+    }
+
+    return 0;
+}
+
+// Get the CSS class for a digit character node
+static const char* get_digit_class(TexNode* node, const HtmlRenderOptions& opts) {
+    const char* font_name = nullptr;
+
+    if (node->node_class == NodeClass::Char) {
+        font_name = node->content.ch.font.name;
+    } else if (node->node_class == NodeClass::MathChar) {
+        font_name = node->content.math_char.font.name;
+    }
+
+    if (font_name) {
+        return font_to_class(font_name);
+    }
+
+    return "cmr";  // digits use roman font by default
+}
+
 // Map cmsy10 (Computer Modern Symbol) character codes to Unicode for HTML output
 // cmsy10 contains mathematical symbols: operators, relations, arrows, etc.
 static int32_t cmsy10_to_unicode(int32_t code) {
@@ -770,7 +824,17 @@ static void render_kern(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 
     if (node->width == 0.0f) return;
 
-    float em = pt_to_em(node->width, opts.base_font_size_px);
+    float em;
+    if (node->flags & TexNode::FLAG_MATHSPACING) {
+        // Inter-atom spacing: use MathLive-compatible scale
+        // MathLive uses mu/18 directly as em, while TeX uses mu*quad/18 as pt
+        // Scale factor: MathLive treats 1em = 18mu, TeX uses quad = 18mu where quad ≈ 10pt
+        // For 16px base font, we need to convert from TeX pt to MathLive em
+        // The ratio is approximately 16/10 = 1.6 to match MathLive spacing
+        em = pt_to_em(node->width, opts.base_font_size_px) * 1.65f;
+    } else {
+        em = pt_to_em(node->width, opts.base_font_size_px);
+    }
 
     // use a span with inline-block width for spacing (MathLive compatible)
     strbuf_append_str(out, "<span style=\"display:inline-block;width:");
@@ -873,30 +937,50 @@ static void render_rule(TexNode* node, StrBuf* out, const HtmlRenderOptions& opt
 static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& opts, int depth) {
     if (!node) return;
 
-    // At root level (depth=0, inside ML__base), we usually don't add extra wrapper.
-    // However, if the hlist contains complex structures (mtable, delimiter with mtable),
-    // we need the wrapper for proper layout like MathLive.
-    bool needs_wrapper = (depth > 0);
+    // Determine if this hlist needs a wrapper span.
+    // We wrap hlists that contain complex structures (mtable, vlist, fraction, etc.)
+    // but NOT simple hlists that only contain chars/glue/kern (like numbers "123").
+    // This matches MathLive's behavior where <span class="ML__cmr">123</span> is not
+    // wrapped in an extra <span style="display:inline-block">.
     bool has_color = (node->color != nullptr);
+    bool has_complex_structure = false;
 
-    if (!needs_wrapper && !has_color) {
-        // Check if this hlist contains complex structures that need wrapping
-        // Complex structures: mtable (for bmatrix/pmatrix/etc), or delimiter + mtable combo
+    // Check if this hlist contains complex structures that need wrapping
+    for (TexNode* child = node->first_child; child; child = child->next_sibling) {
+        NodeClass nc = child->node_class;
+        // Complex structures: anything that's not a simple character, kern, glue, or inner hlist
+        if (nc == NodeClass::VList ||
+            nc == NodeClass::Fraction ||
+            nc == NodeClass::Radical ||
+            nc == NodeClass::Scripts ||
+            nc == NodeClass::Delimiter ||
+            nc == NodeClass::MTable ||
+            nc == NodeClass::Accent ||
+            nc == NodeClass::Rule) {
+            has_complex_structure = true;
+            break;
+        }
+    }
+
+    // Wrap if we have color or complex structures
+    // At depth 0 (root), we might still wrap for delimiter+mtable combos
+    bool needs_wrapper = has_color || (has_complex_structure && depth > 0);
+
+    // Special case: at depth 0, wrap if we have both delimiters and mtable
+    if (depth == 0 && !needs_wrapper) {
         bool has_mtable = false;
         bool has_delimiter = false;
         for (TexNode* child = node->first_child; child; child = child->next_sibling) {
             if (child->node_class == NodeClass::MTable) has_mtable = true;
             if (child->node_class == NodeClass::Char) {
-                // Check for delimiter characters (brackets, parens, etc)
                 int32_t cp = child->content.ch.codepoint;
                 if (cp == '(' || cp == ')' || cp == '[' || cp == ']' ||
                     cp == '{' || cp == '}' || cp == '|' ||
-                    cp == 0 || cp == 1 || cp == 2 || cp == 3) {  // cmex10 delimiters
+                    cp == 0 || cp == 1 || cp == 2 || cp == 3) {
                     has_delimiter = true;
                 }
             }
         }
-        // Wrap if we have both delimiter(s) and mtable - that's a delimited matrix
         if (has_mtable && has_delimiter) {
             needs_wrapper = true;
         }
@@ -915,11 +999,46 @@ static void render_hlist(TexNode* node, StrBuf* out, const HtmlRenderOptions& op
         strbuf_append_str(out, ">");
     }
 
-    // render children
+    // render children, merging consecutive digits into single spans
+    // MathLive outputs numbers as single spans like <span>123</span>
+    // instead of <span>1</span><span>2</span><span>3</span>
     TexNode* child = node->first_child;
     while (child) {
-        render_node(child, out, opts, depth + 1);
-        child = child->next_sibling;
+        // check if this is a digit that could be part of a number
+        int32_t digit_cp = get_digit_codepoint(child);
+        if (digit_cp) {
+            // start collecting consecutive digits
+            const char* digit_class = get_digit_class(child, opts);
+            char class_buf[64];
+            snprintf(class_buf, sizeof(class_buf), "%s__%s", opts.class_prefix, digit_class);
+
+            strbuf_append_str(out, "<span class=\"");
+            strbuf_append_str(out, class_buf);
+            strbuf_append_str(out, "\">");
+
+            // output first digit
+            append_codepoint(out, digit_cp);
+
+            // consume all consecutive digits with same class
+            child = child->next_sibling;
+            while (child) {
+                int32_t next_digit_cp = get_digit_codepoint(child);
+                if (!next_digit_cp) break;
+
+                // check if same class (same font)
+                const char* next_class = get_digit_class(child, opts);
+                if (strcmp(digit_class, next_class) != 0) break;
+
+                append_codepoint(out, next_digit_cp);
+                child = child->next_sibling;
+            }
+
+            strbuf_append_str(out, "</span>");
+            // child now points to next non-digit or null, continue loop
+        } else {
+            render_node(child, out, opts, depth + 1);
+            child = child->next_sibling;
+        }
     }
 
     if (needs_wrapper || has_color) {
@@ -1174,10 +1293,17 @@ static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
     float sqrt_line_top = -pstrut_size - total_height + 0.1f;
     float content_top = -pstrut_size;
 
-    // MathLive structure: inline-block wrapper containing sqrt-index?, sqrt-sign, vlist-t
-    snprintf(buf, sizeof(buf), "<span style=\"display:inline-block;height:%.2fem\">",
-             total_height + total_depth);
-    strbuf_append_str(out, buf);
+    // MathLive structure differs:
+    // - Simple sqrt (\sqrt{x}): has inline-block wrapper
+    // - Nth-root (\sqrt[n]{x}): no inline-block wrapper
+    bool has_degree = (node->content.radical.degree != nullptr);
+
+    if (!has_degree) {
+        // Simple sqrt - add wrapper like MathLive
+        snprintf(buf, sizeof(buf), "<span style=\"display:inline-block;height:%.2fem\">",
+                 total_height + total_depth);
+        strbuf_append_str(out, buf);
+    }
 
     // index (if present) - for \sqrt[n]{x}
     if (node->content.radical.degree) {
@@ -1259,7 +1385,11 @@ static void render_radical(TexNode* node, StrBuf* out, const HtmlRenderOptions& 
 
     strbuf_append_str(out, "</span>");  // close vlist
     strbuf_append_str(out, "</span></span>");  // close vlist-r, vlist-t
-    strbuf_append_str(out, "</span>");  // close inline-block wrapper
+
+    // close wrapper for simple sqrt (no degree)
+    if (!has_degree) {
+        strbuf_append_str(out, "</span>");
+    }
 }
 
 // render subscript/superscript - MathLive-compatible vlist structure
@@ -1413,7 +1543,7 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
 
     // threshold for using scaled delimiter (in em)
     const float SCALE_THRESHOLD = 1.2f;
-    
+
     // for small delimiters or size 0, use simple character
     if (target_size < SCALE_THRESHOLD) {
         snprintf(buf, sizeof(buf), "<span class=\"%s__%s\">", opts.class_prefix, delim_class);
@@ -1480,11 +1610,11 @@ static void render_delimiter(TexNode* node, StrBuf* out, const HtmlRenderOptions
             float top = -pstrut_size + (stack_count - 1 - i) * char_height + 0.47f;
             snprintf(buf, sizeof(buf), "<span style=\"top:%.2fem\">", top);
             strbuf_append_str(out, buf);
-            
+
             snprintf(buf, sizeof(buf), "<span class=\"%s__pstrut\" style=\"height:%.2fem\"></span>",
                      opts.class_prefix, pstrut_size);
             strbuf_append_str(out, buf);
-            
+
             snprintf(buf, sizeof(buf), "<span style=\"height:%.2fem;display:inline-block\">", char_height);
             strbuf_append_str(out, buf);
             append_codepoint(out, stack_char);
@@ -1909,33 +2039,33 @@ static void add_struts(TexNode* root, StrBuf* out, const HtmlRenderOptions& opts
     // MathLive uses minimum strut heights for consistent baseline
     // Minimum height is approximately 0.7em for typical math content
     const float MIN_STRUT_HEIGHT = 0.7f;
-    const float MIN_STRUT_DEPTH = 0.2f;
+    const float MIN_STRUT_DEPTH = 0.08f;
 
-    // Use at least minimum values
+    // Use at least minimum values like MathLive
     if (height_em < MIN_STRUT_HEIGHT) height_em = MIN_STRUT_HEIGHT;
-    if (depth_em < MIN_STRUT_DEPTH && depth_em > 0.01f) depth_em = MIN_STRUT_DEPTH;
+    if (depth_em < MIN_STRUT_DEPTH) depth_em = MIN_STRUT_DEPTH;
 
     char class_buf[64];
 
-    // top strut
+    // top strut - MathLive style (no display:inline-block)
     snprintf(class_buf, sizeof(class_buf), "%s__strut", opts.class_prefix);
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"display:inline-block;height:");
+    strbuf_append_str(out, "\" style=\"height:");
 
     char buf[64];
-    snprintf(buf, sizeof(buf), "%.2fem", round3(height_em));
+    snprintf(buf, sizeof(buf), "%.2gem", height_em);
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 
-    // bottom strut - use MathLive-compatible class name
+    // bottom strut - MathLive-compatible class name (no display:inline-block)
     snprintf(class_buf, sizeof(class_buf), "%s__strut--bottom", opts.class_prefix);
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\" style=\"display:inline-block;height:");
+    strbuf_append_str(out, "\" style=\"height:");
 
-    snprintf(buf, sizeof(buf), "%.2fem;vertical-align:%.2fem",
-             round3(height_em + depth_em), round3(-depth_em));
+    snprintf(buf, sizeof(buf), "%.2gem;vertical-align:%.2gem",
+             height_em + depth_em, -depth_em);
     strbuf_append_str(out, buf);
     strbuf_append_str(out, "\"></span>");
 }
@@ -1953,13 +2083,7 @@ void render_texnode_to_html(TexNode* node, StrBuf* out, const HtmlRenderOptions&
 
     strbuf_append_str(out, "<span class=\"");
     strbuf_append_str(out, class_buf);
-    strbuf_append_str(out, "\"");
-
-    if (opts.include_styles) {
-        strbuf_append_str(out, " style=\"display:inline-block;white-space:nowrap\"");
-    }
-
-    strbuf_append_str(out, ">");
+    strbuf_append_str(out, "\">");
 
     // add struts for baseline
     add_struts(node, out, opts);

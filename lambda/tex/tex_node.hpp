@@ -200,6 +200,7 @@ struct TexNode {
     static constexpr uint8_t FLAG_EXPLICIT = 0x04;  // Explicit (user-specified)
     static constexpr uint8_t FLAG_DIRTY = 0x08;     // Needs re-layout
     static constexpr uint8_t FLAG_NULLDELIM = 0x10; // Null delimiter (for \bigl. etc)
+    static constexpr uint8_t FLAG_MATHSPACING = 0x20; // Inter-atom math spacing (kern)
 
     // ========================================
     // Dimensions (in CSS pixels, populated during layout)
