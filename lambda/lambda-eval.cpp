@@ -25,6 +25,13 @@ extern __thread EvalContext* context;
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
 
+// External path functions for path ++ operation
+extern "C" Pool* eval_context_get_pool(EvalContext* ctx);
+extern "C" Path* path_extend(Pool* pool, Path* base, const char* segment);
+extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
+extern "C" PathScheme path_get_scheme(Path* path);
+extern "C" bool path_is_absolute(Path* path);
+
 // External typeset function
 
 #define stack_alloc(size) alloca(size);
@@ -167,6 +174,42 @@ Item fn_join(Item left, Item right) {
     // concat two scalars, or join two lists/arrays/maps, or join scalar with list/array, or join two binaries, else error
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
     log_debug("fn_join: %d, %d", left_type, right_type);
+
+    // Handle path concatenation first (path must be on the left)
+    if (left_type == LMD_TYPE_PATH) {
+        Path* left_path = left.path;
+        Pool* pool = eval_context_get_pool(context);
+
+        if (right_type == LMD_TYPE_STRING) {
+            // path ++ string: add string as new segment
+            String* right_str = right.get_string();
+            Path* result = path_extend(pool, left_path, right_str->chars);
+            return {.path = result};
+        }
+        else if (right_type == LMD_TYPE_SYMBOL) {
+            // path ++ symbol: add symbol name as new segment
+            String* right_sym = right.get_symbol();
+            Path* result = path_extend(pool, left_path, right_sym->chars);
+            return {.path = result};
+        }
+        else if (right_type == LMD_TYPE_PATH) {
+            // path ++ path: concat if right is relative, error if absolute
+            Path* right_path = right.path;
+            if (path_is_absolute(right_path)) {
+                set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: cannot concatenate path with absolute path");
+                return ItemError;
+            }
+            // Concatenate relative/parent path to base path
+            Path* result = path_concat(pool, left_path, right_path);
+            return {.path = result};
+        }
+        else {
+            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: path can only be concatenated with string, symbol, or relative path, got %s",
+                type_info[right_type].name);
+            return ItemError;
+        }
+    }
+
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         String *left_str = fn_string(left), *right_str = fn_string(right);
         String *result = fn_strcat(left_str, right_str);
