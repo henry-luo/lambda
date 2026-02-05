@@ -199,6 +199,7 @@ struct TexNode {
     static constexpr uint8_t FLAG_CRAMPED = 0x02;   // Cramped math style
     static constexpr uint8_t FLAG_EXPLICIT = 0x04;  // Explicit (user-specified)
     static constexpr uint8_t FLAG_DIRTY = 0x08;     // Needs re-layout
+    static constexpr uint8_t FLAG_NULLDELIM = 0x10; // Null delimiter (for \bigl. etc)
 
     // ========================================
     // Dimensions (in CSS pixels, populated during layout)
@@ -370,6 +371,8 @@ struct TexNode {
             int num_rows;           // Number of rows
             float arraycolsep;      // Column separation
             float jot;              // Row separation
+            uint32_t hlines;        // Bitmask: bit i set means hline before row i (up to 32 rows)
+            bool trailing_hline;    // True if hline after last row
         } mtable;
 
         // MTableColumn node (column within MTable)
