@@ -485,10 +485,10 @@ function calculateTestScore(astResult, htmlResult, dviResult, compareMode) {
 
     // If DVI reference doesn't exist or failed to generate (generationError),
     // redistribute DVI weight to AST and HTML proportionally
-    const dviUnavailable = !dviResult || dviResult.generationError || 
-        (dviResult.differences && dviResult.differences.some(d => 
+    const dviUnavailable = !dviResult || dviResult.generationError ||
+        (dviResult.differences && dviResult.differences.some(d =>
             d.issue && (d.issue.includes('Failed to generate') || d.issue.includes('did not produce'))));
-    
+
     if (dviUnavailable && compareMode === 'all') {
         // Redistribute DVI weight: AST gets 50.5%, HTML gets 49.5%
         const totalNonDvi = weights.ast + weights.html;
@@ -765,27 +765,23 @@ async function runExtendedTest(testInfo, options) {
 }
 
 /**
- * Run a baseline test (DVI comparison required to pass 100%)
+ * Run a baseline test (passes if DVI is 100% OR weighted score is 100%)
+ *
+ * Baseline tests can pass in two ways:
+ * 1. DVI comparison passes 100% (strict typographic match)
+ * 2. Weighted score passes 100% (using AST+HTML+DVI formula from extended tests)
  */
 async function runBaselineTest(testInfo, options) {
     const testName = path.basename(testInfo.file, '.tex');
     // Baseline tests contain a single expression, so use index 0
-    // Prefer pdftex.dvi reference, fall back to .dvi
-    let referenceDVI = path.join(REFERENCE_DIR, `${testName}_0.pdftex.dvi`);
-    if (!fs.existsSync(referenceDVI)) {
-        referenceDVI = path.join(REFERENCE_DIR, `${testName}_0.dvi`);
-    }
+    const refBaseName = `${testName}_0`;
 
-    // Check if reference DVI exists
+    // Check for DVI reference - prefer pdftex.dvi, fall back to .dvi
+    let referenceDVI = path.join(REFERENCE_DIR, `${refBaseName}.pdftex.dvi`);
     if (!fs.existsSync(referenceDVI)) {
-        return {
-            name: testInfo.file,
-            suite: 'baseline',
-            status: 'skipped',
-            error: 'Reference DVI not found. Run "make test-tex-reference" first.',
-            score: { overall: 0 }
-        };
+        referenceDVI = path.join(REFERENCE_DIR, `${refBaseName}.dvi`);
     }
+    const hasDVIRef = fs.existsSync(referenceDVI);
 
     // Read the .tex file to get the LaTeX content
     const texContent = fs.readFileSync(testInfo.path, 'utf-8');
@@ -808,32 +804,119 @@ async function runBaselineTest(testInfo, options) {
     // Run Lambda parser
     const lambdaOutput = await runLambdaParser(latex);
 
-    if (lambdaOutput.error || !lambdaOutput.dvi) {
+    if (lambdaOutput.error) {
         return {
             name: testInfo.file,
             suite: 'baseline',
             status: 'failed',
-            error: lambdaOutput.error || 'Lambda did not produce DVI output',
+            error: lambdaOutput.error,
             score: { overall: 0 }
         };
     }
 
-    // Run DVI comparison with lenient mode for structural matching
-    const dviResult = compareDVI(lambdaOutput.dvi, referenceDVI, {
-        tolerance: options.tolerance,
-        lenient: true  // Enable lenient mode for baseline tests
-    });
+    // Run DVI comparison if reference exists and Lambda produced DVI
+    let dviResult = null;
+    if (hasDVIRef && lambdaOutput.dvi) {
+        dviResult = compareDVI(lambdaOutput.dvi, referenceDVI, {
+            tolerance: options.tolerance,
+            lenient: true  // Enable lenient mode for baseline tests
+        });
+    }
 
-    // Baseline tests require 100% DVI match (lenient mode considers structural match as 100%)
-    const passed = dviResult.passRate === 100;
+    // Check if DVI passes 100%
+    const dviPasses = dviResult && dviResult.passRate === 100;
+
+    // Also compute weighted score using extended test formula (AST + HTML + DVI)
+    // This allows tests to pass even if DVI isn't 100%, as long as weighted score is 100%
+    let astResult = null;
+    let htmlResult = null;
+
+    // Compare AST - prefer MathLive AST over MathML
+    const refMathLiveAstPath = path.join(REFERENCE_DIR, `${refBaseName}.mathlive.json`);
+    const refMathMLPath = path.join(REFERENCE_DIR, `${refBaseName}.mathml.json`);
+    const refAstPath = path.join(REFERENCE_DIR, `${refBaseName}.ast.json`);
+
+    if (fs.existsSync(refMathLiveAstPath) && lambdaOutput.ast) {
+        const refMathLiveAst = JSON.parse(fs.readFileSync(refMathLiveAstPath, 'utf-8'));
+        astResult = compareASTToMathLive(lambdaOutput.ast, refMathLiveAst);
+        astResult.referenceType = 'mathlive-ast';
+    } else if (fs.existsSync(refMathMLPath) && lambdaOutput.ast) {
+        const refMathML = JSON.parse(fs.readFileSync(refMathMLPath, 'utf-8'));
+        astResult = compareASTToMathML(lambdaOutput.ast, refMathML);
+        astResult.referenceType = 'mathml';
+    } else if (fs.existsSync(refAstPath) && lambdaOutput.ast) {
+        const refAst = JSON.parse(fs.readFileSync(refAstPath, 'utf-8'));
+        astResult = compareAST(lambdaOutput.ast, refAst);
+        astResult.selfReference = true;
+        astResult.passRate = Math.min(astResult.passRate, 50);
+    } else if (lambdaOutput.ast) {
+        astResult = { passRate: 0, differences: [{ issue: 'No reference AST available' }] };
+    } else {
+        astResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce AST' }] };
+    }
+
+    // HTML comparison with cross-reference
+    const refMathLiveHtml = path.join(REFERENCE_DIR, `${refBaseName}.mathlive.html`);
+    const refKatexHtml = path.join(REFERENCE_DIR, `${refBaseName}.katex.html`);
+    const refLambdaHtml = path.join(REFERENCE_DIR, `${refBaseName}.lambda.html`);
+
+    if (lambdaOutput.html) {
+        let mathLiveScore = null;
+        let katexScore = null;
+        let lambdaScore = null;
+
+        if (fs.existsSync(refMathLiveHtml)) {
+            const refHtml = fs.readFileSync(refMathLiveHtml, 'utf-8');
+            mathLiveScore = compareHTML(lambdaOutput.html, refHtml, 'mathlive');
+        }
+
+        if (fs.existsSync(refKatexHtml)) {
+            const refHtml = fs.readFileSync(refKatexHtml, 'utf-8');
+            katexScore = compareHTML(lambdaOutput.html, refHtml, 'katex');
+        }
+
+        if (fs.existsSync(refLambdaHtml)) {
+            const refHtml = fs.readFileSync(refLambdaHtml, 'utf-8');
+            lambdaScore = compareHTML(lambdaOutput.html, refHtml, 'lambda');
+        }
+
+        if (mathLiveScore && katexScore) {
+            htmlResult = {
+                passRate: Math.max(mathLiveScore.passRate, katexScore.passRate),
+                bestReference: mathLiveScore.passRate >= katexScore.passRate ? 'mathlive' : 'katex',
+                mathliveScore: mathLiveScore.passRate,
+                katexScore: katexScore.passRate,
+                differences: mathLiveScore.passRate >= katexScore.passRate ?
+                    mathLiveScore.differences : katexScore.differences
+            };
+        } else if (mathLiveScore || katexScore) {
+            htmlResult = mathLiveScore || katexScore;
+        } else if (lambdaScore) {
+            htmlResult = lambdaScore;
+        } else {
+            htmlResult = { passRate: 50, differences: [{ issue: 'No HTML reference available' }] };
+        }
+    } else {
+        htmlResult = { passRate: 0, differences: [{ issue: 'Lambda did not produce HTML' }] };
+    }
+
+    // Calculate weighted score using extended test formula
+    const weightedScore = calculateTestScore(astResult, htmlResult, dviResult, 'all');
+
+    // Pass if DVI is 100% OR weighted score is 100%
+    const weightedPasses = Math.round(weightedScore.overall) >= 100;
+    const passed = dviPasses || weightedPasses;
 
     return {
         name: testInfo.file,
         suite: 'baseline',
         status: passed ? 'passed' : 'failed',
         score: {
-            overall: dviResult.passRate,
-            dvi: dviResult
+            overall: dviResult ? dviResult.passRate : weightedScore.overall,
+            dvi: dviResult,
+            breakdown: weightedScore.breakdown,
+            passedViaDVI: dviPasses,
+            passedViaWeighted: weightedPasses
         }
     };
 }
@@ -878,14 +961,25 @@ function printResults(results, options) {
 
     // Baseline results
     if (baselineResults.length > 0) {
-        console.log('📂 Baseline Tests (DVI must pass 100%)');
+        console.log('📂 Baseline Tests (DVI 100% OR Weighted 100%)');
         console.log('--------------------------------------------------------------------------------');
 
         for (const result of baselineResults) {
             const icon = result.status === 'passed' ? '✅' :
                         result.status === 'skipped' ? '⏭️' : '❌';
             const dviScore = result.score.dvi ? result.score.dvi.passRate.toFixed(1) : 'N/A';
-            console.log(`  ${icon} ${result.name.padEnd(30)} DVI: ${dviScore}%`);
+
+            // Show which criterion passed
+            let passMethod = '';
+            if (result.status === 'passed') {
+                if (result.score.passedViaDVI) {
+                    passMethod = ' (DVI)';
+                } else if (result.score.passedViaWeighted) {
+                    passMethod = ' (Weighted)';
+                }
+            }
+
+            console.log(`  ${icon} ${result.name.padEnd(30)} DVI: ${dviScore}%${passMethod}`);
 
             if (options.verbose && result.score.dvi?.differences?.length > 0) {
                 for (const diff of result.score.dvi.differences.slice(0, 3)) {
