@@ -356,7 +356,8 @@
                 "re2"
             ],
             "defines": [
-                "SIMPLE_SCHEMA_PARSER"
+                "SIMPLE_SCHEMA_PARSER",
+                "PATH_NO_ITERATION"
             ],
             "link": "dynamic"
         }

@@ -26,7 +26,8 @@ void* heap_alloc(int size, TypeId type_id) {
     return data;
 }
 
-void* heap_calloc(size_t size, TypeId type_id) {
+// declared extern "C" to allow calling from C code (path.c)
+extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     void* ptr = heap_alloc(size, type_id);
     memset(ptr, 0, size);
     return ptr;
@@ -34,7 +35,8 @@ void* heap_calloc(size_t size, TypeId type_id) {
 
 // create a content string by copying from source (NOT pooled - arena allocated)
 // use this for user content, text data, or any non-structural strings
-String* heap_strcpy(char* src, int len) {
+// declared extern "C" to allow calling from C code (path.c)
+extern "C" String* heap_strcpy(char* src, int len) {
     String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
     memcpy(str->chars, src, len);  // Safe copy with explicit length
     str->chars[len] = '\0';        // Explicit null termination
