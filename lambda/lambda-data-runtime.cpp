@@ -581,6 +581,21 @@ Item item_attr(Item data, const char* key) {
         Path* path = data.path;
         if (!path) return ItemNull;
         
+        // First, try to resolve the path and access the attribute from resolved content
+        // This is needed for sys.* paths which resolve to Maps
+        if (path->result == 0) {
+            Item resolved = path_resolve_for_iteration(path);
+            if (resolved.item == ItemError.item) return ItemNull;
+        }
+        if (path->result != 0) {
+            Item resolved = {.item = path->result};
+            TypeId resolved_type = get_type_id(resolved);
+            if (resolved_type == LMD_TYPE_MAP || resolved_type == LMD_TYPE_ELEMENT) {
+                // Access attribute from resolved content
+                return item_attr(resolved, key);
+            }
+        }
+        
         // path.name - returns the leaf segment name as a string
         if (strcmp(key, "name") == 0) {
             if (!path->name) return ItemNull;
@@ -635,6 +650,21 @@ Item item_attr(Item data, const char* key) {
 ArrayList* item_keys(Item data) {
     if (!data.item) { return NULL; }
     TypeId type_id = get_type_id(data);
+    
+    // Handle Path: resolve first, then get keys from resolved content
+    if (type_id == LMD_TYPE_PATH) {
+        Path* path = data.path;
+        if (!path) return NULL;
+        // Resolve the path if not already resolved
+        if (path->result == 0) {
+            Item resolved = path_resolve_for_iteration(path);
+            if (resolved.item == ItemError.item) return NULL;
+        }
+        // Get keys from resolved content
+        data = {.item = path->result};
+        type_id = get_type_id(data);
+    }
+    
     switch (type_id) {
     case LMD_TYPE_MAP: {
         Map* map = data.map;

@@ -1347,6 +1347,26 @@ Item fn_index(Item item, Item index_item) {
 
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
+    
+    // For paths (like sys.os), resolve the path content first
+    if (type_id == LMD_TYPE_PATH) {
+        Path* path = item.path;
+        if (path) {
+            // Check if it's a sys path - these should be resolved to their content
+            if (path_get_scheme(path) == PATH_SCHEME_SYS) {
+                if (path->result == 0) {
+                    Item resolved = path_resolve_for_iteration(path);
+                    if (resolved.item == ItemError.item) return ItemNull;
+                }
+                if (path->result != 0) {
+                    // Recurse with resolved content
+                    return fn_member({.item = path->result}, key);
+                }
+            }
+        }
+        return ItemNull;
+    }
+    
     switch (type_id) {
     case LMD_TYPE_NULL:
         return ItemNull;  // null-safe: null.field returns null
