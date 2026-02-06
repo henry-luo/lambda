@@ -560,10 +560,23 @@ int exec_convert(int argc, char* argv[]) {
         return 1;
     }
 
-    // Create type string
+    // Create type string (handle "type:flavor" format)
     String* type_string = NULL;
+    String* flavor_string = NULL;
     if (from_format) {
-        type_string = create_string(temp_pool, from_format);
+        // Check for colon-separated format (e.g., "graph:mermaid")
+        const char* colon = strchr(from_format, ':');
+        if (colon) {
+            // Split into type and flavor
+            size_t type_len = colon - from_format;
+            char* type_buf = (char*)pool_calloc(temp_pool, type_len + 1);
+            strncpy(type_buf, from_format, type_len);
+            type_buf[type_len] = '\0';
+            type_string = create_string(temp_pool, type_buf);
+            flavor_string = create_string(temp_pool, colon + 1);
+        } else {
+            type_string = create_string(temp_pool, from_format);
+        }
     } else {
         type_string = create_string(temp_pool, "auto");
     }
@@ -575,7 +588,7 @@ int exec_convert(int argc, char* argv[]) {
     }
 
         // Parse using Lambda's input system
-        Input* input = input_from_url(url_string, type_string, NULL, NULL);
+        Input* input = input_from_url(url_string, type_string, flavor_string, NULL);
         if (!input) {
             printf("Error: Failed to parse input file\n");
             pool_destroy(temp_pool);

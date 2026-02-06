@@ -23,27 +23,27 @@ SvgGeneratorOptions* create_default_svg_options() {
 }
 
 // Helper: get attribute from graph element or use default
-static const char* get_node_attribute(Element* graph, const char* node_id, 
+static const char* get_node_attribute(Element* graph, const char* node_id,
                                      const char* attr_name, const char* default_value) {
     if (!graph) return default_value;
-    
+
     ElementReader graph_reader(graph);
     ElementReader::ChildIterator children = graph_reader.children();
     ItemReader child_item;
-    
+
     while (children.next(&child_item)) {
         if (!child_item.isElement()) continue;
-        
+
         ElementReader child_reader = child_item.asElement();
         const char* tag = child_reader.tagName();
         if (!tag || strcmp(tag, "node") != 0) continue;
-        
+
         ItemReader id_reader = child_reader.get_attr("id");
         if (!id_reader.isString()) continue;
-        
+
         const char* this_id = id_reader.cstring();
         if (strcmp(this_id, node_id) != 0) continue;
-        
+
         // found the node, get attribute
         ItemReader attr_reader = child_reader.get_attr(attr_name);
         if (attr_reader.isString()) {
@@ -51,13 +51,13 @@ static const char* get_node_attribute(Element* graph, const char* node_id,
         }
         break;
     }
-    
+
     return default_value;
 }
 
 // Helper: render node shape - returns Item (Element)
-static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* pos, 
-                              const char* shape, const char* fill, 
+static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* pos,
+                              const char* shape, const char* fill,
                               const char* stroke, float stroke_width) {
     float x = pos->x - pos->width / 2.0f;
     float y = pos->y - pos->height / 2.0f;
@@ -65,7 +65,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
     float cy = pos->y;
     float w = pos->width;
     float h = pos->height;
-    
+
     if (strcmp(shape, "circle") == 0) {
         float r = fminf(w, h) / 2.0f;
         return builder.element("circle")
@@ -94,7 +94,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          x + w, cy,       // right
                          cx, y + h,       // bottom
                          x, cy);          // left
-        
+
         Item result = builder.element("polygon")
             .attr("points", sb->str->chars)
             .attr("fill", fill)
@@ -114,7 +114,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
             if (i > 0) stringbuf_append_str(sb, " ");
             stringbuf_append_format(sb, "%.1f,%.1f", px, py);
         }
-        
+
         Item result = builder.element("polygon")
             .attr("points", sb->str->chars)
             .attr("fill", fill)
@@ -130,7 +130,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          cx, y,           // top
                          x + w, y + h,    // bottom-right
                          x, y + h);       // bottom-left
-        
+
         Item result = builder.element("polygon")
             .attr("points", sb->str->chars)
             .attr("fill", fill)
@@ -139,8 +139,201 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
             .final();
         stringbuf_free(sb);
         return result;
+    } else if (strcmp(shape, "stadium") == 0 || strcmp(shape, "rounded") == 0) {
+        // stadium/pill shape: rectangle with fully rounded ends (half-circles)
+        float r = h / 2.0f;  // radius is half the height
+        return builder.element("rect")
+            .attr("x", (double)x)
+            .attr("y", (double)y)
+            .attr("width", (double)w)
+            .attr("height", (double)h)
+            .attr("rx", (double)r)  // fully rounded ends
+            .attr("ry", (double)r)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+    } else if (strcmp(shape, "cylinder") == 0) {
+        // cylinder: 3D-ish database shape with ellipse on top/bottom
+        // Draw as a group with rect body and two ellipses
+        float ellipse_ry = h * 0.15f;  // ellipse height is 15% of total height
+        float body_y = y + ellipse_ry;
+        float body_h = h - 2 * ellipse_ry;
+
+        // Build SVG path for cylinder (body + top ellipse)
+        // Using path for the body (rounded rectangle with ellipse caps)
+        StringBuf* sb = stringbuf_new(pool);
+        stringbuf_append_format(sb,
+            "M %.1f,%.1f "
+            "L %.1f,%.1f "
+            "A %.1f,%.1f 0 0,0 %.1f,%.1f "
+            "L %.1f,%.1f "
+            "A %.1f,%.1f 0 0,0 %.1f,%.1f "
+            "Z",
+            x, body_y,                              // start left side
+            x, body_y + body_h,                     // down to bottom
+            w / 2.0f, ellipse_ry, x + w, body_y + body_h,  // bottom ellipse arc
+            x + w, body_y,                          // up right side
+            w / 2.0f, ellipse_ry, x, body_y);       // top ellipse arc (back)
+
+        Item body = builder.element("path")
+            .attr("d", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+
+        // Top ellipse (visible lid)
+        Item top_ellipse = builder.element("ellipse")
+            .attr("cx", (double)cx)
+            .attr("cy", (double)body_y)
+            .attr("rx", (double)(w / 2.0f))
+            .attr("ry", (double)ellipse_ry)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+
+        return builder.element("g")
+            .child(body)
+            .child(top_ellipse)
+            .final();
+    } else if (strcmp(shape, "subroutine") == 0) {
+        // subroutine: rectangle with double vertical lines on sides
+        float inset = w * 0.1f;  // 10% inset for double lines
+
+        // Main rectangle
+        Item rect_main = builder.element("rect")
+            .attr("x", (double)x)
+            .attr("y", (double)y)
+            .attr("width", (double)w)
+            .attr("height", (double)h)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+
+        // Left vertical line
+        Item line_left = builder.element("line")
+            .attr("x1", (double)(x + inset))
+            .attr("y1", (double)y)
+            .attr("x2", (double)(x + inset))
+            .attr("y2", (double)(y + h))
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+
+        // Right vertical line
+        Item line_right = builder.element("line")
+            .attr("x1", (double)(x + w - inset))
+            .attr("y1", (double)y)
+            .attr("x2", (double)(x + w - inset))
+            .attr("y2", (double)(y + h))
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+
+        return builder.element("g")
+            .child(rect_main)
+            .child(line_left)
+            .child(line_right)
+            .final();
+    } else if (strcmp(shape, "doublecircle") == 0) {
+        // double circle: two concentric circles
+        float r = fminf(w, h) / 2.0f;
+        float inner_r = r * 0.8f;  // inner circle is 80% of outer
+
+        Item outer = builder.element("circle")
+            .attr("cx", (double)cx)
+            .attr("cy", (double)cy)
+            .attr("r", (double)r)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+
+        Item inner = builder.element("circle")
+            .attr("cx", (double)cx)
+            .attr("cy", (double)cy)
+            .attr("r", (double)inner_r)
+            .attr("fill", "none")
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+
+        return builder.element("g")
+            .child(outer)
+            .child(inner)
+            .final();
+    } else if (strcmp(shape, "trapezoid") == 0) {
+        // trapezoid: wider at bottom, narrower at top  [/text\]
+        float inset = w * 0.15f;  // 15% inset on each side at top
+        StringBuf* sb = stringbuf_new(pool);
+        stringbuf_append_format(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f",
+                         x + inset, y,         // top-left (inset)
+                         x + w - inset, y,     // top-right (inset)
+                         x + w, y + h,         // bottom-right
+                         x, y + h);            // bottom-left
+
+        Item result = builder.element("polygon")
+            .attr("points", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+        return result;
+    } else if (strcmp(shape, "trapezoid-alt") == 0 || strcmp(shape, "inv_trapezoid") == 0) {
+        // inverted trapezoid: wider at top, narrower at bottom  [\text/]
+        float inset = w * 0.15f;  // 15% inset on each side at bottom
+        StringBuf* sb = stringbuf_new(pool);
+        stringbuf_append_format(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f",
+                         x, y,                     // top-left
+                         x + w, y,                 // top-right
+                         x + w - inset, y + h,     // bottom-right (inset)
+                         x + inset, y + h);        // bottom-left (inset)
+
+        Item result = builder.element("polygon")
+            .attr("points", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+        return result;
+    } else if (strcmp(shape, "asymmetric") == 0) {
+        // asymmetric: flag-like shape with pointed right side  >text]
+        float point_offset = w * 0.15f;
+        StringBuf* sb = stringbuf_new(pool);
+        stringbuf_append_format(sb, "%.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f",
+                         x, y,                         // top-left
+                         x + w, y,                     // top-right
+                         x + w, y + h,                 // bottom-right
+                         x, y + h,                     // bottom-left
+                         x + point_offset, cy);        // left point
+
+        Item result = builder.element("polygon")
+            .attr("points", sb->str->chars)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
+        stringbuf_free(sb);
+        return result;
+    } else if (strcmp(shape, "box") == 0) {
+        // box: simple rectangle with no rounded corners
+        return builder.element("rect")
+            .attr("x", (double)x)
+            .attr("y", (double)y)
+            .attr("width", (double)w)
+            .attr("height", (double)h)
+            .attr("fill", fill)
+            .attr("stroke", stroke)
+            .attr("stroke-width", (double)stroke_width)
+            .final();
     } else {
-        // default: rectangle (box)
+        // default: rectangle with rounded corners
         return builder.element("rect")
             .attr("x", (double)x)
             .attr("y", (double)y)
@@ -162,23 +355,23 @@ static Item render_arrowhead(MarkBuilder& builder, float x, float y, float angle
     // We create a triangle pointing in the direction of the edge
     float cos_a = cosf(angle);
     float sin_a = sinf(angle);
-    
+
     // Arrow base is behind the tip
     float base_x = x - size * cos_a;
     float base_y = y - size * sin_a;
-    
+
     // Arrow wings perpendicular to direction
     float wing_size = size * 0.5f;
     float wing1_x = base_x - wing_size * sin_a;
     float wing1_y = base_y + wing_size * cos_a;
     float wing2_x = base_x + wing_size * sin_a;
     float wing2_y = base_y - wing_size * cos_a;
-    
+
     // Format points string using stack buffer
     char points_buf[128];
     snprintf(points_buf, sizeof(points_buf), "%.1f,%.1f %.1f,%.1f %.1f,%.1f",
              x, y, wing1_x, wing1_y, wing2_x, wing2_y);
-    
+
     return builder.element("polygon")
         .attr("points", points_buf)
         .attr("fill", fill)
@@ -187,19 +380,26 @@ static Item render_arrowhead(MarkBuilder& builder, float x, float y, float angle
         .final();
 }
 
-// Helper: render edge path
-static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path, 
+// Helper: render edge path with style support
+static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
                              const char* stroke, float stroke_width) {
     if (!path->points || path->points->length < 2) {
         return ItemNull;
     }
-    
+
+    // determine stroke width based on edge style
+    float actual_stroke_width = stroke_width;
+    const char* edge_style = path->edge_style ? path->edge_style : "solid";
+    if (strcmp(edge_style, "thick") == 0) {
+        actual_stroke_width = stroke_width * 2.0f;  // thick edges are 2x width
+    }
+
     // build path data string
     StringBuf* sb = stringbuf_new(pool);
-    
+
     Point2D* first = (Point2D*)path->points->data[0];
     stringbuf_append_format(sb, "M %.1f,%.1f", first->x, first->y);
-    
+
     if (path->is_bezier && path->points->length >= 4) {
         // use cubic bezier curves
         for (int i = 1; i + 2 < path->points->length; i += 3) {
@@ -216,35 +416,58 @@ static Item render_edge_path(MarkBuilder& builder, Pool* pool, EdgePath* path,
             stringbuf_append_format(sb, " L %.1f,%.1f", pt->x, pt->y);
         }
     }
-    
+
     ElementBuilder path_builder = builder.element("path");
     path_builder.attr("d", sb->str->chars);
     path_builder.attr("stroke", stroke);
-    path_builder.attr("stroke-width", (double)stroke_width);
+    path_builder.attr("stroke-width", (double)actual_stroke_width);
     path_builder.attr("fill", "none");
-    
+
+    // apply dash pattern for dotted edges
+    if (strcmp(edge_style, "dotted") == 0) {
+        path_builder.attr("stroke-dasharray", "5,5");
+    }
+
     Item path_item = path_builder.final();
     stringbuf_free(sb);
-    
-    // If directed, add arrowhead as separate polygon (ThorVG doesn't support markers)
-    if (path->directed && path->points->length >= 2) {
-        // Get last two points to calculate arrow direction
-        Point2D* prev = (Point2D*)path->points->data[path->points->length - 2];
-        Point2D* last = (Point2D*)path->points->data[path->points->length - 1];
-        
-        float dx = last->x - prev->x;
-        float dy = last->y - prev->y;
-        float angle = atan2f(dy, dx);
-        
-        Item arrow_item = render_arrowhead(builder, last->x, last->y, angle, stroke, 10.0f);
-        
-        // Return group containing path and arrowhead
-        return builder.element("g")
-            .child(path_item)
-            .child(arrow_item)
-            .final();
+
+    // check if we need arrows at either end
+    bool need_arrow_end = path->directed || path->arrow_end;
+    bool need_arrow_start = path->arrow_start;
+
+    if ((need_arrow_end || need_arrow_start) && path->points->length >= 2) {
+        ElementBuilder group_builder = builder.element("g");
+        group_builder.child(path_item);
+
+        // arrow at end
+        if (need_arrow_end) {
+            Point2D* prev = (Point2D*)path->points->data[path->points->length - 2];
+            Point2D* last = (Point2D*)path->points->data[path->points->length - 1];
+
+            float dx = last->x - prev->x;
+            float dy = last->y - prev->y;
+            float angle = atan2f(dy, dx);
+
+            Item arrow_end = render_arrowhead(builder, last->x, last->y, angle, stroke, 10.0f);
+            group_builder.child(arrow_end);
+        }
+
+        // arrow at start (for bidirectional edges)
+        if (need_arrow_start) {
+            Point2D* first_pt = (Point2D*)path->points->data[0];
+            Point2D* second = (Point2D*)path->points->data[1];
+
+            float dx = first_pt->x - second->x;
+            float dy = first_pt->y - second->y;
+            float angle = atan2f(dy, dx);
+
+            Item arrow_start = render_arrowhead(builder, first_pt->x, first_pt->y, angle, stroke, 10.0f);
+            group_builder.child(arrow_start);
+        }
+
+        return group_builder.final();
     }
-    
+
     return path_item;
 }
 
@@ -255,7 +478,7 @@ static Item create_arrow_marker(MarkBuilder& builder, const char* stroke) {
         .attr("points", "0,0 10,3 0,6")
         .attr("fill", stroke)
         .final();
-    
+
     return builder.element("marker")
         .attr("id", "arrowhead")
         .attr("markerWidth", 10.0)
@@ -268,61 +491,61 @@ static Item create_arrow_marker(MarkBuilder& builder, const char* stroke) {
 }
 
 // Main SVG generation
-Item graph_to_svg_with_options(Element* graph, GraphLayout* layout, 
+Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
                                SvgGeneratorOptions* opts, Input* input) {
     if (!graph || !layout) {
         log_error("graph_to_svg: null graph or layout");
         return ItemNull;
     }
-    
+
     log_info("generating SVG from graph layout");
-    
+
     MarkBuilder builder(input);
     Pool* pool = builder.pool();
-    
+
     // create root SVG element
     float svg_width = layout->graph_width + 2 * opts->canvas_padding;
     float svg_height = layout->graph_height + 2 * opts->canvas_padding;
-    
+
     // create defs section for markers
     Item arrow_marker = create_arrow_marker(builder, opts->default_stroke);
     Item defs = builder.element("defs")
         .child(arrow_marker)
         .final();
-    
+
     // render edges first (so they appear behind nodes)
     ElementBuilder edges_group_builder = builder.element("g");
     edges_group_builder.attr("class", "edges");
-    
+
     for (int i = 0; i < layout->edge_paths->length; i++) {
         EdgePath* edge_path = (EdgePath*)layout->edge_paths->data[i];
-        Item path_item = render_edge_path(builder, pool, edge_path, 
-                                          opts->default_stroke, 
+        Item path_item = render_edge_path(builder, pool, edge_path,
+                                          opts->default_stroke,
                                           opts->default_stroke_width);
         if (path_item.item != 0) {
             edges_group_builder.child(path_item);
         }
     }
     Item edges_group = edges_group_builder.final();
-    
+
     // render nodes
     ElementBuilder nodes_group_builder = builder.element("g");
     nodes_group_builder.attr("class", "nodes");
-    
+
     for (int i = 0; i < layout->node_positions->length; i++) {
         NodePosition* pos = (NodePosition*)layout->node_positions->data[i];
         const char* node_id = pos->node_id;
-        
+
         // get node attributes from original graph
         const char* shape = get_node_attribute(graph, node_id, "shape", "box");
         const char* label = get_node_attribute(graph, node_id, "label", node_id);
         const char* fill = get_node_attribute(graph, node_id, "fill", opts->default_fill);
-        
+
         // render shape
-        Item shape_item = render_node_shape(builder, pool, pos, shape, fill, 
-                                           opts->default_stroke, 
+        Item shape_item = render_node_shape(builder, pool, pos, shape, fill,
+                                           opts->default_stroke,
                                            opts->default_stroke_width);
-        
+
         // render label with manual centering
         // ThorVG doesn't support text-anchor/dominant-baseline, so we calculate offsets manually
         // Estimate text width: average character width is approximately 0.5-0.6 of font size
@@ -332,7 +555,7 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
         float text_x = pos->x - text_width / 2.0f;
         // Offset y by approximately 0.35 * font_size to center vertically (baseline adjustment)
         float text_y = pos->y + opts->font_size * 0.35f;
-        
+
         Item text_item = builder.element("text")
             .attr("x", (double)text_x)
             .attr("y", (double)text_y)
@@ -341,7 +564,7 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
             .attr("fill", "black")
             .text(label)
             .final();
-        
+
         // create node group
         Item node_group = builder.element("g")
             .attr("class", "node")
@@ -349,23 +572,23 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
             .child(shape_item)
             .child(text_item)
             .final();
-        
+
         nodes_group_builder.child(node_group);
     }
     Item nodes_group = nodes_group_builder.final();
-    
+
     // create main group with padding offset
     StringBuf* transform_sb = stringbuf_new(pool);
-    stringbuf_append_format(transform_sb, "translate(%.1f, %.1f)", 
+    stringbuf_append_format(transform_sb, "translate(%.1f, %.1f)",
                      opts->canvas_padding, opts->canvas_padding);
-    
+
     Item main_group = builder.element("g")
         .attr("transform", transform_sb->str->chars)
         .child(edges_group)
         .child(nodes_group)
         .final();
     stringbuf_free(transform_sb);
-    
+
     // create root SVG element with all children
     Item svg = builder.element("svg")
         .attr("width", (double)svg_width)
@@ -374,9 +597,9 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
         .child(defs)
         .child(main_group)
         .final();
-    
+
     log_info("SVG generation complete: %.1f x %.1f", svg_width, svg_height);
-    
+
     return svg;
 }
 
