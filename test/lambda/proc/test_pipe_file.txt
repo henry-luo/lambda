@@ -1,21 +1,29 @@
-Test 1 - write map: true
-Test 2 - append map: true
+Test 1 - write map bytes: 58
+Test 2 - append map bytes: 39
 Pipe file content:
 { name: "Lambda", version: 1, features: ["pipe", "file"]}
 { timestamp: t'2026-02-06', count: 42}
+Test 3 - text bytes: 13
 Text file content:
 Hello, world!
 Symbol target content:
 { test: "symbol target"}
 Scalar file content:
 42
-Test 6 - output4 write: true
-Output4 write content:
+Test 6 - output with empty opts bytes: 26
+Output opts write content:
 { mode: "write", test: 6}
-Test 7 - output4 append: true
-Output4 after append:
+Test 7 - output append bytes: 27
+Output after append:
 { mode: "write", test: 6}
 { mode: "append", test: 7}
-Output4 after overwrite:
-{ mode: "overwrite", test: 8}
+Test 8 - output json bytes: 34
+Output json content:
+{
+  "name":"test",
+  "value":123
+}
+Test 9 - atomic write bytes: 25
+Atomic write content:
+{ atomic: true, test: 9}
 done
