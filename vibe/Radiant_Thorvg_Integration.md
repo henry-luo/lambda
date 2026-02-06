@@ -1,8 +1,8 @@
 # ThorVG Integration Upgrade Proposal
 
-**Author:** Copilot  
-**Date:** January 2026  
-**Status:** Implementation Complete  
+**Author:** Copilot
+**Date:** January 2026
+**Status:** Implementation Complete
 
 ---
 
@@ -86,8 +86,8 @@ Tvg_Result tvg_text_spacing(Tvg_Paint text, float letter, float line)
 
 ### 3.1 Version Upgrade: v1.0-pre11 → v1.0-pre34
 
-**Release Tag:** `v1.0-pre34`  
-**Commit:** `54a98e42813a84d3ac2314b818725f9eea8b1658`  
+**Release Tag:** `v1.0-pre34`
+**Commit:** `54a98e42813a84d3ac2314b818725f9eea8b1658`
 **Release URL:** https://github.com/thorvg/thorvg/releases/tag/v1.0-pre34
 
 ### 3.2 Build System Updates
@@ -130,14 +130,14 @@ meson setup builddir \
 # Function to build ThorVG v1.0-pre34 for Mac
 build_thorvg_v1_0_pre34_for_mac() {
     echo "Building ThorVG v1.0-pre34 for Mac..."
-    
+
     # ... existing clone/checkout logic ...
-    
+
     git checkout v1.0-pre34 || {
         echo "❌ Failed to checkout ThorVG v1.0-pre34"
         return 1
     }
-    
+
     meson setup build-mac \
         --buildtype=release \
         --default-library=both \
@@ -159,14 +159,14 @@ build_thorvg_v1_0_pre34_for_mac() {
 # Function to build ThorVG v1.0-pre34 for Linux
 build_thorvg_v1_0_pre34_for_linux() {
     echo "Building ThorVG v1.0-pre34 for Linux..."
-    
+
     # ... existing clone/checkout logic ...
-    
+
     git checkout v1.0-pre34 || {
         echo "❌ Failed to checkout ThorVG v1.0-pre34"
         return 1
     }
-    
+
     meson setup build-linux \
         --buildtype=release \
         --default-library=both \
@@ -187,10 +187,10 @@ build_thorvg_v1_0_pre34_for_linux() {
 ```bash
 build_thorvg() {
     echo "Building ThorVG v1.0-pre34 for Windows native..."
-    
+
     # Clone with new version
     git clone --depth 1 --branch v1.0-pre34 https://github.com/thorvg/thorvg.git
-    
+
     meson setup builddir \
         --prefix="$SCRIPT_DIR/$DEPS_DIR" \
         --buildtype=release \
@@ -245,36 +245,36 @@ static Tvg_Paint* render_svg_text(SvgRenderContext* ctx, Element* elem) {
     // 1. Parse text content
     const char* text_content = get_text_content(elem);
     if (!text_content || !*text_content) return nullptr;
-    
+
     // 2. Parse attributes
     float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
     float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
     float font_size = parse_svg_length(get_svg_attr(elem, "font-size"), 16);
     const char* font_family = get_svg_attr(elem, "font-family");
-    
+
     // 3. Create ThorVG Text object
     Tvg_Paint* text = tvg_text_new();
-    
+
     // 4. Load font via ThorVG's TTF loader
     // Font path resolved via Radiant's font lookup system
     char* font_path = resolve_font_path(font_family, font_weight, font_style);
     if (font_path) {
         tvg_text_set_font(text, font_path, font_size);
     }
-    
+
     // 5. Set text content
     tvg_text_set_text(text, text_content);
-    
+
     // 6. Apply fill/stroke
     apply_svg_fill_stroke(ctx, text, elem);
-    
+
     // 7. Position text
     tvg_paint_translate(text, x, y);
-    
+
     // 8. Apply letter/line spacing (new in v1.0-pre34)
     float letter_spacing = parse_svg_length(get_svg_attr(elem, "letter-spacing"), 0);
     tvg_text_spacing(text, letter_spacing, 0);
-    
+
     return text;
 }
 ```
@@ -327,33 +327,11 @@ tvg_picture_load(pic, file_path);  // Uses ThorVG's internal loaders
 
 Remove ThorVG's image loaders and route all image loading through Radiant:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Image Loading Flow                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  Image Request (URL/path)                                        │
-│         │                                                        │
-│         ▼                                                        │
-│  ┌─────────────────┐                                            │
-│  │ Radiant's       │  load_image() in surface.cpp               │
-│  │ Image Loader    │  - URL resolution                          │
-│  │ (lib/image.h)   │  - Format detection                        │
-│  └────────┬────────┘  - Caching                                 │
-│           │                                                      │
-│           ▼                                                      │
-│  ┌─────────────────┐                                            │
-│  │ ImageSurface    │  - pixels: RGBA data                       │
-│  │ (view.hpp)      │  - width, height, pitch                    │
-│  └────────┬────────┘                                            │
-│           │                                                      │
-│           ▼                                                      │
-│  ┌─────────────────┐                                            │
-│  │ ThorVG Picture  │  tvg_picture_load_raw()                    │
-│  │ (raw pixel load)│  - No file I/O                             │
-│  └─────────────────┘  - Consistent color handling               │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["Image Request<br>(URL/path)"] --> B["Radiant's Image Loader<br><i>load_image() in surface.cpp</i><br>• URL resolution<br>• Format detection<br>• Caching"]
+    B --> C["ImageSurface<br><i>view.hpp</i><br>• pixels: RGBA data<br>• width, height, pitch"]
+    C --> D["ThorVG Picture<br><i>tvg_picture_load_raw()</i><br>• No file I/O<br>• Consistent color handling"]
 ```
 
 ### 5.3 Implementation
@@ -364,9 +342,9 @@ Remove ThorVG's image loaders and route all image loading through Radiant:
 // radiant/surface.cpp
 Tvg_Paint* create_tvg_picture_from_surface(ImageSurface* surface) {
     if (!surface || !surface->pixels) return nullptr;
-    
+
     Tvg_Paint* pic = tvg_picture_new();
-    
+
     // Load raw RGBA pixels directly into ThorVG
     Tvg_Result result = tvg_picture_load_raw(
         pic,
@@ -376,12 +354,12 @@ Tvg_Paint* create_tvg_picture_from_surface(ImageSurface* surface) {
         TVG_COLORSPACE_ARGB8888,  // Match Radiant's pixel format
         false  // Don't copy - surface manages memory
     );
-    
+
     if (result != TVG_RESULT_SUCCESS) {
         tvg_paint_del(pic);
         return nullptr;
     }
-    
+
     return pic;
 }
 ```
@@ -394,31 +372,31 @@ static Tvg_Paint* render_svg_image(SvgRenderContext* ctx, Element* elem) {
     const char* href = get_svg_attr(elem, "href");
     if (!href) href = get_svg_attr(elem, "xlink:href");
     if (!href) return nullptr;
-    
+
     float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
     float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
     float width = parse_svg_length(get_svg_attr(elem, "width"), 0);
     float height = parse_svg_length(get_svg_attr(elem, "height"), 0);
-    
+
     // Use Radiant's unified image loading
     ImageSurface* surface = load_image(ctx->ui_context, href);
     if (!surface) {
         log_debug("[SVG] <image> failed to load: %s", href);
         return nullptr;
     }
-    
+
     // Convert to ThorVG picture
     Tvg_Paint* pic = create_tvg_picture_from_surface(surface);
     if (!pic) return nullptr;
-    
+
     // Set dimensions
     if (width > 0 && height > 0) {
         tvg_picture_set_size(pic, width, height);
     }
-    
+
     // Position
     tvg_paint_translate(pic, x, y);
-    
+
     return pic;
 }
 ```
@@ -449,11 +427,11 @@ static Tvg_Paint* render_svg_image(SvgRenderContext* ctx, Element* elem) {
   - [ ] Remove `png,jpg` from loaders
   - [ ] Add `-Dsimd=true`
   - [ ] Rename function to `build_thorvg_v1_0_pre34_for_mac`
-  
+
 - [ ] Update `setup-linux-deps.sh`:
   - [ ] Same changes as macOS
   - [ ] Rename function to `build_thorvg_v1_0_pre34_for_linux`
-  
+
 - [ ] Update `setup-windows-deps.sh`:
   - [ ] Update clone command to use `v1.0-pre34`
   - [ ] Update meson options
