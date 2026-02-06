@@ -3558,6 +3558,10 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
     StrView target_str = ts_node_source(tp, target_node);
     ast_node->target = name_pool_create_strview(tp->name_pool, target_str);
 
+    // lookup target variable to get its type info
+    NameEntry* entry = lookup_name(tp, target_str);
+    ast_node->target_node = entry ? entry->node : NULL;
+
     // build value expression
     TSNode value_node = ts_node_child_by_field_id(assign_node, FIELD_VALUE);
     ast_node->value = build_expr(tp, value_node);

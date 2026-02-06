@@ -58,13 +58,14 @@ void print_ts_root(const char *source, TSTree* syntax_tree) {
 // write the native C type for the lambda type
 void write_type(StrBuf* code_buf, Type *type) {
     if (!type) {
-        strbuf_append_str(code_buf, "void*");
+        strbuf_append_str(code_buf, "Item");
         return;
     }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
-        strbuf_append_str(code_buf, "void*");
+        // NULL type means variable can hold any value (e.g., var x = null; x = something)
+        strbuf_append_str(code_buf, "Item");
         break;
     case LMD_TYPE_ANY:
         strbuf_append_str(code_buf, "Item");
