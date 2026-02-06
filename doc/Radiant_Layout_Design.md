@@ -12,13 +12,21 @@ Radiant is Lambda's HTML/CSS rendering engine implementing browser-compatible la
 
 Radiant uses a **single inheritance tree** where DOM nodes are their own View representations:
 
-```
-DomNode (base)
-    ├── DomText → ViewText
-    └── DomElement → ViewElement → ViewSpan → ViewBlock
-                                    ├── ViewTable
-                                    ├── ViewTableRow
-                                    └── ViewTableCell
+```mermaid
+classDiagram
+    DomNode <|-- DomText
+    DomNode <|-- DomElement
+    DomText --> ViewText : extends
+    DomElement --> ViewElement : extends
+    ViewElement --> ViewSpan : extends
+    ViewSpan --> ViewBlock : extends
+    ViewBlock <|-- ViewTable
+    ViewBlock <|-- ViewTableRow
+    ViewBlock <|-- ViewTableCell
+
+    class DomNode {
+        <<base>>
+    }
 ```
 
 **Benefits:**
@@ -132,32 +140,21 @@ struct Linebox {
 
 ### 3.1 High-Level Flow
 
-```
-HTML/CSS Input
-      │
-      ▼
-┌─────────────────┐
-│   DOM Parsing   │  (Lambda CSS parser)
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│ Style Resolution│  (resolve_css_style.cpp)
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│ Layout Dispatch │  (layout_block.cpp)
-└────────┬────────┘
-         │
-    ┌────┼────┬────┬────┐
-    ▼    ▼    ▼    ▼    ▼
-  Block Inline Flex Grid Table
-    │    │    │    │    │
-    └────┴────┴────┴────┘
-         │
-         ▼
-┌─────────────────┐
-│   View Tree     │
-└─────────────────┘
+```mermaid
+flowchart TD
+    A[HTML/CSS Input] --> B[DOM Parsing<br><i>Lambda CSS parser</i>]
+    B --> C[Style Resolution<br><i>resolve_css_style.cpp</i>]
+    C --> D[Layout Dispatch<br><i>layout_block.cpp</i>]
+    D --> E[Block]
+    D --> F[Inline]
+    D --> G[Flex]
+    D --> H[Grid]
+    D --> I[Table]
+    E --> J[View Tree]
+    F --> J
+    G --> J
+    H --> J
+    I --> J
 ```
 
 ### 3.2 Layout Mode Dispatch
@@ -477,25 +474,18 @@ GridProp* alloc_grid_prop(LayoutContext* lycon);
 
 ### 7.3 Integration Pipeline
 
-```
-HTML Input                          CSS Input
-    │                                   │
-    ▼                                   ▼
-parse_html_impl()              css_parse_stylesheet()
-    │                                   │
-    ▼                                   ▼
-Lambda Element Tree            CssStylesheet (rules)
-    │                                   │
-    └──────────────┬───────────────────┘
-                   ▼
-            DomDocument
-                   │
-                   ▼
-      dom_node_resolve_style()
-      resolve_css_styles()
-                   │
-                   ▼
-         Computed Styles → Layout
+```mermaid
+flowchart TD
+    subgraph Input
+        A1[HTML Input] --> B1[parse_html_impl]
+        A2[CSS Input] --> B2[css_parse_stylesheet]
+    end
+    B1 --> C1[Lambda Element Tree]
+    B2 --> C2[CssStylesheet<br><i>rules</i>]
+    C1 --> D[DomDocument]
+    C2 --> D
+    D --> E[dom_node_resolve_style<br>resolve_css_styles]
+    E --> F[Computed Styles → Layout]
 ```
 
 **Stylesheet Collection:**

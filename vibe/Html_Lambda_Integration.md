@@ -4,8 +4,8 @@
 
 This document describes how the HTML/CSS DOM system connects with Lambda's native tree structures, and outlines a refactoring plan to establish bidirectional synchronization for text nodes.
 
-**Status**: Planning Phase  
-**Date**: 2025-01-23  
+**Status**: Planning Phase
+**Date**: 2025-01-23
 **Author**: Lambda Development Team
 
 ---
@@ -23,30 +23,30 @@ struct DomElement : public DomNode {
     // Lambda backing
     Element* native_element;     // Pointer to backing Lambda Element
     Input* input;                // Input context (contains arena, pool, name_pool, shape_pool)
-    
+
     // DOM tree relationships (managed separately)
     DomNode* parent;
     DomNode* first_child;
     DomNode* next_sibling;
     DomNode* prev_sibling;
-    
+
     // Element metadata
     const char* tag_name;
     const void* tag_name_ptr;    // Unique pointer for fast comparison
     uint32_t tag_id;             // Lexbor tag ID for fast comparison
-    
+
     // Cached attributes (extracted from native_element)
     const char* id;
     const char** class_names;
     int class_count;
-    
+
     // CSS styling
     StyleTree* specified_style;
     StyleTree* computed_style;
     uint64_t style_version;
     bool needs_style_recompute;
     uint32_t pseudo_state;
-    
+
     // Memory
     Pool* pool;
 };
@@ -61,7 +61,7 @@ struct Element : List {
     void* type;        // TypeElmt* - contains tag name and shape (attribute schema)
     void* data;        // Map of attributes (field name -> value)
     int data_cap;      // Capacity of data buffer
-    
+
     // Inherited from List:
     Item* items;       // Children array (Elements and Strings)
     int64_t length;    // Number of children
@@ -94,21 +94,21 @@ All attribute modifications flow through **MarkEditor** which maintains consiste
 bool dom_element_set_attribute(DomElement* element, const char* name, const char* value) {
     if (element->native_element && element->input) {
         MarkEditor editor(element->input, EDIT_MODE_INLINE);
-        
+
         // Create string value
         Item value_item = editor.builder()->createStringItem(value);
-        
+
         // Update via MarkEditor - modifies native_element in-place
         Item result = editor.elmt_update_attr(
-            {.element = element->native_element}, 
-            name, 
+            {.element = element->native_element},
+            name,
             value_item
         );
-        
+
         if (result.element) {
             // In INLINE mode: element pointer unchanged (in-place mutation)
             element->native_element = result.element;
-            
+
             // Update DOM caches
             if (strcmp(name, "id") == 0) {
                 element->id = extract_from_native(element->native_element);
@@ -126,13 +126,13 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
 bool dom_element_remove_attribute(DomElement* element, const char* name) {
     if (element->native_element && element->input) {
         MarkEditor editor(element->input, EDIT_MODE_INLINE);
-        
+
         // Delete attribute via MarkEditor
         Item result = editor.elmt_delete_attr(
-            {.element = element->native_element}, 
+            {.element = element->native_element},
             name
         );
-        
+
         if (result.element) {
             // In INLINE mode: element pointer unchanged
             element->native_element = result.element;
@@ -163,34 +163,24 @@ Element* result_elmt = old_elmt;  // Same pointer in INLINE mode
 
 #### Flow: DOM → Lambda
 
-```
-User API Call
-    ↓
-dom_element_set_attribute()
-    ↓
-MarkEditor::elmt_update_attr()
-    ↓
-elmt_update_attr_inline()          [INLINE mode]
-    ↓
-elmt_rebuild_with_new_shape()      [if attribute doesn't exist]
-    ↓
-Lambda Element updated in-place
-    ↓
-Attribute persists in Lambda tree  ✅
+```mermaid
+flowchart TD
+    A[User API Call] --> B[dom_element_set_attribute]
+    B --> C["MarkEditor::elmt_update_attr()"]
+    C --> D["elmt_update_attr_inline()<br><i>INLINE mode</i>"]
+    D --> E["elmt_rebuild_with_new_shape()<br><i>if attr doesn't exist</i>"]
+    E --> F[Lambda Element updated in-place]
+    F --> G["Attribute persists in Lambda tree ✅"]
 ```
 
 #### Flow: Lambda → DOM
 
-```
-HTML Parser (build_dom_tree_from_element)
-    ↓
-Creates DomElement with native_element pointer
-    ↓
-ElementReader reads attributes from native_element
-    ↓
-Caches id, class_names from Lambda Element
-    ↓
-DOM reflects Lambda state  ✅
+```mermaid
+flowchart TD
+    A["HTML Parser<br>(build_dom_tree_from_element)"] --> B[Creates DomElement with native_element pointer]
+    B --> C[ElementReader reads attributes from native_element]
+    C --> D["Caches id, class_names from Lambda Element"]
+    D --> E["DOM reflects Lambda state ✅"]
 ```
 
 ---
@@ -206,16 +196,16 @@ struct DomText : public DomNode {
     // Text content (COPIED from Lambda)
     const char* text;        // Standalone copy - NOT backed by Lambda String
     size_t length;           // Text length
-    
+
     // Memory
     Pool* pool;              // Memory pool
-    
+
     // DOM tree relationships
     DomNode* parent;
     DomNode* first_child;    // Always nullptr for text nodes
     DomNode* next_sibling;
     DomNode* prev_sibling;
-    
+
     // NO Lambda backing:
     // - No String* native_string pointer
     // - No Input* input context
@@ -230,17 +220,17 @@ struct DomText : public DomNode {
 ```cpp
 DomText* dom_text_create(Pool* pool, const char* text) {
     DomText* text_node = (DomText*)pool_alloc(pool, sizeof(DomText));
-    
+
     // COPY text content (loses Lambda String* reference)
     size_t len = strlen(text);
     char* text_copy = (char*)pool_alloc(pool, len + 1);
     strcpy(text_copy, text);
-    
+
     text_node->text = text_copy;      // Standalone copy
     text_node->length = len;
     text_node->pool = pool;
     // No native_string, no input, no parent tracking
-    
+
     return text_node;
 }
 ```
@@ -249,18 +239,18 @@ DomText* dom_text_create(Pool* pool, const char* text) {
 ```cpp
 bool dom_text_set_content(DomText* text, const char* new_content) {
     if (!text || !new_content) return false;
-    
+
     // Allocate new copy (doesn't update Lambda tree)
     size_t new_len = strlen(new_content);
     char* new_copy = (char*)pool_alloc(text->pool, new_len + 1);
     strcpy(new_copy, new_content);
-    
+
     text->text = new_copy;   // Update local copy only
     text->length = new_len;
-    
+
     // Lambda String* is NOT updated ❌
     // Parent Element's children array is NOT modified ❌
-    
+
     return true;
 }
 ```
@@ -336,16 +326,16 @@ struct DomComment : public DomNode {
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
     const char* content;         // Full content/text (standalone copy)
     size_t length;               // Content length
-    
+
     // Memory management
     Pool* pool;                  // Memory pool for allocations
-    
+
     // DOM tree relationships
     DomNode* parent;
     DomNode* first_child;        // Always nullptr for comments
     DomNode* next_sibling;
     DomNode* prev_sibling;
-    
+
     // NO Lambda backing:
     // - No Element* native_element pointer
     // - No Input* input context
@@ -358,15 +348,15 @@ struct DomComment : public DomNode {
 
 **1. Create Comment Node** (`dom_comment_create`)
 ```cpp
-DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, 
+DomComment* dom_comment_create(Pool* pool, DomNodeType node_type,
                               const char* tag_name, const char* content) {
     DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
-    
+
     // Copy tag name to pool
     char* tag_copy = (char*)pool_alloc(pool, strlen(tag_name) + 1);
     strcpy(tag_copy, tag_name);
     comment_node->tag_name = tag_copy;
-    
+
     // Copy content to pool (if provided)
     if (content) {
         comment_node->length = strlen(content);
@@ -374,7 +364,7 @@ DomComment* dom_comment_create(Pool* pool, DomNodeType node_type,
         strcpy(content_copy, content);
         comment_node->content = content_copy;  // Standalone copy
     }
-    
+
     // No native_element, no input, no parent tracking
     return comment_node;
 }
@@ -475,16 +465,16 @@ struct DomText : public DomNode {
     // Text content
     const char* text;            // Text content (points to native_string->chars)
     size_t length;               // Text length
-    
+
     // Lambda backing (NEW)
     String* native_string;       // Pointer to backing Lambda String
     Input* input;                // Input context (for MarkEditor)
     DomElement* parent_element;  // Parent DomElement (for child array updates)
     int64_t child_index;         // Index in parent's native_element->items array
-    
+
     // Memory
     Pool* pool;
-    
+
     // DOM tree relationships
     DomNode* parent;
     DomNode* first_child;
@@ -515,7 +505,7 @@ else if (child_type == LMD_TYPE_STRING) {
 // NEW (preserves Lambda reference):
 else if (child_type == LMD_TYPE_STRING) {
     String* text_str = (String*)child_item.pointer;
-    
+
     // Create backed text node
     DomText* text_node = dom_text_create_backed(
         pool,
@@ -523,7 +513,7 @@ else if (child_type == LMD_TYPE_STRING) {
         dom_elem,           // Parent DomElement
         i                   // Child index in native_element->items
     );
-    
+
     if (text_node) {
         text_node->parent = dom_elem;
         // Add to DOM sibling chain...
@@ -533,18 +523,18 @@ else if (child_type == LMD_TYPE_STRING) {
 
 **New Function**:
 ```cpp
-DomText* dom_text_create_backed(Pool* pool, String* native_string, 
+DomText* dom_text_create_backed(Pool* pool, String* native_string,
                                 DomElement* parent_element, int64_t child_index) {
     if (!pool || !native_string || !parent_element) return nullptr;
-    
+
     DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
     if (!text_node) return nullptr;
-    
+
     // Initialize base DomNode
     text_node->node_type = DOM_NODE_TEXT;
     text_node->parent = parent_element;
     text_node->pool = pool;
-    
+
     // Set Lambda backing
     text_node->native_string = native_string;
     text_node->text = native_string->chars;  // Reference, not copy
@@ -552,7 +542,7 @@ DomText* dom_text_create_backed(Pool* pool, String* native_string,
     text_node->input = parent_element->input;
     text_node->parent_element = parent_element;
     text_node->child_index = child_index;
-    
+
     return text_node;
 }
 ```
@@ -570,37 +560,37 @@ bool dom_text_set_content_backed(DomText* text, const char* new_content) {
         log_error("dom_text_set_content_backed: text node not backed by Lambda");
         return false;
     }
-    
+
     // Create new String via MarkBuilder
     MarkEditor editor(text->input, EDIT_MODE_INLINE);
     Item new_string_item = editor.builder()->createStringItem(new_content);
-    
+
     if (!new_string_item.string) {
         log_error("dom_text_set_content_backed: failed to create string");
         return false;
     }
-    
+
     // Replace child in parent Element's items array
     Item result = editor.elmt_replace_child(
         {.element = text->parent_element->native_element},
         text->child_index,
         new_string_item
     );
-    
+
     if (!result.element) {
         log_error("dom_text_set_content_backed: failed to replace child");
         return false;
     }
-    
+
     // Update DomText to point to new String
     text->native_string = new_string_item.string;
     text->text = new_string_item.string->chars;
     text->length = new_string_item.string->len;
-    
+
     // In INLINE mode, parent element pointer unchanged
     // But update reference for consistency
     text->parent_element->native_element = result.element;
-    
+
     return true;
 }
 ```
@@ -614,22 +604,22 @@ DomText* dom_element_append_text_backed(DomElement* parent, const char* text_con
         log_error("dom_element_append_text_backed: parent not backed");
         return nullptr;
     }
-    
+
     // Create String item
     MarkEditor editor(parent->input, EDIT_MODE_INLINE);
     Item string_item = editor.builder()->createStringItem(text_content);
-    
+
     // Append to parent Element's children
     Item result = editor.elmt_append_child(
         {.element = parent->native_element},
         string_item
     );
-    
+
     if (!result.element) {
         log_error("dom_element_append_text_backed: failed to append");
         return nullptr;
     }
-    
+
     // Create DomText wrapper
     int64_t child_index = parent->native_element->length - 1;
     DomText* text_node = dom_text_create_backed(
@@ -638,9 +628,9 @@ DomText* dom_element_append_text_backed(DomElement* parent, const char* text_con
         parent,
         child_index
     );
-    
+
     if (!text_node) return nullptr;
-    
+
     // Add to DOM sibling chain
     text_node->parent = parent;
     if (!parent->first_child) {
@@ -651,7 +641,7 @@ DomText* dom_element_append_text_backed(DomElement* parent, const char* text_con
         last->next_sibling = text_node;
         text_node->prev_sibling = last;
     }
-    
+
     parent->native_element = result.element;
     return text_node;
 }
@@ -666,40 +656,40 @@ bool dom_text_remove_backed(DomText* text) {
         log_error("dom_text_remove_backed: text node not backed");
         return false;
     }
-    
+
     // Remove from Lambda parent Element's children array
     MarkEditor editor(text->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
         {.element = text->parent_element->native_element},
         text->child_index
     );
-    
+
     if (!result.element) {
         log_error("dom_text_remove_backed: failed to delete child");
         return false;
     }
-    
+
     // Update parent
     text->parent_element->native_element = result.element;
-    
+
     // Update sibling child indices (shifted after removal)
     // This requires tracking all DomText siblings - may need parent child list
-    
+
     // Remove from DOM sibling chain
     if (text->prev_sibling) {
         text->prev_sibling->next_sibling = text->next_sibling;
     } else if (text->parent) {
         text->parent->first_child = text->next_sibling;
     }
-    
+
     if (text->next_sibling) {
         text->next_sibling->prev_sibling = text->prev_sibling;
     }
-    
+
     // Clear references
     text->parent = nullptr;
     text->native_string = nullptr;
-    
+
     return true;
 }
 ```
@@ -727,9 +717,9 @@ bool dom_text_remove_backed(DomText* text) {
 ```cpp
 int64_t dom_text_get_child_index(DomText* text) {
     if (!text->parent_element || !text->native_string) return -1;
-    
+
     Element* parent_elem = text->parent_element->native_element;
-    
+
     // Try cached index first (optimization)
     if (text->child_index >= 0 && text->child_index < parent_elem->length) {
         Item cached_item = parent_elem->items[text->child_index];
@@ -737,7 +727,7 @@ int64_t dom_text_get_child_index(DomText* text) {
             return text->child_index;  // Cache hit
         }
     }
-    
+
     // Cache miss - scan for correct index
     for (int64_t i = 0; i < parent_elem->length; i++) {
         Item item = parent_elem->items[i];
@@ -746,7 +736,7 @@ int64_t dom_text_get_child_index(DomText* text) {
             return i;
         }
     }
-    
+
     log_error("dom_text_get_child_index: native_string not found in parent");
     return -1;
 }
@@ -764,16 +754,16 @@ int64_t dom_text_get_child_index(DomText* text) {
 TEST_F(DomCrudTest, DomText_CreateBacked) {
     // Create parent element with backing
     DomElement* parent = create_backed_element("div");
-    
+
     // Append backed text node
     DomText* text = dom_element_append_text_backed(parent, "Hello World");
-    
+
     ASSERT_NE(text, nullptr);
     EXPECT_NE(text->native_string, nullptr);
     EXPECT_NE(text->input, nullptr);
     EXPECT_EQ(text->parent_element, parent);
     EXPECT_STREQ(text->text, "Hello World");
-    
+
     // Verify Lambda backing
     ASSERT_EQ(parent->native_element->length, 1);
     Item child = parent->native_element->items[0];
@@ -785,14 +775,14 @@ TEST_F(DomCrudTest, DomText_CreateBacked) {
 TEST_F(DomCrudTest, DomText_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_backed_element("p");
     DomText* text = dom_element_append_text_backed(parent, "Original");
-    
+
     // Update text content
     EXPECT_TRUE(dom_text_set_content_backed(text, "Updated"));
-    
+
     // Verify DomText updated
     EXPECT_STREQ(text->text, "Updated");
     EXPECT_EQ(text->length, 7);
-    
+
     // Verify Lambda String updated
     Item child = parent->native_element->items[text->child_index];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
@@ -804,47 +794,47 @@ TEST_F(DomCrudTest, DomText_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_backed_element("div");
     DomText* text1 = dom_element_append_text_backed(parent, "First");
     DomText* text2 = dom_element_append_text_backed(parent, "Second");
-    
+
     EXPECT_EQ(parent->native_element->length, 2);
-    
+
     // Remove first text node
     EXPECT_TRUE(dom_text_remove_backed(text1));
-    
+
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
     Item remaining = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
     EXPECT_STREQ(remaining.string->chars, "Second");
-    
+
     // Verify text2 index updated
     EXPECT_EQ(text2->child_index, 0);
 }
 
 TEST_F(DomCrudTest, DomText_MultipleOperations_MaintainsSync) {
     DomElement* parent = create_backed_element("div");
-    
+
     // Add multiple text nodes
     DomText* text1 = dom_element_append_text_backed(parent, "One");
     DomText* text2 = dom_element_append_text_backed(parent, "Two");
     DomText* text3 = dom_element_append_text_backed(parent, "Three");
-    
+
     EXPECT_EQ(parent->native_element->length, 3);
-    
+
     // Update middle text
     dom_text_set_content_backed(text2, "TWO");
-    
+
     // Verify all strings
     EXPECT_STREQ(parent->native_element->items[0].string->chars, "One");
     EXPECT_STREQ(parent->native_element->items[1].string->chars, "TWO");
     EXPECT_STREQ(parent->native_element->items[2].string->chars, "Three");
-    
+
     // Remove middle text
     dom_text_remove_backed(text2);
-    
+
     EXPECT_EQ(parent->native_element->length, 2);
     EXPECT_STREQ(parent->native_element->items[0].string->chars, "One");
     EXPECT_STREQ(parent->native_element->items[1].string->chars, "Three");
-    
+
     // Verify indices updated
     EXPECT_EQ(text1->child_index, 0);
     EXPECT_EQ(text3->child_index, 1);
@@ -852,23 +842,23 @@ TEST_F(DomCrudTest, DomText_MultipleOperations_MaintainsSync) {
 
 TEST_F(DomCrudTest, DomText_MixedChildren_ElementsAndText) {
     DomElement* parent = create_backed_element("div");
-    
+
     // Add mixed children
     DomText* text1 = dom_element_append_text_backed(parent, "Before");
     DomElement* child_elem = create_backed_element("span");
     dom_element_append_child(parent, child_elem);
     DomText* text2 = dom_element_append_text_backed(parent, "After");
-    
+
     // Verify structure
     EXPECT_EQ(parent->native_element->length, 3);
     EXPECT_EQ(get_type_id(parent->native_element->items[0]), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_ELEMENT);
     EXPECT_EQ(get_type_id(parent->native_element->items[2]), LMD_TYPE_STRING);
-    
+
     // Update text around element
     dom_text_set_content_backed(text1, "BEFORE");
     dom_text_set_content_backed(text2, "AFTER");
-    
+
     // Verify Lambda tree
     EXPECT_STREQ(parent->native_element->items[0].string->chars, "BEFORE");
     EXPECT_STREQ(parent->native_element->items[2].string->chars, "AFTER");
@@ -876,21 +866,21 @@ TEST_F(DomCrudTest, DomText_MixedChildren_ElementsAndText) {
 
 TEST_F(DomCrudTest, DomText_ChildIndexTracking) {
     DomElement* parent = create_backed_element("p");
-    
+
     DomText* t0 = dom_element_append_text_backed(parent, "Zero");
     DomText* t1 = dom_element_append_text_backed(parent, "One");
     DomText* t2 = dom_element_append_text_backed(parent, "Two");
-    
+
     EXPECT_EQ(t0->child_index, 0);
     EXPECT_EQ(t1->child_index, 1);
     EXPECT_EQ(t2->child_index, 2);
-    
+
     // Remove middle - indices should update
     dom_text_remove_backed(t1);
-    
+
     EXPECT_EQ(t0->child_index, 0);
     EXPECT_EQ(t2->child_index, 1);
-    
+
     // Get child index should validate
     EXPECT_EQ(dom_text_get_child_index(t0), 0);
     EXPECT_EQ(dom_text_get_child_index(t2), 1);
@@ -899,11 +889,11 @@ TEST_F(DomCrudTest, DomText_ChildIndexTracking) {
 TEST_F(DomCrudTest, DomText_EmptyString_Backed) {
     DomElement* parent = create_backed_element("div");
     DomText* text = dom_element_append_text_backed(parent, "");
-    
+
     ASSERT_NE(text, nullptr);
     EXPECT_STREQ(text->text, "");
     EXPECT_EQ(text->length, 0);
-    
+
     // Verify Lambda has empty string
     Item child = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
@@ -913,19 +903,19 @@ TEST_F(DomCrudTest, DomText_EmptyString_Backed) {
 TEST_F(DomCrudTest, DomText_LongString_Backed) {
     const char* long_text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
                            "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
-    
+
     DomElement* parent = create_backed_element("div");
     DomText* text = dom_element_append_text_backed(parent, long_text);
-    
+
     ASSERT_NE(text, nullptr);
     EXPECT_STREQ(text->text, long_text);
     EXPECT_EQ(text->length, strlen(long_text));
-    
+
     // Update to even longer string
     const char* longer = "This is an even longer string that tests memory handling...";
     EXPECT_TRUE(dom_text_set_content_backed(text, longer));
     EXPECT_STREQ(text->text, longer);
-    
+
     // Verify Lambda
     EXPECT_STREQ(parent->native_element->items[0].string->chars, longer);
 }
@@ -941,15 +931,15 @@ TEST_F(DomIntegrationTest, DomText_SetContent_VerifyLambdaBacking) {
     const char* html = "<div>Original Text</div>";
     Element* root = parse_html_fragment(html);
     DomElement* dom_div = build_dom_tree_from_element(root, pool, nullptr);
-    
+
     // Get text node
     DomText* text = static_cast<DomText*>(dom_div->first_child);
     ASSERT_NE(text, nullptr);
     ASSERT_NE(text->native_string, nullptr);
-    
+
     // Update content
     EXPECT_TRUE(dom_text_set_content_backed(text, "Updated Text"));
-    
+
     // Verify Lambda String updated
     EXPECT_STREQ(dom_div->native_element->items[0].string->chars, "Updated Text");
 }
@@ -978,16 +968,16 @@ struct DomComment : public DomNode {
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
     const char* content;         // Content text (points to native_element's String child)
     size_t length;               // Content length
-    
+
     // Lambda backing (NEW)
     Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
     Input* input;                // Input context (for MarkEditor)
     DomElement* parent_element;  // Parent DomElement (for child array updates)
     int64_t child_index;         // Index in parent's native_element->items array
-    
+
     // Memory management
     Pool* pool;
-    
+
     // DOM tree relationships
     DomNode* parent;
     DomNode* first_child;        // Always nullptr for comments
@@ -1008,15 +998,15 @@ struct DomComment : public DomNode {
 **New Function**: `dom_comment_create_backed`
 
 ```cpp
-DomComment* dom_comment_create_backed(Pool* pool, Element* native_element, 
+DomComment* dom_comment_create_backed(Pool* pool, Element* native_element,
                                      DomElement* parent_element, int64_t child_index) {
     if (!pool || !native_element || !parent_element) return nullptr;
-    
+
     // Get tag name and content
     TypeElmt* type = (TypeElmt*)native_element->type;
     const char* tag_name = type ? type->name.str : nullptr;
     if (!tag_name) return nullptr;
-    
+
     // Determine node type
     DomNodeType node_type;
     if (strcasecmp(tag_name, "!DOCTYPE") == 0) {
@@ -1026,22 +1016,22 @@ DomComment* dom_comment_create_backed(Pool* pool, Element* native_element,
     } else {
         return nullptr;  // Not a comment or DOCTYPE
     }
-    
+
     DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
     if (!comment_node) return nullptr;
-    
+
     // Initialize base DomNode
     comment_node->node_type = node_type;
     comment_node->parent = parent_element;
     comment_node->pool = pool;
-    
+
     // Set Lambda backing
     comment_node->native_element = native_element;
     comment_node->input = parent_element->input;
     comment_node->parent_element = parent_element;
     comment_node->child_index = child_index;
     comment_node->tag_name = tag_name;  // Reference type name (no copy needed)
-    
+
     // Extract content from first String child (if exists)
     if (native_element->length > 0) {
         Item first_item = native_element->items[0];
@@ -1051,12 +1041,12 @@ DomComment* dom_comment_create_backed(Pool* pool, Element* native_element,
             comment_node->length = content_str->len;
         }
     }
-    
+
     if (!comment_node->content) {
         comment_node->content = "";
         comment_node->length = 0;
     }
-    
+
     return comment_node;
 }
 ```
@@ -1072,16 +1062,16 @@ bool dom_comment_set_content_backed(DomComment* comment, const char* new_content
         log_error("dom_comment_set_content_backed: comment not backed by Lambda");
         return false;
     }
-    
+
     // Create new String via MarkBuilder
     MarkEditor editor(comment->input, EDIT_MODE_INLINE);
     Item new_string_item = editor.builder()->createStringItem(new_content);
-    
+
     if (!new_string_item.string) {
         log_error("dom_comment_set_content_backed: failed to create string");
         return false;
     }
-    
+
     // Replace or append String child in comment Element
     Item result;
     if (comment->native_element->length > 0) {
@@ -1098,17 +1088,17 @@ bool dom_comment_set_content_backed(DomComment* comment, const char* new_content
             new_string_item
         );
     }
-    
+
     if (!result.element) {
         log_error("dom_comment_set_content_backed: failed to update content");
         return false;
     }
-    
+
     // Update DomComment to point to new String
     comment->native_element = result.element;
     comment->content = new_string_item.string->chars;
     comment->length = new_string_item.string->len;
-    
+
     return true;
 }
 ```
@@ -1122,34 +1112,34 @@ DomComment* dom_element_append_comment_backed(DomElement* parent, const char* co
         log_error("dom_element_append_comment_backed: parent not backed");
         return nullptr;
     }
-    
+
     // Create Lambda comment Element with tag "!--"
     MarkEditor editor(parent->input, EDIT_MODE_INLINE);
     ElementBuilder comment_elem = editor.builder()->element("!--");
-    
+
     // Add content as String child
     if (strlen(comment_content) > 0) {
         Item content_item = editor.builder()->createStringItem(comment_content);
         comment_elem.child(content_item);
     }
-    
+
     Item comment_item = comment_elem.build();
     if (!comment_item.element) {
         log_error("dom_element_append_comment_backed: failed to create comment element");
         return nullptr;
     }
-    
+
     // Append to parent Element's children
     Item result = editor.elmt_append_child(
         {.element = parent->native_element},
         comment_item
     );
-    
+
     if (!result.element) {
         log_error("dom_element_append_comment_backed: failed to append");
         return nullptr;
     }
-    
+
     // Create DomComment wrapper
     int64_t child_index = parent->native_element->length - 1;
     DomComment* comment_node = dom_comment_create_backed(
@@ -1158,9 +1148,9 @@ DomComment* dom_element_append_comment_backed(DomElement* parent, const char* co
         parent,
         child_index
     );
-    
+
     if (!comment_node) return nullptr;
-    
+
     // Add to DOM sibling chain
     comment_node->parent = parent;
     if (!parent->first_child) {
@@ -1171,7 +1161,7 @@ DomComment* dom_element_append_comment_backed(DomElement* parent, const char* co
         last->next_sibling = comment_node;
         comment_node->prev_sibling = last;
     }
-    
+
     parent->native_element = result.element;
     return comment_node;
 }
@@ -1186,37 +1176,37 @@ bool dom_comment_remove_backed(DomComment* comment) {
         log_error("dom_comment_remove_backed: comment not backed");
         return false;
     }
-    
+
     // Remove from Lambda parent Element's children array
     MarkEditor editor(comment->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
         {.element = comment->parent_element->native_element},
         comment->child_index
     );
-    
+
     if (!result.element) {
         log_error("dom_comment_remove_backed: failed to delete child");
         return false;
     }
-    
+
     // Update parent
     comment->parent_element->native_element = result.element;
-    
+
     // Remove from DOM sibling chain
     if (comment->prev_sibling) {
         comment->prev_sibling->next_sibling = comment->next_sibling;
     } else if (comment->parent) {
         comment->parent->first_child = comment->next_sibling;
     }
-    
+
     if (comment->next_sibling) {
         comment->next_sibling->prev_sibling = comment->prev_sibling;
     }
-    
+
     // Clear references
     comment->parent = nullptr;
     comment->native_element = nullptr;
-    
+
     return true;
 }
 ```
@@ -1245,19 +1235,19 @@ if (strcmp(tag_name, "!--") == 0 || strcasecmp(tag_name, "!DOCTYPE") == 0) {
 for (int64_t i = 0; i < elem->length; i++) {
     Item child_item = elem->items[i];
     TypeId child_type = get_type_id(child_item);
-    
+
     if (child_type == LMD_TYPE_ELEMENT) {
         Element* child_elem = (Element*)child_item.pointer;
         TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
         const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
-        
+
         // Check if this is a comment or DOCTYPE
         if (strcmp(child_tag_name, "!--") == 0 || strcasecmp(child_tag_name, "!DOCTYPE") == 0) {
             // Create backed DomComment
             DomComment* comment_node = dom_comment_create_backed(pool, child_elem, dom_elem, i);
             if (comment_node) {
                 comment_node->parent = dom_elem;
-                
+
                 // Add to DOM sibling chain (same as text nodes)
                 if (!dom_elem->first_child) {
                     dom_elem->first_child = comment_node;
@@ -1270,7 +1260,7 @@ for (int64_t i = 0; i < elem->length; i++) {
             }
             continue;  // Don't try to build as DomElement
         }
-        
+
         // Regular element - build recursively
         DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem, input);
         // ... existing code
@@ -1287,14 +1277,14 @@ Add comprehensive tests to `test_css_dom_crud.cpp`:
 TEST_F(DomCrudTest, DomComment_CreateBacked) {
     DomElement* parent = create_backed_element("div");
     DomComment* comment = dom_element_append_comment_backed(parent, " Test comment ");
-    
+
     ASSERT_NE(comment, nullptr);
     EXPECT_NE(comment->native_element, nullptr);
     EXPECT_NE(comment->input, nullptr);
     EXPECT_EQ(comment->parent_element, parent);
     EXPECT_STREQ(comment->content, " Test comment ");
     EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
-    
+
     // Verify Lambda backing
     TypeElmt* type = (TypeElmt*)comment->native_element->type;
     EXPECT_STREQ(type->name.str, "!--");
@@ -1305,13 +1295,13 @@ TEST_F(DomCrudTest, DomComment_CreateBacked) {
 TEST_F(DomCrudTest, DomComment_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_backed_element("div");
     DomComment* comment = dom_element_append_comment_backed(parent, "Original");
-    
+
     EXPECT_TRUE(dom_comment_set_content_backed(comment, "Updated"));
-    
+
     // Verify DomComment updated
     EXPECT_STREQ(comment->content, "Updated");
     EXPECT_EQ(comment->length, 7);
-    
+
     // Verify Lambda updated
     EXPECT_STREQ(comment->native_element->items[0].string->chars, "Updated");
 }
@@ -1320,10 +1310,10 @@ TEST_F(DomCrudTest, DomComment_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_backed_element("div");
     DomComment* comment1 = dom_element_append_comment_backed(parent, "First");
     DomComment* comment2 = dom_element_append_comment_backed(parent, "Second");
-    
+
     EXPECT_EQ(parent->native_element->length, 2);
     EXPECT_TRUE(dom_comment_remove_backed(comment1));
-    
+
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
     TypeElmt* remaining_type = (TypeElmt*)parent->native_element->items[0].element->type;
@@ -1332,13 +1322,13 @@ TEST_F(DomCrudTest, DomComment_RemoveBacked_UpdatesLambda) {
 
 TEST_F(DomCrudTest, DomComment_MixedChildren_ElementsTextAndComments) {
     DomElement* parent = create_backed_element("div");
-    
+
     DomComment* comment1 = dom_element_append_comment_backed(parent, " Start ");
     DomText* text = dom_element_append_text_backed(parent, "Content");
     DomElement* child = create_backed_element("span");
     dom_element_append_child(parent, child);
     DomComment* comment2 = dom_element_append_comment_backed(parent, " End ");
-    
+
     // Verify structure
     EXPECT_EQ(parent->native_element->length, 4);
     EXPECT_STREQ(((TypeElmt*)parent->native_element->items[0].element->type)->name.str, "!--");
@@ -1352,14 +1342,14 @@ TEST_F(DomCrudTest, DomComment_ParseFromHTML_CreatesBacked) {
     const char* html = "<div><!-- Comment --><p>Text</p></div>";
     Element* root = parse_html_fragment(html);
     DomElement* dom_div = build_dom_tree_from_element(root, pool, nullptr, input);
-    
+
     ASSERT_NE(dom_div, nullptr);
-    
+
     // First child should be DomComment
     DomNode* first_child = dom_div->first_child;
     ASSERT_NE(first_child, nullptr);
     EXPECT_EQ(first_child->node_type, DOM_NODE_COMMENT);
-    
+
     DomComment* comment = static_cast<DomComment*>(first_child);
     EXPECT_NE(comment->native_element, nullptr);
     EXPECT_STREQ(comment->content, " Comment ");
@@ -1416,7 +1406,7 @@ DomText* dom_text_create(Pool* pool, const char* text);
 bool dom_text_set_content(DomText* text, const char* new_content);
 
 // NEW API (backed) - RECOMMENDED
-DomText* dom_text_create_backed(Pool* pool, String* native_string, 
+DomText* dom_text_create_backed(Pool* pool, String* native_string,
                                 DomElement* parent, int64_t index);
 bool dom_text_set_content_backed(DomText* text, const char* new_content);
 DomText* dom_element_append_text_backed(DomElement* parent, const char* text);
