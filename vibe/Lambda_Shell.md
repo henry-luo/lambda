@@ -214,7 +214,7 @@ pn main() {
 
 Lambda provides multiple ways to write data to files: the `output()` function and pipe-to-file operators.
 
-## output(data, target, format?, mode?)
+## output(data, target, options?)
 
 Write data to a file.
 
@@ -223,10 +223,14 @@ Write data to a file.
 **Parameters:**
 - `data` - Data to write (any type)
 - `target` - File path (string, symbol, or Path)
-- `format` *(optional)* - Format symbol: `'json`, `'yaml`, `'xml`, `'html`, `'markdown`, `'text`, `'toml`, `'ini`, `'mark`. If omitted, auto-detected from file extension.
-- `mode` *(optional)* - Write mode: `"write"` (truncate, default) or `"append"`
+- `options` *(optional)* - Options map with:
+  - `format` - Format string: `"json"`, `"yaml"`, `"xml"`, `"html"`, `"markdown"`, `"text"`, `"toml"`, `"ini"`, `"mark"`. If omitted, auto-detected from file extension.
+  - `mode` - Write mode string: `"write"` (truncate, default) or `"append"`
+  - `atomic` - Boolean: if `true`, write to temp file first then rename (default: `false`)
 
-**Format Auto-Detection** (when `format` is omitted or `null`):
+**Returns:** Number of bytes written on success, error on failure.
+
+**Format Auto-Detection** (when `format` is omitted):
 - `.json` → JSON format
 - `.yaml`, `.yml` → YAML format
 - `.xml` → XML format
@@ -246,20 +250,26 @@ Write data to a file.
 let data = {name: "Lambda", version: 1}
 
 // Auto-detect format from extension
-output(data, "/tmp/config.json")      // writes as JSON
-output(data, "/tmp/config.yaml")      // writes as YAML
-output(data, "/tmp/config.mk")        // writes as Mark
-output("Hello", "/tmp/greeting.txt")  // writes as text
+let bytes = output(data, "/tmp/config.json")  // writes as JSON, returns bytes
+output(data, "/tmp/config.yaml")              // writes as YAML
+output(data, "/tmp/config.mk")                // writes as Mark
+output("Hello", "/tmp/greeting.txt")          // writes as text
 
 // Explicit format (overrides extension)
-output(data, "/tmp/data.txt", 'json)  // force JSON format
-output(data, "/tmp/data", 'yaml)      // write YAML to extensionless file
+output(data, "/tmp/data.txt", {format: "json"})  // force JSON format
+output(data, "/tmp/data", {format: "yaml"})      // write YAML to extensionless file
 
 // Append mode
 let entry1 = {event: "start", time: t'2026-02-06'}
 let entry2 = {event: "end", time: t'2026-02-06'}
-output(entry1, "/tmp/log.mk", null, "write")   // create/overwrite file
-output(entry2, "/tmp/log.mk", null, "append")  // append to file
+output(entry1, "/tmp/log.mk", {})                  // create/overwrite file
+output(entry2, "/tmp/log.mk", {mode: "append"})    // append to file
+
+// Atomic writes (safe for concurrent access)
+output(data, "/tmp/config.json", {atomic: true})   // writes atomically
+
+// Combining options
+output(data, "/tmp/data.out", {format: "json", atomic: true})
 ```
 
 ---
@@ -274,11 +284,11 @@ Write data to a file, truncating if it exists.
 
 **Syntax:** `data |> target`
 
-**Equivalent to:** `output(data, target, null, "write")`
+**Returns:** Number of bytes written
 
 **Example:**
 ```lambda
-{name: "Lambda", version: 1} |> "/tmp/config.mk"
+let bytes = {name: "Lambda", version: 1} |> "/tmp/config.mk"
 "Hello, world!" |> "/tmp/greeting.txt"
 42 |> "/tmp/answer.mk"
 ```
@@ -291,7 +301,7 @@ Append data to a file, creating it if it doesn't exist.
 
 **Syntax:** `data |>> target`
 
-**Equivalent to:** `output(data, target, null, "append")`
+**Returns:** Number of bytes written
 
 **Example:**
 ```lambda
@@ -337,9 +347,9 @@ pn main() {
     ]
     
     // Write as different formats
-    output(users, "./users.json")           // JSON
-    output(users, "./users.yaml")           // YAML
-    output(users, "./users.mk")             // Mark
+    let bytes = output(users, "./users.json")  // JSON, returns bytes written
+    output(users, "./users.yaml")              // YAML
+    output(users, "./users.mk")                // Mark
     
     // Append log entries
     "=== Session Start ===" |> "./session.log"
@@ -347,7 +357,10 @@ pn main() {
     "Done!" |>> "./session.log"
     
     // Force format regardless of extension
-    output(users, "./data.txt", 'json')      // JSON in .txt file
+    output(users, "./data.txt", {format: "json"})   // JSON in .txt file
+    
+    // Atomic write for critical data
+    output(users, "./config.json", {atomic: true})   // safe atomic write
     
     print("Files written successfully")
 }

@@ -93,14 +93,50 @@ static int create_parent_dirs(const char* file_path) {
     return result;
 }
 
+// Helper: Generate a unique temp file path for atomic writes
+static void generate_temp_path(const char* file_path, StrBuf* temp_buf) {
+    strbuf_append_str(temp_buf, file_path);
+    strbuf_append_str(temp_buf, ".tmp.");
+    // append pid and timestamp for uniqueness
+#ifdef _WIN32
+    strbuf_append_int(temp_buf, (int)_getpid());
+#else
+    strbuf_append_int(temp_buf, (int)getpid());
+#endif
+    strbuf_append_char(temp_buf, '.');
+    strbuf_append_int(temp_buf, (int)time(NULL));
+}
+
+// Helper: Perform atomic rename (temp file to final file)
+static int atomic_rename(const char* temp_path, const char* final_path) {
+#ifdef _WIN32
+    // Windows: MoveFileEx with MOVEFILE_REPLACE_EXISTING
+    if (!MoveFileExA(temp_path, final_path, MOVEFILE_REPLACE_EXISTING)) {
+        return -1;
+    }
+    return 0;
+#else
+    // POSIX: rename() is atomic on the same filesystem
+    return rename(temp_path, final_path);
+#endif
+}
+
 // Unified output implementation
 // source: data to output
 // target_item: file path (String, Symbol, or Path)
 // format_str: optional format type ('json, 'yaml, 'html, etc.), NULL for auto-detect
 // append: true for append mode, false for write (truncate) mode
-static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append) {
+// atomic: if true, write to temp file first then rename (only for write mode, not append)
+// Returns: bytes written on success, ItemError on failure
+static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append, bool atomic) {
     const char* mode = append ? "a" : "w";
     const char* mode_binary = append ? "ab" : "wb";
+    
+    // atomic writes only make sense for write mode (not append)
+    if (atomic && append) {
+        log_debug("pn_output_internal: atomic mode ignored for append");
+        atomic = false;
+    }
     
     // resolve target file path
     // - string/symbol: treat as filename, create dirs if contains path separator
@@ -185,9 +221,19 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             return ItemError;
         }
         
-        FILE* f = fopen(file_path, mode);
+        // determine actual write path (temp file for atomic writes)
+        StrBuf* temp_path_buf = NULL;
+        const char* write_path = file_path;
+        if (atomic) {
+            temp_path_buf = strbuf_new();
+            generate_temp_path(file_path, temp_path_buf);
+            write_path = temp_path_buf->str;
+        }
+        
+        FILE* f = fopen(write_path, mode);
         if (!f) {
-            log_error("pn_output_internal: failed to open file %s: %s", file_path, strerror(errno));
+            log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -196,14 +242,28 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         fclose(f);
         
         if (written != (size_t)str->len) {
-            log_error("pn_output_internal: failed to write to file %s", file_path);
+            log_error("pn_output_internal: failed to write to file %s", write_path);
+            if (atomic) remove(write_path);  // clean up temp file on error
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
         
+        // atomic: rename temp file to final path
+        if (atomic) {
+            if (atomic_rename(write_path, file_path) != 0) {
+                log_error("pn_output_internal: atomic rename failed: %s -> %s: %s", write_path, file_path, strerror(errno));
+                remove(write_path);  // clean up temp file
+                strbuf_free(temp_path_buf);
+                strbuf_free(path_buf);
+                return ItemError;
+            }
+            strbuf_free(temp_path_buf);
+        }
+        
         log_debug("pn_output_internal: wrote %zu bytes (text) to %s", written, file_path);
         strbuf_free(path_buf);
-        return {.item = ITEM_TRUE};
+        return {.item = i2it((int64_t)written)};
     }
     
     // binary source: output as raw binary data (ignore format)
@@ -215,9 +275,19 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             return ItemError;
         }
         
-        FILE* f = fopen(file_path, mode_binary);
+        // determine actual write path (temp file for atomic writes)
+        StrBuf* temp_path_buf = NULL;
+        const char* write_path = file_path;
+        if (atomic) {
+            temp_path_buf = strbuf_new();
+            generate_temp_path(file_path, temp_path_buf);
+            write_path = temp_path_buf->str;
+        }
+        
+        FILE* f = fopen(write_path, mode_binary);
         if (!f) {
-            log_error("pn_output_internal: failed to open file %s: %s", file_path, strerror(errno));
+            log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -226,14 +296,28 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         fclose(f);
         
         if (written != (size_t)bin->len) {
-            log_error("pn_output_internal: failed to write to file %s", file_path);
+            log_error("pn_output_internal: failed to write to file %s", write_path);
+            if (atomic) remove(write_path);  // clean up temp file on error
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
         
+        // atomic: rename temp file to final path
+        if (atomic) {
+            if (atomic_rename(write_path, file_path) != 0) {
+                log_error("pn_output_internal: atomic rename failed: %s -> %s: %s", write_path, file_path, strerror(errno));
+                remove(write_path);  // clean up temp file
+                strbuf_free(temp_path_buf);
+                strbuf_free(path_buf);
+                return ItemError;
+            }
+            strbuf_free(temp_path_buf);
+        }
+        
         log_debug("pn_output_internal: wrote %zu bytes (binary) to %s", written, file_path);
         strbuf_free(path_buf);
-        return {.item = ITEM_TRUE};
+        return {.item = i2it((int64_t)written)};
     }
     
     // determine format for structured data
@@ -304,11 +388,21 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         return ItemError;
     }
     
+    // determine actual write path (temp file for atomic writes)
+    StrBuf* temp_path_buf = NULL;
+    const char* write_path = file_path;
+    if (atomic) {
+        temp_path_buf = strbuf_new();
+        generate_temp_path(file_path, temp_path_buf);
+        write_path = temp_path_buf->str;
+    }
+    
     // write to file
-    FILE* f = fopen(file_path, mode);
+    FILE* f = fopen(write_path, mode);
     if (!f) {
-        log_error("pn_output_internal: failed to open file %s: %s", file_path, strerror(errno));
+        log_error("pn_output_internal: failed to open file %s: %s", write_path, strerror(errno));
         pool_destroy(temp_pool);
+        if (temp_path_buf) strbuf_free(temp_path_buf);
         strbuf_free(path_buf);
         return ItemError;
     }
@@ -323,9 +417,11 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         fclose(f);
         
         if (written != content_buf->length) {
-            log_error("pn_output_internal: failed to write to file %s", file_path);
+            log_error("pn_output_internal: failed to write to file %s", write_path);
+            if (atomic) remove(write_path);  // clean up temp file on error
             strbuf_free(content_buf);
             pool_destroy(temp_pool);
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -337,6 +433,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             log_error("pn_output_internal: formatting failed");
             fclose(f);
             pool_destroy(temp_pool);
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -345,8 +442,10 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         fclose(f);
         
         if (written != strlen(formatted->chars)) {
-            log_error("pn_output_internal: failed to write to file %s", file_path);
+            log_error("pn_output_internal: failed to write to file %s", write_path);
+            if (atomic) remove(write_path);  // clean up temp file on error
             pool_destroy(temp_pool);
+            if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -354,23 +453,100 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         log_debug("pn_output_internal: wrote %zu bytes (%s) to %s", written, effective_format, file_path);
     }
     
+    // atomic: rename temp file to final path
+    if (atomic) {
+        if (atomic_rename(write_path, file_path) != 0) {
+            log_error("pn_output_internal: atomic rename failed: %s -> %s: %s", write_path, file_path, strerror(errno));
+            remove(write_path);  // clean up temp file
+            pool_destroy(temp_pool);
+            strbuf_free(temp_path_buf);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        strbuf_free(temp_path_buf);
+    }
+    
     pool_destroy(temp_pool);
     strbuf_free(path_buf);
-    return {.item = ITEM_TRUE};
+    return {.item = i2it((int64_t)written)};
 }
 
 // 2-parameter wrapper: output(source, trg) - writes data to target (default format, write mode)
+// Returns: bytes written on success, error on failure
 Item pn_output2(Item source, Item target_item) {
-    return pn_output_internal(source, target_item, NULL, false);
+    return pn_output_internal(source, target_item, NULL, false, false);
 }
 
-// 3-parameter wrapper: output(source, url, format) - explicit format, write mode
-Item pn_output3(Item source, Item url_item, Item format_item) {
-    return pn_output4(source, url_item, format_item, ItemNull);
+// Helper: Get string from map field (returns NULL if not found or wrong type)
+static const char* get_map_string_field(Map* map, const char* field_name) {
+    if (!map) return NULL;
+    
+    String* key = heap_strcpy((char*)field_name, strlen(field_name));
+    Item key_item = {.item = s2it(key)};
+    Item value = map_get(map, key_item);
+    
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_SYMBOL || value_type == LMD_TYPE_STRING) {
+        String* str = value.get_string();
+        if (str && str->chars) {
+            return str->chars;
+        }
+    }
+    return NULL;
 }
 
-// 4-parameter wrapper: output(source, url, format, mode) - with write mode
+// Helper: Get boolean from map field (returns default_val if not found or wrong type)
+static bool get_map_bool_field(Map* map, const char* field_name, bool default_val) {
+    if (!map) return default_val;
+    
+    String* key = heap_strcpy((char*)field_name, strlen(field_name));
+    Item key_item = {.item = s2it(key)};
+    Item value = map_get(map, key_item);
+    
+    TypeId value_type = get_type_id(value);
+    if (value_type == LMD_TYPE_BOOL) {
+        return value.bool_val;
+    }
+    return default_val;
+}
+
+// 3-parameter wrapper: output(source, target, options) - with options map
+// Options map supports:
+//   format: symbol - output format ('json, 'yaml, 'xml, 'html, 'markdown, 'text, 'mark, etc.)
+//   mode: symbol - 'write or 'append (default: 'write)
+//   atomic: bool - write to temp file first, then rename (default: false)
+// Returns: bytes written on success, error on failure
+Item pn_output3(Item source, Item target_item, Item options_item) {
+    const char* format_str = NULL;
+    bool append = false;
+    bool atomic = false;
+    
+    TypeId options_type = get_type_id(options_item);
+    if (options_type == LMD_TYPE_MAP) {
+        Map* options = options_item.map;
+        
+        // extract format option
+        format_str = get_map_string_field(options, "format");
+        
+        // extract mode option
+        const char* mode_str = get_map_string_field(options, "mode");
+        if (mode_str && strcmp(mode_str, "append") == 0) {
+            append = true;
+        }
+        
+        // extract atomic option
+        atomic = get_map_bool_field(options, "atomic", false);
+    } else if (options_type != LMD_TYPE_NULL) {
+        log_error("pn_output3: options must be a map or null, got type %d", options_type);
+        return ItemError;
+    }
+    
+    return pn_output_internal(source, target_item, format_str, append, atomic);
+}
+
+// 4-parameter wrapper: output(source, url, format, mode) - for pipe operators backward compat
 // mode is 'write' or 'append'
+// Returns: bytes written on success, error on failure
 Item pn_output4(Item source, Item target_item, Item format_item, Item mode_item) {
     // determine append mode based on mode parameter
     bool append = false;
@@ -398,7 +574,7 @@ Item pn_output4(Item source, Item target_item, Item format_item, Item mode_item)
     }
     // NULL format means auto-detect
     
-    return pn_output_internal(source, target_item, format_str, append);
+    return pn_output_internal(source, target_item, format_str, append, false);
 }
 
 extern void free_fetch_response(FetchResponse* response);
