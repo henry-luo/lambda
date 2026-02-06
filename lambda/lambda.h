@@ -367,6 +367,8 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 void* heap_calloc(size_t size, TypeId type_id);
 // String creation for name pooling
 String* heap_create_name(const char* name);
+// String creation for runtime strings
+String* heap_strcpy(char* src, int len);
 
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
@@ -628,10 +630,7 @@ typedef struct Context {
     Item pn_output(Item source, Item url, Item format);   // internal: write formatted data to file (with format detection)
     Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target (same as |>)
     Item pn_output3(Item source, Item url, Item format);  // output(data, url, format) - explicit format output
-
-    // pipe-to-file operators (procedural only)
-    Item pn_pipe_file(Item source, Item path);    // |> pipe to file (write, Mark format)
-    Item pn_pipe_append(Item source, Item path);  // |>> pipe to file (append, Mark format)
+    Item pn_output4(Item source, Item url, Item format, Item mode);  // output(data, url, format, mode) - with write mode ('write' or 'append')
 
     // fs module functions (procedural)
     Item pn_fs_copy(Item src, Item dst);

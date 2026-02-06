@@ -198,6 +198,7 @@ func_obj_t func_list[] = {
     {"to_closure_named", (fn_ptr) to_closure_named},
     {"heap_calloc", (fn_ptr) heap_calloc},
     {"heap_create_name", (fn_ptr) heap_create_name},
+    {"heap_strcpy", (fn_ptr) heap_strcpy},  // for creating runtime strings
     {"fn_call", (fn_ptr) fn_call},
     {"fn_call0", (fn_ptr) fn_call0},
     {"fn_call1", (fn_ptr) fn_call1},
@@ -232,9 +233,7 @@ func_obj_t func_list[] = {
     {"pn_fetch", (fn_ptr) pn_fetch},
     {"pn_output2", (fn_ptr) pn_output2},
     {"pn_output3", (fn_ptr) pn_output3},
-    // pipe-to-file procedures
-    {"pn_pipe_file", (fn_ptr) pn_pipe_file},
-    {"pn_pipe_append", (fn_ptr) pn_pipe_append},
+    {"pn_output4", (fn_ptr) pn_output4},
     // fs module procedures
     {"pn_fs_copy", (fn_ptr) pn_fs_copy},
     {"pn_fs_move", (fn_ptr) pn_fs_move},
