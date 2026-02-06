@@ -325,15 +325,74 @@ let fresh = sys!;  // ! suffix forces refresh
 
 The following paths are reserved for future implementation:
 
+### Storage & Disk I/O
 | Path | Description | Inspired by |
 |------|-------------|-------------|
-| `sys.proc.loadavg` | System load averages | `/proc/loadavg` |
+| `sys.disk.devices` | List of disk devices | `/sys/block/`, `diskutil` |
+| `sys.disk.devices[].size` | Device size in bytes | `lsblk`, `diskutil info` |
+| `sys.disk.devices[].model` | Device model name | `/sys/block/*/device/model` |
+| `sys.disk.io.read_bytes` | Total bytes read | `/proc/diskstats` |
+| `sys.disk.io.write_bytes` | Total bytes written | `/proc/diskstats` |
+| `sys.fs.*` | Filesystem info and usage | `df`, `statvfs()` |
 | `sys.proc.mounts` | Mounted filesystems | `/proc/mounts` |
-| `sys.proc.net.*` | Network statistics | `/proc/net/*` |
-| `sys.fs.*` | Filesystem information | `df`, `statvfs()` |
-| `sys.disk.*` | Disk I/O statistics | `/proc/diskstats` |
-| `sys.net.interfaces` | Network interfaces | `getifaddrs()` |
-| `sys.net.connections` | Active connections | `netstat` |
+
+### Network
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.net.interfaces` | Network interface list | `getifaddrs()` |
+| `sys.net.interfaces[].rx_bytes` | Bytes received | `/proc/net/dev` |
+| `sys.net.interfaces[].tx_bytes` | Bytes transmitted | `/proc/net/dev` |
+| `sys.net.connections` | Active TCP/UDP connections | `netstat`, `/proc/net/tcp` |
+| `sys.net.routes` | Routing table | `/proc/net/route` |
+| `sys.net.stats` | Network statistics | `/proc/net/snmp` |
+
+### GPU & Graphics
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.gpu.devices` | List of GPUs | Metal, NVML, Vulkan |
+| `sys.gpu.devices[].name` | GPU name | `"Apple M2 Pro"`, `"RTX 4090"` |
+| `sys.gpu.devices[].memory` | VRAM size | vendor APIs |
+| `sys.gpu.devices[].vendor` | GPU vendor | `"Apple"`, `"NVIDIA"`, `"AMD"` |
+
+### Power & Battery
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.power.battery.percent` | Battery percentage | `IOKit`, `upower` |
+| `sys.power.battery.charging` | Charging status | `IOKit`, `upower` |
+| `sys.power.battery.time_left` | Time remaining (seconds) | `IOKit`, `upower` |
+| `sys.power.ac_power` | AC power connected | `IOKit`, `upower` |
+
+### Process (Extended)
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.proc.[pid].threads` | Thread count | `/proc/[pid]/status` |
+| `sys.proc.[pid].io.read` | I/O bytes read | `/proc/[pid]/io` |
+| `sys.proc.[pid].io.write` | I/O bytes written | `/proc/[pid]/io` |
+| `sys.proc.[pid].start_time` | Process start time | `/proc/[pid]/stat` |
+| `sys.proc.[pid].cpu_time` | Total CPU time used | `getrusage()` |
+| `sys.proc.loadavg` | System load averages | `/proc/loadavg` |
+
+### System Limits
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.limits.open_files` | Max open file descriptors | `getrlimit(RLIMIT_NOFILE)` |
+| `sys.limits.processes` | Max user processes | `getrlimit(RLIMIT_NPROC)` |
+| `sys.limits.memory` | Memory limits | `getrlimit(RLIMIT_AS)` |
+| `sys.limits.stack_size` | Stack size limit | `getrlimit(RLIMIT_STACK)` |
+
+### Users & Sessions
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.users` | Logged-in users | `utmp`, `who` |
+| `sys.users[].name` | Username | `getpwuid()` |
+| `sys.users[].terminal` | Terminal/TTY | `utmp` |
+| `sys.users[].login_time` | Login timestamp | `utmp` |
+
+### Hardware Sensors
+| Path | Description | Inspired by |
+|------|-------------|-------------|
+| `sys.sensors.temperature` | CPU/system temps | `IOKit`, `lm-sensors` |
+| `sys.sensors.fans` | Fan speeds (RPM) | `IOKit`, `lm-sensors` |
 
 > **KIV** = Keep In View. These will be defined in future versions based on use cases.
 

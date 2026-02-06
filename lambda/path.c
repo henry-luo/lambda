@@ -12,6 +12,7 @@
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include "lambda.h"
+#include "sysinfo.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -705,6 +706,18 @@ Item path_resolve_for_iteration(Path* path) {
     // Already resolved?
     if (path->result != 0) {
         return path->result;
+    }
+    
+    // Handle sys.* paths via sysinfo module
+    PathScheme scheme = path_get_scheme(path);
+    if (scheme == PATH_SCHEME_SYS) {
+        Item result = sysinfo_resolve_path(path);
+        // Only cache if resolution succeeded (non-null, non-error)
+        // This allows unresolvable sys paths like sys.config to print as paths
+        if (result != ITEM_NULL && result != ITEM_ERROR) {
+            path->result = result;
+        }
+        return result;
     }
     
     // Handle wildcards specially
