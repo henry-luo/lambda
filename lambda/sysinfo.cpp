@@ -82,6 +82,10 @@ static const int TTL_TIME = 0;        // always fresh
 
 static __thread SysinfoCache* g_cache = nullptr;
 
+// Global storage for command line arguments (set once at startup)
+static int g_argc = 0;
+static char** g_argv = nullptr;
+
 // ============================================================================
 // Forward declarations
 // ============================================================================
@@ -101,6 +105,11 @@ static Item resolve_temp(void);
 // ============================================================================
 // Initialization
 // ============================================================================
+
+extern "C" void sysinfo_set_args(int argc, char** argv) {
+    g_argc = argc;
+    g_argv = argv;
+}
 
 extern "C" void sysinfo_init(void) {
     if (g_cache && g_cache->initialized) return;
@@ -733,6 +742,20 @@ static Item resolve_proc(const char** segments, int count) {
                     return builder.createStringItem(cwd);
                 }
                 return ItemNull;
+            }
+            
+            if (strcmp(field, "args") == 0) {
+                // sys.proc.self.args - return command line arguments as array
+                MarkBuilder builder(input);
+                ArrayBuilder args = builder.array();
+                
+                if (g_argv) {
+                    for (int i = 0; i < g_argc; i++) {
+                        args.append(builder.createStringItem(g_argv[i]));
+                    }
+                }
+                
+                return args.final();
             }
             
             if (strcmp(field, "env") == 0) {
