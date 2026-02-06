@@ -407,6 +407,49 @@ bool target_is_dir(Target* target) {
 }
 
 /**
+ * Check if target exists (file or directory).
+ * For local targets: uses stat()
+ * For remote URLs: returns false (would need HTTP HEAD request)
+ */
+bool target_exists(Target* target) {
+    if (!target) return false;
+    
+    // Remote URLs would need HTTP HEAD request - not supported yet
+    if (target_is_remote(target)) {
+        log_debug("target_exists: remote URLs not supported yet");
+        return false;
+    }
+    
+    struct stat st;
+    
+    if (target->type == TARGET_TYPE_URL && target->url) {
+        const char* pathname = url_get_pathname(target->url);
+        if (!pathname) return false;
+        
+#ifdef _WIN32
+        // Windows: handle /C:/path format
+        if (pathname[0] == '/' && 
+            ((pathname[1] >= 'A' && pathname[1] <= 'Z') || 
+             (pathname[1] >= 'a' && pathname[1] <= 'z')) &&
+            pathname[2] == ':') {
+            pathname++;
+        }
+#endif
+        
+        return (stat(pathname, &st) == 0);
+    }
+    else if (target->type == TARGET_TYPE_PATH && target->path) {
+        StrBuf* path_buf = strbuf_new();
+        path_to_os_path(target->path, path_buf);
+        bool exists = (stat(path_buf->str, &st) == 0);
+        strbuf_free(path_buf);
+        return exists;
+    }
+    
+    return false;
+}
+
+/**
  * Free a Target and its contents.
  * Note: Does NOT free Path objects (they may be shared).
  */
