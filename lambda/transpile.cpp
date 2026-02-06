@@ -447,6 +447,10 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
     case AST_NODE_ASSIGN_STAM:
         pre_define_closure_envs(tp, ((AstAssignStamNode*)node)->value);
         break;
+    case AST_NODE_PIPE_FILE_STAM:
+        pre_define_closure_envs(tp, ((AstBinaryNode*)node)->left);
+        pre_define_closure_envs(tp, ((AstBinaryNode*)node)->right);
+        break;
     case AST_NODE_LIST:  case AST_NODE_CONTENT: {
         AstListNode* list = (AstListNode*)node;
         AstNode* decl = list->declare;
@@ -2050,6 +2054,62 @@ bool has_current_item_ref(AstNode* node);
 // - Without ~: pass whole collection as first argument to function
 // - where: filter items where condition is truthy
 // Implementation: inline the iteration loop similar to for-expression
+
+// Helper: get call node if right side is a call expression (unwrapping primary if needed)
+static AstCallNode* get_pipe_call_node(AstNode* right) {
+    if (!right) return NULL;
+    if (right->node_type == AST_NODE_CALL_EXPR) {
+        return (AstCallNode*)right;
+    }
+    if (right->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)right;
+        if (primary->expr && primary->expr->node_type == AST_NODE_CALL_EXPR) {
+            return (AstCallNode*)primary->expr;
+        }
+    }
+    return NULL;
+}
+
+// Helper: transpile a pipe with call injection: data | func(args) -> func(data, args)
+// For calls with pipe_inject=true, the AST already looked up the correct N+1 arg function
+static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNode* call_node) {
+    AstNode* fn_node = call_node->function;
+    bool is_sys_func = (fn_node->node_type == AST_NODE_SYS_FUNC);
+    
+    if (is_sys_func) {
+        AstSysFuncNode* sys_fn = (AstSysFuncNode*)fn_node;
+        
+        // If pipe_inject is set, the fn_info already points to the N+1 arg version
+        // Just emit the call with left as first arg
+        strbuf_append_str(tp->code_buf, sys_fn->fn_info->is_proc ? "pn_" : "fn_");
+        strbuf_append_str(tp->code_buf, sys_fn->fn_info->name);
+        if (sys_fn->fn_info->is_overloaded) {
+            strbuf_append_int(tp->code_buf, sys_fn->fn_info->arg_count);
+        }
+        strbuf_append_char(tp->code_buf, '(');
+        
+        // First argument: the piped data
+        transpile_box_item(tp, left);
+        
+        // Remaining arguments from original call
+        AstNode* arg = call_node->argument;
+        while (arg) {
+            strbuf_append_str(tp->code_buf, ", ");
+            transpile_box_item(tp, arg);
+            arg = arg->next;
+        }
+        
+        strbuf_append_char(tp->code_buf, ')');
+    } else {
+        // For user-defined functions, fall back to fn_pipe_call
+        strbuf_append_str(tp->code_buf, "fn_pipe_call(");
+        transpile_box_item(tp, left);
+        strbuf_append_str(tp->code_buf, ", ");
+        transpile_box_item(tp, (AstNode*)call_node);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+}
+
 void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     log_debug("transpile pipe expr");
     if (!pipe_node || !pipe_node->left || !pipe_node->right) {
@@ -2063,7 +2123,14 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
 
     if (!uses_current_item && pipe_node->op == OPERATOR_PIPE) {
         // aggregate pipe: pass whole collection as first argument
-        // For now, evaluate left and right, call fn_pipe_call
+        // Check if right side is a call expression - if so, inject left as first arg
+        AstCallNode* call_node = get_pipe_call_node(pipe_node->right);
+        if (call_node) {
+            transpile_pipe_call_inject(tp, pipe_node->left, call_node);
+            return;
+        }
+        
+        // Otherwise, use runtime fn_pipe_call
         strbuf_append_str(tp->code_buf, "fn_pipe_call(");
         transpile_box_item(tp, pipe_node->left);
         strbuf_append_str(tp->code_buf, ", ");
@@ -2257,6 +2324,26 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
     strbuf_append_char(tp->code_buf, ';');
+}
+
+// pipe-to-file statement (procedural only): |> and |>>
+void transpile_pipe_file_stam(Transpiler* tp, AstBinaryNode *pipe_node) {
+    log_debug("transpile pipe file stam");
+    if (!pipe_node || !pipe_node->left || !pipe_node->right) {
+        log_error("Error: invalid pipe_file_node");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        return;
+    }
+
+    // determine which function to call based on operator
+    const char* func_name = (pipe_node->op == OPERATOR_PIPE_APPEND) ? "pn_pipe_append" : "pn_pipe_file";
+    
+    strbuf_append_str(tp->code_buf, func_name);
+    strbuf_append_char(tp->code_buf, '(');
+    transpile_box_item(tp, pipe_node->left);  // source data
+    strbuf_append_str(tp->code_buf, ", ");
+    transpile_box_item(tp, pipe_node->right);  // file path
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 // assignment statement for mutable variables (procedural only)
@@ -4016,6 +4103,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_ASSIGN_STAM:
         transpile_assign_stam(tp, (AstAssignStamNode*)expr_node);
         break;
+    case AST_NODE_PIPE_FILE_STAM:
+        transpile_pipe_file_stam(tp, (AstBinaryNode*)expr_node);
+        break;
     case AST_NODE_ASSIGN:
         transpile_assign_expr(tp, (AstNamedNode*)expr_node);
         break;
@@ -4275,6 +4365,12 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         define_ast_node(tp, assign->value);
+        break;
+    }
+    case AST_NODE_PIPE_FILE_STAM: {
+        AstBinaryNode* pipe_file = (AstBinaryNode*)node;
+        define_ast_node(tp, pipe_file->left);
+        define_ast_node(tp, pipe_file->right);
         break;
     }
     case AST_NODE_ASSIGN: {
