@@ -891,28 +891,26 @@ Item pn_cmd(Item cmd, Item args) {
 // These are procedural functions for file/directory operations
 // ============================================================================
 
-// Helper: Get path string from Item (supports Path, String, and Symbol types)
-static const char* get_path_string(Item path_item, StrBuf** buf_out) {
-    TypeId type_id = get_type_id(path_item);
-    if (type_id == LMD_TYPE_PATH) {
-        Path* path = path_item.path;
-        if (!path) return NULL;
-        StrBuf* buf = strbuf_new();
-        path_to_os_path(path, buf);
-        *buf_out = buf;
-        return buf->str;
-    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
-        String* str = path_item.get_string();
-        if (!str) return NULL;
-        *buf_out = NULL;
-        return str->chars;
+// Helper to extract local path from Item using unified Target API
+// Accepts: Path, String, Symbol
+// Returns StrBuf* that caller must free with strbuf_free()
+// Returns NULL if item cannot be converted to local path (e.g., http:// URLs)
+static StrBuf* get_local_path_from_item(Item item) {
+    Target* target = item_to_target(item.item, NULL);
+    if (!target) {
+        return NULL;
     }
-    return NULL;
-}
-
-// Helper: Free path buffer if allocated
-static void free_path_buf(StrBuf* buf) {
-    if (buf) strbuf_free(buf);
+    
+    // Check if local - fs operations only work on local files
+    if (!target_is_local(target)) {
+        log_error("fs: cannot perform operation on remote URL");
+        target_free(target);
+        return NULL;
+    }
+    
+    StrBuf* path_buf = (StrBuf*)target_to_local_path(target, NULL);
+    target_free(target);
+    return path_buf;
 }
 
 #ifndef _WIN32
@@ -934,16 +932,18 @@ static int remove_callback(const char* path, const struct stat* sb, int typeflag
 
 // fs.copy(src, dst) - Copy file or directory
 Item pn_fs_copy(Item src_item, Item dst_item) {
-    StrBuf *src_buf = NULL, *dst_buf = NULL;
-    const char* src_path = get_path_string(src_item, &src_buf);
-    const char* dst_path = get_path_string(dst_item, &dst_buf);
+    StrBuf* src_buf = get_local_path_from_item(src_item);
+    StrBuf* dst_buf = get_local_path_from_item(dst_item);
     
-    if (!src_path || !dst_path) {
+    if (!src_buf || !dst_buf) {
         log_error("fs.copy: invalid path argument");
-        free_path_buf(src_buf);
-        free_path_buf(dst_buf);
+        if (src_buf) strbuf_free(src_buf);
+        if (dst_buf) strbuf_free(dst_buf);
         return ItemError;
     }
+    
+    const char* src_path = src_buf->str;
+    const char* dst_path = dst_buf->str;
     
     log_debug("fs.copy: %s -> %s", src_path, dst_path);
     
@@ -958,28 +958,31 @@ Item pn_fs_copy(Item src_item, Item dst_item) {
 #endif
     
     int result = system(cmd);
-    free_path_buf(src_buf);
-    free_path_buf(dst_buf);
     
     if (result != 0) {
         log_error("fs.copy: failed to copy %s to %s", src_path, dst_path);
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(src_buf);
+    strbuf_free(dst_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // fs.move(src, dst) - Move/rename file or directory
 Item pn_fs_move(Item src_item, Item dst_item) {
-    StrBuf *src_buf = NULL, *dst_buf = NULL;
-    const char* src_path = get_path_string(src_item, &src_buf);
-    const char* dst_path = get_path_string(dst_item, &dst_buf);
+    StrBuf* src_buf = get_local_path_from_item(src_item);
+    StrBuf* dst_buf = get_local_path_from_item(dst_item);
     
-    if (!src_path || !dst_path) {
+    if (!src_buf || !dst_buf) {
         log_error("fs.move: invalid path argument");
-        free_path_buf(src_buf);
-        free_path_buf(dst_buf);
+        if (src_buf) strbuf_free(src_buf);
+        if (dst_buf) strbuf_free(dst_buf);
         return ItemError;
     }
+    
+    const char* src_path = src_buf->str;
+    const char* dst_path = dst_buf->str;
     
     log_debug("fs.move: %s -> %s", src_path, dst_path);
     
@@ -990,8 +993,8 @@ Item pn_fs_move(Item src_item, Item dst_item) {
         log_debug("fs.move: cross-device move, using copy+delete");
         Item copy_result = pn_fs_copy(src_item, dst_item);
         if (copy_result.item == ItemError.item) {
-            free_path_buf(src_buf);
-            free_path_buf(dst_buf);
+            strbuf_free(src_buf);
+            strbuf_free(dst_buf);
             return ItemError;
         }
         // Delete source after successful copy
@@ -1010,32 +1013,33 @@ Item pn_fs_move(Item src_item, Item dst_item) {
 #endif
     }
     
-    free_path_buf(src_buf);
-    free_path_buf(dst_buf);
-    
     if (result != 0) {
         log_error("fs.move: failed to move %s to %s: %s", src_path, dst_path, strerror(errno));
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(src_buf);
+    strbuf_free(dst_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // fs.delete(path) - Delete file or directory
 Item pn_fs_delete(Item path_item) {
-    StrBuf* path_buf = NULL;
-    const char* path = get_path_string(path_item, &path_buf);
+    StrBuf* path_buf = get_local_path_from_item(path_item);
     
-    if (!path) {
+    if (!path_buf) {
         log_error("fs.delete: invalid path argument");
         return ItemError;
     }
+    
+    const char* path = path_buf->str;
     
     log_debug("fs.delete: %s", path);
     
     struct stat st;
     if (stat(path, &st) != 0) {
         log_error("fs.delete: path does not exist: %s", path);
-        free_path_buf(path_buf);
+        strbuf_free(path_buf);
         return ItemError;
     }
     
@@ -1054,24 +1058,25 @@ Item pn_fs_delete(Item path_item) {
         result = remove(path);
     }
     
-    free_path_buf(path_buf);
-    
     if (result != 0) {
         log_error("fs.delete: failed to delete %s: %s", path, strerror(errno));
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(path_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // fs.mkdir(path) - Create directory (recursive)
 Item pn_fs_mkdir(Item path_item) {
-    StrBuf* path_buf = NULL;
-    const char* path = get_path_string(path_item, &path_buf);
+    StrBuf* path_buf = get_local_path_from_item(path_item);
     
-    if (!path) {
+    if (!path_buf) {
         log_error("fs.mkdir: invalid path argument");
         return ItemError;
     }
+    
+    const char* path = path_buf->str;
     
     log_debug("fs.mkdir: %s", path);
     
@@ -1112,24 +1117,25 @@ Item pn_fs_mkdir(Item path_item) {
     free(path_copy);
 #endif
     
-    free_path_buf(path_buf);
-    
     if (result != 0) {
         log_error("fs.mkdir: failed to create directory %s: %s", path, strerror(errno));
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(path_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // fs.touch(path) - Create file or update modification time
 Item pn_fs_touch(Item path_item) {
-    StrBuf* path_buf = NULL;
-    const char* path = get_path_string(path_item, &path_buf);
+    StrBuf* path_buf = get_local_path_from_item(path_item);
     
-    if (!path) {
+    if (!path_buf) {
         log_error("fs.touch: invalid path argument");
         return ItemError;
     }
+    
+    const char* path = path_buf->str;
     
     log_debug("fs.touch: %s", path);
     
@@ -1157,27 +1163,29 @@ Item pn_fs_touch(Item path_item) {
             fclose(f);
         } else {
             log_error("fs.touch: failed to create file %s: %s", path, strerror(errno));
-            free_path_buf(path_buf);
+            strbuf_free(path_buf);
             return ItemError;
         }
     }
     
-    free_path_buf(path_buf);
+    strbuf_free(path_buf);
     return ItemNull;
 }
 
 // fs.symlink(target, link) - Create symbolic link
 Item pn_fs_symlink(Item target_item, Item link_item) {
-    StrBuf *target_buf = NULL, *link_buf = NULL;
-    const char* target_path = get_path_string(target_item, &target_buf);
-    const char* link_path = get_path_string(link_item, &link_buf);
+    StrBuf* target_buf = get_local_path_from_item(target_item);
+    StrBuf* link_buf = get_local_path_from_item(link_item);
     
-    if (!target_path || !link_path) {
+    if (!target_buf || !link_buf) {
         log_error("fs.symlink: invalid path argument");
-        free_path_buf(target_buf);
-        free_path_buf(link_buf);
+        if (target_buf) strbuf_free(target_buf);
+        if (link_buf) strbuf_free(link_buf);
         return ItemError;
     }
+    
+    const char* target_path = target_buf->str;
+    const char* link_path = link_buf->str;
     
     log_debug("fs.symlink: %s -> %s", link_path, target_path);
     
@@ -1196,27 +1204,28 @@ Item pn_fs_symlink(Item target_item, Item link_item) {
     int result = symlink(target_path, link_path);
 #endif
     
-    free_path_buf(target_buf);
-    free_path_buf(link_buf);
-    
     if (result != 0) {
         log_error("fs.symlink: failed to create symlink %s -> %s: %s", 
                   link_path, target_path, strerror(errno));
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(target_buf);
+    strbuf_free(link_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // fs.chmod(path, mode) - Change file permissions
 // mode can be string like "755" or int like 0755
 Item pn_fs_chmod(Item path_item, Item mode_item) {
-    StrBuf* path_buf = NULL;
-    const char* path = get_path_string(path_item, &path_buf);
+    StrBuf* path_buf = get_local_path_from_item(path_item);
     
-    if (!path) {
+    if (!path_buf) {
         log_error("fs.chmod: invalid path argument");
         return ItemError;
     }
+    
+    const char* path = path_buf->str;
     
     // Parse mode
     int mode = 0;
@@ -1231,7 +1240,7 @@ Item pn_fs_chmod(Item path_item, Item mode_item) {
         }
     } else {
         log_error("fs.chmod: mode must be int or string");
-        free_path_buf(path_buf);
+        strbuf_free(path_buf);
         return ItemError;
     }
     
@@ -1245,39 +1254,41 @@ Item pn_fs_chmod(Item path_item, Item mode_item) {
     int result = chmod(path, mode);
 #endif
     
-    free_path_buf(path_buf);
-    
     if (result != 0) {
         log_error("fs.chmod: failed to change mode of %s: %s", path, strerror(errno));
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(path_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
 // fs.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
 Item pn_fs_rename(Item old_item, Item new_item) {
-    StrBuf *old_buf = NULL, *new_buf = NULL;
-    const char* old_path = get_path_string(old_item, &old_buf);
-    const char* new_path = get_path_string(new_item, &new_buf);
+    StrBuf* old_buf = get_local_path_from_item(old_item);
+    StrBuf* new_buf = get_local_path_from_item(new_item);
     
-    if (!old_path || !new_path) {
+    if (!old_buf || !new_buf) {
         log_error("fs.rename: invalid path argument");
-        free_path_buf(old_buf);
-        free_path_buf(new_buf);
+        if (old_buf) strbuf_free(old_buf);
+        if (new_buf) strbuf_free(new_buf);
         return ItemError;
     }
+    
+    const char* old_path = old_buf->str;
+    const char* new_path = new_buf->str;
     
     log_debug("fs.rename: %s -> %s", old_path, new_path);
     
     int result = rename(old_path, new_path);
     
-    free_path_buf(old_buf);
-    free_path_buf(new_buf);
-    
     if (result != 0) {
         log_error("fs.rename: failed to rename %s to %s: %s", old_path, new_path, strerror(errno));
-        return ItemError;
     }
-    return ItemNull;
+    
+    strbuf_free(old_buf);
+    strbuf_free(new_buf);
+    
+    return (result != 0) ? ItemError : ItemNull;
 }
 
