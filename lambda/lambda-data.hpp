@@ -350,6 +350,7 @@ typedef enum SysFunc {
     SYSPROC_FETCH,
     SYSPROC_OUTPUT2,         // output(source, url) - writes data to target
     SYSPROC_OUTPUT3,         // output(source, url, format) - explicit format
+    SYSPROC_OUTPUT4,         // output(source, url, format, mode) - with write mode
     SYSPROC_CMD,
     // fs module functions
     SYSPROC_FS_COPY,
