@@ -213,6 +213,7 @@ typedef enum AstNodeType {
     AST_NODE_RETURN_STAM,   // return statement (procedural only)
     AST_NODE_VAR_STAM,      // var statement (procedural only)
     AST_NODE_ASSIGN_STAM,   // assignment statement (procedural only)
+    AST_NODE_PIPE_FILE_STAM, // pipe to file statement (procedural only): |> and |>>
     AST_NODE_LET_STAM,
     AST_NODE_PUB_STAM,
     AST_NODE_TYPE_STAM,
@@ -261,6 +262,7 @@ typedef struct AstFieldNode : AstNode {
 typedef struct AstCallNode : AstNode {
     AstNode *function;
     AstNode *argument;
+    bool pipe_inject;  // true if this call has an injected first arg from pipe context
 } AstCallNode;
 
 // Path segment info for AstPathNode
@@ -525,6 +527,9 @@ typedef struct Transpiler : Script {
 
     // Unboxed function transpilation context
     bool in_unboxed_body;      // true when transpiling body of unboxed (_u) version
+
+    // Pipe injection context (for data | func(args) -> func(data, args))
+    int pipe_inject_args;      // extra args to add when looking up sys_func (0 normally, 1 in pipe context)
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

@@ -141,14 +141,253 @@ Item pn_output(Item source, Item url_item, Item format_item) {
     return ItemNull;
 }
 
-// 2-parameter wrapper: output(source, url) - auto-detect format
-Item pn_output2(Item source, Item url_item) {
-    return pn_output(source, url_item, ItemNull);
+// Forward declaration for pn_pipe_file_internal
+static Item pn_pipe_file_internal(Item source, Item target_item, const char* mode, const char* mode_binary);
+
+// 2-parameter wrapper: output(source, trg) - writes data to target
+// Uses same logic as |> operator for consistency
+Item pn_output2(Item source, Item target_item) {
+    return pn_pipe_file_internal(source, target_item, "w", "wb");
 }
 
-// 3-parameter wrapper: output(source, url, format)
+// 3-parameter wrapper: output(source, url, format) - explicit format
+// This variant keeps the old format-based output behavior
 Item pn_output3(Item source, Item url_item, Item format_item) {
     return pn_output(source, url_item, format_item);
+}
+
+// Helper: Create parent directories recursively for a file path
+static int create_parent_dirs(const char* file_path) {
+    char* path_copy = strdup(file_path);
+    if (!path_copy) return -1;
+    
+    // Find last path separator to get directory portion
+    char* last_sep = strrchr(path_copy, '/');
+#ifdef _WIN32
+    char* last_sep_win = strrchr(path_copy, '\\');
+    if (last_sep_win > last_sep) last_sep = last_sep_win;
+#endif
+    
+    if (!last_sep || last_sep == path_copy) {
+        // no directory component or just root
+        free(path_copy);
+        return 0;
+    }
+    
+    *last_sep = '\0';  // truncate to get directory path
+    
+#ifdef _WIN32
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", path_copy);
+    int result = system(cmd);
+    if (result != 0) {
+        DWORD attr = GetFileAttributesA(path_copy);
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            result = 0;
+        }
+    }
+#else
+    char* p = path_copy;
+    int result = 0;
+    
+    if (*p == '/') p++;
+    
+    while (*p) {
+        while (*p && *p != '/') p++;
+        char saved = *p;
+        *p = '\0';
+        
+        if (mkdir(path_copy, 0755) != 0 && errno != EEXIST) {
+            result = -1;
+            break;
+        }
+        
+        *p = saved;
+        if (saved) p++;
+    }
+#endif
+    
+    free(path_copy);
+    return result;
+}
+
+// pipe-to-file internal implementation
+// mode: "w" for write (truncate), "a" for append
+// mode_binary: "wb" or "ab" for binary mode
+static Item pn_pipe_file_internal(Item source, Item target_item, const char* mode, const char* mode_binary) {
+    // resolve target file path
+    // - string/symbol: treat as filename in current working directory
+    // - path: use full path, create directories if needed
+    StrBuf* path_buf = strbuf_new();
+    bool need_create_dirs = false;
+    
+    TypeId target_type = get_type_id(target_item);
+    if (target_type == LMD_TYPE_STRING) {
+        String* str = it2s(target_item);
+        if (!str || !str->chars) {
+            log_error("pn_pipe_file: target string is null");
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        strbuf_append_str(path_buf, str->chars);
+        // if string contains path separator, treat as path and create dirs
+        if (strchr(str->chars, '/') != NULL
+#ifdef _WIN32
+            || strchr(str->chars, '\\') != NULL
+#endif
+        ) {
+            need_create_dirs = true;
+        }
+    } else if (target_type == LMD_TYPE_SYMBOL) {
+        Symbol* sym = target_item.get_symbol();
+        if (!sym || !sym->chars) {
+            log_error("pn_pipe_file: target symbol is null");
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        strbuf_append_str(path_buf, sym->chars);
+        // symbols with path separators also get directory creation
+        if (strchr(sym->chars, '/') != NULL
+#ifdef _WIN32
+            || strchr(sym->chars, '\\') != NULL
+#endif
+        ) {
+            need_create_dirs = true;
+        }
+    } else if (target_type == LMD_TYPE_PATH) {
+        Path* path = target_item.path;
+        if (!path) {
+            log_error("pn_pipe_file: target path is null");
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        path_to_os_path(path, path_buf);
+        need_create_dirs = true;  // paths may need directory creation
+    } else {
+        log_error("pn_pipe_file: target must be string, symbol, or path, got type %d", target_type);
+        strbuf_free(path_buf);
+        return ItemError;
+    }
+    
+    const char* file_path = path_buf->str;
+    log_debug("pn_pipe_file: writing to %s (mode=%s)", file_path, mode);
+    
+    // handle source data based on type
+    TypeId source_type = get_type_id(source);
+    
+    // error: report and return error
+    if (source_type == LMD_TYPE_ERROR) {
+        log_error("pn_pipe_file: cannot pipe error to file");
+        strbuf_free(path_buf);
+        return ItemError;
+    }
+    
+    // create parent directories if needed (for path targets)
+    if (need_create_dirs) {
+        if (create_parent_dirs(file_path) != 0) {
+            log_error("pn_pipe_file: failed to create directories for %s", file_path);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+    }
+    
+    // string: output as raw text
+    if (source_type == LMD_TYPE_STRING) {
+        String* str = it2s(source);
+        if (!str) {
+            log_error("pn_pipe_file: source string is null");
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        FILE* f = fopen(file_path, mode);
+        if (!f) {
+            log_error("pn_pipe_file: failed to open file %s: %s", file_path, strerror(errno));
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        size_t written = fwrite(str->chars, 1, str->len, f);
+        fclose(f);
+        
+        if (written != (size_t)str->len) {
+            log_error("pn_pipe_file: failed to write to file %s", file_path);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        log_debug("pn_pipe_file: wrote %zu bytes (text) to %s", written, file_path);
+        strbuf_free(path_buf);
+        return {.item = ITEM_TRUE};
+    }
+    
+    // binary: output as raw binary data
+    if (source_type == LMD_TYPE_BINARY) {
+        Binary* bin = (Binary*)it2s(source);
+        if (!bin) {
+            log_error("pn_pipe_file: source binary is null");
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        FILE* f = fopen(file_path, mode_binary);
+        if (!f) {
+            log_error("pn_pipe_file: failed to open file %s: %s", file_path, strerror(errno));
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        size_t written = fwrite(bin->chars, 1, bin->len, f);
+        fclose(f);
+        
+        if (written != (size_t)bin->len) {
+            log_error("pn_pipe_file: failed to write to file %s", file_path);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        log_debug("pn_pipe_file: wrote %zu bytes (binary) to %s", written, file_path);
+        strbuf_free(path_buf);
+        return {.item = ITEM_TRUE};
+    }
+    
+    // other data types: format as Lambda/Mark
+    StrBuf* content_buf = strbuf_new_cap(1024);
+    print_item(content_buf, source, 0, NULL);
+    strbuf_append_char(content_buf, '\n');  // add trailing newline
+    
+    FILE* f = fopen(file_path, mode);
+    if (!f) {
+        log_error("pn_pipe_file: failed to open file %s: %s", file_path, strerror(errno));
+        strbuf_free(content_buf);
+        strbuf_free(path_buf);
+        return ItemError;
+    }
+    
+    size_t written = fwrite(content_buf->str, 1, content_buf->length, f);
+    fclose(f);
+    
+    if (written != content_buf->length) {
+        log_error("pn_pipe_file: failed to write to file %s", file_path);
+        strbuf_free(content_buf);
+        strbuf_free(path_buf);
+        return ItemError;
+    }
+    
+    log_debug("pn_pipe_file: wrote %zu bytes (mark) to %s", content_buf->length, file_path);
+    strbuf_free(content_buf);
+    strbuf_free(path_buf);
+    return {.item = ITEM_TRUE};
+}
+
+// |> pipe to file (write)
+Item pn_pipe_file(Item source, Item target) {
+    return pn_pipe_file_internal(source, target, "w", "wb");
+}
+
+// |>> pipe to file (append)
+Item pn_pipe_append(Item source, Item target) {
+    return pn_pipe_file_internal(source, target, "a", "ab");
 }
 
 extern void free_fetch_response(FetchResponse* response);
@@ -486,7 +725,7 @@ Item pn_cmd(Item cmd, Item args) {
 // These are procedural functions for file/directory operations
 // ============================================================================
 
-// Helper: Get path string from Item (supports Path and String types)
+// Helper: Get path string from Item (supports Path, String, and Symbol types)
 static const char* get_path_string(Item path_item, StrBuf** buf_out) {
     TypeId type_id = get_type_id(path_item);
     if (type_id == LMD_TYPE_PATH) {
@@ -496,7 +735,7 @@ static const char* get_path_string(Item path_item, StrBuf** buf_out) {
         path_to_os_path(path, buf);
         *buf_out = buf;
         return buf->str;
-    } else if (type_id == LMD_TYPE_STRING) {
+    } else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         String* str = path_item.get_string();
         if (!str) return NULL;
         *buf_out = NULL;

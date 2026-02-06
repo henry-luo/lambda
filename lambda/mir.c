@@ -232,6 +232,9 @@ func_obj_t func_list[] = {
     {"pn_fetch", (fn_ptr) pn_fetch},
     {"pn_output2", (fn_ptr) pn_output2},
     {"pn_output3", (fn_ptr) pn_output3},
+    // pipe-to-file procedures
+    {"pn_pipe_file", (fn_ptr) pn_pipe_file},
+    {"pn_pipe_append", (fn_ptr) pn_pipe_append},
     // fs module procedures
     {"pn_fs_copy", (fn_ptr) pn_fs_copy},
     {"pn_fs_move", (fn_ptr) pn_fs_move},
