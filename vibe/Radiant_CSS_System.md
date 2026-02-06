@@ -14,59 +14,17 @@ The Lambda CSS system provides complete end-to-end HTML parsing, CSS cascade pro
 
 ### Complete End-to-End Pipeline
 
-```
-HTML Document
-    ↓
-1. Parse HTML → Lambda Element Tree
-   (lambda/input/html/html_parser.c)
-    ↓
-2. Build DomElement Tree with CSS
-   (lambda/input/css/dom_element.hpp/cpp)
-   - Parse external CSS files
-   - Extract <style> elements
-   - Parse inline style="" attributes
-    ↓
-3. Apply CSS Cascade
-   (lambda/input/css/css_engine.h/c)
-   a. External stylesheets (lowest priority)
-   b. Inline <style> elements (medium priority)
-   c. Inline style attributes (highest priority)
-    ↓
-4. Computed Styles stored in DomElement AVL tree
-   - Each element has specified_style AVL tree
-   - Keys: CssPropertyId
-   - Values: StyleNode with winning_decl
-    ↓
-5. Create Document with Lambda CSS DOM
-   (lambda/cmd_layout.cpp - load_lambda_html_doc())
-   - Document.doc_type = DOC_TYPE_LAMBDA_CSS
-   - Document.lambda_dom_root = DomElement tree root
-    ↓
-6. Convert to DomNode Unified Tree
-   (radiant/dom.hpp/cpp)
-   - DomNode wraps both Lexbor and Lambda elements
-   - DomNode.type = MARK_ELEMENT for Lambda CSS
-   - DomNode.style = pointer to DomElement
-    ↓
-7. Resolve CSS Properties to ViewTree
-   (radiant/lambda_css_resolve.cpp)
-   - dom_node_resolve_style() dispatches on node->type
-   - MARK_ELEMENT → resolve_css_styles()
-   - Iterate DomElement AVL tree
-   - resolve_css_property() for each property
-   - Set ViewSpan/ViewBlock properties
-    ↓
-8. Radiant Layout Engine
-   (radiant/layout.cpp)
-   - Compute box model (width, height, margins, padding)
-   - Calculate positions (x, y coordinates)
-   - Text measurement with FreeType
-   - Flexbox/Grid layout algorithms
-    ↓
-9. Output ViewTree with Layout
-   - JSON format with computed dimensions
-   - Complete box model properties
-   - Positioned elements with coordinates
+```mermaid
+flowchart TD
+    A[HTML Document] --> B["1. Parse HTML \u2192 Lambda Element Tree<br><i>lambda/input/html/html_parser.c</i>"]
+    B --> C["2. Build DomElement Tree with CSS<br><i>lambda/input/css/dom_element.hpp/cpp</i><br>\u2022 Parse external CSS files<br>\u2022 Extract style elements<br>\u2022 Parse inline style attributes"]
+    C --> D["3. Apply CSS Cascade<br><i>lambda/input/css/css_engine.h/c</i><br>a. External stylesheets<br>b. Inline style elements<br>c. Inline style attributes"]
+    D --> E["4. Computed Styles in DomElement AVL tree<br>\u2022 Keys: CssPropertyId<br>\u2022 Values: StyleNode with winning_decl"]
+    E --> F["5. Create Document with Lambda CSS DOM<br><i>lambda/cmd_layout.cpp</i><br>\u2022 doc_type = DOC_TYPE_LAMBDA_CSS"]
+    F --> G["6. Convert to DomNode Unified Tree<br><i>radiant/dom.hpp/cpp</i><br>\u2022 DomNode.type = MARK_ELEMENT"]
+    G --> H["7. Resolve CSS Properties to ViewTree<br><i>radiant/lambda_css_resolve.cpp</i><br>\u2022 dom_node_resolve_style()<br>\u2022 resolve_css_property()"]
+    H --> I["8. Radiant Layout Engine<br><i>radiant/layout.cpp</i><br>\u2022 Box model computation<br>\u2022 Position calculation<br>\u2022 Flexbox/Grid algorithms"]
+    I --> J["9. Output ViewTree with Layout<br>\u2022 JSON format<br>\u2022 Computed dimensions<br>\u2022 Positioned elements"]
 ```
 
 ### Components
