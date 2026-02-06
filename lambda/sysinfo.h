@@ -26,6 +26,15 @@ typedef struct Path Path;
 void sysinfo_init(void);
 
 /**
+ * Set command line arguments for sys.proc.self.args access.
+ * Should be called early in main() before any sys path resolution.
+ *
+ * @param argc Argument count from main()
+ * @param argv Argument vector from main()
+ */
+void sysinfo_set_args(int argc, char** argv);
+
+/**
  * Shutdown sysinfo module and free resources.
  */
 void sysinfo_shutdown(void);
