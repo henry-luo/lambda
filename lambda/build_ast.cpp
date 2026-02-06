@@ -125,6 +125,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, trg) -> true/error
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, url, format)
+    {SYSPROC_OUTPUT4, "output", 4, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, url, format, mode)
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
     // fs module functions - procedural (is_proc=true), not method-eligible
     {SYSPROC_FS_COPY, "fs_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},

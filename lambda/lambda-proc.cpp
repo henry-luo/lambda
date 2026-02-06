@@ -156,6 +156,36 @@ Item pn_output3(Item source, Item url_item, Item format_item) {
     return pn_output(source, url_item, format_item);
 }
 
+// 4-parameter wrapper: output(source, url, format, mode) - with write mode
+// mode is 'write' or 'append'
+Item pn_output4(Item source, Item target_item, Item format_item, Item mode_item) {
+    // determine mode strings based on mode parameter
+    const char* mode = "w";
+    const char* mode_binary = "wb";
+    
+    if (get_type_id(mode_item) != LMD_TYPE_NULL) {
+        String* mode_str = it2s(mode_item);
+        if (mode_str && mode_str->chars) {
+            if (strcmp(mode_str->chars, "append") == 0) {
+                mode = "a";
+                mode_binary = "ab";
+            }
+            // 'write' is the default
+        }
+    }
+    
+    // if format is specified, use pn_output with custom format handling
+    // otherwise, use pn_pipe_file_internal for Mark format auto-detection
+    if (get_type_id(format_item) == LMD_TYPE_NULL) {
+        return pn_pipe_file_internal(source, target_item, mode, mode_binary);
+    } else {
+        // explicit format: use pn_output but with mode handling
+        // for now, explicit format always writes (doesn't support append)
+        // TODO: extend pn_output to support append mode
+        return pn_output(source, target_item, format_item);
+    }
+}
+
 // Helper: Create parent directories recursively for a file path
 static int create_parent_dirs(const char* file_path) {
     char* path_copy = strdup(file_path);
@@ -374,20 +404,10 @@ static Item pn_pipe_file_internal(Item source, Item target_item, const char* mod
         return ItemError;
     }
     
-    log_debug("pn_pipe_file: wrote %zu bytes (mark) to %s", content_buf->length, file_path);
+    log_debug("pn_pipe_file_internal: wrote %zu bytes (mark) to %s", content_buf->length, file_path);
     strbuf_free(content_buf);
     strbuf_free(path_buf);
     return {.item = ITEM_TRUE};
-}
-
-// |> pipe to file (write)
-Item pn_pipe_file(Item source, Item target) {
-    return pn_pipe_file_internal(source, target, "w", "wb");
-}
-
-// |>> pipe to file (append)
-Item pn_pipe_append(Item source, Item target) {
-    return pn_pipe_file_internal(source, target, "a", "ab");
 }
 
 extern void free_fetch_response(FetchResponse* response);
