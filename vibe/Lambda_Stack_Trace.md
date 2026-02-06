@@ -1,8 +1,8 @@
 # Lambda Stack Trace Implementation
 
-**Author**: Lambda Development Team  
-**Date**: January 2026  
-**Status**: ✅ Implemented  
+**Author**: Lambda Development Team
+**Date**: January 2026
+**Status**: ✅ Implemented
 
 ## Overview
 
@@ -152,12 +152,12 @@ static inline void* get_frame_pointer(void) {
 StackFrame* walk_mir_frames(void* debug_info) {
     StackFrame* head = NULL;
     StackFrame** tail = &head;
-    
+
     void** fp = (void**)get_frame_pointer();
-    
+
     while (fp != NULL && (uintptr_t)fp > 0x1000) {  // sanity check
         void* return_addr = fp[1];  // LR is at FP+8
-        
+
         // Look up return address in debug info table
         FuncDebugInfo* info = lookup_debug_info(debug_info, return_addr);
         if (info) {
@@ -165,15 +165,15 @@ StackFrame* walk_mir_frames(void* debug_info) {
             frame->function_name = info->lambda_func_name;
             frame->location.file = info->source_file;
             frame->location.line = info->source_line;
-            
+
             *tail = frame;
             tail = &frame->next;
         }
-        
+
         // Follow chain: old FP is at FP+0
         fp = (void**)*fp;
     }
-    
+
     return head;
 }
 ```
@@ -208,30 +208,24 @@ Based on the MIR analysis above, **manual FP chain walking** is the recommended 
 
 ### 4.1 Design Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Stack Trace Capture Flow                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   1. JIT Compile Time: Build Debug Info Table                   │
-│      ┌────────────────────────────────────────┐                 │
-│      │ Address Range  │ Lambda Function Name │                 │
-│      ├────────────────┼──────────────────────┤                 │
-│      │ 0x1000-0x1100  │ "level3"             │                 │
-│      │ 0x1100-0x1200  │ "level2"             │                 │
-│      │ 0x1200-0x1400  │ "level1"             │                 │
-│      │ 0x1400-0x1600  │ "main_expr"          │                 │
-│      └────────────────┴──────────────────────┘                 │
-│                                                                 │
-│   2. On Error: Walk Frame Pointer Chain                         │
-│                                                                 │
-│      Current FP ──► [old FP] ──► [old FP] ──► ...              │
-│                     [LR=0x1050]  [LR=0x1150]                   │
-│                         │            │                          │
-│                         ▼            ▼                          │
-│                     "level3"    "level2"                        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph CompileTime["1. JIT Compile Time: Build Debug Info Table"]
+        direction TB
+        T1["Address Range → Lambda Function Name"]
+        T2["0x1000-0x1100 → level3"]
+        T3["0x1100-0x1200 → level2"]
+        T4["0x1200-0x1400 → level1"]
+        T5["0x1400-0x1600 → main_expr"]
+    end
+
+    subgraph Runtime["2. On Error: Walk Frame Pointer Chain"]
+        FP[Current FP] --> F1["old FP<br>LR=0x1050"]
+        F1 --> F2["old FP<br>LR=0x1150"]
+        F2 --> F3[...]
+        F1 -.-> G1["level3"]
+        F2 -.-> G2["level2"]
+    end
 ```
 
 ### 4.2 Implementation Components
@@ -264,23 +258,23 @@ static inline void* get_current_fp(void) {
 // Walk frame pointer chain and build stack trace
 StackFrame* capture_mir_stack_trace(void* debug_info_table) {
     if (!debug_info_table) return NULL;
-    
+
     StackFrame* head = NULL;
     StackFrame** tail = &head;
     int depth = 0;
     const int MAX_DEPTH = 64;
-    
+
     void** fp = (void**)get_current_fp();
-    
+
     while (fp != NULL && depth < MAX_DEPTH) {
         // Sanity check: FP should be in valid stack range
         if ((uintptr_t)fp < 0x1000 || ((uintptr_t)fp & 0x7) != 0) {
             break;  // Invalid or misaligned FP
         }
-        
+
         // Read return address (LR is stored at FP+8 on ARM64)
         void* return_addr = fp[1];
-        
+
         // Look up in debug info table
         FuncDebugInfo* info = lookup_debug_info(debug_info_table, return_addr);
         if (info && info->lambda_func_name) {
@@ -290,24 +284,24 @@ StackFrame* capture_mir_stack_trace(void* debug_info_table) {
                 frame->location.file = info->source_file;
                 frame->location.line = info->source_line;
                 frame->next = NULL;
-                
+
                 *tail = frame;
                 tail = &frame->next;
                 depth++;
             }
         }
-        
+
         // Follow chain: old FP is stored at FP+0
         void* old_fp = *fp;
-        
+
         // Detect infinite loops or backwards chain
         if ((uintptr_t)old_fp <= (uintptr_t)fp) {
             break;
         }
-        
+
         fp = (void**)old_fp;
     }
-    
+
     return head;
 }
 
@@ -397,7 +391,7 @@ static inline void* get_frame_pointer(void) {
     return fp;
 }
 
-// x86-64: Read current frame pointer  
+// x86-64: Read current frame pointer
 static inline void* get_frame_pointer(void) {
     void* fp;
     __asm__ volatile("mov %%rbp, %0" : "=r"(fp));
@@ -480,7 +474,7 @@ Lambda supports controlling MIR JIT optimization level via CLI:
 ./lambda.exe --optimize=0 script.ls   # Debug mode, best stack traces
 ./lambda.exe --optimize=2 script.ls   # Full optimization (default)
 
-# GCC-style short form  
+# GCC-style short form
 ./lambda.exe -O0 script.ls   # Level 0 - debug
 ./lambda.exe -O1 script.ls   # Level 1 - basic
 ./lambda.exe -O2 script.ls   # Level 2 - full (default)
