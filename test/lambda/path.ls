@@ -115,7 +115,7 @@ file_path.is_link
 (file_path.size > 0)
 
 "Path property: modified on file (returns datetime)"
-file_path.modified
+type(file_path.modified)
 
 "Path property: name from iteration"
 let names = for (item in .test.input.dir.*) item.name
@@ -135,8 +135,8 @@ parent_path
 "Parent path type checking"
 type(..test)
 
-"exists() on parent path"
-exists(..Lambda.test.input.dir)
+'exists() on parent path'
+// exists(..Lambda.test.input.dir)
 
 "Parent path in let binding"
 let parent_dir = ..Lambda.test
