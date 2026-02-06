@@ -497,6 +497,8 @@ static void resolve_sys_paths_recursive(Item item) {
     }
     // Note: Maps and Elements could also contain paths, but for script results
     // we mainly need to handle List/Array which collect top-level expressions
+    // Map/Element traversal was causing segfaults in some edge cases (csv_test)
+    // TODO: Investigate why map->data access crashes for some maps
 }
 
 // Common helper function to execute a compiled script and wrap the result in an Input*

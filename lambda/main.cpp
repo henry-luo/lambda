@@ -22,6 +22,9 @@
 // Error handling with stack traces
 #include "lambda-error.h"
 
+// System info for sys.* paths
+#include "sysinfo.h"
+
 // Graph layout includes
 #include "../radiant/layout_graph.hpp"
 #include "../radiant/graph_to_svg.hpp"
@@ -775,6 +778,9 @@ int main(int argc, char *argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 #endif
+
+    // Store command line args for sys.proc.self.args access
+    sysinfo_set_args(argc, argv);
 
     // Initialize logging system with config file if available
     if (access("log.conf", F_OK) == 0) {
