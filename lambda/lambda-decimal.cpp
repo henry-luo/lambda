@@ -175,14 +175,11 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
     }
     
     new_dec->ref_cnt = 1;
+    new_dec->unlimited = is_unlimited ? 1 : 0;
     new_dec->dec_val = new_dec_val;
     
     Item result;
-    if (is_unlimited) {
-        result.item = c2it_big(new_dec);
-    } else {
-        result.item = c2it(new_dec);
-    }
+    result.item = c2it(new_dec);
     return result;
 }
 
@@ -279,7 +276,7 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     TypeId type = item._type_id;
     
     // If already a decimal, make a copy
-    if (type == LMD_TYPE_DECIMAL || type == LMD_TYPE_DECIMAL_BIG) {
+    if (type == LMD_TYPE_DECIMAL) {
         Decimal* dec_ptr = item.get_decimal();
         if (!dec_ptr || !dec_ptr->dec_val) return NULL;
         
@@ -342,39 +339,37 @@ bool decimal_is_zero(mpd_t* dec) {
 }
 
 bool decimal_is_unlimited(Item item) {
-    return item._type_id == LMD_TYPE_DECIMAL_BIG;
+    if (item._type_id != LMD_TYPE_DECIMAL) return false;
+    Decimal* dec_ptr = item.get_decimal();
+    return dec_ptr && dec_ptr->unlimited;
 }
 
 bool decimal_is_any(Item item) {
-    return item._type_id == LMD_TYPE_DECIMAL || item._type_id == LMD_TYPE_DECIMAL_BIG;
+    return item._type_id == LMD_TYPE_DECIMAL;
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Helper: Push decimal result
 // ─────────────────────────────────────────────────────────────────────
 
-// Macro to convert decimal pointer to Item with appropriate type
-#define c2it_big(decimal_ptr) ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL_BIG)<<56) | (uint64_t)(decimal_ptr)): null)
+// Helper: Push decimal result
+// ─────────────────────────────────────────────────────────────────────
 
 Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited) {
     if (!mpd_val) return ItemError;
     
-    TypeId type_id = is_unlimited ? LMD_TYPE_DECIMAL_BIG : LMD_TYPE_DECIMAL;
-    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), type_id);
+    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
     if (!decimal) {
         mpd_del(mpd_val);
         return ItemError;
     }
     
     decimal->ref_cnt = 1;
+    decimal->unlimited = is_unlimited ? 1 : 0;
     decimal->dec_val = mpd_val;
     
     Item result;
-    if (is_unlimited) {
-        result.item = c2it_big(decimal);
-    } else {
-        result.item = c2it(decimal);
-    }
+    result.item = c2it(decimal);
     return result;
 }
 
@@ -384,7 +379,16 @@ Item decimal_push_result(mpd_t* mpd_val, bool is_unlimited) {
 
 // Helper: determine if result should be unlimited based on operands
 static bool should_be_unlimited(Item a, Item b) {
-    return a._type_id == LMD_TYPE_DECIMAL_BIG || b._type_id == LMD_TYPE_DECIMAL_BIG;
+    // Check if either operand is an unlimited decimal
+    if (a._type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_a = a.get_decimal();
+        if (dec_a && dec_a->unlimited) return true;
+    }
+    if (b._type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_b = b.get_decimal();
+        if (dec_b && dec_b->unlimited) return true;
+    }
+    return false;
 }
 
 // Helper: get appropriate context based on operand types
