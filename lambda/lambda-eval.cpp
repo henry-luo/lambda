@@ -1136,6 +1136,7 @@ extern "C" TypeId item_type_id(Item item) {
 }
 
 extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
+extern "C" Input* input_from_target(Target* target, String* type, String* flavor);
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     log_debug("input_data at: %s, type: %s, flavor: %s",
@@ -1145,14 +1146,25 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
 }
 
-Item fn_input2(Item url, Item type) {
-    String *url_str, *type_str = NULL, *flavor_str = NULL;
-    if (url._type_id != LMD_TYPE_STRING && url._type_id != LMD_TYPE_SYMBOL) {
-        log_debug("input url must be a string or symbol, got type %d", url._type_id);
+Item fn_input2(Item target_item, Item type) {
+    String *type_str = NULL, *flavor_str = NULL;
+    
+    // Validate target type: must be string, symbol, or path
+    TypeId target_type_id = get_type_id(target_item);
+    if (target_type_id != LMD_TYPE_STRING && target_type_id != LMD_TYPE_SYMBOL && target_type_id != LMD_TYPE_PATH) {
+        log_debug("input target must be a string, symbol, or path, got type %d", target_type_id);
         return ItemNull;  // todo: push error
     }
-    else { url_str = url.get_string(); }
-    log_debug("input url: %s", url_str->chars);
+    
+    // Convert target Item to Target struct
+    Url* cwd = context ? (Url*)context->cwd : NULL;
+    Target* target = item_to_target(target_item.item, cwd);
+    if (!target) {
+        log_error("fn_input2: failed to convert item to target");
+        return ItemNull;
+    }
+    
+    log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
 
     TypeId type_id = get_type_id(type);
     if (type_id == LMD_TYPE_NULL) {
@@ -1203,17 +1215,23 @@ Item fn_input2(Item url, Item type) {
     }
     else {
         log_debug("input type must be a string, symbol, or map, got type %d", type_id);
+        target_free(target);
         return ItemNull;  // todo: push error
     }
 
     // Check if context is properly initialized
     if (!context) {
         log_debug("Error: context is NULL in fn_input");
+        target_free(target);
         return ItemNull;
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    Input *input = input_data(context, url_str, type_str, flavor_str);
+    
+    // Use the new target-based input function
+    Input *input = input_from_target(target, type_str, flavor_str);
+    target_free(target);
+    
     // todo: input should be cached in context
     return (input && input->root.item) ? input->root : ItemNull;
 }

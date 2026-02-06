@@ -348,6 +348,76 @@ Item path_load_content(Path* path);                               // Load path c
 int64_t path_get_length(Path* path);                              // Get path content length (triggers load)
 Item path_get_item(Path* path, int64_t index);                    // Get item at index (triggers load)
 
+// ============================================================================
+// Target: Unified I/O target for input/output operations
+// ============================================================================
+// Supports both URL strings and Lambda Path objects
+// - URLs: file://, http://, https://, sys:// etc. (parsed from string/symbol)
+// - Paths: Lambda's cross-platform path type
+
+// Forward declaration for Url (defined in lib/url.h)
+typedef struct Url Url;
+
+// Target scheme (derived from URL or Path)
+typedef enum {
+    TARGET_SCHEME_FILE = 0,     // local file (file:// or relative path)
+    TARGET_SCHEME_HTTP,         // HTTP URL
+    TARGET_SCHEME_HTTPS,        // HTTPS URL
+    TARGET_SCHEME_SYS,          // system info (sys://)
+    TARGET_SCHEME_FTP,          // FTP (future)
+    TARGET_SCHEME_DATA,         // data: URL (future)
+    TARGET_SCHEME_UNKNOWN       // unrecognized scheme
+} TargetScheme;
+
+// Target type (how the target was specified)
+typedef enum {
+    TARGET_TYPE_URL = 0,        // parsed from URL string
+    TARGET_TYPE_PATH            // Lambda Path object
+} TargetType;
+
+// Target structure - unified I/O target
+typedef struct Target {
+    TargetScheme scheme;        // scheme type (file, http, https, sys, etc.)
+    TargetType type;            // source type (url or path)
+    const char* original;       // original input string (for relative path preservation)
+    union {
+        Url* url;               // parsed URL (when type == TARGET_TYPE_URL)
+        Path* path;             // Lambda Path (when type == TARGET_TYPE_PATH)
+    };
+} Target;
+
+// Target API (defined in target.c)
+// item_to_target: Convert Item to Target
+// - string/symbol: parse as URL
+// - path: use directly
+// - other types: return error
+// Note: Takes uint64_t to avoid C/C++ Item type mismatch
+Target* item_to_target(uint64_t item, Url* cwd);
+
+// target_to_local_path: Convert Target to local OS file path
+// - Resolves relative paths against cwd
+// - Returns NULL for non-file schemes (http, https, etc.)
+// - Caller must free the returned StrBuf
+void* target_to_local_path(Target* target, Url* cwd);
+
+// target_to_url_string: Get URL string representation
+// - For URL targets: returns href
+// - For Path targets: converts to URL string (file:// for local paths)
+const char* target_to_url_string(Target* target, void* out_buf);
+
+// target_is_local: Check if target is a local file (not http/https)
+bool target_is_local(Target* target);
+
+// target_is_remote: Check if target is a remote URL (http/https)
+bool target_is_remote(Target* target);
+
+// target_is_dir: Check if target is a directory (local targets only)
+// Returns false for remote URLs or if stat fails
+bool target_is_dir(Target* target);
+
+// target_free: Free target and its contents
+void target_free(Target* target);
+
 // Path resolution for iteration (returns list for dirs, content for files)
 Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration
 bool path_ends_with_wildcard(Path* path);                         // Check if leaf is * or **
