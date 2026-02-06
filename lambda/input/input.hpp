@@ -55,6 +55,11 @@ Input* input_from_source(const char* source, Url* url, String* type, String* fla
 Input* input_from_directory(const char* directory_path, const char* original_url, bool recursive, int max_depth);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
+// Target-based input (unified I/O target handling)
+// Uses Target struct from lambda.h for unified URL/Path handling
+struct Target;  // forward declaration
+Input* input_from_target(struct Target* target, String* type, String* flavor);
+
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
 void cleanup_math_parser();  // Call at program exit to free resources

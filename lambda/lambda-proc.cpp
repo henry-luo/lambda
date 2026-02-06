@@ -138,62 +138,50 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         atomic = false;
     }
     
-    // resolve target file path
-    // - string/symbol: treat as filename, create dirs if contains path separator
-    // - path: use full path, create directories if needed
-    StrBuf* path_buf = strbuf_new();
-    bool need_create_dirs = false;
-    
+    // Validate target type: must be string, symbol, or path
     TypeId target_type = get_type_id(target_item);
-    if (target_type == LMD_TYPE_STRING) {
-        String* str = it2s(target_item);
-        if (!str || !str->chars) {
-            log_error("pn_output_internal: target string is null");
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-        strbuf_append_str(path_buf, str->chars);
-        // if string contains path separator, treat as path and create dirs
-        if (strchr(str->chars, '/') != NULL
-#ifdef _WIN32
-            || strchr(str->chars, '\\') != NULL
-#endif
-        ) {
-            need_create_dirs = true;
-        }
-    } else if (target_type == LMD_TYPE_SYMBOL) {
-        Symbol* sym = target_item.get_symbol();
-        if (!sym || !sym->chars) {
-            log_error("pn_output_internal: target symbol is null");
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-        strbuf_append_str(path_buf, sym->chars);
-        // symbols with path separators also get directory creation
-        if (strchr(sym->chars, '/') != NULL
-#ifdef _WIN32
-            || strchr(sym->chars, '\\') != NULL
-#endif
-        ) {
-            need_create_dirs = true;
-        }
-    } else if (target_type == LMD_TYPE_PATH) {
-        Path* path = target_item.path;
-        if (!path) {
-            log_error("pn_output_internal: target path is null");
-            strbuf_free(path_buf);
-            return ItemError;
-        }
-        path_to_os_path(path, path_buf);
-        need_create_dirs = true;  // paths may need directory creation
-    } else {
+    if (target_type != LMD_TYPE_STRING && target_type != LMD_TYPE_SYMBOL && target_type != LMD_TYPE_PATH) {
         log_error("pn_output_internal: target must be string, symbol, or path, got type %d", target_type);
-        strbuf_free(path_buf);
+        return ItemError;
+    }
+    
+    // Convert target to unified Target struct
+    Url* cwd = context ? (Url*)context->cwd : NULL;
+    Target* target = item_to_target(target_item.item, cwd);
+    if (!target) {
+        log_error("pn_output_internal: failed to convert item to target");
+        return ItemError;
+    }
+    
+    // Check if target is writable (local file only)
+    if (!target_is_local(target)) {
+        log_error("pn_output_internal: cannot write to remote URL (scheme=%d)", target->scheme);
+        target_free(target);
+        return ItemError;
+    }
+    
+    // Get local file path from target
+    StrBuf* path_buf = (StrBuf*)target_to_local_path(target, cwd);
+    if (!path_buf || !path_buf->str || path_buf->length == 0) {
+        log_error("pn_output_internal: failed to resolve target to local path");
+        target_free(target);
+        if (path_buf) strbuf_free(path_buf);
         return ItemError;
     }
     
     const char* file_path = path_buf->str;
     log_debug("pn_output_internal: writing to %s (mode=%s, format=%s)", file_path, mode, format_str ? format_str : "auto");
+    
+    // Always try to create parent directories for resolved paths
+    if (create_parent_dirs(file_path) != 0) {
+        log_error("pn_output_internal: failed to create directories for %s", file_path);
+        strbuf_free(path_buf);
+        target_free(target);
+        return ItemError;
+    }
+    
+    // Clean up target (no longer needed)
+    target_free(target);
     
     // handle error source: report and return error
     TypeId source_type = get_type_id(source);
@@ -201,15 +189,6 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         log_error("pn_output_internal: cannot output error to file");
         strbuf_free(path_buf);
         return ItemError;
-    }
-    
-    // create parent directories if needed
-    if (need_create_dirs) {
-        if (create_parent_dirs(file_path) != 0) {
-            log_error("pn_output_internal: failed to create directories for %s", file_path);
-            strbuf_free(path_buf);
-            return ItemError;
-        }
     }
     
     // string source: output as raw text (ignore format)
