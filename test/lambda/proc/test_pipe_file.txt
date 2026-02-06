@@ -9,4 +9,13 @@ Symbol target content:
 { test: "symbol target"}
 Scalar file content:
 42
+Test 6 - output4 write: true
+Output4 write content:
+{ mode: "write", test: 6}
+Test 7 - output4 append: true
+Output4 after append:
+{ mode: "write", test: 6}
+{ mode: "append", test: 7}
+Output4 after overwrite:
+{ mode: "overwrite", test: 8}
 done

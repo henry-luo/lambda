@@ -38,154 +38,6 @@ Item pn_print(Item item) {
     return ItemNull;
 }
 
-// output(source, url, format?) - write formatted data to file
-// source: data to output
-// url: file path to write to
-// format: optional symbol for format type ('json, 'yaml, 'html, etc.)
-//         if omitted, auto-detect from file extension
-Item pn_output(Item source, Item url_item, Item format_item) {
-    // validate url parameter
-    TypeId url_type = get_type_id(url_item);
-    if (url_type != LMD_TYPE_STRING) {
-        log_error("pn_output: url must be a string, got type %d", url_type);
-        return ItemError;
-    }
-    String* url = it2s(url_item);
-    if (!url || !url->chars) {
-        log_error("pn_output: url string is null");
-        return ItemError;
-    }
-    
-    log_debug("pn_output: writing to %s", url->chars);
-    
-    // determine format - from parameter or auto-detect from extension
-    const char* format_str = NULL;
-    TypeId format_type = get_type_id(format_item);
-    
-    if (format_type == LMD_TYPE_SYMBOL) {
-        String* format_sym = it2s(format_item);
-        if (format_sym && format_sym->chars) {
-            format_str = format_sym->chars;
-        }
-    } else if (format_type != LMD_TYPE_NULL) {
-        log_error("pn_output: format must be a symbol, got type %d", format_type);
-        return ItemError;
-    }
-    
-    // auto-detect format from file extension if not specified
-    if (!format_str) {
-        const char* dot = strrchr(url->chars, '.');
-        if (dot) {
-            const char* ext = dot + 1;
-            if (strcmp(ext, "json") == 0) format_str = "json";
-            else if (strcmp(ext, "yaml") == 0 || strcmp(ext, "yml") == 0) format_str = "yaml";
-            else if (strcmp(ext, "xml") == 0) format_str = "xml";
-            else if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) format_str = "html";
-            else if (strcmp(ext, "md") == 0) format_str = "markdown";
-            else if (strcmp(ext, "csv") == 0) format_str = "csv";
-            else if (strcmp(ext, "txt") == 0) format_str = "text";
-            else if (strcmp(ext, "toml") == 0) format_str = "toml";
-            else if (strcmp(ext, "ini") == 0) format_str = "ini";
-            else if (strcmp(ext, "ls") == 0 || strcmp(ext, "mark") == 0) format_str = "mark";
-            else format_str = "json";  // default to json
-        } else {
-            format_str = "json";  // default to json if no extension
-        }
-    }
-    
-    log_debug("pn_output: using format '%s'", format_str);
-    
-    // format the data
-    Pool* temp_pool = pool_create();
-    String* formatted = NULL;
-    
-    if (strcmp(format_str, "json") == 0) {
-        formatted = format_json(temp_pool, source);
-    } else if (strcmp(format_str, "yaml") == 0) {
-        formatted = format_yaml(temp_pool, source);
-    } else if (strcmp(format_str, "xml") == 0) {
-        formatted = format_xml(temp_pool, source);
-    } else if (strcmp(format_str, "html") == 0) {
-        formatted = format_html(temp_pool, source);
-    } else if (strcmp(format_str, "markdown") == 0) {
-        StringBuf* sb = stringbuf_new(temp_pool);
-        format_markdown(sb, source);
-        formatted = stringbuf_to_string(sb);
-        stringbuf_free(sb);
-    } else if (strcmp(format_str, "text") == 0) {
-        formatted = format_text_string(temp_pool, source);
-    } else if (strcmp(format_str, "toml") == 0) {
-        formatted = format_toml(temp_pool, source);
-    } else if (strcmp(format_str, "ini") == 0) {
-        formatted = format_ini(temp_pool, source);
-    } else if (strcmp(format_str, "mark") == 0) {
-        // For mark format, use JSON as fallback for now
-        formatted = format_json(temp_pool, source);
-    } else {
-        log_error("pn_output: unsupported format '%s'", format_str);
-        pool_destroy(temp_pool);
-        return ItemError;
-    }
-    
-    if (!formatted || !formatted->chars) {
-        log_error("pn_output: formatting failed");
-        pool_destroy(temp_pool);
-        return ItemError;
-    }
-    
-    // write to file
-    write_text_file(url->chars, formatted->chars);
-    log_debug("pn_output: wrote %zu bytes to %s", strlen(formatted->chars), url->chars);
-    
-    pool_destroy(temp_pool);
-    return ItemNull;
-}
-
-// Forward declaration for pn_pipe_file_internal
-static Item pn_pipe_file_internal(Item source, Item target_item, const char* mode, const char* mode_binary);
-
-// 2-parameter wrapper: output(source, trg) - writes data to target
-// Uses same logic as |> operator for consistency
-Item pn_output2(Item source, Item target_item) {
-    return pn_pipe_file_internal(source, target_item, "w", "wb");
-}
-
-// 3-parameter wrapper: output(source, url, format) - explicit format
-// This variant keeps the old format-based output behavior
-Item pn_output3(Item source, Item url_item, Item format_item) {
-    return pn_output(source, url_item, format_item);
-}
-
-// 4-parameter wrapper: output(source, url, format, mode) - with write mode
-// mode is 'write' or 'append'
-Item pn_output4(Item source, Item target_item, Item format_item, Item mode_item) {
-    // determine mode strings based on mode parameter
-    const char* mode = "w";
-    const char* mode_binary = "wb";
-    
-    if (get_type_id(mode_item) != LMD_TYPE_NULL) {
-        String* mode_str = it2s(mode_item);
-        if (mode_str && mode_str->chars) {
-            if (strcmp(mode_str->chars, "append") == 0) {
-                mode = "a";
-                mode_binary = "ab";
-            }
-            // 'write' is the default
-        }
-    }
-    
-    // if format is specified, use pn_output with custom format handling
-    // otherwise, use pn_pipe_file_internal for Mark format auto-detection
-    if (get_type_id(format_item) == LMD_TYPE_NULL) {
-        return pn_pipe_file_internal(source, target_item, mode, mode_binary);
-    } else {
-        // explicit format: use pn_output but with mode handling
-        // for now, explicit format always writes (doesn't support append)
-        // TODO: extend pn_output to support append mode
-        return pn_output(source, target_item, format_item);
-    }
-}
-
 // Helper: Create parent directories recursively for a file path
 static int create_parent_dirs(const char* file_path) {
     char* path_copy = strdup(file_path);
@@ -241,12 +93,17 @@ static int create_parent_dirs(const char* file_path) {
     return result;
 }
 
-// pipe-to-file internal implementation
-// mode: "w" for write (truncate), "a" for append
-// mode_binary: "wb" or "ab" for binary mode
-static Item pn_pipe_file_internal(Item source, Item target_item, const char* mode, const char* mode_binary) {
+// Unified output implementation
+// source: data to output
+// target_item: file path (String, Symbol, or Path)
+// format_str: optional format type ('json, 'yaml, 'html, etc.), NULL for auto-detect
+// append: true for append mode, false for write (truncate) mode
+static Item pn_output_internal(Item source, Item target_item, const char* format_str, bool append) {
+    const char* mode = append ? "a" : "w";
+    const char* mode_binary = append ? "ab" : "wb";
+    
     // resolve target file path
-    // - string/symbol: treat as filename in current working directory
+    // - string/symbol: treat as filename, create dirs if contains path separator
     // - path: use full path, create directories if needed
     StrBuf* path_buf = strbuf_new();
     bool need_create_dirs = false;
@@ -255,7 +112,7 @@ static Item pn_pipe_file_internal(Item source, Item target_item, const char* mod
     if (target_type == LMD_TYPE_STRING) {
         String* str = it2s(target_item);
         if (!str || !str->chars) {
-            log_error("pn_pipe_file: target string is null");
+            log_error("pn_output_internal: target string is null");
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -271,7 +128,7 @@ static Item pn_pipe_file_internal(Item source, Item target_item, const char* mod
     } else if (target_type == LMD_TYPE_SYMBOL) {
         Symbol* sym = target_item.get_symbol();
         if (!sym || !sym->chars) {
-            log_error("pn_pipe_file: target symbol is null");
+            log_error("pn_output_internal: target symbol is null");
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -287,52 +144,50 @@ static Item pn_pipe_file_internal(Item source, Item target_item, const char* mod
     } else if (target_type == LMD_TYPE_PATH) {
         Path* path = target_item.path;
         if (!path) {
-            log_error("pn_pipe_file: target path is null");
+            log_error("pn_output_internal: target path is null");
             strbuf_free(path_buf);
             return ItemError;
         }
         path_to_os_path(path, path_buf);
         need_create_dirs = true;  // paths may need directory creation
     } else {
-        log_error("pn_pipe_file: target must be string, symbol, or path, got type %d", target_type);
+        log_error("pn_output_internal: target must be string, symbol, or path, got type %d", target_type);
         strbuf_free(path_buf);
         return ItemError;
     }
     
     const char* file_path = path_buf->str;
-    log_debug("pn_pipe_file: writing to %s (mode=%s)", file_path, mode);
+    log_debug("pn_output_internal: writing to %s (mode=%s, format=%s)", file_path, mode, format_str ? format_str : "auto");
     
-    // handle source data based on type
+    // handle error source: report and return error
     TypeId source_type = get_type_id(source);
-    
-    // error: report and return error
     if (source_type == LMD_TYPE_ERROR) {
-        log_error("pn_pipe_file: cannot pipe error to file");
+        log_error("pn_output_internal: cannot output error to file");
         strbuf_free(path_buf);
         return ItemError;
     }
     
-    // create parent directories if needed (for path targets)
+    // create parent directories if needed
     if (need_create_dirs) {
         if (create_parent_dirs(file_path) != 0) {
-            log_error("pn_pipe_file: failed to create directories for %s", file_path);
+            log_error("pn_output_internal: failed to create directories for %s", file_path);
             strbuf_free(path_buf);
             return ItemError;
         }
     }
     
-    // string: output as raw text
+    // string source: output as raw text (ignore format)
     if (source_type == LMD_TYPE_STRING) {
         String* str = it2s(source);
         if (!str) {
-            log_error("pn_pipe_file: source string is null");
+            log_error("pn_output_internal: source string is null");
             strbuf_free(path_buf);
             return ItemError;
         }
         
         FILE* f = fopen(file_path, mode);
         if (!f) {
-            log_error("pn_pipe_file: failed to open file %s: %s", file_path, strerror(errno));
+            log_error("pn_output_internal: failed to open file %s: %s", file_path, strerror(errno));
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -341,28 +196,28 @@ static Item pn_pipe_file_internal(Item source, Item target_item, const char* mod
         fclose(f);
         
         if (written != (size_t)str->len) {
-            log_error("pn_pipe_file: failed to write to file %s", file_path);
+            log_error("pn_output_internal: failed to write to file %s", file_path);
             strbuf_free(path_buf);
             return ItemError;
         }
         
-        log_debug("pn_pipe_file: wrote %zu bytes (text) to %s", written, file_path);
+        log_debug("pn_output_internal: wrote %zu bytes (text) to %s", written, file_path);
         strbuf_free(path_buf);
         return {.item = ITEM_TRUE};
     }
     
-    // binary: output as raw binary data
+    // binary source: output as raw binary data (ignore format)
     if (source_type == LMD_TYPE_BINARY) {
         Binary* bin = (Binary*)it2s(source);
         if (!bin) {
-            log_error("pn_pipe_file: source binary is null");
+            log_error("pn_output_internal: source binary is null");
             strbuf_free(path_buf);
             return ItemError;
         }
         
         FILE* f = fopen(file_path, mode_binary);
         if (!f) {
-            log_error("pn_pipe_file: failed to open file %s: %s", file_path, strerror(errno));
+            log_error("pn_output_internal: failed to open file %s: %s", file_path, strerror(errno));
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -371,43 +226,179 @@ static Item pn_pipe_file_internal(Item source, Item target_item, const char* mod
         fclose(f);
         
         if (written != (size_t)bin->len) {
-            log_error("pn_pipe_file: failed to write to file %s", file_path);
+            log_error("pn_output_internal: failed to write to file %s", file_path);
             strbuf_free(path_buf);
             return ItemError;
         }
         
-        log_debug("pn_pipe_file: wrote %zu bytes (binary) to %s", written, file_path);
+        log_debug("pn_output_internal: wrote %zu bytes (binary) to %s", written, file_path);
         strbuf_free(path_buf);
         return {.item = ITEM_TRUE};
     }
     
-    // other data types: format as Lambda/Mark
-    StrBuf* content_buf = strbuf_new_cap(1024);
-    print_item(content_buf, source, 0, NULL);
-    strbuf_append_char(content_buf, '\n');  // add trailing newline
+    // determine format for structured data
+    const char* effective_format = format_str;
+    if (!effective_format) {
+        // auto-detect format from file extension
+        const char* dot = strrchr(file_path, '.');
+        if (dot) {
+            const char* ext = dot + 1;
+            if (strcmp(ext, "json") == 0) effective_format = "json";
+            else if (strcmp(ext, "yaml") == 0 || strcmp(ext, "yml") == 0) effective_format = "yaml";
+            else if (strcmp(ext, "xml") == 0) effective_format = "xml";
+            else if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) effective_format = "html";
+            else if (strcmp(ext, "md") == 0) effective_format = "markdown";
+            else if (strcmp(ext, "csv") == 0) effective_format = "csv";
+            else if (strcmp(ext, "txt") == 0) effective_format = "text";
+            else if (strcmp(ext, "toml") == 0) effective_format = "toml";
+            else if (strcmp(ext, "ini") == 0) effective_format = "ini";
+            else if (strcmp(ext, "ls") == 0 || strcmp(ext, "mark") == 0 || strcmp(ext, "mk") == 0) effective_format = "mark";
+            // unknown extension: leave as NULL for fallback handling below
+        }
+        // no extension or unknown extension: effective_format remains NULL
+    }
     
+    // fallback when format not detected: based on data type
+    if (!effective_format) {
+        if (source_type == LMD_TYPE_STRING) {
+            effective_format = "text";
+        } else if (source_type == LMD_TYPE_BINARY) {
+            effective_format = "binary";
+        } else {
+            effective_format = "mark";  // default to mark for structured data
+        }
+    }
+    
+    log_debug("pn_output_internal: using format '%s'", effective_format);
+    
+    // format the data
+    Pool* temp_pool = pool_create();
+    String* formatted = NULL;
+    bool use_mark_format = false;
+    
+    if (strcmp(effective_format, "json") == 0) {
+        formatted = format_json(temp_pool, source);
+    } else if (strcmp(effective_format, "yaml") == 0) {
+        formatted = format_yaml(temp_pool, source);
+    } else if (strcmp(effective_format, "xml") == 0) {
+        formatted = format_xml(temp_pool, source);
+    } else if (strcmp(effective_format, "html") == 0) {
+        formatted = format_html(temp_pool, source);
+    } else if (strcmp(effective_format, "markdown") == 0) {
+        StringBuf* sb = stringbuf_new(temp_pool);
+        format_markdown(sb, source);
+        formatted = stringbuf_to_string(sb);
+        stringbuf_free(sb);
+    } else if (strcmp(effective_format, "text") == 0) {
+        formatted = format_text_string(temp_pool, source);
+    } else if (strcmp(effective_format, "toml") == 0) {
+        formatted = format_toml(temp_pool, source);
+    } else if (strcmp(effective_format, "ini") == 0) {
+        formatted = format_ini(temp_pool, source);
+    } else if (strcmp(effective_format, "mark") == 0) {
+        use_mark_format = true;
+    } else {
+        log_error("pn_output_internal: unsupported format '%s'", effective_format);
+        pool_destroy(temp_pool);
+        strbuf_free(path_buf);
+        return ItemError;
+    }
+    
+    // write to file
     FILE* f = fopen(file_path, mode);
     if (!f) {
-        log_error("pn_pipe_file: failed to open file %s: %s", file_path, strerror(errno));
-        strbuf_free(content_buf);
+        log_error("pn_output_internal: failed to open file %s: %s", file_path, strerror(errno));
+        pool_destroy(temp_pool);
         strbuf_free(path_buf);
         return ItemError;
     }
     
-    size_t written = fwrite(content_buf->str, 1, content_buf->length, f);
-    fclose(f);
-    
-    if (written != content_buf->length) {
-        log_error("pn_pipe_file: failed to write to file %s", file_path);
+    size_t written;
+    if (use_mark_format) {
+        // use print_item for native Mark format
+        StrBuf* content_buf = strbuf_new_cap(1024);
+        print_item(content_buf, source, 0, NULL);
+        strbuf_append_char(content_buf, '\n');  // add trailing newline
+        written = fwrite(content_buf->str, 1, content_buf->length, f);
+        fclose(f);
+        
+        if (written != content_buf->length) {
+            log_error("pn_output_internal: failed to write to file %s", file_path);
+            strbuf_free(content_buf);
+            pool_destroy(temp_pool);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        log_debug("pn_output_internal: wrote %zu bytes (mark) to %s", written, file_path);
         strbuf_free(content_buf);
-        strbuf_free(path_buf);
-        return ItemError;
+    } else {
+        if (!formatted || !formatted->chars) {
+            log_error("pn_output_internal: formatting failed");
+            fclose(f);
+            pool_destroy(temp_pool);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        written = fwrite(formatted->chars, 1, strlen(formatted->chars), f);
+        fclose(f);
+        
+        if (written != strlen(formatted->chars)) {
+            log_error("pn_output_internal: failed to write to file %s", file_path);
+            pool_destroy(temp_pool);
+            strbuf_free(path_buf);
+            return ItemError;
+        }
+        
+        log_debug("pn_output_internal: wrote %zu bytes (%s) to %s", written, effective_format, file_path);
     }
     
-    log_debug("pn_pipe_file_internal: wrote %zu bytes (mark) to %s", content_buf->length, file_path);
-    strbuf_free(content_buf);
+    pool_destroy(temp_pool);
     strbuf_free(path_buf);
     return {.item = ITEM_TRUE};
+}
+
+// 2-parameter wrapper: output(source, trg) - writes data to target (default format, write mode)
+Item pn_output2(Item source, Item target_item) {
+    return pn_output_internal(source, target_item, NULL, false);
+}
+
+// 3-parameter wrapper: output(source, url, format) - explicit format, write mode
+Item pn_output3(Item source, Item url_item, Item format_item) {
+    return pn_output4(source, url_item, format_item, ItemNull);
+}
+
+// 4-parameter wrapper: output(source, url, format, mode) - with write mode
+// mode is 'write' or 'append'
+Item pn_output4(Item source, Item target_item, Item format_item, Item mode_item) {
+    // determine append mode based on mode parameter
+    bool append = false;
+    if (get_type_id(mode_item) != LMD_TYPE_NULL) {
+        String* mode_str = it2s(mode_item);
+        if (mode_str && mode_str->chars && strcmp(mode_str->chars, "append") == 0) {
+            append = true;
+        }
+    }
+    
+    // get format string
+    const char* format_str = NULL;
+    TypeId format_type = get_type_id(format_item);
+    
+    if (format_type == LMD_TYPE_SYMBOL) {
+        String* format_sym = it2s(format_item);
+        if (format_sym && format_sym->chars) {
+            format_str = format_sym->chars;
+        }
+    } else if (format_type == LMD_TYPE_STRING) {
+        String* format_s = it2s(format_item);
+        if (format_s && format_s->chars) {
+            format_str = format_s->chars;
+        }
+    }
+    // NULL format means auto-detect
+    
+    return pn_output_internal(source, target_item, format_str, append);
 }
 
 extern void free_fetch_response(FetchResponse* response);
