@@ -67,6 +67,9 @@ function binary_expr($, in_attr, exclude_pipe = false) {
     ...(exclude_pipe ? [] : [
       ['|', 'pipe'],
       ['where', 'pipe'],  // same precedence as | for left-to-right chaining
+      // Pipe-to-file operators (procedural only) - lower precedence than | and where
+      ['|>', 'pipe_file'],
+      ['|>>', 'pipe_file'],  
     ]),
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
@@ -197,6 +200,7 @@ module.exports = grammar({
     'is_in',
     // pipe operators (low precedence, just above control flow)
     'pipe',
+    'pipe_file',  // |> and |>> - lowest binary precedence
     $.if_expr,
     $.for_expr,
     $.let_expr,

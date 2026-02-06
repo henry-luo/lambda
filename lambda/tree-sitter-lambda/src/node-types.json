@@ -443,6 +443,14 @@
           {
             "type": "|",
             "named": false
+          },
+          {
+            "type": "|>",
+            "named": false
+          },
+          {
+            "type": "|>>",
+            "named": false
           }
         ]
       },
@@ -3711,19 +3719,19 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
-  },
-  {
-    "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
     "named": true
+  },
+  {
+    "type": "decimal",
+    "named": false
   },
   {
     "type": "desc",
@@ -3763,11 +3771,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -3927,11 +3935,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",
@@ -3963,6 +3971,14 @@
   },
   {
     "type": "|",
+    "named": false
+  },
+  {
+    "type": "|>",
+    "named": false
+  },
+  {
+    "type": "|>>",
     "named": false
   },
   {
