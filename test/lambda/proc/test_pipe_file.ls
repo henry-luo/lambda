@@ -87,7 +87,7 @@ pn main() {
     print(content9);
     
     // Clean up symbol target file
-    fs.delete('lambda_test_symbol.mk');
+    io.delete('lambda_test_symbol.mk');
     
     print("done");
 }

@@ -1,38 +1,63 @@
-# Lambda Shell / File System Module
+# Lambda Shell / I/O Module
 
-This document describes the `fs` module functions available in Lambda Script for file system operations.
+This document describes the `io` module functions available in Lambda Script for file system operations and network I/O.
 
 ## Overview
 
-The `fs` module provides file system operations that are commonly needed for scripting tasks. Most functions are **procedural** (have side effects), while `fs.exists()` is a **pure function** that can be used in functional contexts.
+The `io` module provides unified I/O operations for both local files and remote URLs. Most functions are **procedural** (have side effects), while `exists()` is a **global pure function** that can be used in functional contexts.
 
-## Function Reference
+## Global Functions
 
-### fs.exists(path) → bool
+### exists(path) → bool
 
-Check if a file or directory exists.
+Check if a file or directory exists. This is a **global function** (not under the `io` module).
 
 **Type:** Pure function (can be used in functional expressions)
 
 **Parameters:**
-- `path` - File path (string or Path type)
+- `path` - File path (string, symbol, or Path type)
 
 **Returns:** `true` if the path exists, `false` otherwise
 
 **Example:**
 ```lambda
 // In functional context
-let config_exists = fs.exists("/etc/config.json")
+let config_exists = exists("/etc/config.json")
 
 // In procedural context with conditional
-if fs.exists("./output") {
+if exists("./output") {
     print("Output directory exists")
 }
 ```
 
 ---
 
-### fs.mkdir(path)
+## IO Module Functions
+
+### io.fetch(target, options?) → string/binary
+
+Fetch content from a URL or local file.
+
+**Type:** Procedure
+
+**Parameters:**
+- `target` - URL or file path (string)
+- `options` *(optional)* - Options map (reserved for future use)
+
+**Returns:** Content as string or binary data
+
+**Example:**
+```lambda
+// Fetch from HTTP URL
+let data = io.fetch("https://httpbin.org/json")
+
+// Fetch local file
+let content = io.fetch("./data.txt")
+```
+
+---
+
+### io.mkdir(path)
 
 Create a directory, including parent directories if needed (like `mkdir -p`).
 
@@ -43,12 +68,12 @@ Create a directory, including parent directories if needed (like `mkdir -p`).
 
 **Example:**
 ```lambda
-fs.mkdir("./output/reports/2024")
+io.mkdir("./output/reports/2024")
 ```
 
 ---
 
-### fs.touch(path)
+### io.touch(path)
 
 Create an empty file or update its modification time if it exists.
 
@@ -59,30 +84,36 @@ Create an empty file or update its modification time if it exists.
 
 **Example:**
 ```lambda
-fs.touch("./output/marker.txt")
+io.touch("./output/marker.txt")
 ```
 
 ---
 
-### fs.copy(source, destination)
+### io.copy(source, destination)
 
-Copy a file or directory to a new location.
+Copy a file or directory to a new location. **Supports remote URLs as source**.
 
 **Type:** Procedure
 
 **Parameters:**
-- `source` - Source path (string)
-- `destination` - Destination path (string)
+- `source` - Source path or URL (string). Can be:
+  - Local file path: `"./data.json"`
+  - HTTP/HTTPS URL: `"https://example.com/data.json"`
+- `destination` - Destination path (string, must be local)
 
 **Example:**
 ```lambda
-fs.copy("./config.json", "./config.backup.json")
-fs.copy("./src", "./src_backup")  // copies directory recursively
+// Copy local file
+io.copy("./config.json", "./config.backup.json")
+io.copy("./src", "./src_backup")  // copies directory recursively
+
+// Copy from remote URL
+io.copy("https://example.com/data.json", "./downloaded.json")
 ```
 
 ---
 
-### fs.move(source, destination)
+### io.move(source, destination)
 
 Move a file or directory to a new location. Works across filesystems.
 
@@ -94,12 +125,12 @@ Move a file or directory to a new location. Works across filesystems.
 
 **Example:**
 ```lambda
-fs.move("./temp/output.txt", "./final/output.txt")
+io.move("./temp/output.txt", "./final/output.txt")
 ```
 
 ---
 
-### fs.rename(old_path, new_path)
+### io.rename(old_path, new_path)
 
 Rename a file or directory. Must be on the same filesystem.
 
@@ -111,12 +142,12 @@ Rename a file or directory. Must be on the same filesystem.
 
 **Example:**
 ```lambda
-fs.rename("./report.txt", "./report_final.txt")
+io.rename("./report.txt", "./report_final.txt")
 ```
 
 ---
 
-### fs.delete(path)
+### io.delete(path)
 
 Delete a file or directory. Directories are deleted recursively.
 
@@ -127,13 +158,13 @@ Delete a file or directory. Directories are deleted recursively.
 
 **Example:**
 ```lambda
-fs.delete("./temp/cache.txt")
-fs.delete("./build")  // deletes directory and all contents
+io.delete("./temp/cache.txt")
+io.delete("./build")  // deletes directory and all contents
 ```
 
 ---
 
-### fs.symlink(target, link_path)
+### io.symlink(target, link_path)
 
 Create a symbolic link.
 
@@ -145,12 +176,12 @@ Create a symbolic link.
 
 **Example:**
 ```lambda
-fs.symlink("./config/production.json", "./config.json")
+io.symlink("./config/production.json", "./config.json")
 ```
 
 ---
 
-### fs.chmod(path, mode)
+### io.chmod(path, mode)
 
 Change file permissions.
 
@@ -162,8 +193,8 @@ Change file permissions.
 
 **Example:**
 ```lambda
-fs.chmod("./script.sh", 755)
-fs.chmod("./config.json", 644)
+io.chmod("./script.sh", 755)
+io.chmod("./config.json", 644)
 ```
 
 ---
@@ -171,26 +202,29 @@ fs.chmod("./config.json", 644)
 ## Complete Example
 
 ```lambda
-// Procedural script with fs module
+// Procedural script with io module
 pn main() {
     // Create output directory
-    fs.mkdir("./output")
+    io.mkdir("./output")
     
     // Check if source exists before copying
-    if fs.exists("./data/input.csv") {
-        fs.copy("./data/input.csv", "./output/input.csv")
+    if exists("./data/input.csv") {
+        io.copy("./data/input.csv", "./output/input.csv")
         print("Copied input file")
     }
     
+    // Download from URL
+    io.copy("https://example.com/config.json", "./output/remote_config.json")
+    
     // Create marker file
-    fs.touch("./output/.processed")
+    io.touch("./output/.processed")
     
     // Set permissions
-    fs.chmod("./output/.processed", 644)
+    io.chmod("./output/.processed", 644)
     
     // Cleanup old temp files
-    if fs.exists("./temp") {
-        fs.delete("./temp")
+    if exists("./temp") {
+        io.delete("./temp")
         print("Cleaned up temp directory")
     }
     
@@ -200,11 +234,12 @@ pn main() {
 
 ## Implementation Notes
 
-- All `fs` functions except `fs.exists()` are **procedures** (`pn_*` prefix internally)
-- `fs.exists()` is a **pure function** (`fn_fs_exists` internally) and can be used in:
+- All `io` module functions are **procedures** (`pn_io_*` prefix internally)
+- `exists()` is a **global pure function** (`fn_exists` internally) and can be used in:
   - Functional expressions
   - `if` conditions in functional code
   - `let` bindings
+- `io.copy()` supports remote URLs (http/https) as the source - data is fetched and saved locally
 - Path arguments accept string paths; relative paths are resolved from the current working directory
 - Error handling: Functions return `null` on failure and log errors
 
@@ -444,5 +479,5 @@ output(data, "https://example.com")  // ERROR
 ## Related
 
 - `input()` function for reading file contents
-- `fs` module for file system operations (copy, move, delete, etc.)
+- `io` module for file system operations (copy, move, delete, etc.)
 - Path expressions: `/path.to.file`, `.relative.path`, `..parent.path`

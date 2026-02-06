@@ -687,7 +687,6 @@ typedef struct Context {
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
-    Item fn_fetch(Item url, Item options);
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
     DateTime fn_datetime();
@@ -703,18 +702,19 @@ typedef struct Context {
     Item pn_fetch(Item url, Item options);
     Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
     Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - with options map {format, mode, atomic}
-    Item pn_output4(Item source, Item url, Item format, Item mode);  // internal: for pipe operators |> and |>>
+    Item pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
 
-    // fs module functions (procedural)
-    Item pn_fs_copy(Item src, Item dst);
-    Item pn_fs_move(Item src, Item dst);
-    Item pn_fs_delete(Item path);
-    Item pn_fs_mkdir(Item path);
-    Item pn_fs_touch(Item path);
-    Item pn_fs_symlink(Item target, Item link);
-    Item pn_fs_chmod(Item path, Item mode);
-    Item pn_fs_rename(Item old_path, Item new_path);
-    Item pn_fs_exists(Item path);
+    // io module functions (procedural)
+    Item pn_io_copy(Item src, Item dst);
+    Item pn_io_move(Item src, Item dst);
+    Item pn_io_delete(Item path);
+    Item pn_io_mkdir(Item path);
+    Item pn_io_touch(Item path);
+    Item pn_io_symlink(Item target, Item link);
+    Item pn_io_chmod(Item path, Item mode);
+    Item pn_io_rename(Item old_path, Item new_path);
+    Item pn_io_fetch1(Item target);
+    Item pn_io_fetch2(Item target, Item options);
 
 #endif
 

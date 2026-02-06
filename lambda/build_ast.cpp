@@ -122,19 +122,21 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},  // legacy global fetch (deprecated)
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, trg) -> bytes_written/error
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, trg, options) - options map with format, mode, atomic
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
-    // fs module functions - procedural (is_proc=true), not method-eligible
-    {SYSPROC_FS_COPY, "fs_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_MOVE, "fs_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_DELETE, "fs_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_MKDIR, "fs_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_TOUCH, "fs_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_SYMLINK, "fs_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_CHMOD, "fs_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FS_RENAME, "fs_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    // io module functions - procedural (is_proc=true), supports local and remote targets
+    {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
+    {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},  // io.fetch(target) - overload 1 arg
+    {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},  // io.fetch(target, options) - overload 2 args
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY},  // exists(path) -> bool (pure read-only)
 };
 
@@ -941,7 +943,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             if (!ts_node_is_null(inner) && ts_node_symbol(inner) == sym_identifier) {
                 module_name = ts_node_source(tp, inner);
                 // Check for known built-in modules
-                if (strview_equal(&module_name, "fs")) {
+                if (strview_equal(&module_name, "io")) {
                     is_builtin_module_call = true;
                     log_debug("builtin module call detected: %.*s.%.*s()",
                         (int)module_name.length, module_name.str,
@@ -950,7 +952,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             }
         } else if (obj_symbol == sym_identifier) {
             module_name = ts_node_source(tp, object_node);
-            if (strview_equal(&module_name, "fs")) {
+            if (strview_equal(&module_name, "io")) {
                 is_builtin_module_call = true;
                 log_debug("builtin module call detected: %.*s.%.*s()",
                     (int)module_name.length, module_name.str,

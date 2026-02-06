@@ -523,37 +523,10 @@ Item pn_output3(Item source, Item target_item, Item options_item) {
     return pn_output_internal(source, target_item, format_str, append, atomic);
 }
 
-// 4-parameter wrapper: output(source, url, format, mode) - for pipe operators backward compat
-// mode is 'write' or 'append'
-// Returns: bytes written on success, error on failure
-Item pn_output4(Item source, Item target_item, Item format_item, Item mode_item) {
-    // determine append mode based on mode parameter
-    bool append = false;
-    if (get_type_id(mode_item) != LMD_TYPE_NULL) {
-        String* mode_str = it2s(mode_item);
-        if (mode_str && mode_str->chars && strcmp(mode_str->chars, "append") == 0) {
-            append = true;
-        }
-    }
-    
-    // get format string
-    const char* format_str = NULL;
-    TypeId format_type = get_type_id(format_item);
-    
-    if (format_type == LMD_TYPE_SYMBOL) {
-        String* format_sym = it2s(format_item);
-        if (format_sym && format_sym->chars) {
-            format_str = format_sym->chars;
-        }
-    } else if (format_type == LMD_TYPE_STRING) {
-        String* format_s = it2s(format_item);
-        if (format_s && format_s->chars) {
-            format_str = format_s->chars;
-        }
-    }
-    // NULL format means auto-detect
-    
-    return pn_output_internal(source, target_item, format_str, append, false);
+// 2-parameter append wrapper: used by |>> pipe operator
+// Directly calls pn_output_internal with append=true, no format, no atomic
+Item pn_output_append(Item source, Item target_item) {
+    return pn_output_internal(source, target_item, NULL, true, false);
 }
 
 extern void free_fetch_response(FetchResponse* response);
@@ -887,8 +860,9 @@ Item pn_cmd(Item cmd, Item args) {
 }
 
 // ============================================================================
-// File System Functions (fs module)
-// These are procedural functions for file/directory operations
+// I/O Module Functions (io module)
+// These are procedural functions for unified I/O operations
+// Supports both local file system and remote URLs
 // ============================================================================
 
 // Helper to extract local path from Item using unified Target API
@@ -901,9 +875,9 @@ static StrBuf* get_local_path_from_item(Item item) {
         return NULL;
     }
     
-    // Check if local - fs operations only work on local files
+    // Check if local - some operations only work on local files
     if (!target_is_local(target)) {
-        log_error("fs: cannot perform operation on remote URL");
+        log_error("io: cannot perform operation on remote URL");
         target_free(target);
         return NULL;
     }
@@ -924,28 +898,102 @@ static int remove_callback(const char* path, const struct stat* sb, int typeflag
         rv = remove(path);
     }
     if (rv != 0) {
-        log_error("fs.delete: failed to remove %s: %s", path, strerror(errno));
+        log_error("io.delete: failed to remove %s: %s", path, strerror(errno));
     }
     return rv;
 }
 #endif
 
-// fs.copy(src, dst) - Copy file or directory
-Item pn_fs_copy(Item src_item, Item dst_item) {
-    StrBuf* src_buf = get_local_path_from_item(src_item);
-    StrBuf* dst_buf = get_local_path_from_item(dst_item);
+// io.copy(src, dst) - Copy file or directory
+// src can be local path or remote URL (http/https)
+// dst must be a local path
+Item pn_io_copy(Item src_item, Item dst_item) {
+    // First, check if source is remote
+    Target* src_target = item_to_target(src_item.item, NULL);
+    if (!src_target) {
+        log_error("io.copy: invalid source argument");
+        return ItemError;
+    }
     
-    if (!src_buf || !dst_buf) {
-        log_error("fs.copy: invalid path argument");
-        if (src_buf) strbuf_free(src_buf);
-        if (dst_buf) strbuf_free(dst_buf);
+    // Destination must always be local
+    StrBuf* dst_buf = get_local_path_from_item(dst_item);
+    if (!dst_buf) {
+        log_error("io.copy: destination must be a local path");
+        target_free(src_target);
+        return ItemError;
+    }
+    
+    const char* dst_path = dst_buf->str;
+    
+    // Handle remote source (fetch and save)
+    if (target_is_remote(src_target)) {
+        log_debug("io.copy: fetching remote source to %s", dst_path);
+        
+        // Get the URL string
+        StrBuf* url_buf = strbuf_new();
+        target_to_url_string(src_target, url_buf);
+        String* url_str = heap_strcpy(url_buf->str, url_buf->length);
+        strbuf_free(url_buf);
+        target_free(src_target);
+        
+        // Fetch the remote data using pn_fetch
+        Item url_item = {.item = s2it(url_str)};
+        Item fetch_result = pn_fetch(url_item, ItemNull);
+        
+        if (fetch_result.item == ItemError.item || fetch_result.item == ItemNull.item) {
+            log_error("io.copy: failed to fetch remote source");
+            strbuf_free(dst_buf);
+            return ItemError;
+        }
+        
+        // Create parent directories if needed
+        if (create_parent_dirs(dst_path) != 0) {
+            log_error("io.copy: failed to create parent directories for %s", dst_path);
+            strbuf_free(dst_buf);
+            return ItemError;
+        }
+        
+        // Write the fetched data to destination
+        TypeId result_type = get_type_id(fetch_result);
+        FILE* f = fopen(dst_path, "wb");
+        if (!f) {
+            log_error("io.copy: failed to open destination file %s: %s", dst_path, strerror(errno));
+            strbuf_free(dst_buf);
+            return ItemError;
+        }
+        
+        size_t written = 0;
+        if (result_type == LMD_TYPE_STRING) {
+            String* str = it2s(fetch_result);
+            if (str && str->chars) {
+                written = fwrite(str->chars, 1, str->len, f);
+            }
+        } else if (result_type == LMD_TYPE_BINARY) {
+            Binary* bin = (Binary*)it2s(fetch_result);
+            if (bin && bin->chars) {
+                written = fwrite(bin->chars, 1, bin->len, f);
+            }
+        }
+        fclose(f);
+        
+        log_debug("io.copy: wrote %zu bytes from remote source to %s", written, dst_path);
+        strbuf_free(dst_buf);
+        return ItemNull;
+    }
+    
+    // Local source - get local path
+    StrBuf* src_buf = (StrBuf*)target_to_local_path(src_target, NULL);
+    target_free(src_target);
+    
+    if (!src_buf) {
+        log_error("io.copy: invalid source path");
+        strbuf_free(dst_buf);
         return ItemError;
     }
     
     const char* src_path = src_buf->str;
-    const char* dst_path = dst_buf->str;
     
-    log_debug("fs.copy: %s -> %s", src_path, dst_path);
+    log_debug("io.copy: %s -> %s", src_path, dst_path);
     
     // Use platform command for simplicity (handles directories too)
 #ifdef _WIN32
@@ -960,7 +1008,7 @@ Item pn_fs_copy(Item src_item, Item dst_item) {
     int result = system(cmd);
     
     if (result != 0) {
-        log_error("fs.copy: failed to copy %s to %s", src_path, dst_path);
+        log_error("io.copy: failed to copy %s to %s", src_path, dst_path);
     }
     
     strbuf_free(src_buf);
@@ -969,13 +1017,13 @@ Item pn_fs_copy(Item src_item, Item dst_item) {
     return (result != 0) ? ItemError : ItemNull;
 }
 
-// fs.move(src, dst) - Move/rename file or directory
-Item pn_fs_move(Item src_item, Item dst_item) {
+// io.move(src, dst) - Move/rename file or directory
+Item pn_io_move(Item src_item, Item dst_item) {
     StrBuf* src_buf = get_local_path_from_item(src_item);
     StrBuf* dst_buf = get_local_path_from_item(dst_item);
     
     if (!src_buf || !dst_buf) {
-        log_error("fs.move: invalid path argument");
+        log_error("io.move: invalid path argument");
         if (src_buf) strbuf_free(src_buf);
         if (dst_buf) strbuf_free(dst_buf);
         return ItemError;
@@ -984,14 +1032,14 @@ Item pn_fs_move(Item src_item, Item dst_item) {
     const char* src_path = src_buf->str;
     const char* dst_path = dst_buf->str;
     
-    log_debug("fs.move: %s -> %s", src_path, dst_path);
+    log_debug("io.move: %s -> %s", src_path, dst_path);
     
     int result = rename(src_path, dst_path);
     
     // If rename fails (cross-device), fall back to copy+delete
     if (result != 0 && errno == EXDEV) {
-        log_debug("fs.move: cross-device move, using copy+delete");
-        Item copy_result = pn_fs_copy(src_item, dst_item);
+        log_debug("io.move: cross-device move, using copy+delete");
+        Item copy_result = pn_io_copy(src_item, dst_item);
         if (copy_result.item == ItemError.item) {
             strbuf_free(src_buf);
             strbuf_free(dst_buf);
@@ -1014,7 +1062,7 @@ Item pn_fs_move(Item src_item, Item dst_item) {
     }
     
     if (result != 0) {
-        log_error("fs.move: failed to move %s to %s: %s", src_path, dst_path, strerror(errno));
+        log_error("io.move: failed to move %s to %s: %s", src_path, dst_path, strerror(errno));
     }
     
     strbuf_free(src_buf);
@@ -1023,22 +1071,22 @@ Item pn_fs_move(Item src_item, Item dst_item) {
     return (result != 0) ? ItemError : ItemNull;
 }
 
-// fs.delete(path) - Delete file or directory
-Item pn_fs_delete(Item path_item) {
+// io.delete(path) - Delete file or directory
+Item pn_io_delete(Item path_item) {
     StrBuf* path_buf = get_local_path_from_item(path_item);
     
     if (!path_buf) {
-        log_error("fs.delete: invalid path argument");
+        log_error("io.delete: invalid path argument");
         return ItemError;
     }
     
     const char* path = path_buf->str;
     
-    log_debug("fs.delete: %s", path);
+    log_debug("io.delete: %s", path);
     
     struct stat st;
     if (stat(path, &st) != 0) {
-        log_error("fs.delete: path does not exist: %s", path);
+        log_error("io.delete: path does not exist: %s", path);
         strbuf_free(path_buf);
         return ItemError;
     }
@@ -1059,7 +1107,7 @@ Item pn_fs_delete(Item path_item) {
     }
     
     if (result != 0) {
-        log_error("fs.delete: failed to delete %s: %s", path, strerror(errno));
+        log_error("io.delete: failed to delete %s: %s", path, strerror(errno));
     }
     
     strbuf_free(path_buf);
@@ -1067,12 +1115,12 @@ Item pn_fs_delete(Item path_item) {
     return (result != 0) ? ItemError : ItemNull;
 }
 
-// fs.mkdir(path) - Create directory (recursive)
-Item pn_fs_mkdir(Item path_item) {
+// io.mkdir(path) - Create directory (recursive)
+Item pn_io_mkdir(Item path_item) {
     StrBuf* path_buf = get_local_path_from_item(path_item);
     
     if (!path_buf) {
-        log_error("fs.mkdir: invalid path argument");
+        log_error("io.mkdir: invalid path argument");
         return ItemError;
     }
     
@@ -1118,7 +1166,7 @@ Item pn_fs_mkdir(Item path_item) {
 #endif
     
     if (result != 0) {
-        log_error("fs.mkdir: failed to create directory %s: %s", path, strerror(errno));
+        log_error("io.mkdir: failed to create directory %s: %s", path, strerror(errno));
     }
     
     strbuf_free(path_buf);
@@ -1126,12 +1174,12 @@ Item pn_fs_mkdir(Item path_item) {
     return (result != 0) ? ItemError : ItemNull;
 }
 
-// fs.touch(path) - Create file or update modification time
-Item pn_fs_touch(Item path_item) {
+// io.touch(path) - Create file or update modification time
+Item pn_io_touch(Item path_item) {
     StrBuf* path_buf = get_local_path_from_item(path_item);
     
     if (!path_buf) {
-        log_error("fs.touch: invalid path argument");
+        log_error("io.touch: invalid path argument");
         return ItemError;
     }
     
@@ -1162,7 +1210,7 @@ Item pn_fs_touch(Item path_item) {
         if (f) {
             fclose(f);
         } else {
-            log_error("fs.touch: failed to create file %s: %s", path, strerror(errno));
+            log_error("io.touch: failed to create file %s: %s", path, strerror(errno));
             strbuf_free(path_buf);
             return ItemError;
         }
@@ -1172,13 +1220,13 @@ Item pn_fs_touch(Item path_item) {
     return ItemNull;
 }
 
-// fs.symlink(target, link) - Create symbolic link
-Item pn_fs_symlink(Item target_item, Item link_item) {
+// io.symlink(target, link) - Create symbolic link
+Item pn_io_symlink(Item target_item, Item link_item) {
     StrBuf* target_buf = get_local_path_from_item(target_item);
     StrBuf* link_buf = get_local_path_from_item(link_item);
     
     if (!target_buf || !link_buf) {
-        log_error("fs.symlink: invalid path argument");
+        log_error("io.symlink: invalid path argument");
         if (target_buf) strbuf_free(target_buf);
         if (link_buf) strbuf_free(link_buf);
         return ItemError;
@@ -1205,7 +1253,7 @@ Item pn_fs_symlink(Item target_item, Item link_item) {
 #endif
     
     if (result != 0) {
-        log_error("fs.symlink: failed to create symlink %s -> %s: %s", 
+        log_error("io.symlink: failed to create symlink %s -> %s: %s", 
                   link_path, target_path, strerror(errno));
     }
     
@@ -1215,13 +1263,13 @@ Item pn_fs_symlink(Item target_item, Item link_item) {
     return (result != 0) ? ItemError : ItemNull;
 }
 
-// fs.chmod(path, mode) - Change file permissions
+// io.chmod(path, mode) - Change file permissions
 // mode can be string like "755" or int like 0755
-Item pn_fs_chmod(Item path_item, Item mode_item) {
+Item pn_io_chmod(Item path_item, Item mode_item) {
     StrBuf* path_buf = get_local_path_from_item(path_item);
     
     if (!path_buf) {
-        log_error("fs.chmod: invalid path argument");
+        log_error("io.chmod: invalid path argument");
         return ItemError;
     }
     
@@ -1239,12 +1287,12 @@ Item pn_fs_chmod(Item path_item, Item mode_item) {
             mode = (int)strtol(mode_str->chars, NULL, 8);
         }
     } else {
-        log_error("fs.chmod: mode must be int or string");
+        log_error("io.chmod: mode must be int or string");
         strbuf_free(path_buf);
         return ItemError;
     }
     
-    log_debug("fs.chmod: %s mode=%o", path, mode);
+    log_debug("io.chmod: %s mode=%o", path, mode);
     
 #ifdef _WIN32
     // Windows doesn't have chmod in the same way
@@ -1255,7 +1303,7 @@ Item pn_fs_chmod(Item path_item, Item mode_item) {
 #endif
     
     if (result != 0) {
-        log_error("fs.chmod: failed to change mode of %s: %s", path, strerror(errno));
+        log_error("io.chmod: failed to change mode of %s: %s", path, strerror(errno));
     }
     
     strbuf_free(path_buf);
@@ -1263,13 +1311,13 @@ Item pn_fs_chmod(Item path_item, Item mode_item) {
     return (result != 0) ? ItemError : ItemNull;
 }
 
-// fs.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
-Item pn_fs_rename(Item old_item, Item new_item) {
+// io.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
+Item pn_io_rename(Item old_item, Item new_item) {
     StrBuf* old_buf = get_local_path_from_item(old_item);
     StrBuf* new_buf = get_local_path_from_item(new_item);
     
     if (!old_buf || !new_buf) {
-        log_error("fs.rename: invalid path argument");
+        log_error("io.rename: invalid path argument");
         if (old_buf) strbuf_free(old_buf);
         if (new_buf) strbuf_free(new_buf);
         return ItemError;
@@ -1278,17 +1326,27 @@ Item pn_fs_rename(Item old_item, Item new_item) {
     const char* old_path = old_buf->str;
     const char* new_path = new_buf->str;
     
-    log_debug("fs.rename: %s -> %s", old_path, new_path);
+    log_debug("io.rename: %s -> %s", old_path, new_path);
     
     int result = rename(old_path, new_path);
     
     if (result != 0) {
-        log_error("fs.rename: failed to rename %s to %s: %s", old_path, new_path, strerror(errno));
+        log_error("io.rename: failed to rename %s to %s: %s", old_path, new_path, strerror(errno));
     }
     
     strbuf_free(old_buf);
     strbuf_free(new_buf);
     
     return (result != 0) ? ItemError : ItemNull;
+}
+
+// io.fetch(target) - Fetch content from URL or local file (1-arg version)
+Item pn_io_fetch1(Item target_item) {
+    return pn_fetch(target_item, ItemNull);
+}
+
+// io.fetch(target, options) - Fetch content from URL or local file (2-arg version)
+Item pn_io_fetch2(Item target_item, Item options_item) {
+    return pn_fetch(target_item, options_item);
 }
 

@@ -350,17 +350,17 @@ typedef enum SysFunc {
     SYSPROC_FETCH,
     SYSPROC_OUTPUT2,         // output(source, target) - writes data to target, returns bytes
     SYSPROC_OUTPUT3,         // output(source, target, options) - with options map
-    SYSPROC_OUTPUT4,         // internal: for pipe operators |> |>>
     SYSPROC_CMD,
-    // fs module functions
-    SYSPROC_FS_COPY,
-    SYSPROC_FS_MOVE,
-    SYSPROC_FS_DELETE,
-    SYSPROC_FS_MKDIR,
-    SYSPROC_FS_TOUCH,
-    SYSPROC_FS_SYMLINK,
-    SYSPROC_FS_CHMOD,
-    SYSPROC_FS_RENAME,
+    // io module functions (unified I/O - supports local and remote targets)
+    SYSPROC_IO_COPY,
+    SYSPROC_IO_MOVE,
+    SYSPROC_IO_DELETE,
+    SYSPROC_IO_MKDIR,
+    SYSPROC_IO_TOUCH,
+    SYSPROC_IO_SYMLINK,
+    SYSPROC_IO_CHMOD,
+    SYSPROC_IO_RENAME,
+    SYSPROC_IO_FETCH,        // io.fetch(target, options) - fetch data from URL or file
 } SysFunc;
 
 typedef struct TypeBinary : Type {
