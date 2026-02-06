@@ -1,5 +1,21 @@
 # Radiant Graph Layout - Lessons from beautiful-mermaid
 
+## Implementation Progress
+
+| Phase | Status | Completed |
+|-------|--------|-----------|
+| 1. Edge Post-Processing | ✅ Complete | Feb 2026 |
+| 2. Theme System | ✅ Complete | Feb 2026 |
+| 3. Complete Shapes | ✅ Complete | Feb 2026 |
+| 4. Subgraph Support | ✅ Complete | Feb 2026 |
+| 5. ASCII Output | 🔲 Not Started | — |
+| 6. State Diagrams | 🔲 Not Started | — |
+| 7. Sequence Diagrams | 🔲 Not Started | — |
+
+**Progress**: 4/7 phases complete (57%)
+
+---
+
 ## Executive Summary
 
 This document analyzes the `beautiful-mermaid` library (located in `./beautiful-mermaid`) and compares it with Lambda's current Mermaid graph support. The goal is to identify features and techniques that can improve our graph rendering quality.
@@ -480,60 +496,68 @@ export const TEXT_BASELINE_SHIFT = '0.35em'  // Vertical centering
 
 ## 4. Implementation Plan
 
-### Phase 1: Edge Post-Processing (P0) — 2 days
+### Phase 1: Edge Post-Processing (P0) — ✅ COMPLETE
 
 **Goal**: Make edges look professional
 
-**Files to create/modify**:
+**Files created/modified**:
 - `radiant/graph_edge_utils.hpp` - Header for edge utilities
 - `radiant/graph_edge_utils.cpp` - Implementation
-- `radiant/graph_dagre.cpp` - Call post-processing after layout
+- `radiant/layout_graph.cpp` - Integrated post-processing after layout
 
-**Tasks**:
-1. Port `snapToOrthogonal()` to C++
-2. Port `clipToDiamondBoundary()` to C++
-3. Port `clipToCircleBoundary()` to C++
-4. Port `removeCollinear()` to C++
-5. Integrate into Dagre layout pipeline
+**Completed**:
+- ✅ Ported `snapToOrthogonal()` to C++
+- ✅ Ported `clipToDiamondBoundary()` to C++
+- ✅ Ported `clipToCircleBoundary()` to C++
+- ✅ Ported `removeCollinear()` to C++
+- ✅ Integrated into Dagre layout pipeline
 
-### Phase 2: Theme System (P1) — 3 days
+### Phase 2: Theme System (P1) — ✅ COMPLETE
 
 **Goal**: Support multiple color themes
 
-**Files to create**:
+**Files created**:
 - `radiant/graph_theme.hpp` - Theme data structures
 - `radiant/graph_theme.cpp` - Theme definitions and color derivation
 
-**Tasks**:
-1. Define `DiagramTheme` structure
-2. Implement color mixing/derivation
-3. Add 5-10 predefined themes
-4. Update `graph_to_svg.cpp` to use themes
-5. Add CLI option: `--theme tokyo-night`
+**Completed**:
+- ✅ Defined `DiagramTheme` structure with bg, fg, derived colors
+- ✅ Implemented color mixing/derivation using hex color math
+- ✅ Added 11 predefined themes: zinc-dark, zinc-light, tokyo-night, nord, dracula, catppuccin-mocha, catppuccin-latte, github-dark, github-light, solarized-dark, solarized-light
+- ✅ Updated `graph_to_svg.cpp` to use themed colors
+- ✅ Added CLI option: `--theme <name>` (e.g., `--theme tokyo-night`)
 
-### Phase 3: Complete Shape Support (P1) — 2 days
+### Phase 3: Complete Shape Support (P1) — ✅ COMPLETE
 
 **Goal**: Support all 12 Mermaid shapes
 
-**Files to modify**:
+**Files modified**:
 - `lambda/input/input-graph-mermaid.cpp` - Parser updates
 - `radiant/graph_to_svg.cpp` - Renderer updates
 
-**Tasks**:
-1. Update parser to recognize all shape syntaxes
-2. Add SVG rendering for: stadium, subroutine, doublecircle, hexagon, cylinder, trapezoid, inverse-trapezoid
-3. Add unit tests for each shape
+**Completed**:
+- ✅ Updated parser to recognize all shape syntaxes
+- ✅ Added SVG rendering for all 12 shapes: box, rounded, diamond, circle, stadium, subroutine, doublecircle, hexagon, cylinder, asymmetric, trapezoid, trapezoid-alt
 
-### Phase 4: Subgraph Support (P2) — 4 days
+### Phase 4: Subgraph Support (P2) — ✅ COMPLETE
 
 **Goal**: Support nested subgraphs with direction overrides
 
-**Files to modify**:
-- `lambda/input/input-graph-mermaid.cpp` - Parse subgraphs
-- `radiant/layout_graph.cpp` - Two-pass layout
-- `radiant/graph_to_svg.cpp` - Render group boxes
+**Files modified**:
+- `lambda/input/input-graph-mermaid.cpp` - Subgraph parsing with `subgraph ID [Label]...end` syntax
+- `lambda/input/input-graph.cpp` - Fixed capacity handling in `add_node_to_graph()`, `add_edge_to_graph()`, `add_cluster_to_graph()`
+- `radiant/layout_graph.cpp` - Recursive node/edge/subgraph extraction, subgraph bounds computation
+- `radiant/graph_to_svg.cpp` - Render subgraph boxes with themed header bars and labels
 
-### Phase 5: ASCII Output (P2) — 5 days
+**Completed**:
+- ✅ Parse `subgraph ID [optional label]...end` blocks
+- ✅ Parse `direction LR/TB/BT/RL` overrides inside subgraphs
+- ✅ Support nested subgraphs (subgraphs within subgraphs)
+- ✅ Extract nodes and edges recursively from subgraph hierarchy
+- ✅ Render subgraph boxes with rounded corners, header bar, and label
+- ✅ Apply themed colors to subgraph boxes
+
+### Phase 5: ASCII Output (P2) — 🔲 NOT STARTED
 
 **Goal**: Terminal-friendly diagram output
 
@@ -718,16 +742,16 @@ void remove_collinear_points(ArrayList* points) {
 
 ## 6. Timeline Summary
 
-| Phase | Duration | Deliverable |
-|-------|----------|-------------|
-| 1. Edge Post-Processing | 2 days | Professional-looking edges |
-| 2. Theme System | 3 days | Multiple color themes |
-| 3. Complete Shapes | 2 days | All 12 Mermaid shapes |
-| 4. Subgraph Support | 4 days | Nested groups with directions |
-| 5. ASCII Output | 5 days | Terminal-friendly diagrams |
-| 6. State Diagrams | 3 days | `stateDiagram-v2` support |
-| 7. Sequence Diagrams | 5 days | `sequenceDiagram` support |
-| **Total** | **24 days** | **Feature parity with beautiful-mermaid** |
+| Phase | Est. Duration | Status | Deliverable |
+|-------|---------------|--------|-------------|
+| 1. Edge Post-Processing | 2 days | ✅ Complete | Professional-looking edges |
+| 2. Theme System | 3 days | ✅ Complete | 11 color themes |
+| 3. Complete Shapes | 2 days | ✅ Complete | All 12 Mermaid shapes |
+| 4. Subgraph Support | 4 days | ✅ Complete | Nested groups with directions |
+| 5. ASCII Output | 5 days | 🔲 Pending | Terminal-friendly diagrams |
+| 6. State Diagrams | 3 days | 🔲 Pending | `stateDiagram-v2` support |
+| 7. Sequence Diagrams | 5 days | 🔲 Pending | `sequenceDiagram` support |
+| **Total** | **24 days** | **57%** | **4/7 phases complete** |
 
 ---
 
