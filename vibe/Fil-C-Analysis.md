@@ -219,26 +219,10 @@ Combine software capabilities with hardware features:
 
 ### Implementation Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Source Code                                        │
-└─────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────┐
-│  Static Analysis Pass                               │
-│  - Infer bounds where possible                      │
-│  - Mark "proven safe" operations                    │
-│  - Identify escaping pointers                       │
-└─────────────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────┐
-│  Code Generation                                    │
-│  - Emit capability checks only where needed         │
-│  - Use lightweight checks for non-escaping pointers │
-│  - Full Fil-C for external/untrusted data           │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[Source Code] --> B[Static Analysis Pass<br>• Infer bounds where possible<br>• Mark proven safe operations<br>• Identify escaping pointers]
+    B --> C[Code Generation<br>• Emit capability checks only where needed<br>• Use lightweight checks for non-escaping pointers<br>• Full Fil-C for external/untrusted data]
 ```
 
 ### Related Research
@@ -253,19 +237,19 @@ Combine software capabilities with hardware features:
 
 ### The Trade-off Spectrum
 
-```
-Full Static (Rust)                              Full Dynamic (Fil-C)
-     │                                                    │
-     ▼                                                    ▼
-┌─────────┬──────────┬──────────┬──────────┬──────────┬─────────┐
-│  Zero   │  Light   │  Hybrid  │  Heavy   │  Full    │  GC +   │
-│ runtime │  checks  │  analysis│  static  │  runtime │  Caps   │
-│  cost   │          │  + dyn   │          │  checks  │         │
-└─────────┴──────────┴──────────┴──────────┴──────────┴─────────┘
-     │                    ▲
-     │                    │
-     └── Sweet spot for ──┘
-         production C/C++
+```mermaid
+flowchart LR
+    subgraph Spectrum[" "]
+        direction LR
+        A[Zero<br>runtime<br>cost] --> B[Light<br>checks]
+        B --> C[Hybrid<br>analysis<br>+ dyn]
+        C --> D[Heavy<br>static]
+        D --> E[Full<br>runtime<br>checks]
+        E --> F[GC +<br>Caps]
+    end
+    G[Full Static<br>Rust] -.-> A
+    H[Full Dynamic<br>Fil-C] -.-> F
+    C -.->|Sweet spot for<br>production C/C++| C
 ```
 
 ### Expected Outcome

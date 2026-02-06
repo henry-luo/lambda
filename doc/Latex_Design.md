@@ -1,7 +1,7 @@
 # Lambda LaTeX Pipeline Design
 
-**Version**: 1.0  
-**Date**: January 2026  
+**Version**: 1.0
+**Date**: January 2026
 **Status**: Active Development
 
 ---
@@ -102,17 +102,18 @@ MathLive is a TypeScript math editor with high-quality math typesetting.
 
 Lambda uses a **single pipeline** for all LaTeX processing:
 
-```
-LaTeX Source → Tree-sitter → Lambda AST → DocElement → Output
-                                              │
-                              ┌───────────────┼───────────────┐
-                              ↓               ↓               ↓
-                            HTML          TexNode         Other
-                        (semantic)      (typesetting)
-                                              │
-                              ┌───────────────┼───────────────┬───────────────┐
-                              ↓               ↓               ↓               ↓
-                             DVI             SVG             PDF             PNG
+```mermaid
+flowchart TD
+    A[LaTeX Source] --> B[Tree-sitter]
+    B --> C[Lambda AST]
+    C --> D[DocElement]
+    D --> E[HTML<br><i>semantic</i>]
+    D --> F[TexNode<br><i>typesetting</i>]
+    D --> G[Other]
+    F --> H[DVI]
+    F --> I[SVG]
+    F --> J[PDF]
+    F --> K[PNG]
 ```
 
 ### 3.2 Key Features
@@ -150,13 +151,13 @@ enum class DocElemType : uint8_t {
     FIGURE,             // figure environment
     BLOCKQUOTE,         // quote/quotation
     CODE_BLOCK,         // verbatim
-    
+
     // Math elements
     MATH_INLINE,        // $...$
     MATH_DISPLAY,       // $$...$$ or \[...\]
     MATH_EQUATION,      // equation environment
     MATH_ALIGN,         // align/gather
-    
+
     // Inline elements
     TEXT_SPAN,          // Styled text
     TEXT_RUN,           // Plain text
@@ -165,7 +166,7 @@ enum class DocElemType : uint8_t {
     FOOTNOTE,           // \footnote
     CITATION,           // \cite
     CROSS_REF,          // \ref, \pageref
-    
+
     // Structure
     DOCUMENT,           // Root
     SECTION,            // Logical section
@@ -202,67 +203,30 @@ enum class MathNodeType : uint8_t {
 
 ### 4.1 Complete Pipeline Diagram
 
-```
-  LaTeX Source (.tex)
-        │
-        ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│  Stage 1: PARSING                                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │  Tree-sitter LaTeX Parser                                           │  │
-│  │  Grammar: lambda/tree-sitter-latex/grammar.js                       │  │
-│  │  Implementation: lambda/input/input-latex-ts.cpp                    │  │
-│  │                                                                     │  │
-│  │  • External scanner for verbatim, \char, ^^XX notation              │  │
-│  │  • Produces Concrete Syntax Tree (CST)                              │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│        │                                                                   │
-│        ▼                                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │  Lambda AST Builder                                                  │  │
-│  │  Converts CST → Lambda Mark/Element tree                            │  │
-│  │  (Universal data model for all Lambda inputs)                       │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│  Stage 2: DOCUMENT MODEL CONSTRUCTION                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │  tex_document_model.cpp                                              │  │
-│  │  TexDocumentModel + DocElement tree                                  │  │
-│  │                                                                     │  │
-│  │  • Macro expansion (\newcommand, \def)                              │  │
-│  │  • Counter tracking (section, equation, figure)                     │  │
-│  │  • Cross-reference collection (labels, refs)                        │  │
-│  │  • Package loading (via CommandRegistry)                            │  │
-│  │  • Math AST construction (MathASTNode tree)                         │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────────────────────────┘
-        │
-        ├─────────────────────────────────────────────┐
-        ▼                                             ▼
-┌─────────────────────────────┐         ┌─────────────────────────────────────┐
-│  Stage 3a: HTML OUTPUT      │         │  Stage 3b: TYPESETTING              │
-│  ┌───────────────────────┐  │         │  ┌─────────────────────────────────┐│
-│  │  doc_model_to_html()  │  │         │  │  doc_model_to_texnode()         ││
-│  │  tex_doc_model_html   │  │         │  │  → TexNode tree                 ││
-│  │  .cpp                 │  │         │  │                                 ││
-│  │                       │  │         │  │  Math: typeset_math_ast()       ││
-│  │  • Semantic HTML5     │  │         │  │  Text: TFM font metrics         ││
-│  │  • Inline SVG for math│  │         │  │  Line: Knuth-Plass algorithm    ││
-│  │  • CSS class names    │  │         │  │  Page: Optimal breaking         ││
-│  └───────────────────────┘  │         │  └─────────────────────────────────┘│
-│        │                    │         │        │                            │
-│        ▼                    │         │        ├────────┬────────┬─────────┤│
-│     .html                   │         │        ▼        ▼        ▼         ▼│
-└─────────────────────────────┘         │      DVI      SVG      PDF       PNG│
-                                        │   tex_dvi  tex_svg  tex_pdf  tex_png│
-                                        │   _out.cpp _out.cpp _out.cpp _out.cpp│
-                                        │        │        │        │        │ │
-                                        │        ▼        ▼        ▼        ▼ │
-                                        │     .dvi     .svg     .pdf     .png │
-                                        └─────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Stage1["Stage 1: PARSING"]
+        A[LaTeX Source .tex] --> B["Tree-sitter LaTeX Parser<br><i>grammar.js, input-latex-ts.cpp</i><br>• External scanner for verbatim, \\char, ^^XX<br>• Produces CST"]
+        B --> C["Lambda AST Builder<br><i>CST → Lambda Mark/Element tree</i>"]
+    end
+
+    subgraph Stage2["Stage 2: DOCUMENT MODEL"]
+        C --> D["tex_document_model.cpp<br>TexDocumentModel + DocElement tree<br>• Macro expansion<br>• Counter tracking<br>• Cross-reference collection<br>• Package loading<br>• Math AST construction"]
+    end
+
+    D --> E["Stage 3a: HTML OUTPUT<br>doc_model_to_html()<br>• Semantic HTML5<br>• Inline SVG for math<br>• CSS class names"]
+    D --> F["Stage 3b: TYPESETTING<br>doc_model_to_texnode()<br>• TFM font metrics<br>• Knuth-Plass algorithm<br>• Optimal page breaking"]
+
+    E --> G[.html]
+    F --> H[DVI<br>tex_dvi_out.cpp]
+    F --> I[SVG<br>tex_svg_out.cpp]
+    F --> J[PDF<br>tex_pdf_out.cpp]
+    F --> K[PNG<br>tex_png_out.cpp]
+
+    H --> L[.dvi]
+    I --> M[.svg]
+    J --> N[.pdf]
+    K --> O[.png]
 ```
 
 ### 4.2 Stage Details
@@ -298,7 +262,7 @@ enum class MathNodeType : uint8_t {
 **Macro Expansion** (unified in Tree-sitter pipeline):
 ```cpp
 // Registration
-void add_macro(const char* name, int num_args, 
+void add_macro(const char* name, int num_args,
                const char* replacement, const char* params);
 
 // Expansion
@@ -460,7 +424,7 @@ DocElement* build_doc_element(
     Arena* arena, TexDocumentModel* doc);
 
 // Macro management
-void add_macro(const char* name, int num_args, 
+void add_macro(const char* name, int num_args,
                const char* replacement, const char* params);
 bool try_expand_macro(const char* name, const ElementReader& elem);
 ```
@@ -503,7 +467,7 @@ void dvi_output(TexNode* root, const char* filename);
 void svg_output(TexNode* root, StrBuf* out);
 char* svg_render_math_inline(TexNode* math, Arena* arena);
 
-// PDF output  
+// PDF output
 void pdf_output(TexNode* root, const char* filename);
 
 // PNG output
