@@ -47,36 +47,53 @@ The script is a ~3000 line Python program that:
 | Arrays/lists | `[1, 2, 3]`, for-expressions |
 | String manipulation | `split`, `str_join`, `replace`, `contains`, `starts_with`, `ends_with`, `trim` |
 | Functions | `fn` (pure) and `pn` (procedural) |
-| File output | `output(data, "file.lua")` |
+| File output | `output(data, "file.lua")` or pipe `data |> "file.lua"` |
 | Mutable state | `var` declarations in `pn` functions |
 | Loops | `while`, `for` with `break`/`continue` |
 | Null-safe access | `config.platforms.linux` (auto null-propagation) |
+| File existence | `exists("path")` returns bool |
 
-### ✅ Available via `sys://` Input
+### ✅ System Information via `sys.*` Paths
 
-Lambda has a **system information input** (`input("sys://system/info")`) that provides:
+Lambda provides **native system information access** through `sys.*` path literals with lazy evaluation and caching:
 
 ```lambda
-let sysinfo = input("sys://system/info")
+// Platform detection
+sys.os.platform              // "darwin", "linux", "windows"
+sys.os.name                  // "Darwin", "Linux", "Windows"
+sys.os.version               // Kernel version string
+sys.os.machine               // "x86_64", "arm64", etc.
 
-// Available fields:
-sysinfo.platform.value      // "darwin", "linux", "windows"
-sysinfo.os.name             // "Darwin", "Linux", "Windows"
-sysinfo.os.version          // Kernel version string
-sysinfo.os.machine          // "x86_64", "arm64", etc.
-sysinfo.hostname.value      // Machine hostname
-sysinfo.uptime.seconds      // System uptime
+// CPU information
+sys.cpu.cores                // Number of CPU cores
+sys.cpu.threads              // Number of CPU threads
+
+// Memory information
+sys.memory.total             // Total memory in bytes
+sys.memory.available         // Available memory in bytes
+
+// Process information
+sys.proc.self.pid            // Current process ID
+sys.proc.self.cwd            // Current working directory
+sys.proc.self.args           // Command line arguments as array
+sys.proc.self.env            // Environment variables as map
+sys.proc.self.env.HOME       // Specific environment variable
+sys.proc.self.env.PATH       // Another environment variable
+
+// Time and paths
+sys.time.now                 // Current timestamp
+sys.home                     // User home directory
+sys.temp                     // System temp directory
+
+// Lambda runtime info
+sys.lambda.version           // Lambda version string
 ```
 
-This addresses the critical **platform detection** requirement!
-
-### ⚠️ Partially Supported (Workarounds Needed)
-
-| Feature | Status | Workaround |
-|---------|--------|------------|
-| CLI arguments | No `argv` access | Could use config file or environment |
-| String interpolation | No f-strings | Use functional statements or `+` concatenation |
-| Classes/OOP | Not supported | Pass state maps through functions |
+This addresses **all critical system access requirements**:
+- ✅ Platform detection via `sys.os.platform`
+- ✅ Environment variables via `sys.proc.self.env.*`
+- ✅ Command-line arguments via `sys.proc.self.args`
+- ✅ Current directory via `sys.proc.self.cwd`
 
 ### ✅ Available via Directory Input
 
@@ -103,16 +120,28 @@ for entry in dir {
 }
 ```
 
-This addresses **directory listing** and partially addresses **file existence** (try to input, check for null/error).
+### ⚠️ Design Differences (Not Limitations)
 
-### ❌ Remaining Missing Features
+| Feature | Status | Lambda Approach |
+|---------|--------|-----------------|
+| String interpolation | No f-strings | Use functional statements or `+` concatenation |
+| Classes/OOP | Not supported | Pass state maps through functions (functional style) |
+
+### ✅ Previously Missing, Now Available
+
+| Feature | Python | Lambda | Status |
+|---------|--------|--------|--------|
+| Environment variables | `os.environ["VAR"]` | `sys.proc.self.env.VAR` | ✅ Available |
+| CLI arguments | `sys.argv` | `sys.proc.self.args` | ✅ Available |
+| File existence | `os.path.exists()` | `exists(path)` | ✅ Available |
+| Current directory | `os.getcwd()` | `sys.proc.self.cwd` | ✅ Available |
+
+### ⚠️ Minor Missing Features
 
 | Feature | Python | Lambda | Impact |
 |---------|--------|--------|--------|
-| Environment variables | `os.environ["VAR"]` | — | Medium |
-| File existence check | `os.path.exists()` | Workaround via `input()` | Low |
-| Path manipulation | `os.path.basename()` | — | Low |
-| Symlink creation | `os.symlink()` | — | Low |
+| Path manipulation | `os.path.basename()` | Use string functions | Low |
+| Symlink creation | `os.symlink()` | `io.symlink()` in procedural | Low |
 
 ---
 
@@ -146,8 +175,7 @@ type GeneratorState = {
 
 fn create_state(config_path: string) -> GeneratorState => {
     let config = input(config_path, 'json)
-    let sysinfo = input("sys://system/info")
-    let platform = sysinfo.platform.value
+    let platform = sys.os.platform  // Direct path access
     
     {
         config: config,
@@ -270,8 +298,7 @@ type LibraryInfo = {
 
 fn create_state(config_path: string) -> GeneratorState => {
     let config = input(config_path, 'json)
-    let sysinfo = input("sys://system/info")
-    let platform = sysinfo.platform.value
+    let platform = sys.os.platform  // "darwin", "linux", or "windows"
     
     let state = {
         config: config,
@@ -458,7 +485,9 @@ fn generate_main_program(state: GeneratorState) -> GeneratorState => {
 // =============================================================================
 
 pn main() {
-    let config_path = "build_lambda_config.json"
+    // Get config path from CLI args or use default
+    let args = sys.proc.self.args
+    let config_path = if (len(args) > 1) args[1] else "build_lambda_config.json"
     
     // Initialize state with platform detection
     var state = create_state(config_path)
@@ -476,7 +505,7 @@ pn main() {
     
     // Write output
     let content = state.content.str_join("\n")
-    output(content, output_file)
+    content |> output_file
     
     print("Generated: " + output_file)
 }
@@ -484,29 +513,57 @@ pn main() {
 
 ---
 
-## Recommended Lambda Improvements
+## Recently Implemented Features
 
-### Priority 1: Environment Variables (High Value)
+The following features were previously identified as blockers and have now been implemented:
 
-```lambda
-// Proposed syntax
-env("PATH")                    // Get environment variable
-env("HOME", "/default")        // With default value
-```
-
-**Implementation**: Add `SYSFUNC_ENV` in `build_ast.cpp`, implement in `lambda-proc.cpp` using `getenv()`.
-
-### Priority 2: Command-Line Arguments (High Value)
+### ✅ Environment Variables (Now Available)
 
 ```lambda
-// Proposed syntax  
-args()                         // Returns [string] of CLI args
-args(0)                        // Get specific argument
+// Access via sys.proc.self.env
+sys.proc.self.env.PATH         // Get PATH environment variable
+sys.proc.self.env.HOME         // Get HOME directory
+sys.proc.self.env.USER         // Get current user
+
+// Access full environment map
+let all_env = sys.proc.self.env
+for k, v in all_env { ... }    // Iterate all variables
 ```
 
-**Implementation**: Pass `argc`/`argv` to runtime, expose via `SYSFUNC_ARGS`.
+### ✅ Command-Line Arguments (Now Available)
 
-### Priority 3: Functional Statement String Composition (Already Available)
+```lambda
+// Access via sys.proc.self.args
+let args = sys.proc.self.args  // Returns array of strings
+args[0]                        // Program name (e.g., "./lambda.exe")
+args[1]                        // First argument
+len(args)                      // Number of arguments
+
+// Example usage
+pn main() {
+    let args = sys.proc.self.args
+    if (len(args) < 2) {
+        print("Usage: lambda run script.ls <config_file>")
+        return
+    }
+    let config_file = args[1]
+    // ...
+}
+```
+
+### ✅ Platform Detection (Now Available)
+
+```lambda
+// Direct path access - no input() needed
+sys.os.platform                // "darwin", "linux", "windows"
+sys.os.name                    // "Darwin", "Linux", "Windows"  
+sys.os.machine                 // "arm64", "x86_64", etc.
+
+// Example platform-specific logic
+let compiler = if (sys.os.platform == "windows") "msvc" else "clang"
+```
+
+### ✅ Functional Statement String Composition (Already Available)
 
 Lambda's **functional statement syntax** is designed for dynamic string composition. A function body with semicolon-separated expressions automatically concatenates string results:
 
@@ -532,7 +589,11 @@ fn generate_filter(platform: string, settings: [string]) => {
 
 This is **more powerful than template strings** because it integrates seamlessly with Lambda's control flow (conditionals, loops, etc.) and maintains the functional paradigm.
 
-### Priority 4: Path Manipulation Functions (Medium Value)
+---
+
+## Remaining Nice-to-Have Improvements
+
+### Priority 1: Path Manipulation Functions (Low Value)
 
 ```lambda
 path_basename("dir/file.txt")  // "file.txt"
@@ -541,9 +602,17 @@ path_ext("file.txt")           // ".txt"
 path_join("dir", "file")       // "dir/file"
 ```
 
+**Workaround**: Use string functions:
+```lambda
+fn basename(path: string) => {
+    let parts = path.split("/")
+    parts[len(parts) - 1]
+}
+```
+
 Note: Directory listing is already available via `input("./dir")`.
 
-### Priority 5: Record Update Syntax (Nice to Have)
+### Priority 2: Record Update Syntax (Nice to Have)
 
 ```lambda
 // Current
@@ -557,57 +626,180 @@ state with {content: state.content ++ new_lines}
 
 ## Feasibility Assessment
 
-| Aspect | Current Status | With Improvements |
-|--------|----------------|-------------------|
-| Config parsing | ✅ Excellent | ✅ Excellent |
-| Platform detection | ✅ Via `sys://` | ✅ Excellent |
-| Directory listing | ✅ Via `input()` | ✅ Excellent |
-| String generation | ✅ Functional statements | ✅ Excellent |
-| State management | ⚠️ Manual | ⚠️ Acceptable |
-| File output | ✅ Available | ✅ Available |
-| CLI args | ❌ Blocked | ✅ Feasible |
-| Env vars | ❌ Blocked | ✅ Feasible |
+| Aspect                | Status      | Notes                         |
+| --------------------- | ----------- | ----------------------------- |
+| Config parsing        | ✅ Excellent | `input("file.json", 'json)`   |
+| Platform detection    | ✅ Excellent | `sys.os.platform` native path |
+| Environment variables | ✅ Excellent | `sys.proc.self.env.*`         |
+| CLI arguments         | ✅ Excellent | `sys.proc.self.args` array    |
+| Current directory     | ✅ Excellent | `sys.proc.self.cwd`           |
+| Directory listing     | ✅ Excellent | `input("./dir")`              |
+| String generation     | ✅ Excellent | Functional statements         |
+| State management      | ✅ Good      | State maps through functions  |
+| File output           | ✅ Excellent | pipe or `output()`            |
+| File existence        | ✅ Excellent | `exists(path)`                |
 
-### Verdict
+### Verdict: **FULL CONVERSION IS NOW FEASIBLE**
 
-**Conversion is feasible today** for a simplified version that:
-- Reads config from JSON file
-- Auto-detects platform via `sys://system/info`
-- Generates Lua output to a file
-- Uses functional statements for clean string composition
+All previously blocking features have been implemented:
 
-**Full parity with Python** requires:
-1. `env()` function for environment variables
-2. `args()` function for CLI argument parsing
+1. ✅ **CLI arguments** → `sys.proc.self.args` returns array
+2. ✅ **Environment variables** → `sys.proc.self.env.*` access
+3. ✅ **Platform detection** → `sys.os.platform` native path
+4. ✅ **File existence** → `exists()` function
+5. ✅ **Current directory** → `sys.proc.self.cwd`
+
+The conversion can proceed with **full feature parity** to the Python version.
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1: Minimal Viable Conversion (Today)
-- Convert core generation logic
-- Use `sys://system/info` for platform detection
-- Hardcode config path (no CLI args)
-- Output to platform-specific filenames
+### Phase 1: Core Conversion (Ready Now)
+- ✅ Platform detection via `sys.os.platform`
+- ✅ CLI argument parsing via `sys.proc.self.args`
+- ✅ Environment access via `sys.proc.self.env.*`
+- ✅ JSON config loading via `input()`
+- ✅ File output via `|>` pipe operator
+- Convert core generation logic using state maps
+- Implement Lua code generation helpers
+- Test on all three platforms
 
-### Phase 2: Add System Functions
-1. Implement `env(name)` and `env(name, default)`
-2. Implement `args()` and `args(n)`
-3. Update documentation
+### Phase 2: Full Feature Parity
+- Convert all ~25 generator methods
+- Handle all library types (static, dynamic, header-only)
+- Platform-specific compiler flags and libraries
+- Test suite generation
+- Comprehensive testing against Python output
 
-### Phase 3: Full Feature Parity
-1. Add `file_exists()` function
-2. Add path manipulation functions
+### Phase 3: Enhancements (Optional)
+- Add path manipulation helper functions
+- Performance optimization
+- Error handling improvements
+- Documentation generation
 
 ---
 
 ## Conclusion
 
-Converting `generate_premake.py` to Lambda Script is **largely feasible** with Lambda's current features, especially with the `sys://system/info` input providing platform detection. The main challenges are:
+Converting `generate_premake.py` to Lambda Script is now **fully feasible** with all blocking features implemented:
 
-1. **No classes** → Use state maps (acceptable workaround)
-2. **String composition** → Functional statements provide elegant solution
-3. **No CLI args** → Needs language extension
-4. **No env vars** → Needs language extension
+| Feature            | Python                   | Lambda                  | Status             |
+| ------------------ | ------------------------ | ----------------------- | ------------------ |
+| Platform detection | `platform.system()`      | `sys.os.platform`       | ✅ Native           |
+| Environment vars   | `os.environ["VAR"]`      | `sys.proc.self.env.VAR` | ✅ Native           |
+| CLI arguments      | `sys.argv`               | `sys.proc.self.args`    | ✅ Native           |
+| JSON parsing       | `json.load()`            | `input(file, 'json)`    | ✅ Native           |
+| File output        | `open().write()`         | `data > file`           | ✅ Native           |
+| Classes            | `class PremakeGenerator` | State maps + functions  | ✅ Functional style |
 
-The conversion would demonstrate Lambda's viability as a **general-purpose scripting language** for build tooling, not just data processing. Adding `env()` and `args()` functions would unlock a significant new use case category.
+### Key Advantages of Lambda Version
+
+1. **Cleaner Syntax**: Functional composition and pipe operators
+2. **Type Safety**: Optional type annotations catch errors early
+3. **Self-Hosting**: Lambda can generate its own build files
+4. **Single File**: No external dependencies (Python interpreter)
+5. **Cross-Platform**: Same code runs on all platforms
+
+### Next Steps
+
+1. Create `utils/generate_premake.ls` with initial implementation
+2. Test output against current Python-generated `premake5.lua`
+3. Iterate until outputs match
+4. Replace Python script in build workflow
+
+The conversion demonstrates Lambda's viability as a **general-purpose scripting language** for build tooling and system automation, not just data processing.
+
+---
+
+## Implementation Notes: Workarounds & Known Issues
+
+During the initial implementation of `utils/generate_premake.ls`, several transpiler bugs and limitations were discovered. These workarounds are documented here for future reference.
+
+### Transpiler Bugs / Limitations
+
+| Issue                  | Description                                                                                                                  | Workaround                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `input()` null in `pn` | `input()` returns null when called inside a `pn` function with JIT compilation                                               | Load config at top-level with `let config = input(...)` before `pn main()`     |
+| `var = var ++ fn()`    | Concatenating a function call result directly causes parse errors                                                            | Use intermediate variable: `h = fn(); lua = lua ++ h`                          |
+| `replace(s, old, "")`  | Replacing with empty string returns null                                                                                     | Use `slice(s, 0, len(s) - n)` to remove suffix                                 |
+| Type coercion warnings | Multiple `if (x == null) "default" else x` expressions cause "incompatible types" warnings that can break `main()` detection | Minimize null checks; use direct field access when config is known to be valid |
+| `var` inside blocks    | Cannot declare `var` inside `while` or `if` blocks                                                                           | Declare all `var` at top of `pn` function                                      |
+| `if` blocks in `fn`    | Block-style `if (cond) { ... }` doesn't work in pure functions                                                               | Use expression-style: `if (cond) value else other`                             |
+
+### Working Pattern: Hybrid Functional + Procedural
+
+The successful pattern combines functional and procedural code:
+
+```lambda
+// 1. Top-level functional code for input
+let config = input("config.json", "json")
+let platform = sys.os.platform
+
+// 2. Pure functions for string generation
+fn gen_header(name: string) {
+    "workspace " ++ lua_string(name) ++ "\n" ++
+    "    configurations { \"Debug\", \"Release\" }\n"
+}
+
+// 3. Procedural main for file output
+pn main() {
+    var lua = "x"
+    var h1 = "x"
+    
+    h1 = gen_header("Lambda")
+    lua = h1
+    
+    lua |> "output.lua"
+    return 0
+}
+```
+
+### Code Style Requirements
+
+1. **All `var` declarations at function top** - no inline declarations
+2. **Intermediate variables for fn results** - `h = fn(); result = result ++ h`
+3. **Expression-style if-else in fn** - `if (cond) a else b` not `if (cond) { a }`
+4. **Use `slice()` not `replace()` for suffix removal**
+5. **Minimize null checks** to avoid type coercion issues
+
+---
+
+## TODO: Remaining Implementation Tasks
+
+The current `utils/generate_premake.ls` generates workspace headers and configurations. The following tasks remain for full feature parity with `generate_premake.py`:
+
+### High Priority
+
+- [ ] **Iterate `source_dirs`** - Generate file lists for each source directory
+- [ ] **Generate `lambda-lib`** - Static library project from `lib/` sources
+- [ ] **Generate `lambda-runtime`** - Static library from `lambda/` sources  
+- [ ] **Generate main executable** - `lambda` project linking all libraries
+- [ ] **Handle `includes`** - Generate `includedirs` from config
+
+### Medium Priority
+
+- [ ] **Platform-specific libraries** - Parse `platforms.macos/linux/windows` overrides
+- [ ] **Library linking** - Generate `links` section with correct library order
+- [ ] **Build options** - Generate `buildoptions` from config flags
+- [ ] **Linker options** - Generate `linkoptions` for LTO, dead stripping, etc.
+
+### Lower Priority
+
+- [ ] **Test projects** - Generate test executables from `test_suites`
+- [ ] **Dev libraries** - Handle `dev_libraries` for test builds
+- [ ] **Library dependencies** - Track and order library dependencies correctly
+- [ ] **Platform filters** - Generate `filter "system:macos"` blocks
+
+### Enhancements
+
+- [ ] **CLI argument parsing** - Support `--platform linux` override
+- [ ] **Output path option** - Allow custom output filename
+- [ ] **Validation** - Check config structure before generation
+- [ ] **Diff mode** - Compare against existing premake5.lua
+
+### Testing
+
+- [ ] **Output comparison** - Diff against Python-generated premake5.lua
+- [ ] **Build verification** - Ensure generated Lua produces working builds
+- [ ] **Cross-platform** - Test on Linux and Windows
