@@ -38,13 +38,23 @@ typedef struct EdgePath {
     bool arrow_end;         // True to draw arrow at end
 } EdgePath;
 
+// Subgraph/cluster position after layout
+typedef struct SubgraphPosition {
+    const char* subgraph_id;    // Subgraph identifier
+    const char* label;          // Display label
+    float x, y;                 // Top-left position
+    float width, height;        // Bounding box dimensions
+    float label_height;         // Height reserved for label
+} SubgraphPosition;
+
 // Complete graph layout result
 typedef struct GraphLayout {
     float graph_width;      // Total graph width
     float graph_height;     // Total graph height
 
-    ArrayList* node_positions; // Array of NodePosition*
-    ArrayList* edge_paths;   // Array of EdgePath*
+    ArrayList* node_positions;      // Array of NodePosition*
+    ArrayList* edge_paths;          // Array of EdgePath*
+    ArrayList* subgraph_positions;  // Array of SubgraphPosition*
 
     // Layout parameters
     float node_spacing_x;   // Horizontal spacing between nodes
@@ -132,11 +142,32 @@ typedef struct LayoutLayer {
     ArrayList* nodes;       // Array of LayoutNode*
 } LayoutLayer;
 
+// Internal: Subgraph/cluster in layout graph
+typedef struct LayoutSubgraph {
+    const char* id;         // Subgraph identifier
+    const char* label;      // Display label
+    const char* direction;  // Direction override ("TB", "LR", "BT", "RL", or NULL for inherit)
+
+    ArrayList* node_ids;    // Array of const char* - IDs of nodes in this subgraph
+    ArrayList* subgraphs;   // Array of LayoutSubgraph* - nested subgraphs
+
+    // Layout computed values
+    float x, y;             // Top-left position
+    float width, height;    // Bounding box including padding
+
+    // Styling
+    const char* fill;       // Background fill color
+    const char* stroke;     // Border stroke color
+    float padding;          // Internal padding (default: 10)
+    float label_height;     // Height reserved for label (default: 20)
+} LayoutSubgraph;
+
 // Internal: Graph structure for layout algorithms
 typedef struct LayoutGraph {
     ArrayList* nodes;       // Array of LayoutNode*
     ArrayList* edges;       // Array of LayoutEdge*
     ArrayList* layers;      // Array of LayoutLayer* (for hierarchical layouts)
+    ArrayList* subgraphs;   // Array of LayoutSubgraph* (clusters/groups)
 
     // Graph properties
     bool is_directed;
