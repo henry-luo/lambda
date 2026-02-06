@@ -123,8 +123,8 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_OUTPUT2, "output", 2, &TYPE_NULL, true, true, false, LMD_TYPE_ANY},
-    {SYSPROC_OUTPUT3, "output", 3, &TYPE_NULL, true, true, false, LMD_TYPE_ANY},
+    {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, trg) -> true/error
+    {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, url, format)
     {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
     // fs module functions - procedural (is_proc=true), not method-eligible
     {SYSPROC_FS_COPY, "fs_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
@@ -852,6 +852,30 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     return (AstNode*)ast_node;
 }
 
+// Helper: check if TSNode contains ~ (current_item) reference before building AST
+// This is used to determine if pipe expression needs argument injection
+static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
+    if (ts_node_is_null(node)) return false;
+    
+    TSSymbol symbol = ts_node_symbol(node);
+    
+    // Check for current_item (~) or current_index (~#)
+    if (symbol == sym_current_item || symbol == sym_current_index) {
+        return true;
+    }
+    
+    // Recursively check children
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        if (tsnode_has_current_item_ref(tp, child)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
 AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     log_debug("build call expr: %d", symbol);
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp,
@@ -976,7 +1000,14 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
 
     if (!sys_func_info && !is_method_call) {
         // Traditional function call lookup
-        sys_func_info = get_sys_func_info(&func_name, arg_count);
+        // If in pipe context without ~ reference, lookup with extra arg
+        int lookup_arg_count = arg_count + tp->pipe_inject_args;
+        sys_func_info = get_sys_func_info(&func_name, lookup_arg_count);
+        if (sys_func_info && tp->pipe_inject_args > 0) {
+            log_debug("pipe inject: lookup %.*s with %d args (was %d)", 
+                (int)func_name.length, func_name.str, lookup_arg_count, arg_count);
+            ast_node->pipe_inject = true;
+        }
     }
 
     if (sys_func_info) {
@@ -1235,8 +1266,15 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         LMD_TYPE_SYMBOL, sizeof(TypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
 
-    if (cnt <= 1) {
-        // For cnt == 0 (identifiers) or cnt == 1 (simple string content)
+    // Check if the single child is an escape sequence - if so, needs special processing
+    bool has_escape = false;
+    if (cnt == 1) {
+        TSNode first_child = ts_node_named_child(node, 0);
+        has_escape = (ts_node_symbol(first_child) == SYM_ESCAPE_SEQUENCE);
+    }
+
+    if (cnt <= 1 && !has_escape) {
+        // For cnt == 0 (identifiers) or cnt == 1 (simple string content, no escapes)
         if (cnt == 0) {
             child = node;
         } else {
@@ -1252,7 +1290,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         str->chars[len] = '\0';  str->len = len;
         str->ref_cnt = 1;  // set to 1 to prevent it from being freed
     }
-    else { // got escape sequence
+    else { // got escape sequence or multiple content parts
         StringBuf *str_buf = stringbuf_new(tp->pool);  // todo: reuse the stringbuf
         TSNode child = ts_node_named_child(node, 0);
         while (!ts_node_is_null(child)) {
@@ -1739,6 +1777,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_PIPE; }
     else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
+    else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE_FILE; }
+    else if (strview_equal(&op, "|>>")) { ast_node->op = OPERATOR_PIPE_APPEND; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
     else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
@@ -1748,8 +1788,24 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op = OPERATOR_ADD; // Default fallback to prevent crashes
     }
 
+    // For pipe operator: check if RHS uses ~ (current_item)
+    // If not, inject the left side as first argument at call lookup time
     TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
+    bool pipe_inject = false;
+    if (ast_node->op == OPERATOR_PIPE) {
+        if (!tsnode_has_current_item_ref(tp, right_node)) {
+            tp->pipe_inject_args = 1;
+            pipe_inject = true;
+            log_debug("pipe without ~: will inject first arg");
+        }
+    }
+    
     ast_node->right = build_expr(tp, right_node);
+    
+    // Reset pipe_inject_args after building right side
+    if (pipe_inject) {
+        tp->pipe_inject_args = 0;
+    }
 
     // Defensive validation: ensure right operand was built successfully
     if (!ast_node->right) {
@@ -1850,6 +1906,17 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
                 type_id = right_type;
             }
         }
+    }
+    else if (ast_node->op == OPERATOR_PIPE_FILE || ast_node->op == OPERATOR_PIPE_APPEND) {
+        // pipe-to-file operators (procedural only): change node type to AST_NODE_PIPE_FILE_STAM
+        ast_node->node_type = AST_NODE_PIPE_FILE_STAM;
+        // Check that we're in procedural context
+        if (!tp->current_scope || !tp->current_scope->is_proc) {
+            log_error("Error: pipe-to-file operators (|> and |>>) are only allowed in procedural code (pn functions)");
+            tp->error_count++;
+        }
+        // result type is Item (true on success, error on failure)
+        type_id = LMD_TYPE_ANY;
     }
     else {  // OPERATOR_JOIN, etc.
         type_id = LMD_TYPE_ANY;

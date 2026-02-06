@@ -1,0 +1,12 @@
+Test 1 - write map: true
+Test 2 - append map: true
+Pipe file content:
+{ name: "Lambda", version: 1, features: ["pipe", "file"]}
+{ timestamp: t'2026-02-06', count: 42}
+Text file content:
+Hello, world!
+Symbol target content:
+{ test: "symbol target"}
+Scalar file content:
+42
+done

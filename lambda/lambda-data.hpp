@@ -237,6 +237,8 @@ typedef enum Operator {
     // pipe operators
     OPERATOR_PIPE,      // | pipe operator
     OPERATOR_WHERE,     // where filter clause
+    OPERATOR_PIPE_FILE,     // |> pipe to file (write)
+    OPERATOR_PIPE_APPEND,   // |>> pipe to file (append)
 
     // occurrence
     OPERATOR_OPTIONAL,  // ?
@@ -346,7 +348,7 @@ typedef enum SysFunc {
     SYSPROC_TODAY,
     SYSPROC_PRINT,
     SYSPROC_FETCH,
-    SYSPROC_OUTPUT2,         // output(source, url) - auto-detect format
+    SYSPROC_OUTPUT2,         // output(source, url) - writes data to target
     SYSPROC_OUTPUT3,         // output(source, url, format) - explicit format
     SYSPROC_CMD,
     // fs module functions

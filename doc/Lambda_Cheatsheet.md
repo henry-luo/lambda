@@ -153,6 +153,30 @@ users where ~.age >= 18 | ~.name // filter then map
 [1,2,3] | ~ ^ 2 where ~ > 5 | sum // 13 (4+9)
 ```
 
+**Pipe to File (procedural only):**
+```lambda
+// Target can be string, symbol, or path
+data |> "output.txt"      // String: file in current dir
+data |> 'output.txt'      // Symbol: same as string
+data |> /tmp.output.txt   // Path: full path (creates dirs if needed)
+
+// Append mode
+data |>> "output.txt"     // Append to file
+
+// Data type determines output format:
+// - String: raw text (no formatting)
+// - Binary: raw binary data
+// - Error: reports error, returns error
+// - Other types: Lambda/Mark format
+
+// To output in other formats, use format() first:
+data | format('json') |> "output.json"
+
+// Returns true on success, error on failure
+let ok = data |> "file.txt";
+if (!ok) { print("Write failed"); }
+```
+
 ## Control Flow
 
 **If Expressions (require else):**

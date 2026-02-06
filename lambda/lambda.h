@@ -625,9 +625,13 @@ typedef struct Context {
     Item pn_print(Item item);
     Item pn_cmd(Item cmd, Item args);
     Item pn_fetch(Item url, Item options);
-    Item pn_output(Item source, Item url, Item format);   // internal: write formatted data to file
-    Item pn_output2(Item source, Item url);               // output(source, url) - auto-detect format
-    Item pn_output3(Item source, Item url, Item format);  // output(source, url, format) - explicit format
+    Item pn_output(Item source, Item url, Item format);   // internal: write formatted data to file (with format detection)
+    Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target (same as |>)
+    Item pn_output3(Item source, Item url, Item format);  // output(data, url, format) - explicit format output
+
+    // pipe-to-file operators (procedural only)
+    Item pn_pipe_file(Item source, Item path);    // |> pipe to file (write, Mark format)
+    Item pn_pipe_append(Item source, Item path);  // |>> pipe to file (append, Mark format)
 
     // fs module functions (procedural)
     Item pn_fs_copy(Item src, Item dst);
