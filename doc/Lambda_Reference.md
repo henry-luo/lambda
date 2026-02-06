@@ -6,7 +6,9 @@
 2. [Language Overview](#language-overview)
 3. [Syntax and Grammar](#syntax-and-grammar)
 4. [Data Types](#data-types)
+   - [Path Type](#path-type)
 5. [Literals](#literals)
+   - [Path Literals](#path-literals)
 6. [Variables and Declarations](#variables-and-declarations)
 7. [Expressions](#expressions)
    - [Pipe Expressions](#pipe-expressions)
@@ -16,9 +18,12 @@
 10. [Collections](#collections)
 11. [Type System](#type-system)
 12. [System Functions](#system-functions)
-13. [Input/Output and Parsing](#inputoutput-and-parsing)
+13. [I/O Module](#io-module)
+    - [Unified Path and URL Handling](#unified-path-and-url-handling)
+    - [I/O Functions](#io-functions)
 14. [Operators](#operators)
     - [Pipe and Filter Operators](#pipe-and-filter-operators)
+    - [Pipe Output Operators](#pipe-output-operators)
 15. [Modules and Imports](#modules-and-imports)
 16. [Error Handling](#error-handling)
 17. [Memory Management](#memory-management)
@@ -135,6 +140,87 @@ Lambda Script has a rich type system with both primitive and composite types:
 - `error` - Error values
 - `number` - Numeric union type (int | float)
 
+### Path Type
+
+The `path` type represents file system paths and URLs in a unified, platform-independent way. Paths use **dot notation** for segment separation and support lazy content loading.
+
+#### Path Structure
+
+Paths consist of linked segments with a root scheme:
+
+| Scheme | Root Syntax | Example | Resolves To |
+|--------|-------------|---------|-------------|
+| Absolute file | `/` | `/etc.hosts` | `/etc/hosts` |
+| Relative (current) | `.` | `.src.main` | `./src/main` |
+| Relative (parent) | `..` | `..shared.lib` | `../shared/lib` |
+| HTTP | `http` | `http.api.example.com` | `http://api.example.com` |
+| HTTPS | `https` | `https.secure.api` | `https://secure.api` |
+| System | `sys` | `sys.env.PATH` | System environment variable |
+
+#### Path Syntax
+
+```lambda
+// Absolute paths (file scheme)
+/etc.hosts                    // /etc/hosts
+/home.user.documents          // /home/user/documents
+/var.log.'app.log'            // /var/log/app.log (quoted for dots in filename)
+
+// Relative paths
+.src.main                     // ./src/main
+.data.'config.json'           // ./data/config.json
+..shared.lib                  // ../shared/lib
+
+// URL paths
+http.api.github.com.users     // http://api.github.com/users
+https.example.com.'api/v1'    // https://example.com/api/v1
+
+// System paths
+sys.env.HOME                  // Value of $HOME environment variable
+sys.env.PATH                  // Value of $PATH environment variable
+```
+
+#### Wildcards
+
+Paths support glob-style wildcards for pattern matching:
+
+```lambda
+// Single-level wildcard (*)
+.src.*                        // All items directly in ./src
+/var.log.*                    // All items in /var/log
+
+// Recursive wildcard (**)
+.test.**                      // All items recursively under ./test
+/home.user.documents.**       // All files recursively
+```
+
+#### Path Concatenation
+
+Paths can be concatenated using the `++` operator:
+
+```lambda
+let base = /home.user
+let config = base ++ "config" ++ "settings.json"
+// Result: /home.user.config.'settings.json'
+
+let project = .src
+let file = project ++ "main.ls"
+// Result: .src.'main.ls'
+```
+
+#### Path Metadata
+
+Paths carry optional metadata that is lazily loaded:
+
+```lambda
+// Check existence
+exists(/etc.hosts)            // true or false
+exists(.config.json)          // true or false
+
+// Paths resolve to content when used in expressions
+let content = input(/etc.hosts, 'text)    // Load file content
+let data = input(https.api.example.com.data, 'json)  // Fetch URL
+```
+
 ---
 
 ## Literals
@@ -222,6 +308,67 @@ t'2025-05-01T14:30:00Z'
 true
 false
 null
+```
+
+### Path Literals
+
+Path literals represent file system paths and URLs using dot notation:
+
+```lambda
+// Absolute file paths (start with /)
+/etc.hosts                    // /etc/hosts
+/home.user.documents          // /home/user/documents
+/usr.local.bin.lambda         // /usr/local/bin/lambda
+
+// Relative paths (start with . or ..)
+.config.json                  // ./config.json
+.src.main.ls                  // ./src/main.ls
+..parent.file                 // ../parent/file
+
+// Quoted segments (for names containing dots or special chars)
+/var.log.'app.log'            // /var/log/app.log
+.data.'my-file.json'          // ./data/my-file.json
+/home.user.'Documents and Settings'  // Spaces in names
+
+// HTTP/HTTPS URLs
+http.api.github.com.users     // http://api.github.com/users
+https.example.com.data        // https://example.com/data
+https.httpbin.org.json        // https://httpbin.org/json
+
+// System paths
+sys.env.HOME                  // Environment variable $HOME
+sys.env.PATH                  // Environment variable $PATH
+sys.platform                  // Operating system platform
+
+// Wildcards in paths
+.src.*                        // Single-level: all in ./src
+.test.**                      // Recursive: all under ./test
+/var.log.'*.log'              // Pattern in filename
+```
+
+#### Path vs String
+
+Paths are distinct from strings:
+
+| Feature | Path | String |
+|---------|------|--------|
+| Syntax | `/etc.hosts` | `"/etc/hosts"` |
+| Type | `path` | `string` |
+| URL support | Native | Requires parsing |
+| Wildcards | Built-in (`*`, `**`) | Manual |
+| Lazy loading | Yes | No |
+| Platform-independent | Yes | Separator varies |
+
+```lambda
+// Path literal - cross-platform, supports URLs
+let p = /home.user.config
+
+// String - platform-specific
+let s = "/home/user/config"
+
+// Both work with input()
+let data1 = input(p, 'json)
+let data2 = input(s, 'json)
 ```
 
 ---
@@ -1659,10 +1806,274 @@ nums.reverse()              // [6, 2, 9, 5, 1, 4, 1, 3]
 | **Statistical** | `sum`, `avg`, `mean`, `median`, `variance`, `deviation`, `quantile` | Statistical analysis |
 | **Collection** | `slice`, `set`, `all`, `any`, `reverse`, `sort`, `unique`, `concat`, ... | Collection manipulation |
 | **Vector** | `cumsum`, `cumprod`, `argmin`, `argmax`, `dot`, `norm`, `fill`, `range` | Vector operations |
-| **I/O** | `input`, `format`, `print`, `output`, `fetch` | Input/output operations |
+| **I/O** | `input`, `format`, `print`, `output`, `exists` | Input/output operations |
+| **I/O Module** | `io.copy`, `io.move`, `io.delete`, `io.mkdir`, `io.touch`, `io.fetch`, ... | File system operations (procedural) |
 | **Date/Time** | `datetime`, `date`, `time`, `today`, `now`, `justnow` | Date and time functions |
 | **Error** | `error` | Error handling |
 | **Variadic** | `varg` | Variadic argument access |
+
+---
+
+## I/O Module
+
+Lambda provides a unified I/O system that handles both local files and remote URLs transparently. The system consists of:
+
+1. **Pure functions** (`input`, `exists`, `format`) — usable in functional code
+2. **Procedural functions** (`io.*`) — for file system modifications in `pn` functions
+
+### Unified Path and URL Handling
+
+Lambda treats file paths and URLs uniformly through the **Target** system. You can use strings, symbols, or path literals interchangeably:
+
+```lambda
+// All equivalent ways to specify a local file
+let data = input("./config.json", 'json)
+let data = input('./config.json, 'json)
+let data = input(.config.json, 'json)
+
+// All equivalent ways to specify a remote URL
+let users = input("https://api.github.com/users", 'json)
+let users = input('https://api.github.com/users, 'json)
+let users = input(https.api.github.com.users, 'json)
+```
+
+#### Target Types
+
+| Input | Scheme | Behavior |
+|-------|--------|----------|
+| `"./file.txt"` | file (relative) | Read local file |
+| `"/etc/config"` | file (absolute) | Read local file |
+| `.src.main` | file (relative) | Read local file |
+| `/etc.hosts` | file (absolute) | Read local file |
+| `"http://..."` | http | Fetch via HTTP |
+| `"https://..."` | https | Fetch via HTTPS |
+| `https.example.com` | https | Fetch via HTTPS |
+| `sys.env.HOME` | sys | Read system info |
+
+#### The `input()` Function
+
+The universal input function reads and parses data from any source:
+
+```lambda
+// Signature
+input(source)                           // Auto-detect format from extension
+input(source, type)                     // Specify format
+input(source, options)                  // With options map
+
+// Examples
+let json_data = input("data.json")              // Auto-detect JSON
+let yaml_data = input("config.yaml", 'yaml)     // Explicit YAML
+let markdown = input("README.md", 'markdown)    // Markdown document
+let text = input("file.txt", 'text)             // Raw text
+
+// Remote URLs
+let api_data = input("https://api.example.com/data", 'json)
+let remote = input(https.httpbin.org.json, 'json)
+
+// With options
+let doc = input("article.md", {type: 'markdown, flavor: 'gfm})
+```
+
+#### Supported Input Formats
+
+| Format | Extensions | Type Symbol |
+|--------|------------|-------------|
+| JSON | `.json` | `'json` |
+| YAML | `.yaml`, `.yml` | `'yaml` |
+| XML | `.xml` | `'xml` |
+| HTML | `.html`, `.htm` | `'html` |
+| Markdown | `.md`, `.markdown` | `'markdown` |
+| TOML | `.toml` | `'toml` |
+| CSV | `.csv` | `'csv` |
+| Lambda/Mark | `.ls`, `.mk`, `.mark` | `'mark` |
+| Plain text | `.txt` | `'text` |
+| Binary | any | `'binary` |
+| PDF | `.pdf` | `'pdf` |
+| LaTeX | `.tex` | `'latex` |
+
+#### The `exists()` Function
+
+Check if a file or directory exists (pure function, usable anywhere):
+
+```lambda
+// Check file existence
+if exists("./config.json") {
+    let config = input("./config.json", 'json)
+}
+
+// With path literals
+let has_config = exists(.config.json)
+let has_hosts = exists(/etc.hosts)
+
+// Check directories
+if exists("./output") {
+    print("Output directory exists")
+}
+```
+
+### I/O Functions
+
+The `io` module provides procedural functions for file system operations. These functions are only available in procedural (`pn`) functions.
+
+#### `io.copy(source, destination)`
+
+Copies a file or directory. **Supports remote URLs as source.**
+
+```lambda
+pn backup_config() {
+    // Copy local file
+    io.copy("./config.json", "./config.backup.json")
+    
+    // Copy directory recursively
+    io.copy("./src", "./src_backup")
+    
+    // Download remote file (URL to local)
+    io.copy("https://example.com/data.json", "./downloaded.json")
+    
+    // Using path literals
+    io.copy(.data.input, .data.output)
+}
+```
+
+#### `io.move(source, destination)`
+
+Moves (renames) a file or directory:
+
+```lambda
+pn organize_files() {
+    // Move file
+    io.move("./temp/output.txt", "./final/output.txt")
+    
+    // Rename file
+    io.move("./draft.md", "./published.md")
+    
+    // Move directory
+    io.move("./old_project", "./archive/old_project")
+}
+```
+
+#### `io.delete(path)`
+
+Deletes a file or directory (directories are deleted recursively):
+
+```lambda
+pn cleanup() {
+    // Delete file
+    io.delete("./temp/cache.txt")
+    
+    // Delete directory and all contents
+    io.delete("./build")
+    
+    // Safe deletion with existence check
+    if exists("./temp") {
+        io.delete("./temp")
+    }
+}
+```
+
+#### `io.mkdir(path)`
+
+Creates a directory, including parent directories (like `mkdir -p`):
+
+```lambda
+pn setup_project() {
+    // Create nested directories
+    io.mkdir("./output/reports/2024")
+    io.mkdir("./src/components/ui")
+    
+    // Using path literals
+    io.mkdir(.build.artifacts)
+}
+```
+
+#### `io.touch(path)`
+
+Creates an empty file or updates modification time:
+
+```lambda
+pn mark_completion() {
+    // Create marker file
+    io.touch("./output/.complete")
+    
+    // Update timestamp
+    io.touch("./cache/last_update")
+}
+```
+
+#### `io.symlink(target, link_path)`
+
+Creates a symbolic link:
+
+```lambda
+pn create_links() {
+    // Create symlink: link_path -> target
+    io.symlink("./config/production.json", "./config.json")
+    
+    // Link to directory
+    io.symlink("./versions/v2.0", "./current")
+}
+```
+
+#### `io.chmod(path, mode)`
+
+Changes file permissions (Unix-style):
+
+```lambda
+pn set_permissions() {
+    // Make executable
+    io.chmod("./script.sh", 755)
+    
+    // Read-only
+    io.chmod("./config.json", 644)
+    
+    // Mode as string
+    io.chmod("./private.key", "600")
+}
+```
+
+#### `io.rename(old_path, new_path)`
+
+Renames a file or directory (must be on same filesystem):
+
+```lambda
+pn rename_files() {
+    io.rename("./report.txt", "./report_final.txt")
+    io.rename("./temp", "./temp_old")
+}
+```
+
+#### `io.fetch(url)` / `io.fetch(url, options)`
+
+Fetches content from a URL or reads a local file:
+
+```lambda
+pn download_data() {
+    // Fetch from URL
+    let response = io.fetch("https://httpbin.org/json")
+    
+    // Fetch with options
+    let data = io.fetch("https://api.example.com/data", {
+        headers: {"Authorization": "Bearer token"}
+    })
+    
+    // Read local file
+    let content = io.fetch("./data.txt")
+}
+```
+
+#### I/O Function Summary
+
+| Function | Description | Remote Support |
+|----------|-------------|----------------|
+| `io.copy(src, dst)` | Copy file/directory | Source can be URL |
+| `io.move(src, dst)` | Move/rename | Local only |
+| `io.delete(path)` | Delete file/directory | Local only |
+| `io.mkdir(path)` | Create directory | Local only |
+| `io.touch(path)` | Create/update file | Local only |
+| `io.symlink(target, link)` | Create symbolic link | Local only |
+| `io.chmod(path, mode)` | Change permissions | Local only |
+| `io.rename(old, new)` | Rename (same filesystem) | Local only |
+| `io.fetch(url, opts?)` | Fetch content | Yes |
 
 ---
 
@@ -1740,6 +2151,126 @@ users | ~.name              // ["Alice", "Bob", ...]
 ```
 
 See [Pipe Expressions](#pipe-expressions) for detailed documentation.
+
+### Pipe Output Operators
+
+Lambda provides **pipe output operators** for writing data directly to files in procedural code. These operators are only available in `pn` (procedural) functions.
+
+| Operator | Description | Mode |
+|----------|-------------|------|
+| `\|>` | Pipe to file | Write (truncate) |
+| `\|>>` | Pipe append to file | Append |
+
+#### `|>` — Pipe Write
+
+Writes data to a file, creating it if it doesn't exist or truncating if it does:
+
+```lambda
+pn save_data() {
+    // Write map to file (auto-formats as Mark)
+    let data = {name: "Lambda", version: 1}
+    data |> "/tmp/config.mk"
+    
+    // Write string to file
+    "Hello, world!" |> "/tmp/greeting.txt"
+    
+    // Write with symbol path
+    let result = {status: "ok", count: 42}
+    result |> 'output.json
+    
+    // Chain with expressions
+    [1, 2, 3] | ~ * 2 |> "/tmp/doubled.mk"
+}
+```
+
+#### `|>>` — Pipe Append
+
+Appends data to a file, creating it if it doesn't exist:
+
+```lambda
+pn build_log() {
+    // Create log file
+    {event: "start", time: now()} |> "/tmp/events.log"
+    
+    // Append entries
+    {event: "process", item: 1} |>> "/tmp/events.log"
+    {event: "process", item: 2} |>> "/tmp/events.log"
+    {event: "end", time: now()} |>> "/tmp/events.log"
+}
+```
+
+#### Return Value
+
+Both operators return the **number of bytes written**:
+
+```lambda
+pn count_bytes() {
+    let bytes_written = {large: "data"} |> "/tmp/output.mk"
+    print("Wrote", bytes_written, "bytes")
+}
+```
+
+#### Output Format Auto-Detection
+
+The output format is automatically detected from the file extension:
+
+| Extension | Format |
+|-----------|--------|
+| `.json` | JSON |
+| `.yaml`, `.yml` | YAML |
+| `.xml` | XML |
+| `.html`, `.htm` | HTML |
+| `.md` | Markdown |
+| `.txt` | Plain text |
+| `.mk`, `.mark`, `.ls` | Mark format |
+
+```lambda
+pn export_data() {
+    let data = {name: "test", values: [1, 2, 3]}
+    
+    data |> "/tmp/data.json"    // Outputs as JSON
+    data |> "/tmp/data.yaml"    // Outputs as YAML
+    data |> "/tmp/data.mk"      // Outputs as Mark
+}
+```
+
+#### The `output()` Function
+
+For more control over output, use the `output()` function directly:
+
+```lambda
+// Signature
+output(data, target)                    // Auto-detect format
+output(data, target, options)           // With options
+
+// Options map:
+//   format: symbol - Override format ('json, 'yaml, 'xml, etc.)
+//   mode: symbol - 'write (default) or 'append
+//   atomic: bool - Write to temp file first, then rename
+
+pn advanced_output() {
+    let data = {config: "value"}
+    
+    // Force JSON format on .txt file
+    output(data, "/tmp/data.txt", {format: 'json})
+    
+    // Append mode
+    output({entry: 1}, "/tmp/log.mk", {mode: 'append})
+    
+    // Atomic write (safe for concurrent access)
+    output(data, "/tmp/config.json", {atomic: true})
+}
+```
+
+#### Pipe Output vs `output()`
+
+| Feature | `\|>` / `\|>>` | `output()` |
+|---------|----------------|------------|
+| Syntax | Infix operator | Function call |
+| Format override | No | Yes (`format` option) |
+| Atomic writes | No | Yes (`atomic` option) |
+| Append mode | `\|>>` | `{mode: 'append}` |
+| Return value | Bytes written | Bytes written |
 
 ### Type Operators
 
