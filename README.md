@@ -1,8 +1,8 @@
 # Lambda Script
 
-A general-purpose, cross-platform, pure functional scripting language and document processing engine.
+A general-purpose, cross-platform, functional scripting language and document processing engine.
 
-Built from scratch in C/C++ with a custom and light-weight runtime (only **6 MB**), Tree-sitter parsing, MIR-based JIT compilation.
+Built from scratch in C/C++ with a custom and light-weight runtime (only **8 MB**), Tree-sitter parsing, MIR-based JIT compilation.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
 > A stable subset of the literal data model is separately formalised and released as
@@ -19,8 +19,8 @@ Internally, Lambda treats documents as structured data. Different input formats 
 ## Features
 
 ### 1. Lambda script (pure functional runtime)
-- **Pure-functional core** with immutable data structures (lists, maps, elements) and first-class functions.
-- **Expressive pipe operator** (`|`) for fluent data transformation pipelines with inline mapping and filtering.
+- **Pure-functional core** with immutable data structures (lists, arrays, maps, elements) and first-class functions and types.
+- **Expressive pipe operator** (`|`) for fluent set-oriented data transformation pipelines with inline mapping and filtering.
 - **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
 - **Powerful for-expressions** with `where`, `order by`, `limit`, `offset` clauses for SQL-like data querying.
 - **Interactive REPL** for exploration and debugging.
@@ -42,11 +42,10 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
 - **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
 - **Unified interactive viewer** via `lambda view`:
-   - HTML / XML (treated as HTML) with CSS styling
+   - HTML / XML (treated as HTML with CSS styling) 
    - Markdown / Wiki (rendered with styling)
    - LaTeX (`.tex`) via conversion to HTML
-   - PDF viewing
-   - Lambda script results (`.ls`) evaluated and rendered
+   - Lambda script (`.ls`) evaluated to HTML and rendered (think of PHP)
 
 ## Language Highlights
 
@@ -151,37 +150,40 @@ data |> "/tmp/output.json"
 
 ## Quick Start
 
-### Prerequisites
+### Install From Source
 
-Lambda is built from source. The dependency scripts also install Node.js/npm (used by Tree-sitter generation via `npx`).
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/henry-luo/lambda.git
+   cd lambda
+   ```
 
-**macOS (native build):**
+2. **Install dependencies:**
+   ```bash
+   # macOS
+   ./setup-mac-deps.sh
+
+   # Linux
+   ./setup-linux-deps.sh
+
+   # Windows (under MSYS2)
+   ./setup-windows-deps.sh
+   ```
+
+3. **Build:**
+   ```bash
+   make build
+   ```
+#### Build System
+
+Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
+
 ```bash
-./setup-mac-deps.sh
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-./setup-linux-deps.sh
-```
-
-**Windows (native build under MSYS2):**
-```bash
-./setup-windows-deps.sh
-```
-
-### Building
-
-**Recommended (Premake-based Make targets):**
-```bash
-make build      # Incremental build (default)
-make debug      # Debug build (AddressSanitizer enabled)
-make release    # Optimized release build
-```
-
-**More build help:**
-```bash
-make help
+make build             # Incremental build (recommended)
+make release           # Optimized release build
+make test              # Run unit test
+make clean             # Clean build artifacts
+make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar changes)
 ```
 
 ### Running
@@ -217,33 +219,6 @@ The build produces a runnable executable at the repo root: `lambda.exe`.
 
 Tip: `./lambda.exe <command> --help` prints detailed options and examples.
 
-## Installation
-
-### From Source
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/henry-luo/lambda.git
-   cd lambda
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   # macOS
-   ./setup-mac-deps.sh
-
-   # Linux
-   ./setup-linux-deps.sh
-
-   # Windows
-   ./setup-windows-deps.sh
-   ```
-
-3. **Build:**
-   ```bash
-   make build
-   ```
-
 ## Examples
 
 ### Document Processing
@@ -266,24 +241,6 @@ for (row in csv) {
 42
 λ> for (u in data.users) { if (u.active) u.name }
 ["Alice", "Bob", "Charlie"]
-```
-
-## Testing
-
-```bash
-make build-test
-make test
-```
-
-## Build System
-
-Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
-
-```bash
-make build             # Incremental build (recommended)
-make release           # Optimized release build
-make clean             # Clean build artifacts
-make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar changes)
 ```
 
 ## Documentation
@@ -314,7 +271,7 @@ make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar c
 | -------- | ------ | --------------------------- |
 | macOS    | ✅ Full | Native development platform |
 | Linux    | ✅ Full | Ubuntu 20.04+ tested        |
-| Windows  | ✅ Full | Native build via MSYS2;     |
+| Windows  | ✅ Full | Native build via MSYS2      |
 
 ## License
 
@@ -325,7 +282,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **MIR Project**: JIT compilation infrastructure
 - **Tree-sitter**: Incremental parsing framework
 - **ThorVG**: SVG vector graphics library
-- **GoogleTest**: C++ unit testing framework
 
 ## Support
 
