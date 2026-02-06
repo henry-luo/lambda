@@ -616,6 +616,16 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_PATH: {
         Path* path = (Path*)item.item;
+        // For sys:// paths, print the resolved content instead of the path
+        if (path_get_scheme(path) == PATH_SCHEME_SYS) {
+            if (path->result != 0) {
+                // Already resolved - print the resolved content
+                print_item(strbuf, {.item = path->result}, depth, indent);
+                break;
+            }
+            // Not resolved - just print path (resolution happens during execution)
+        }
+        // Fall through for non-sys paths or unresolved sys paths
         path_to_string(path, strbuf);
         break;
     }
