@@ -2335,21 +2335,21 @@ void transpile_pipe_file_stam(Transpiler* tp, AstBinaryNode *pipe_node) {
         return;
     }
 
-    // Use pn_output4 with appropriate mode: 'write' for |>, 'append' for |>>
-    const char* mode = (pipe_node->op == OPERATOR_PIPE_APPEND) ? "append" : "write";
-    int mode_len = (pipe_node->op == OPERATOR_PIPE_APPEND) ? 6 : 5;  // strlen of mode
-    
-    strbuf_append_str(tp->code_buf, "pn_output4(");
-    transpile_box_item(tp, pipe_node->left);  // source data
-    strbuf_append_str(tp->code_buf, ", ");
-    transpile_box_item(tp, pipe_node->right);  // file path
-    strbuf_append_str(tp->code_buf, ", ITEM_NULL, ");  // format: null for auto-detect
-    strbuf_append_str(tp->code_buf, "s2it(heap_strcpy(\"");
-    strbuf_append_str(tp->code_buf, mode);
-    strbuf_append_str(tp->code_buf, "\", ");
-    strbuf_append_int(tp->code_buf, mode_len);
-    strbuf_append_str(tp->code_buf, "))");  // mode as string
-    strbuf_append_char(tp->code_buf, ')');
+    if (pipe_node->op == OPERATOR_PIPE_APPEND) {
+        // Use pn_output_append for |>> (append mode)
+        strbuf_append_str(tp->code_buf, "pn_output_append(");
+        transpile_box_item(tp, pipe_node->left);  // source data
+        strbuf_append_str(tp->code_buf, ", ");
+        transpile_box_item(tp, pipe_node->right);  // file path
+        strbuf_append_char(tp->code_buf, ')');
+    } else {
+        // Use pn_output2 for |> (write mode, default)
+        strbuf_append_str(tp->code_buf, "pn_output2(");
+        transpile_box_item(tp, pipe_node->left);  // source data
+        strbuf_append_str(tp->code_buf, ", ");
+        transpile_box_item(tp, pipe_node->right);  // file path
+        strbuf_append_char(tp->code_buf, ')');
+    }
 }
 
 // assignment statement for mutable variables (procedural only)
