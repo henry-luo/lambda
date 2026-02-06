@@ -294,6 +294,7 @@
                 "lambda/shape_pool.cpp",
                 "lambda/shape_builder.cpp",
                 "lambda/lambda-data.cpp",
+                "lambda/target.c",
                 "lambda/lambda-decimal.cpp",
                 "lambda/lambda-error.cpp",
                 "lambda/build_ast.cpp",

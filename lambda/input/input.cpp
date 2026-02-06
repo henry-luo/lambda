@@ -12,6 +12,11 @@
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/file.h"
 
+// Include Target API
+extern "C" {
+    #include "../lambda.h"  // for Target, TargetScheme, etc.
+}
+
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 void parse_json(Input* input, const char* json_string);
@@ -865,6 +870,139 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         url_destroy(abs_url);
         return NULL;
     }
+}
+
+/**
+ * Load input from a Target (unified I/O target).
+ * This function dispatches to appropriate handlers based on target scheme.
+ * 
+ * @param target - The Target to load from (URL or Path)
+ * @param type - Optional type hint (json, xml, etc.)
+ * @param flavor - Optional flavor hint (for markup variants)
+ * @return Input* on success, NULL on failure
+ */
+Input* input_from_target(Target* target, String* type, String* flavor) {
+    if (!target) {
+        log_error("input_from_target: target is NULL");
+        return NULL;
+    }
+    
+    log_debug("input_from_target: scheme=%d, type=%d", target->scheme, target->type);
+    
+    // Check if target is a directory first (for local targets)
+    if (target_is_dir(target)) {
+        log_debug("input_from_target: directory detected, using directory listing");
+        StrBuf* path_buf = (StrBuf*)target_to_local_path(target, NULL);
+        if (path_buf) {
+            Input* input = input_from_directory(path_buf->str, target->original, false, 1);
+            strbuf_free(path_buf);
+            return input;
+        }
+        return NULL;
+    }
+    
+    // For URL targets, use the existing URL-based dispatch
+    if (target->type == TARGET_TYPE_URL && target->url) {
+        Url* url = target->url;
+        log_debug("input_from_target: URL target, href=%s", url->href ? url->href->chars : "null");
+        
+        // Handle different URL schemes
+        if (target->scheme == TARGET_SCHEME_FILE) {
+            const char* pathname = url_get_pathname(url);
+            #ifdef _WIN32
+            if (pathname && pathname[0] == '/' && isalpha(pathname[1]) && pathname[2] == ':') {
+                pathname++; // Skip the leading '/' for Windows paths
+            }
+            #endif
+            
+            log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
+            char* source = read_text_file(pathname);
+            if (!source) {
+                log_debug("input_from_target: failed to read file at path: %s", pathname ? pathname : "null");
+                return NULL;
+            }
+            
+            // Create a copy of the URL for the input (input_from_source doesn't own the URL)
+            Url* url_copy = url_parse(url->href->chars);
+            Input* input = input_from_source(source, url_copy, type, flavor);
+            free(source);
+            if (!input && url_copy) url_destroy(url_copy);
+            return input;
+        }
+        else if (target->scheme == TARGET_SCHEME_HTTP || target->scheme == TARGET_SCHEME_HTTPS) {
+            log_debug("input_from_target: HTTP/HTTPS URL detected");
+            const char* type_str = type ? type->chars : NULL;
+            const char* flavor_str = flavor ? flavor->chars : NULL;
+            return input_from_http(url->href->chars, type_str, flavor_str, "./temp/cache");
+        }
+        else if (target->scheme == TARGET_SCHEME_SYS) {
+            log_debug("input_from_target: sys:// URL detected");
+            Pool* pool = pool_create();
+            if (!pool) {
+                log_error("input_from_target: failed to create pool for sys:// URL");
+                return NULL;
+            }
+            Input* input = input_from_sysinfo(url, pool);
+            if (!input) pool_destroy(pool);
+            return input;
+        }
+        else {
+            log_error("input_from_target: unsupported URL scheme %d", target->scheme);
+            return NULL;
+        }
+    }
+    // For Path targets, convert to OS path and read
+    else if (target->type == TARGET_TYPE_PATH && target->path) {
+        Path* path = target->path;
+        log_debug("input_from_target: Path target");
+        
+        // Check scheme of the path
+        PathScheme path_scheme = path_get_scheme(path);
+        if (path_scheme == PATH_SCHEME_HTTP || path_scheme == PATH_SCHEME_HTTPS) {
+            // Convert path to URL string and handle as HTTP
+            StrBuf* url_buf = strbuf_new();
+            path_to_string(path, url_buf);
+            const char* type_str = type ? type->chars : NULL;
+            const char* flavor_str = flavor ? flavor->chars : NULL;
+            Input* input = input_from_http(url_buf->str, type_str, flavor_str, "./temp/cache");
+            strbuf_free(url_buf);
+            return input;
+        }
+        
+        // Local file path - convert to OS path
+        StrBuf* path_buf = strbuf_new();
+        path_to_os_path(path, path_buf);
+        const char* pathname = path_buf->str;
+        
+        // Directory case already handled by target_is_dir check above
+        
+        log_debug("input_from_target: reading file from path: %s", pathname);
+        char* source = read_text_file(pathname);
+        if (!source) {
+            log_debug("input_from_target: failed to read file at path: %s", pathname);
+            strbuf_free(path_buf);
+            return NULL;
+        }
+        
+        // Create URL from file path for the input
+        StrBuf* url_buf = strbuf_new();
+        strbuf_append_str(url_buf, "file://");
+        #ifdef _WIN32
+        if (pathname[0] != '/') strbuf_append_char(url_buf, '/');
+        #endif
+        strbuf_append_str(url_buf, pathname);
+        Url* file_url = url_parse(url_buf->str);
+        strbuf_free(url_buf);
+        
+        Input* input = input_from_source(source, file_url, type, flavor);
+        free(source);
+        strbuf_free(path_buf);
+        if (!input && file_url) url_destroy(file_url);
+        return input;
+    }
+    
+    log_error("input_from_target: invalid target (type=%d)", target->type);
+    return NULL;
 }
 
 Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {

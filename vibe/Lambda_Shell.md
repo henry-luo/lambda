@@ -368,6 +368,79 @@ pn main() {
 
 ---
 
+## I/O Target System
+
+Lambda's `input()` and `output()` functions accept **targets** that identify where to read from or write to. The Target system provides unified handling for different location types.
+
+### Accepted Target Types
+
+| Type   | Description                   | Example                                           |
+| ------ | ----------------------------- | ------------------------------------------------- |
+| String | URL or relative path          | `"./data.json"`, `"https://api.example.com/data"` |
+| Symbol | URL or relative path (quoted) | `'./data.json'`, `'https://example.com'`          |
+| Path   | Lambda Path literal           | `/path.to.data`, `.relative.path`                 |
+
+### URL Schemes
+
+| Scheme | Description | Example |
+|--------|-------------|---------|
+| `file://` | Local file system | `"file:///home/user/data.json"` |
+| `http://` | HTTP URL (read-only) | `"http://example.com/api/data"` |
+| `https://` | HTTPS URL (read-only) | `"https://api.github.com/repos"` |
+| `sys://` | System information | `"sys://env"`, `"sys://platform"` |
+| *(none)* | Relative file path | `"./data.json"`, `"../config.yaml"` |
+
+### Path Resolution
+
+Relative paths (without a scheme) are resolved against the current working directory:
+
+```lambda
+// If cwd is /home/user/project/
+input("./data/input.json")      // reads /home/user/project/data/input.json
+input("../shared/config.yaml")  // reads /home/user/shared/config.yaml
+```
+
+### Lambda Path Type
+
+Lambda provides a native `Path` type for cross-platform path handling:
+
+```lambda
+// Path literals use dots instead of slashes
+let config = input(/etc.config.json)
+let data = input(.data.input.csv)      // relative path
+let parent = input(..parent.config.mk) // parent directory
+```
+
+**Path Type Features:**
+- Cross-platform (no OS-specific separators)
+- Type-safe (compile-time checked)
+- Supports wildcards: `*` (single level), `**` (recursive)
+
+### Remote URLs
+
+HTTP/HTTPS targets are **read-only** and fetch content from the web:
+
+```lambda
+// Fetch JSON from REST API
+let data = input("https://api.github.com/repos/owner/repo")
+
+// Error: cannot write to remote URL
+output(data, "https://example.com")  // ERROR
+```
+
+### Target Behavior Summary
+
+| Target Type | input() | output() | Notes |
+|-------------|---------|----------|-------|
+| Relative path | ✅ | ✅ | Resolved against cwd |
+| Absolute path | ✅ | ✅ | Used directly |
+| file:// URL | ✅ | ✅ | Extracted pathname |
+| http(s):// URL | ✅ | ❌ | Read-only |
+| sys:// URL | ✅ | ❌ | System info (read-only) |
+| Lambda Path | ✅ | ✅ | Cross-platform |
+
+---
+
 ## Related
 
 - `input()` function for reading file contents
