@@ -415,6 +415,10 @@ bool target_is_remote(Target* target);
 // Returns false for remote URLs or if stat fails
 bool target_is_dir(Target* target);
 
+// target_exists: Check if target exists (file or directory, local targets only)
+// Returns false for remote URLs (would need HTTP HEAD request)
+bool target_exists(Target* target);
+
 // target_free: Free target and its contents
 void target_free(Target* target);
 
@@ -423,8 +427,8 @@ Item path_resolve_for_iteration(Path* path);                      // Resolve pat
 bool path_ends_with_wildcard(Path* path);                         // Check if leaf is * or **
 void path_load_metadata(Path* path);                              // Load metadata via stat()
 
-// System function: fs.exists() - check if file/directory exists
-Item fn_fs_exists(Item path);                                     // Check if path exists
+// System function: exists() - check if file/directory exists
+Item fn_exists(Item path);                                        // Check if path exists
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);

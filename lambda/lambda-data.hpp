@@ -361,7 +361,6 @@ typedef enum SysFunc {
     SYSPROC_FS_SYMLINK,
     SYSPROC_FS_CHMOD,
     SYSPROC_FS_RENAME,
-    SYSPROC_FS_EXISTS,
 } SysFunc;
 
 typedef struct TypeBinary : Type {

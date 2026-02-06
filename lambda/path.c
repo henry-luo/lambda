@@ -950,73 +950,29 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
 }
 
 // ============================================================================
-// fn_exists() - Check if path exists
+// fn_exists() - Check if path exists using unified Target API
 // ============================================================================
-
-// External declaration for item_type_id (defined in lambda-eval.cpp)
-extern TypeId item_type_id(Item item);
 
 /**
  * Check if a path exists (file or directory).
- * For file:// paths: uses stat()
- * For http(s):// paths: uses HTTP HEAD request (not implemented yet)
+ * Uses unified Target API for consistent path handling.
+ * Accepts: String, Symbol, or Path items.
  * Returns: bool Item (true/false)
  */
-Item fn_fs_exists(Item path_item) {
-    log_debug("fn_fs_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
-    TypeId type_id = item_type_id(path_item);
-    log_debug("fn_fs_exists: type_id=%d", type_id);
+Item fn_exists(Item path_item) {
+    log_debug("fn_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
     
-    if (type_id == LMD_TYPE_NULL) {
-        log_debug("fn_exists: NULL input");
+    // Use unified Target API
+    Target* target = item_to_target(path_item, NULL);
+    if (!target) {
+        log_debug("fn_exists: failed to convert item to target");
         return b2it(false);
     }
     
-    if (type_id == LMD_TYPE_STRING) {
-        // Handle string URLs - extract String* from tagged pointer
-        String* url = (String*)(path_item & 0x00FFFFFFFFFFFFFFULL);
-        if (!url || !url->chars) return b2it(false);
-        
-        // Simple file path check
-        struct stat st;
-        bool exists = (stat(url->chars, &st) == 0);
-        log_debug("fn_exists: string path='%s', exists=%d", url->chars, exists);
-        return b2it(exists);
-    }
+    bool exists = target_exists(target);
+    log_debug("fn_exists: target exists=%d", exists);
     
-    if (type_id != LMD_TYPE_PATH) {
-        return b2it(false);
-    }
-    
-    // Extract Path* from Item (direct pointer for container types)
-    Path* path = (Path*)(uint64_t)path_item;
-    if (!path) { log_debug("fn_exists: path is NULL"); return b2it(false); }
-    
-    log_debug("fn_exists: path=%p, path->name=%s", (void*)path, path->name ? path->name : "(null)");
-    
-    // Convert path to OS path
-    StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path, path_buf);
-    
-    const char* scheme = path_get_scheme_name(path);
-    bool exists = false;
-    
-    log_debug("fn_exists: scheme='%s', os_path='%s'", scheme ? scheme : "(null)", path_buf->str);
-    
-    if (strcmp(scheme, "file") == 0 || 
-        strcmp(scheme, ".") == 0 || 
-        strcmp(scheme, "..") == 0) {
-        // Local file system - use stat
-        struct stat st;
-        exists = (stat(path_buf->str, &st) == 0);
-        log_debug("fn_exists: stat result=%d, exists=%d", stat(path_buf->str, &st), exists);
-    } else if (strcmp(scheme, "sys") == 0) {
-        // System paths always "exist" if valid
-        exists = true;
-    }
-    // TODO: HTTP HEAD request for http/https schemes
-    
-    strbuf_free(path_buf);
+    target_free(target);
     return b2it(exists);
 }
 

@@ -11,9 +11,9 @@ pn main() {
     fs.mkdir("./test_output/fs_test_dir")
     print("   Created directory: ./test_output/fs_test_dir")
     
-    // Test 2: fs.exists - check if exists
-    print("2. Testing fs.exists...")
-    if fs.exists("./test_output/fs_test_dir") {
+    // Test 2: exists - check if exists (global function)
+    print("2. Testing exists...")
+    if exists("./test_output/fs_test_dir") {
         print("   Directory exists: true")
     }
     
@@ -55,7 +55,7 @@ pn main() {
     print("   Cleaned up test directory")
     
     // Verify cleanup
-    if fs.exists("./test_output/fs_test_dir") {
+    if exists("./test_output/fs_test_dir") {
         print("   WARNING: Directory still exists!")
     } else {
         print("   Directory removed successfully")
