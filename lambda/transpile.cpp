@@ -12,6 +12,7 @@ void define_func_unboxed(Transpiler* tp, AstFuncNode *fn_node);
 bool has_typed_params(AstFuncNode* fn_node);
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node);
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node);
+void transpile_proc_statements(Transpiler* tp, AstListNode *list_node);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 void transpile_box_capture(Transpiler* tp, CaptureInfo* cap, bool from_outer_env);
@@ -621,9 +622,9 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "ITEM_NULL");
         } else {
-            strbuf_append_char(tp->code_buf, '(');
-            transpile_expr(tp, item);  // e.g. for procedural code
-            strbuf_append_str(tp->code_buf, ",ITEM_NULL)");
+            // Non-literal NULL type means a variable initialized to null but may hold any value
+            // It's stored as Item type, so just emit the expression directly
+            transpile_expr(tp, item);
         }
         break;
     case LMD_TYPE_BOOL:
@@ -2278,10 +2279,10 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
     }
     strbuf_append_str(tp->code_buf, ") {");
 
-    // transpile then branch as procedural content
+    // transpile then branch as procedural statements (no wrapper needed)
     if (if_node->then) {
         if (if_node->then->node_type == AST_NODE_CONTENT) {
-            transpile_proc_content(tp, (AstListNode*)if_node->then);
+            transpile_proc_statements(tp, (AstListNode*)if_node->then);
         } else if (if_node->then->node_type == AST_NODE_IF_STAM) {
             // nested if in then branch
             strbuf_append_str(tp->code_buf, "\n ");
@@ -2299,7 +2300,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
     if (if_node->otherwise) {
         strbuf_append_str(tp->code_buf, " else {");
         if (if_node->otherwise->node_type == AST_NODE_CONTENT) {
-            transpile_proc_content(tp, (AstListNode*)if_node->otherwise);
+            transpile_proc_statements(tp, (AstListNode*)if_node->otherwise);
         } else if (if_node->otherwise->node_type == AST_NODE_IF_STAM) {
             // else if chain
             strbuf_append_str(tp->code_buf, "\n ");
@@ -2363,7 +2364,23 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
     strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
     strbuf_append_char(tp->code_buf, '=');
-    transpile_expr(tp, assign_node->value);
+    
+    // If target variable has Item type (e.g., was declared with var x = null), 
+    // we need to box the value properly
+    bool needs_boxing = false;
+    if (assign_node->target_node && assign_node->target_node->type) {
+        TypeId target_type = assign_node->target_node->type->type_id;
+        // NULL type variables become Item type in C, so need to box values assigned to them
+        if (target_type == LMD_TYPE_NULL || target_type == LMD_TYPE_ANY) {
+            needs_boxing = true;
+        }
+    }
+    
+    if (needs_boxing) {
+        transpile_box_item(tp, assign_node->value);
+    } else {
+        transpile_expr(tp, assign_node->value);
+    }
     strbuf_append_char(tp->code_buf, ';');
 }
 
@@ -2491,6 +2508,61 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         transpile_push_items(tp, list_node->item, false);
     }
 }
+
+// Helper to transpile procedural content as statements (no statement expression wrapper)
+// Used for if-else blocks where we don't need a return value
+void transpile_proc_statements(Transpiler* tp, AstListNode *list_node) {
+    if (!list_node) return;
+
+    AstNode *item = list_node->item;
+    while (item) {
+        // handle declarations
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_VAR_STAM) {
+            transpile_let_stam(tp, (AstLetNode*)item, false);
+        }
+        else if (item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM ||
+                 item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR ||
+                 item->node_type == AST_NODE_PROC ||
+                 item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+            // skip - already handled globally or pattern definitions
+        }
+        else if (item->node_type == AST_NODE_WHILE_STAM) {
+            transpile_while(tp, (AstWhileNode*)item);
+        }
+        else if (item->node_type == AST_NODE_BREAK_STAM) {
+            strbuf_append_str(tp->code_buf, "\n break;");
+        }
+        else if (item->node_type == AST_NODE_CONTINUE_STAM) {
+            strbuf_append_str(tp->code_buf, "\n continue;");
+        }
+        else if (item->node_type == AST_NODE_RETURN_STAM) {
+            transpile_return(tp, (AstReturnNode*)item);
+        }
+        else if (item->node_type == AST_NODE_ASSIGN_STAM) {
+            transpile_assign_stam(tp, (AstAssignStamNode*)item);
+        }
+        else if (item->node_type == AST_NODE_FOR_STAM) {
+            transpile_for(tp, (AstForNode*)item);
+        }
+        else if (item->node_type == AST_NODE_PIPE_FILE_STAM) {
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_pipe_file_stam(tp, (AstBinaryNode*)item);
+            strbuf_append_char(tp->code_buf, ';');
+        }
+        else if (item->node_type == AST_NODE_IF_STAM) {
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_if_stam(tp, (AstIfNode*)item);
+        }
+        else {
+            // other expressions - just execute for side effects
+            strbuf_append_str(tp->code_buf, "\n ");
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ';');
+        }
+        item = item->next;
+    }
+}
+
 void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile proc content");
     if (!list_node) { log_error("Error: missing list_node");  return; }

@@ -402,8 +402,9 @@ typedef struct AstReturnNode : AstNode {
 
 // assignment statement (procedural only)
 typedef struct AstAssignStamNode : AstNode {
-    String* target;   // variable name to assign to
-    AstNode *value;   // value expression
+    String* target;       // variable name to assign to
+    AstNode *target_node; // AST node of the target variable (for type info)
+    AstNode *value;       // value expression
 } AstAssignStamNode;
 
 typedef struct AstArrayNode : AstNode {
