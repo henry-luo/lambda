@@ -15,8 +15,10 @@ void parse_graph_d2(Input* input, const char* d2_string);
 
 // Helper functions for graph construction
 Element* create_graph_element(Input* input, const char* type, const char* layout, const char* flavor);
-Element* create_node_element(Input* input, const char* id, const char* label);
-Element* create_edge_element(Input* input, const char* from, const char* to, const char* label);
+Element* create_node_element(Input* input, const char* id, const char* label, const char* shape = nullptr);
+Element* create_edge_element(Input* input, const char* from, const char* to, const char* label,
+                             const char* style = nullptr, const char* arrow_start = nullptr,
+                             const char* arrow_end = nullptr);
 Element* create_cluster_element(Input* input, const char* id, const char* label);
 
 // Attribute management

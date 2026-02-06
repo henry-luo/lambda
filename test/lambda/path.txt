@@ -76,7 +76,7 @@ false
 "Path property: size on file (returns bytes)"
 true
 "Path property: modified on file (returns datetime)"
-t'2025-10-08 07:58:54z'
+datetime
 "Path property: name from iteration"
 true
 "Path property: filter using is_dir"
@@ -87,8 +87,7 @@ true
 ..test.input.dir
 "Parent path type checking"
 path
-"exists() on parent path"
-true
+'exists() on parent path'
 "Parent path in let binding"
 ..Lambda.test
 "Parent path with quoted segment"

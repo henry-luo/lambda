@@ -72,74 +72,167 @@ static String* parse_mermaid_identifier(InputContext& ctx) {
 }
 
 // Parse Mermaid node shape and extract label
+// Supports all 12 Mermaid flowchart shapes:
+//   [text]       - rectangle (box)
+//   (text)       - rounded rectangle
+//   ((text))     - circle
+//   (((text)))   - double circle
+//   {text}       - diamond (rhombus)
+//   {{text}}     - hexagon
+//   ([text])     - stadium (pill shape)
+//   [(text)]     - cylinder (database)
+//   [[text]]     - subroutine (double-bordered rectangle)
+//   >text]       - asymmetric (flag/banner)
+//   [/text\]     - trapezoid (wider bottom)
+//   [\text/]     - inverse trapezoid (wider top)
+//
+// Returns the extracted label text and sets g_current_node_shape for the caller
+static const char* g_current_node_shape = "box";
+
 static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) {
+        g_current_node_shape = "box";
         return ctx.builder.createString(node_id);
     }
 
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
-    char open_char = tracker.current();
-    char close_char = 0;
-    const char* shape = "box"; // default shape
+    char c0 = tracker.current();
+    char c1 = tracker.peek(1);
+    char c2 = tracker.peek(2);
 
-    // determine shape based on opening character(s)
-    if (open_char == '[') {
-        close_char = ']';
-        shape = "box";
-        tracker.advance();
-    } else if (open_char == '(' && tracker.peek(1) == '(') {
-        close_char = ')';
+    const char* shape = "box";
+    const char* close_pattern = nullptr;  // for complex closings
+    char close_char = 0;
+    int open_len = 1;
+
+    // Detect shape based on opening delimiter pattern
+    // Order matters - check longer patterns first
+
+    if (c0 == '(' && c1 == '(' && c2 == '(') {
+        // (((text))) - double circle
+        shape = "doublecircle";
+        close_pattern = ")))";
+        open_len = 3;
+    } else if (c0 == '(' && c1 == '(') {
+        // ((text)) - circle
         shape = "circle";
-        tracker.advance(2);
-        // look for closing ))
-    } else if (open_char == '(') {
-        close_char = ')';
-        shape = "ellipse";
-        tracker.advance();
-    } else if (open_char == '{') {
-        close_char = '}';
-        shape = "diamond";
-        tracker.advance();
-    } else if (open_char == '>') {
+        close_pattern = "))";
+        open_len = 2;
+    } else if (c0 == '(' && c1 == '[') {
+        // ([text]) - stadium
+        shape = "stadium";
+        close_pattern = "])";
+        open_len = 2;
+    } else if (c0 == '[' && c1 == '(') {
+        // [(text)] - cylinder
+        shape = "cylinder";
+        close_pattern = ")]";
+        open_len = 2;
+    } else if (c0 == '[' && c1 == '[') {
+        // [[text]] - subroutine
+        shape = "subroutine";
+        close_pattern = "]]";
+        open_len = 2;
+    } else if (c0 == '{' && c1 == '{') {
+        // {{text}} - hexagon
+        shape = "hexagon";
+        close_pattern = "}}";
+        open_len = 2;
+    } else if (c0 == '[' && c1 == '/') {
+        // [/text\] - trapezoid
+        shape = "trapezoid";
+        close_pattern = "\\]";
+        open_len = 2;
+    } else if (c0 == '[' && c1 == '\\') {
+        // [\text/] - inverse trapezoid
+        shape = "trapezoid-alt";
+        close_pattern = "/]";
+        open_len = 2;
+    } else if (c0 == '>') {
+        // >text] - asymmetric
+        shape = "asymmetric";
         close_char = ']';
-        shape = "pentagon";
-        tracker.advance();
+        open_len = 1;
+    } else if (c0 == '(') {
+        // (text) - rounded rectangle
+        shape = "rounded";
+        close_char = ')';
+        open_len = 1;
+    } else if (c0 == '[') {
+        // [text] - rectangle (default box)
+        shape = "box";
+        close_char = ']';
+        open_len = 1;
+    } else if (c0 == '{') {
+        // {text} - diamond
+        shape = "diamond";
+        close_char = '}';
+        open_len = 1;
     } else {
         // no shape specified, return node_id as label
+        g_current_node_shape = "box";
         return ctx.builder.createString(node_id);
     }
 
-    // Extract label text
-    while (!tracker.atEnd() && tracker.current() != close_char) {
-        char c = tracker.current();
+    // Advance past opening delimiter
+    tracker.advance(open_len);
 
-        if (c == '\\') {
-            tracker.advance();
-            if (!tracker.atEnd()) {
-                stringbuf_append_char(sb, tracker.current());
+    g_current_node_shape = shape;
+
+    // Extract label text until closing delimiter
+    if (close_pattern) {
+        size_t close_len = strlen(close_pattern);
+        while (!tracker.atEnd()) {
+            // Check for closing pattern
+            bool found_close = true;
+            for (size_t i = 0; i < close_len; i++) {
+                if (tracker.peek(i) != close_pattern[i]) {
+                    found_close = false;
+                    break;
+                }
+            }
+            if (found_close) {
+                tracker.advance(close_len);
+                break;
+            }
+
+            char c = tracker.current();
+            if (c == '\\') {
+                tracker.advance();
+                if (!tracker.atEnd()) {
+                    stringbuf_append_char(sb, tracker.current());
+                    tracker.advance();
+                }
+            } else {
+                stringbuf_append_char(sb, c);
                 tracker.advance();
             }
-        } else {
-            stringbuf_append_char(sb, c);
+        }
+    } else {
+        // Simple single-character closing
+        while (!tracker.atEnd() && tracker.current() != close_char) {
+            char c = tracker.current();
+
+            if (c == '\\') {
+                tracker.advance();
+                if (!tracker.atEnd()) {
+                    stringbuf_append_char(sb, tracker.current());
+                    tracker.advance();
+                }
+            } else {
+                stringbuf_append_char(sb, c);
+                tracker.advance();
+            }
+        }
+
+        if (!tracker.atEnd() && tracker.current() == close_char) {
             tracker.advance();
         }
-    }
-
-    if (tracker.atEnd() || tracker.current() != close_char) {
-        ctx.addError(tracker.location(), "Expected closing character '%c' for node shape", close_char);
-        return ctx.builder.createString(node_id);
-    }
-
-    tracker.advance(); // skip close_char
-
-    // for shapes with double closing chars (e.g., circle with ))
-    if (shape[0] == 'c' && tracker.current() == close_char) {
-        tracker.advance();
     }
 
     const char* label_text = sb->str->chars;
@@ -201,68 +294,103 @@ static void parse_mermaid_node_def(InputContext& ctx, Element* graph) {
 
     skip_whitespace_and_comments_mermaid(tracker);
 
-    // parse node shape and label
+    // parse node shape and label (sets g_current_node_shape)
     String* label = parse_mermaid_node_shape(ctx, node_id->chars);
     if (!label) {
         label = node_id; // use ID as label if no shape specified
     }
 
-    // create node element
-    Element* node = create_node_element(ctx.input(), node_id->chars, label->chars);
+    // create node element with shape passed directly (before finalization)
+    Element* node = create_node_element(ctx.input(), node_id->chars, label->chars, g_current_node_shape);
 
     // add to graph
     add_node_to_graph(ctx.input(), graph, node);
 }
 
 // Parse Mermaid edge definition: nodeA --> nodeB or nodeA -->|label| nodeB etc.
+// Supports all Mermaid edge styles:
+//   -->   solid arrow
+//   --->  solid arrow (longer)
+//   -.->  dotted arrow
+//   ==>   thick arrow
+//   ---   solid line (no arrow)
+//   -.-   dotted line (no arrow)
+//   ===   thick line (no arrow)
+//   <-->  bidirectional solid
+//   <-.-> bidirectional dotted
+//   <==>  bidirectional thick
 static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
-    // parse edge arrow type
-    bool is_directed = true;
+    // Edge properties
+    bool has_arrow_start = false;
+    bool has_arrow_end = false;
     String* label = nullptr;
-    const char* edge_type = "solid";
+    const char* edge_style = "solid";
 
-    // check for edge arrow patterns: -->, --->, .-->, -.->
-    if (tracker.current() == '-' || tracker.current() == '.') {
-        if (tracker.current() == '.') {
-            edge_type = "dashed";
-            tracker.advance();
+    // Check for starting arrow (bidirectional)
+    if (tracker.current() == '<') {
+        has_arrow_start = true;
+        tracker.advance();
+    }
+
+    // Determine edge style from first character
+    char first_char = tracker.current();
+    if (first_char == '=') {
+        edge_style = "thick";
+    } else if (first_char == '.') {
+        edge_style = "dotted";
+        tracker.advance();
+        // After '.', expect '-' for dashed pattern
+        if (tracker.current() != '-') {
+            ctx.addError(tracker.location(), "Invalid edge syntax after '.'");
+            return;
         }
+    } else if (first_char == '-') {
+        // Could be solid or dotted (-.->)
+        // Check if this is part of -.- pattern
+    } else {
+        ctx.addError(tracker.location(), "Invalid edge syntax, expected '-', '=', or '.'");
+        return;
+    }
 
-        // skip dashes
-        while (!tracker.atEnd() && tracker.current() == '-') {
+    // Skip main line characters (-, =, or . combinations)
+    if (edge_style[0] == 't') {  // thick
+        while (!tracker.atEnd() && tracker.current() == '=') {
             tracker.advance();
-        }
-
-        // check for arrow head
-        if (tracker.current() == '>') {
-            tracker.advance();
-            is_directed = true;
-        } else {
-            is_directed = false;
-        }
-        
-        // check for label inside |text| AFTER arrow head (Mermaid syntax: -->|label| target)
-        if (tracker.current() == '|') {
-            tracker.advance();
-            StringBuf* sb = ctx.sb;
-            stringbuf_reset(sb);
-
-            while (!tracker.atEnd() && tracker.current() != '|') {
-                stringbuf_append_char(sb, tracker.current());
-                tracker.advance();
-            }
-
-            if (!tracker.atEnd() && tracker.current() == '|') {
-                tracker.advance();
-                label = ctx.builder.createString(sb->str->chars);
-            }
         }
     } else {
-        ctx.addError(tracker.location(), "Invalid edge syntax, expected edge arrow like '-->', '--->', or '-.->'"  );
-        return;
+        // solid or dotted - skip dashes and dots
+        while (!tracker.atEnd() && (tracker.current() == '-' || tracker.current() == '.')) {
+            if (tracker.current() == '.') {
+                edge_style = "dotted";
+            }
+            tracker.advance();
+        }
+    }
+
+    // Check for ending arrow
+    if (tracker.current() == '>') {
+        has_arrow_end = true;
+        tracker.advance();
+    }
+
+    // Check for label inside |text| AFTER arrow head (Mermaid syntax: -->|label| target)
+    if (tracker.current() == '|') {
+        tracker.advance();
+        StringBuf* sb = ctx.sb;
+        stringbuf_reset(sb);
+
+        while (!tracker.atEnd() && tracker.current() != '|') {
+            stringbuf_append_char(sb, tracker.current());
+            tracker.advance();
+        }
+
+        if (!tracker.atEnd() && tracker.current() == '|') {
+            tracker.advance();
+            label = ctx.builder.createString(sb->str->chars);
+        }
     }
 
     skip_whitespace_and_comments_mermaid(tracker);
@@ -273,39 +401,31 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
         ctx.addError(tracker.location(), "Expected target node identifier");
         return;
     }
-    
+
     // check if target node has a shape and create node if so
     skip_whitespace_and_comments_mermaid(tracker);
-    if (tracker.current() == '[' || tracker.current() == '(' ||
-        tracker.current() == '{' || tracker.current() == '>') {
-        // determine shape from opening char
-        char open_char = tracker.current();
-        const char* node_shape = nullptr;
-        if (open_char == '[') node_shape = "box";
-        else if (open_char == '(') node_shape = "ellipse";
-        else if (open_char == '{') node_shape = "diamond";
-        else if (open_char == '>') node_shape = "pentagon";
-        
+    char c0 = tracker.current();
+    char c1 = tracker.peek(1);
+
+    // Check for any shape opening pattern
+    bool has_shape = (c0 == '[') || (c0 == '(') || (c0 == '{') || (c0 == '>');
+
+    if (has_shape) {
         // parse node shape and get label
         String* to_label = parse_mermaid_node_shape(ctx, to_id->chars);
-        
-        // create and add target node element
-        Element* to_node = create_node_element(ctx.input(), to_id->chars, 
-            to_label ? to_label->chars : to_id->chars);
-        if (node_shape) {
-            add_graph_attribute(ctx.input(), to_node, "shape", node_shape);
-        }
+
+        // create and add target node element with shape passed directly (before finalization)
+        Element* to_node = create_node_element(ctx.input(), to_id->chars,
+            to_label ? to_label->chars : to_id->chars, g_current_node_shape);
         add_node_to_graph(ctx.input(), graph, to_node);
     }
 
-    // create edge element
+    // create edge element with all attributes passed directly (before finalization)
     Element* edge = create_edge_element(ctx.input(), from_id->chars, to_id->chars,
-                                        label ? label->chars : nullptr);
-
-    // add edge type attribute if dashed
-    if (strcmp(edge_type, "dashed") == 0) {
-        add_graph_attribute(ctx.input(), edge, "style", "dashed");
-    }
+                                        label ? label->chars : nullptr,
+                                        edge_style,
+                                        has_arrow_start ? "true" : "false",
+                                        has_arrow_end ? "true" : "false");
 
     // add to graph
     add_edge_to_graph(ctx.input(), graph, edge);
@@ -412,34 +532,34 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             // check if node has shape and create node if so
             skip_whitespace_and_comments_mermaid(tracker);
             String* node_label = nullptr;
-            const char* node_shape = nullptr;
-            
-            if (tracker.current() == '[' || tracker.current() == '(' ||
-                tracker.current() == '{' || tracker.current() == '>') {
-                // determine shape from opening char
-                char open_char = tracker.current();
-                if (open_char == '[') node_shape = "box";
-                else if (open_char == '(') node_shape = "ellipse";
-                else if (open_char == '{') node_shape = "diamond";
-                else if (open_char == '>') node_shape = "pentagon";
-                
-                // parse node shape and get label
+
+            // Check for any shape opening pattern
+            char c0 = tracker.current();
+            if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
+                // parse node shape and get label (sets g_current_node_shape)
                 node_label = parse_mermaid_node_shape(ctx, potential_node->chars);
                 skip_whitespace_and_comments_mermaid(tracker);
-                
-                // create and add node element
-                Element* node = create_node_element(ctx.input(), potential_node->chars, 
-                    node_label ? node_label->chars : potential_node->chars);
-                if (node_shape) {
-                    add_graph_attribute(ctx.input(), node, "shape", node_shape);
-                }
+
+                // create and add node element with shape passed directly (before finalization)
+                Element* node = create_node_element(ctx.input(), potential_node->chars,
+                    node_label ? node_label->chars : potential_node->chars, g_current_node_shape);
                 add_node_to_graph(ctx.input(), graph, node);
             }
 
-            // look for edge operator
-            if (tracker.match("-->") || tracker.match("-.->") ||
+            // look for edge operator (including bidirectional <-->)
+            bool is_edge = false;
+            if (tracker.current() == '<') {
+                // could be bidirectional: <-->, <-.->, <==>
+                is_edge = true;
+            } else if (tracker.match("-->") || tracker.match("-.->") ||
                 tracker.match("==>") || tracker.match("---") ||
-                tracker.match("-.-") || tracker.match("===")) {
+                tracker.match("-.-") || tracker.match("===") ||
+                tracker.match("--") || tracker.match("-.-") ||
+                tracker.current() == '-' || tracker.current() == '=') {
+                is_edge = true;
+            }
+
+            if (is_edge) {
                 // this is an edge
                 parse_mermaid_edge_def(ctx, graph, potential_node);
             } else if (!node_label) {
