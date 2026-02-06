@@ -233,16 +233,18 @@ func_obj_t func_list[] = {
     {"pn_fetch", (fn_ptr) pn_fetch},
     {"pn_output2", (fn_ptr) pn_output2},
     {"pn_output3", (fn_ptr) pn_output3},
-    {"pn_output4", (fn_ptr) pn_output4},
-    // fs module procedures
-    {"pn_fs_copy", (fn_ptr) pn_fs_copy},
-    {"pn_fs_move", (fn_ptr) pn_fs_move},
-    {"pn_fs_delete", (fn_ptr) pn_fs_delete},
-    {"pn_fs_mkdir", (fn_ptr) pn_fs_mkdir},
-    {"pn_fs_touch", (fn_ptr) pn_fs_touch},
-    {"pn_fs_symlink", (fn_ptr) pn_fs_symlink},
-    {"pn_fs_chmod", (fn_ptr) pn_fs_chmod},
-    {"pn_fs_rename", (fn_ptr) pn_fs_rename},
+    {"pn_output_append", (fn_ptr) pn_output_append},
+    // io module procedures (unified I/O - local and remote)
+    {"pn_io_copy", (fn_ptr) pn_io_copy},
+    {"pn_io_move", (fn_ptr) pn_io_move},
+    {"pn_io_delete", (fn_ptr) pn_io_delete},
+    {"pn_io_mkdir", (fn_ptr) pn_io_mkdir},
+    {"pn_io_touch", (fn_ptr) pn_io_touch},
+    {"pn_io_symlink", (fn_ptr) pn_io_symlink},
+    {"pn_io_chmod", (fn_ptr) pn_io_chmod},
+    {"pn_io_rename", (fn_ptr) pn_io_rename},
+    {"pn_io_fetch1", (fn_ptr) pn_io_fetch1},
+    {"pn_io_fetch2", (fn_ptr) pn_io_fetch2},
     // exists() is a global pure function (no side effects)
     {"fn_exists", (fn_ptr) fn_exists},
     // shared runtime context pointer
