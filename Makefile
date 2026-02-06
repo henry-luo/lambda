@@ -1614,7 +1614,7 @@ uninstall:
 # Cheatsheet PDF generation
 cheatsheet:
 	@echo "Generating Lambda Script cheatsheet PDFs..."
-	@cd doc && bash _generate_pdf_cheatsheets.sh
+	@cd doc/_template && bash generate_pdf_cheatsheets.sh
 
 # Utility targets
 info:
