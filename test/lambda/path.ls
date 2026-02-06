@@ -50,14 +50,14 @@ type(/etc.hosts)
 let hosts = /etc.hosts
 len(hosts)
 
-"fs.exists() function - directory exists"
-fs.exists(/etc)
+"exists() function - directory exists"
+exists(/etc)
 
-"fs.exists() function - file exists"
-fs.exists(/etc.hosts)
+"exists() function - file exists"
+exists(/etc.hosts)
 
-"fs.exists() function - non-existent path"
-fs.exists(/this_path_does_not_exist)
+"exists() function - non-existent path"
+exists(/this_path_does_not_exist)
 
 "len() on directory - counts entries"
 (len(/etc) > 0)
@@ -74,8 +74,8 @@ item_types[0]
 let rel_dir = .test.input.dir
 rel_dir
 
-"fs.exists() on relative path"
-fs.exists(.test.input.dir)
+"exists() on relative path"
+exists(.test.input.dir)
 
 "len() on relative directory"
 len(.test.input.dir)
@@ -135,8 +135,8 @@ parent_path
 "Parent path type checking"
 type(..test)
 
-"fs.exists() on parent path"
-fs.exists(..Lambda.test.input.dir)
+"exists() on parent path"
+exists(..Lambda.test.input.dir)
 
 "Parent path in let binding"
 let parent_dir = ..Lambda.test

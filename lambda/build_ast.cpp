@@ -135,7 +135,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_FS_SYMLINK, "fs_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_FS_CHMOD, "fs_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
     {SYSPROC_FS_RENAME, "fs_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSFUNC_EXISTS, "fs_exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY},  // fs.exists(path) -> bool (pure read-only)
+    {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY},  // exists(path) -> bool (pure read-only)
 };
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
