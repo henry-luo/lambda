@@ -23,6 +23,8 @@ static void parse_mermaid_node_def(InputContext& ctx, Element* graph);
 static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id);
 static void parse_mermaid_class_def(InputContext& ctx, Element* graph);
 static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id);
+static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph);
+static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_elem);
 
 // Skip whitespace and comments in Mermaid
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker) {
@@ -464,6 +466,162 @@ static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
     // Full implementation would apply styling to matching nodes
 }
 
+// Parse Mermaid subgraph: subgraph id [label] ... end
+// Supports direction override: direction LR/TB/BT/RL
+static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_whitespace_and_comments_mermaid(tracker);
+
+    // "subgraph" keyword already consumed by caller
+    // Parse subgraph ID
+    String* subgraph_id = parse_mermaid_identifier(ctx);
+    if (!subgraph_id) {
+        // Generate a unique ID
+        static int subgraph_counter = 0;
+        char id_buf[32];
+        snprintf(id_buf, sizeof(id_buf), "subgraph_%d", subgraph_counter++);
+        subgraph_id = ctx.builder.createString(id_buf);
+    }
+
+    // Don't skip all whitespace here - just skip spaces on the same line
+    // to check for optional [Label]
+    while (!tracker.atEnd() && (tracker.current() == ' ' || tracker.current() == '\t')) {
+        tracker.advance();
+    }
+
+    // Check for optional label in brackets: subgraph id [Label Text]
+    String* label = nullptr;
+    if (tracker.current() == '[') {
+        tracker.advance();
+        StringBuf* sb = ctx.sb;
+        stringbuf_reset(sb);
+
+        while (!tracker.atEnd() && tracker.current() != ']') {
+            stringbuf_append_char(sb, tracker.current());
+            tracker.advance();
+        }
+        if (!tracker.atEnd() && tracker.current() == ']') {
+            tracker.advance();
+        }
+        label = ctx.builder.createString(sb->str->chars);
+    }
+
+    // Skip to end of line - any remaining content is just comments or whitespace
+    // The label is either in brackets [Label] or we use the subgraph ID
+    while (!tracker.atEnd() && tracker.current() != '\n') {
+        tracker.advance();
+    }
+    if (!tracker.atEnd() && tracker.current() == '\n') {
+        tracker.advance();
+    }
+
+    // Create subgraph element - use label if provided, otherwise use ID as label
+    Element* subgraph_elem = create_cluster_element(ctx.input(), subgraph_id->chars,
+        label ? label->chars : subgraph_id->chars);
+
+    // Parse subgraph content until "end" keyword
+    parse_mermaid_subgraph_content(ctx, subgraph_elem);
+
+    // Add subgraph to parent graph
+    add_node_to_graph(ctx.input(), parent_graph, subgraph_elem);
+}
+
+// Parse content inside a subgraph (nodes, edges, nested subgraphs, direction)
+static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_elem) {
+    SourceTracker& tracker = ctx.tracker;
+
+    while (!tracker.atEnd()) {
+        skip_whitespace_and_comments_mermaid(tracker);
+
+        if (tracker.atEnd()) break;
+
+        // Check for "end" keyword
+        if (tracker.match("end")) {
+            // Verify it's "end" and not "endpoint" or similar
+            char next = tracker.peek(3);
+            if (!isalnum(next) && next != '_') {
+                tracker.advance(3);
+                break;
+            }
+        }
+
+        // Check for direction override: direction LR/TB/BT/RL
+        if (tracker.match("direction")) {
+            tracker.advance(9);
+            skip_whitespace_and_comments_mermaid(tracker);
+
+            // Parse direction value
+            if (tracker.match("LR") || tracker.match("RL") ||
+                tracker.match("TB") || tracker.match("TD") ||
+                tracker.match("BT")) {
+                char dir_buf[3] = {tracker.current(), tracker.peek(1), '\0'};
+                tracker.advance(2);
+
+                // Add direction attribute to subgraph
+                add_graph_attribute(ctx.input(), subgraph_elem, "direction", dir_buf);
+            }
+            continue;
+        }
+
+        // Check for nested subgraph
+        if (tracker.match("subgraph")) {
+            tracker.advance(8);
+            parse_mermaid_subgraph(ctx, subgraph_elem);
+            continue;
+        }
+
+        const char* line_start = tracker.rest();
+
+        // Try to parse node or edge (same logic as main parser)
+        String* potential_node = parse_mermaid_identifier(ctx);
+
+        if (potential_node) {
+            // Check if node has shape
+            skip_whitespace_and_comments_mermaid(tracker);
+            String* node_label = nullptr;
+
+            char c0 = tracker.current();
+            if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
+                node_label = parse_mermaid_node_shape(ctx, potential_node->chars);
+                skip_whitespace_and_comments_mermaid(tracker);
+
+                Element* node = create_node_element(ctx.input(), potential_node->chars,
+                    node_label ? node_label->chars : potential_node->chars, g_current_node_shape);
+                add_node_to_graph(ctx.input(), subgraph_elem, node);
+            }
+
+            // Check for edge operator
+            bool is_edge = false;
+            if (tracker.current() == '<') {
+                is_edge = true;
+            } else if (tracker.match("-->") || tracker.match("-.->") ||
+                tracker.match("==>") || tracker.match("---") ||
+                tracker.match("-.-") || tracker.match("===") ||
+                tracker.match("--") || tracker.current() == '-' || tracker.current() == '=') {
+                is_edge = true;
+            }
+
+            if (is_edge) {
+                parse_mermaid_edge_def(ctx, subgraph_elem, potential_node);
+            } else if (!node_label) {
+                // Standalone node without shape - create it
+                Element* node = create_node_element(ctx.input(), potential_node->chars,
+                    potential_node->chars, "box");
+                add_node_to_graph(ctx.input(), subgraph_elem, node);
+            }
+        }
+
+        // Skip to next line if no progress
+        const char* line_end = tracker.rest();
+        if (line_end == line_start) {
+            skip_to_eol(tracker);
+            if (!tracker.atEnd() && tracker.current() == '\n') {
+                tracker.advance();
+            }
+        }
+    }
+}
+
 // Main Mermaid parser function
 void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     InputContext ctx(input, mermaid_string, strlen(mermaid_string));
@@ -521,6 +679,13 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         if (tracker.match("classDef")) {
             tracker.advance(8);
             parse_mermaid_class_def(ctx, graph);
+            continue;
+        }
+
+        // check for subgraph
+        if (tracker.match("subgraph")) {
+            tracker.advance(8);
+            parse_mermaid_subgraph(ctx, graph);
             continue;
         }
 
