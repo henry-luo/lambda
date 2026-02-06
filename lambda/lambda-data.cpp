@@ -181,7 +181,7 @@ double it2d(Item itm) {
     else if (itm._type_id == LMD_TYPE_FLOAT) {
         return itm.get_double();
     }
-    else if (itm._type_id == LMD_TYPE_DECIMAL || itm._type_id == LMD_TYPE_DECIMAL_BIG) {
+    else if (itm._type_id == LMD_TYPE_DECIMAL) {
         return decimal_to_double(itm);
     }
     log_debug("invalid type %d", itm._type_id);
