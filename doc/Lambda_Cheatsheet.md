@@ -2,8 +2,8 @@
 ```bash
 lambda                    # Start REPL
 // REPL Commands: .quit, .help, .clear
-lambda script.ls          # Eval functional script  
-lambda run script.ls      # Run procedual script  
+lambda script.ls          # Eval functional script
+lambda run script.ls      # Run procedual script
 lambda --transpile-only script.ls # Transpile only
 lambda --help             # Show help
 ```
@@ -18,7 +18,7 @@ lambda validate file.json            # Default schema
 
 **Scalar Types:**
 ```lambda
-null  bool  int  float  decimal  
+null  bool  int  float  decimal
 string  symbol  binary  datetime
 ```
 
@@ -34,7 +34,7 @@ string  symbol  binary  datetime
 **Type Operators:**
 ```lambda
 int | string     // Union type
-int & number     // Intersection  
+int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
@@ -56,7 +56,7 @@ type Result = int | error;              // Union type
 **Numbers:**
 ```lambda
 42        // Integer
-3.14      // Float  
+3.14      // Float
 1.5e-10   // Scientific notation
 123.45n   // Decimal (arbitrary precision)
 inf  nan  // Special values
@@ -156,25 +156,17 @@ users where ~.age >= 18 | ~.name // filter then map
 **Pipe to File (procedural only):**
 ```lambda
 // Target can be string, symbol, or path
-data |> "output.txt"      // String: file in current dir
-data |> 'output.txt'      // Symbol: same as string
-data |> /tmp.output.txt   // Path: full path (creates dirs if needed)
-
-// Append mode
-data |>> "output.txt"     // Append to file
+data |> 'output.txt'        // file under CWD
+data |> /tmp.'output.txt'   // output at full path
+data |>> "output.txt"       // append to file
 
 // Data type determines output format:
 // - String: raw text (no formatting)
 // - Binary: raw binary data
-// - Error: reports error, returns error
 // - Other types: Lambda/Mark format
 
-// To output in other formats, use format() first:
+// Output in specific formats:
 data | format('json') |> "output.json"
-
-// Returns true on success, error on failure
-let ok = data |> "file.txt";
-if (!ok) { print("Write failed"); }
 ```
 
 ## Control Flow
@@ -182,7 +174,7 @@ if (!ok) { print("Write failed"); }
 **If Expressions (require else):**
 ```lambda
 if (x > 0) "positive" else "non-positive"
-if (score >= 90) "A" 
+if (score >= 90) "A"
 else if (score >= 80) "B" else "C"
 ```
 
@@ -195,7 +187,7 @@ if (condition) { something() } else { otherThing() }
 **For Expressions:**
 ```lambda
 for (x in [1, 2, 3]) x * 2     // Array iteration
-for (i in 1 to 5) i * i        // Range iteration  
+for (i in 1 to 5) i * i        // Range iteration
 for (x in data) if (x > 0) x else 0  // Conditional
 ```
 
@@ -206,7 +198,7 @@ for (x in data, let sq = x*x) sq        // let binding
 for (x in [3,1,2] order by x) x         // (1,2,3)
 for (x in [3,1,2] order by x desc) x    // (3,2,1)
 for (x in data limit 5 offset 10) x     // pagination
-for (x in data, let y=x*2 
+for (x in data, let y=x*2
     where y>5 order by y desc limit 3) y
 ```
 
@@ -215,10 +207,10 @@ for (x in data, let y=x*2
 for item in collection { transform(item) }
 ```
 
-**Procedural Control (in `pn`):** 
+**Procedural Control (in `pn`):**
 ```lambda
 var x=0;   // Mutable variable
-while(c) { break;  continue;  return x; } 
+while(c) { break;  continue;  return x; }
 ```
 
 ## Functions
@@ -226,16 +218,16 @@ while(c) { break;  continue;  return x; }
 **Function Declaration:**
 ```lambda
 // Function with statement body
-fn add(a: int, b: int) int { a + b }    
+fn add(a: int, b: int) int { a + b }
 // Function  with expression body
-fn multiply(x: int, y: int) => x * y    
-// Anonymous function   
-let square = (x) => x * x;     
-// Procedural function         
-pn f(n) { var x=0; while(x<n) {x=x+1}; x }    
+fn multiply(x: int, y: int) => x * y
+// Anonymous function
+let square = (x) => x * x;
+// Procedural function
+pn f(n) { var x=0; while(x<n) {x=x+1}; x }
 ```
 
-**Advanced Features:** 
+**Advanced Features:**
 ```lambda
 fn f(x?:int)    // optional param
 fn f(x=10)      // default param value
@@ -246,31 +238,31 @@ fn outer(n) { fn inner(x)=>x+n; inner } // closure
 
 ## System Functions
 
-**Type:** 
+**Type:**
 
 `int(v)` `int64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
 
-**Math:** 
+**Math:**
 
 `abs(x)` `sign(x)` `min(a,b)` `max(a,b)` `round(x)` `floor(x)` `ceil(x)` `sqrt(x)` `log(x)` `log10(x)` `exp(x)` `sin(x)` `cos(x)` `tan(x)`
 
-**Stats:** 
+**Stats:**
 
 `sum(v)` `avg(v)` `mean(v)` `median(v)` `variance(v)` `deviation(v)` `quantile(v,p)` `prod(v)`
 
-**Date/Time:** 
+**Date/Time:**
 
 `datetime()` `today()` `now()` `justnow()` `date(dt)` `time(dt)`
 
-**Collection:** 
+**Collection:**
 
 `slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `concat(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(a,b,s)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
 
-**Vector:** 
+**Vector:**
 
 `dot(a,b)` `norm(v)` `cumsum(v)` `cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
 
-**I/O:** 
+**I/O:**
 
 `input(file,fmt)` `format(data,fmt)` `print(v)` `output(data,file)` `fetch(url,opts)` `cmd(c,args)` `error(msg)` `varg()`
 
@@ -305,12 +297,12 @@ import mod1, mod2, alias: mod3;   // Multiple imports
 
 **Module Usage Example:**
 ```lambda
-// In math_utils.ls: 
-pub PI = 3.14159; 
+// In math_utils.ls:
+pub PI = 3.14159;
 pub fn square(x) => x * x;
 
-// In main.ls: 
-import math: .math_utils; 
+// In main.ls:
+import math: .math_utils;
 let area = math.PI * math.square(radius);
 ```
 ## Error Handling
@@ -323,7 +315,7 @@ error("Something went wrong")   // Create error value
 **Error Checking:**
 ```lambda
 let result = risky_operation();
-if (result is error) { print("Error:", result) } 
+if (result is error) { print("Error:", result) }
 else { print("Success:", result) }
 ```
 
@@ -349,7 +341,7 @@ else { print("Success:", result) }
 let data = input("sales.json", 'json')
 let total = sum(
   (for (sale in data.sales) sale.amount))
-let report = {total: total, 
+let report = {total: total,
   count: len(data.sales)}
 format(report, 'json')
 ```
@@ -373,7 +365,7 @@ format(article, 'html')
 **Comprehensions - Complex data processing:**
 ```lambda
 (let data = [1, 2, 3, 4, 5],
- let filtered = (for (x in data) 
+ let filtered = (for (x in data)
    if (x % 2 == 0) x else 0),
  let doubled = (for (x in filtered) x * 2), doubled)
 ```
