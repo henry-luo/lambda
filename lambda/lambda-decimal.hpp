@@ -121,7 +121,7 @@ double decimal_mpd_to_double(mpd_t* dec, mpd_context_t* ctx);
 
 // All arithmetic operations:
 // - Use the appropriate context based on operand types
-// - If either operand is unlimited (LMD_TYPE_DECIMAL_BIG), result is unlimited
+// - If either operand has the unlimited flag set, result is unlimited
 // - Otherwise result is fixed precision
 
 // Addition: a + b
