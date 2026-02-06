@@ -39,13 +39,17 @@ Element* create_graph_element(Input* input, const char* type, const char* layout
 }
 
 // Helper function to create a node element
-Element* create_node_element(Input* input, const char* id, const char* label) {
+// shape parameter is optional - if provided, it's added before finalization
+Element* create_node_element(Input* input, const char* id, const char* label, const char* shape) {
     MarkBuilder builder(input);
     ElementBuilder node = builder.element("node");
 
     node.attr("id", id);
     if (label) {
         node.attr("label", label);
+    }
+    if (shape && shape[0] != '\0') {
+        node.attr("shape", shape);
     }
 
     // Note: Attributes are now stored directly in the element, no separate attributes map
@@ -55,7 +59,9 @@ Element* create_node_element(Input* input, const char* id, const char* label) {
 }
 
 // Helper function to create an edge element
-Element* create_edge_element(Input* input, const char* from, const char* to, const char* label) {
+// style, arrow_start, arrow_end are optional - if provided, they're added before finalization
+Element* create_edge_element(Input* input, const char* from, const char* to, const char* label,
+                             const char* style, const char* arrow_start, const char* arrow_end) {
     MarkBuilder builder(input);
     ElementBuilder edge = builder.element("edge");
 
@@ -63,6 +69,15 @@ Element* create_edge_element(Input* input, const char* from, const char* to, con
     edge.attr("to", to);
     if (label) {
         edge.attr("label", label);
+    }
+    if (style && style[0] != '\0') {
+        edge.attr("style", style);
+    }
+    if (arrow_start && arrow_start[0] != '\0') {
+        edge.attr("arrow-start", arrow_start);
+    }
+    if (arrow_end && arrow_end[0] != '\0') {
+        edge.attr("arrow-end", arrow_end);
     }
 
     // Note: Attributes are now stored directly in the element, no separate attributes map
