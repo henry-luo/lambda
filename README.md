@@ -20,10 +20,11 @@ Internally, Lambda treats documents as structured data. Different input formats 
 
 ### 1. Lambda script (pure functional runtime)
 - **Pure-functional core** with immutable data structures (lists, maps, elements) and first-class functions.
+- **Expressive pipe operator** (`|`) for fluent data transformation pipelines with inline mapping and filtering.
+- **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
+- **Powerful for-expressions** with `where`, `order by`, `limit`, `offset` clauses for SQL-like data querying.
 - **Interactive REPL** for exploration and debugging.
-- **Fast parsing** with a Tree-sitter based frontend.
 - **Optional MIR JIT** execution path for performance-sensitive workloads.
-- **Reference counting + pooled allocators** for predictable memory behavior.
 
 ### 2. Markup input parsing & formatting
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
@@ -35,7 +36,6 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **Rich type system** with type inference and explicit type annotations, similar to that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 - **Format-aware validation** helpers that unwrap/normalize documents before validation.
-- **Detailed error reporting** with paths and expected/actual diagnostics.
 
 ### 4. Radiant HTML/CSS/SVG layout, rendering & viewer
 - **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
@@ -47,6 +47,93 @@ Internally, Lambda treats documents as structured data. Different input formats 
    - LaTeX (`.tex`) via conversion to HTML
    - PDF viewing
    - Lambda script results (`.ls`) evaluated and rendered
+
+## Language Highlights
+
+### Pipe Operator & Data Pipelines
+
+The pipe operator `|` enables fluent data transformations. Use `~` to reference the current item:
+
+```lambda
+// Map: double each element
+[1, 2, 3] | ~ * 2                    // [2, 4, 6]
+
+// Extract fields
+users | ~.name                       // ["Alice", "Bob", "Carol"]
+
+// Filter with 'where'
+[1, 2, 3, 4, 5] where ~ > 3          // [4, 5]
+
+// Chain operations: filter → map → aggregate
+users where ~.age >= 18 | ~.name | len   // count adult names
+```
+
+### Vector Arithmetic
+
+Scalar operations automatically broadcast over collections:
+
+```lambda
+1 + [2, 3]           // [3, 4]       — scalar + array
+[1, 2] * 2           // [2, 4]       — array * scalar
+[1, 2] + [3, 4]      // [4, 6]       — element-wise
+[1, 2] ^ 2           // [1, 4]       — element-wise power
+```
+
+### For-Expressions with SQL-like Clauses
+
+Powerful comprehensions with `let`, `where`, `order by`, `limit`, `offset`:
+
+```lambda
+// Filter and transform
+for (x in data where x > 0) x * 2
+
+// With local bindings
+for (x in data, let sq = x * x where sq > 10) sq
+
+// Sorting and pagination
+for (x in items order by x.price desc limit 5) x.name
+```
+
+### Rich Type System
+
+```lambda
+// Type annotations
+let x: int = 42
+let items: [string] = ["a", "b"]
+
+// Union and optional types
+type Result = int | error
+type Name = string?
+
+// Function types
+fn add(a: int, b: int) int => a + b
+```
+
+### Elements (Markup Literals)
+
+First-class markup syntax for document generation:
+
+```lambda
+let card = <div class: "card";
+    <h2; "Title">
+    <p; "Content here.">
+>
+format(card, 'html)
+```
+
+### Built-in Multi-Format I/O
+
+```lambda
+// Read any format
+let data = input("config.yaml", 'yaml)
+let doc = input("article.md", 'markdown)
+
+// Convert between formats
+format(data, 'json)
+
+// Write to file (in procedural functions)
+data |> "/tmp/output.json"
+```
 
 ## Demo
 <p align="center">
@@ -201,10 +288,25 @@ make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar c
 
 ## Documentation
 
-- Language reference: `doc/Lambda_Reference.md`
-- Validator guide: `doc/Lambda_Validator_Guide.md`
-- Radiant layout design: `doc/Radiant_Layout_Design.md`
-- Mark doc schema (for lightweight markup, like Markdown, Wiki, RST, etc.): `doc/Doc_Schema.md`
+### Language Reference
+
+| Document | Description |
+|----------|-------------|
+| [Lambda Reference](doc/Lambda_Reference.md) | Language overview, modules, I/O, and error handling |
+| [Data & Collections](doc/Lambda_Data.md) | Literals, arrays, lists, maps, elements, and ranges |
+| [Type System](doc/Lambda_Type.md) | Types, unions, patterns, and type declarations |
+| [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, control flow, and comprehensions |
+| [Functions](doc/Lambda_Func.md) | Function declarations, closures, and procedures |
+| [System Functions](doc/Lambda_Sys_Func.md) | Built-in functions (math, string, collection, I/O) |
+| [Cheatsheet](doc/Lambda_Cheatsheet.md) | Quick reference for syntax and common patterns |
+
+### Other Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Validator Guide](doc/Lambda_Validator_Guide.md) | Schema-based validation for data structures |
+| [Radiant Layout Design](doc/Radiant_Layout_Design.md) | HTML/CSS layout engine internals |
+| [Doc Schema](doc/Doc_Schema.md) | Schema for lightweight markup (Markdown, Wiki, RST) |
 
 ## Platform Support
 
