@@ -73,13 +73,29 @@ static const char* get_themed_bg_color(SvgGeneratorOptions* opts) {
     return "#ffffff";
 }
 
-// Helper: get attribute from graph element or use default
-static const char* get_node_attribute(Element* graph, const char* node_id,
-                                     const char* attr_name, const char* default_value) {
-    if (!graph) return default_value;
+static const char* get_themed_group_header_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->group_header;
+    return "#e8e8e8";
+}
 
-    ElementReader graph_reader(graph);
-    ElementReader::ChildIterator children = graph_reader.children();
+static const char* get_themed_surface_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->surface;
+    return "#f5f5f5";
+}
+
+static const char* get_themed_text_secondary_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->text_secondary;
+    return "#666666";
+}
+
+// Forward declaration
+static const char* get_node_attribute_recursive(ElementReader& reader, const char* node_id,
+                                                const char* attr_name, const char* default_value);
+
+// Helper: recursively search for node attribute in element and its subgraphs
+static const char* get_node_attribute_recursive(ElementReader& reader, const char* node_id,
+                                                const char* attr_name, const char* default_value) {
+    ElementReader::ChildIterator children = reader.children();
     ItemReader child_item;
 
     while (children.next(&child_item)) {
@@ -87,23 +103,38 @@ static const char* get_node_attribute(Element* graph, const char* node_id,
 
         ElementReader child_reader = child_item.asElement();
         const char* tag = child_reader.tagName();
-        if (!tag || strcmp(tag, "node") != 0) continue;
+        if (!tag) continue;
 
-        ItemReader id_reader = child_reader.get_attr("id");
-        if (!id_reader.isString()) continue;
+        if (strcmp(tag, "node") == 0) {
+            ItemReader id_reader = child_reader.get_attr("id");
+            if (!id_reader.isString()) continue;
 
-        const char* this_id = id_reader.cstring();
-        if (strcmp(this_id, node_id) != 0) continue;
+            const char* this_id = id_reader.cstring();
+            if (strcmp(this_id, node_id) != 0) continue;
 
-        // found the node, get attribute
-        ItemReader attr_reader = child_reader.get_attr(attr_name);
-        if (attr_reader.isString()) {
-            return attr_reader.cstring();
+            // found the node, get attribute
+            ItemReader attr_reader = child_reader.get_attr(attr_name);
+            if (attr_reader.isString()) {
+                return attr_reader.cstring();
+            }
+            return default_value;
+        } else if (strcmp(tag, "subgraph") == 0) {
+            // recurse into subgraph
+            const char* result = get_node_attribute_recursive(child_reader, node_id, attr_name, nullptr);
+            if (result) return result;
         }
-        break;
     }
 
     return default_value;
+}
+
+// Helper: get attribute from graph element or use default (searches recursively into subgraphs)
+static const char* get_node_attribute(Element* graph, const char* node_id,
+                                     const char* attr_name, const char* default_value) {
+    if (!graph) return default_value;
+
+    ElementReader graph_reader(graph);
+    return get_node_attribute_recursive(graph_reader, node_id, attr_name, default_value);
 }
 
 // Helper: render node shape - returns Item (Element)
@@ -597,6 +628,73 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     }
     Item edges_group = edges_group_builder.final();
 
+    // render subgraphs (boxes with labels, behind nodes but in front of edges)
+    ElementBuilder subgraphs_group_builder = builder.element("g");
+    subgraphs_group_builder.attr("class", "subgraphs");
+
+    const char* subgraph_fill = get_themed_surface_color(opts);
+    const char* subgraph_stroke = get_themed_node_stroke(opts);
+    const char* subgraph_header_fill = get_themed_group_header_color(opts);
+    const char* subgraph_text_color = get_themed_text_secondary_color(opts);
+
+    if (layout->subgraph_positions) {
+        for (int i = 0; i < layout->subgraph_positions->length; i++) {
+            SubgraphPosition* sgpos = (SubgraphPosition*)layout->subgraph_positions->data[i];
+
+            // create subgraph group
+            ElementBuilder sg_builder = builder.element("g");
+            sg_builder.attr("class", "subgraph");
+            sg_builder.attr("id", sgpos->subgraph_id);
+
+            // main box with rounded corners
+            Item sg_rect = builder.element("rect")
+                .attr("x", (double)sgpos->x)
+                .attr("y", (double)sgpos->y)
+                .attr("width", (double)sgpos->width)
+                .attr("height", (double)sgpos->height)
+                .attr("rx", 5.0)
+                .attr("ry", 5.0)
+                .attr("fill", subgraph_fill)
+                .attr("stroke", subgraph_stroke)
+                .attr("stroke-width", 1.0)
+                .final();
+            sg_builder.child(sg_rect);
+
+            // header bar with label
+            if (sgpos->label && sgpos->label_height > 0) {
+                Item header_rect = builder.element("rect")
+                    .attr("x", (double)sgpos->x)
+                    .attr("y", (double)sgpos->y)
+                    .attr("width", (double)sgpos->width)
+                    .attr("height", (double)sgpos->label_height)
+                    .attr("rx", 5.0)
+                    .attr("ry", 5.0)
+                    .attr("fill", subgraph_header_fill)
+                    .final();
+                sg_builder.child(header_rect);
+
+                // label text
+                float label_x = sgpos->x + 8.0f;  // padding from left
+                float label_y = sgpos->y + sgpos->label_height * 0.7f;  // baseline adjust
+
+                Item sg_label = builder.element("text")
+                    .attr("x", (double)label_x)
+                    .attr("y", (double)label_y)
+                    .attr("font-family", opts->font_family)
+                    .attr("font-size", (double)(opts->font_size - 1))
+                    .attr("font-weight", "600")
+                    .attr("fill", subgraph_text_color)
+                    .text(sgpos->label)
+                    .final();
+                sg_builder.child(sg_label);
+            }
+
+            Item sg_group = sg_builder.final();
+            subgraphs_group_builder.child(sg_group);
+        }
+    }
+    Item subgraphs_group = subgraphs_group_builder.final();
+
     // render nodes
     ElementBuilder nodes_group_builder = builder.element("g");
     nodes_group_builder.attr("class", "nodes");
@@ -653,6 +751,7 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
 
     Item main_group = builder.element("g")
         .attr("transform", transform_sb->str->chars)
+        .child(subgraphs_group)
         .child(edges_group)
         .child(nodes_group)
         .final();

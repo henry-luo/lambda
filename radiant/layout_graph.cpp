@@ -55,12 +55,203 @@ static const char* get_layout_direction(Element* graph) {
     return "TB"; // default top-to-bottom
 }
 
+// Forward declaration
+static void extract_nodes_recursive(ElementReader& reader, LayoutGraph* lg);
+static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg);
+static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg);
+
+// Helper to extract a single node from an element reader
+static LayoutNode* extract_single_node(ElementReader& child_reader) {
+    LayoutNode* node = (LayoutNode*)calloc(1, sizeof(LayoutNode));
+    node->in_edges = arraylist_new(4);
+    node->out_edges = arraylist_new(4);
+
+    // extract node properties
+    ItemReader id_reader = child_reader.get_attr("id");
+    node->id = id_reader.isString() ? id_reader.cstring() : "";
+
+    ItemReader label_reader = child_reader.get_attr("label");
+    node->label = label_reader.isString() ? label_reader.cstring() : node->id;
+
+    ItemReader shape_reader = child_reader.get_attr("shape");
+    node->shape = shape_reader.isString() ? shape_reader.cstring() : "box";
+
+    ItemReader fill_reader = child_reader.get_attr("fill");
+    node->fill = fill_reader.isString() ? fill_reader.cstring() : "lightblue";
+
+    ItemReader stroke_reader = child_reader.get_attr("stroke");
+    node->stroke = stroke_reader.isString() ? stroke_reader.cstring() : "black";
+
+    // default dimensions
+    node->width = 80.0f;
+    node->height = 40.0f;
+
+    return node;
+}
+
+// Recursively extract nodes from element and its subgraphs
+static void extract_nodes_recursive(ElementReader& reader, LayoutGraph* lg) {
+    ElementReader::ChildIterator children = reader.children();
+    ItemReader child_item;
+
+    while (children.next(&child_item)) {
+        if (!child_item.isElement()) continue;
+
+        ElementReader child_reader = child_item.asElement();
+        const char* tag = child_reader.tagName();
+        if (!tag) continue;
+
+        if (strcmp(tag, "node") == 0) {
+            LayoutNode* node = extract_single_node(child_reader);
+            arraylist_append(lg->nodes, node);
+        } else if (strcmp(tag, "subgraph") == 0) {
+            // recurse into subgraph to extract its nodes
+            extract_nodes_recursive(child_reader, lg);
+        }
+    }
+}
+
+// Recursively extract edges from element and its subgraphs
+static void extract_edges_recursive(ElementReader& reader, LayoutGraph* lg) {
+    ElementReader::ChildIterator children = reader.children();
+    ItemReader child_item;
+
+    while (children.next(&child_item)) {
+        if (!child_item.isElement()) continue;
+
+        ElementReader child_reader = child_item.asElement();
+        const char* tag = child_reader.tagName();
+        if (!tag) continue;
+
+        if (strcmp(tag, "edge") == 0) {
+            LayoutEdge* edge = (LayoutEdge*)calloc(1, sizeof(LayoutEdge));
+            edge->path_points = arraylist_new(4);
+
+            ItemReader from_reader = child_reader.get_attr("from");
+            edge->from_id = from_reader.isString() ? from_reader.cstring() : "";
+
+            ItemReader to_reader = child_reader.get_attr("to");
+            edge->to_id = to_reader.isString() ? to_reader.cstring() : "";
+
+            ItemReader label_reader = child_reader.get_attr("label");
+            edge->label = label_reader.isString() ? label_reader.cstring() : nullptr;
+
+            ItemReader style_reader = child_reader.get_attr("style");
+            edge->style = style_reader.isString() ? style_reader.cstring() : "solid";
+
+            ItemReader arrow_start_reader = child_reader.get_attr("arrow-start");
+            edge->arrow_start = arrow_start_reader.isBool() ? arrow_start_reader.asBool() : false;
+
+            ItemReader arrow_end_reader = child_reader.get_attr("arrow-end");
+            edge->arrow_end = arrow_end_reader.isBool() ? arrow_end_reader.asBool() : lg->is_directed;
+
+            edge->directed = lg->is_directed;
+
+            // link to nodes (linear search)
+            edge->from_node = nullptr;
+            edge->to_node = nullptr;
+            for (int j = 0; j < lg->nodes->length; j++) {
+                LayoutNode* n = (LayoutNode*)lg->nodes->data[j];
+                if (strcmp(n->id, edge->from_id) == 0) {
+                    edge->from_node = n;
+                }
+                if (strcmp(n->id, edge->to_id) == 0) {
+                    edge->to_node = n;
+                }
+            }
+
+            if (edge->from_node && edge->to_node) {
+                arraylist_append(edge->from_node->out_edges, edge);
+                arraylist_append(edge->to_node->in_edges, edge);
+                arraylist_append(lg->edges, edge);
+            } else {
+                log_warn("edge references non-existent nodes: %s -> %s",
+                        edge->from_id, edge->to_id);
+                arraylist_free(edge->path_points);
+                free(edge);
+            }
+        } else if (strcmp(tag, "subgraph") == 0) {
+            // recurse into subgraph to extract its edges
+            extract_edges_recursive(child_reader, lg);
+        }
+    }
+}
+
+// Forward declaration for recursive node ID collection
+static void collect_node_ids_recursive(ElementReader& reader, ArrayList* node_ids);
+
+// Collect node IDs recursively from element and nested subgraphs
+static void collect_node_ids_recursive(ElementReader& reader, ArrayList* node_ids) {
+    ElementReader::ChildIterator children = reader.children();
+    ItemReader child_item;
+
+    while (children.next(&child_item)) {
+        if (!child_item.isElement()) continue;
+
+        ElementReader child_reader = child_item.asElement();
+        const char* tag = child_reader.tagName();
+        if (!tag) continue;
+
+        if (strcmp(tag, "node") == 0) {
+            ItemReader id_reader = child_reader.get_attr("id");
+            if (id_reader.isString()) {
+                arraylist_append(node_ids, (void*)id_reader.cstring());
+            }
+        } else if (strcmp(tag, "subgraph") == 0) {
+            // recurse into nested subgraph
+            collect_node_ids_recursive(child_reader, node_ids);
+        }
+    }
+}
+
+// Recursively extract subgraphs (collects all subgraphs at all levels)
+static void extract_subgraphs_recursive(ElementReader& reader, LayoutGraph* lg) {
+    ElementReader::ChildIterator children = reader.children();
+    ItemReader child_item;
+
+    while (children.next(&child_item)) {
+        if (!child_item.isElement()) continue;
+
+        ElementReader child_reader = child_item.asElement();
+        const char* tag = child_reader.tagName();
+        if (!tag || strcmp(tag, "subgraph") != 0) continue;
+
+        LayoutSubgraph* sg = (LayoutSubgraph*)calloc(1, sizeof(LayoutSubgraph));
+        sg->node_ids = arraylist_new(8);
+        sg->subgraphs = arraylist_new(2);
+
+        ItemReader id_reader = child_reader.get_attr("id");
+        sg->id = id_reader.isString() ? id_reader.cstring() : "";
+
+        ItemReader label_reader = child_reader.get_attr("label");
+        sg->label = label_reader.isString() ? label_reader.cstring() : sg->id;
+
+        ItemReader direction_reader = child_reader.get_attr("direction");
+        sg->direction = direction_reader.isString() ? direction_reader.cstring() : nullptr;
+
+        sg->fill = nullptr;
+        sg->stroke = nullptr;
+        sg->padding = 15.0f;
+        sg->label_height = 20.0f;
+
+        // collect node IDs recursively (including from nested subgraphs)
+        collect_node_ids_recursive(child_reader, sg->node_ids);
+
+        arraylist_append(lg->subgraphs, sg);
+        log_debug("extracted subgraph '%s' with %d nodes", sg->id, sg->node_ids->length);
+
+        // also recurse to extract nested subgraphs as separate entries
+        extract_subgraphs_recursive(child_reader, lg);
+    }
+}
+
 // Build internal LayoutGraph from Lambda graph Element
 static LayoutGraph* build_layout_graph(Element* graph) {
     LayoutGraph* lg = (LayoutGraph*)calloc(1, sizeof(LayoutGraph));
     lg->nodes = arraylist_new(32);
     lg->edges = arraylist_new(32);
     lg->layers = arraylist_new(10);
+    lg->subgraphs = arraylist_new(4);
 
     // determine if directed
     const char* directed_str = get_string_attr(graph, "directed", "true");
@@ -69,104 +260,18 @@ static LayoutGraph* build_layout_graph(Element* graph) {
 
     // use ElementReader to traverse children
     ElementReader graph_reader(graph);
-    ElementReader::ChildIterator children = graph_reader.children();
-    ItemReader child_item;
 
-    // first pass: extract nodes
-    while (children.next(&child_item)) {
-        if (!child_item.isElement()) continue;
+    // extract all nodes recursively (including from subgraphs)
+    extract_nodes_recursive(graph_reader, lg);
 
-        ElementReader child_reader = child_item.asElement();
-        const char* tag = child_reader.tagName();
-        if (!tag || strcmp(tag, "node") != 0) continue;
+    // extract all edges recursively (including from subgraphs)
+    extract_edges_recursive(graph_reader, lg);
 
-        LayoutNode* node = (LayoutNode*)calloc(1, sizeof(LayoutNode));
-        node->in_edges = arraylist_new(4);
-        node->out_edges = arraylist_new(4);
+    // extract subgraph definitions
+    extract_subgraphs_recursive(graph_reader, lg);
 
-        // extract node properties
-        ItemReader id_reader = child_reader.get_attr("id");
-        node->id = id_reader.isString() ? id_reader.cstring() : "";
-
-        ItemReader label_reader = child_reader.get_attr("label");
-        node->label = label_reader.isString() ? label_reader.cstring() : node->id;
-
-        ItemReader shape_reader = child_reader.get_attr("shape");
-        node->shape = shape_reader.isString() ? shape_reader.cstring() : "box";
-
-        ItemReader fill_reader = child_reader.get_attr("fill");
-        node->fill = fill_reader.isString() ? fill_reader.cstring() : "lightblue";
-
-        ItemReader stroke_reader = child_reader.get_attr("stroke");
-        node->stroke = stroke_reader.isString() ? stroke_reader.cstring() : "black";
-
-        // default dimensions (will be measured properly later)
-        node->width = 80.0f;
-        node->height = 40.0f;
-
-        arraylist_append(lg->nodes, node);
-    }
-
-    // second pass: extract edges
-    children.reset();
-    while (children.next(&child_item)) {
-        if (!child_item.isElement()) continue;
-
-        ElementReader child_reader = child_item.asElement();
-        const char* tag = child_reader.tagName();
-        if (!tag || strcmp(tag, "edge") != 0) continue;
-
-        LayoutEdge* edge = (LayoutEdge*)calloc(1, sizeof(LayoutEdge));
-        edge->path_points = arraylist_new(4);
-
-        ItemReader from_reader = child_reader.get_attr("from");
-        edge->from_id = from_reader.isString() ? from_reader.cstring() : "";
-
-        ItemReader to_reader = child_reader.get_attr("to");
-        edge->to_id = to_reader.isString() ? to_reader.cstring() : "";
-
-        ItemReader label_reader = child_reader.get_attr("label");
-        edge->label = label_reader.isString() ? label_reader.cstring() : nullptr;
-
-        ItemReader style_reader = child_reader.get_attr("style");
-        edge->style = style_reader.isString() ? style_reader.cstring() : "solid";
-
-        // arrow direction attributes (for bidirectional edges)
-        ItemReader arrow_start_reader = child_reader.get_attr("arrow-start");
-        edge->arrow_start = arrow_start_reader.isBool() ? arrow_start_reader.asBool() : false;
-
-        ItemReader arrow_end_reader = child_reader.get_attr("arrow-end");
-        edge->arrow_end = arrow_end_reader.isBool() ? arrow_end_reader.asBool() : lg->is_directed;
-
-        edge->directed = lg->is_directed;
-
-        // link to nodes (linear search)
-        edge->from_node = nullptr;
-        edge->to_node = nullptr;
-        for (int j = 0; j < lg->nodes->length; j++) {
-            LayoutNode* n = (LayoutNode*)lg->nodes->data[j];
-            if (strcmp(n->id, edge->from_id) == 0) {
-                edge->from_node = n;
-            }
-            if (strcmp(n->id, edge->to_id) == 0) {
-                edge->to_node = n;
-            }
-        }
-
-        if (edge->from_node && edge->to_node) {
-            arraylist_append(edge->from_node->out_edges, edge);
-            arraylist_append(edge->to_node->in_edges, edge);
-            arraylist_append(lg->edges, edge);
-        } else {
-            log_warn("edge references non-existent nodes: %s -> %s",
-                    edge->from_id, edge->to_id);
-            arraylist_free(edge->path_points);
-            free(edge);
-        }
-    }
-
-    log_info("built layout graph: %d nodes, %d edges",
-             lg->nodes->length, lg->edges->length);
+    log_info("built layout graph: %d nodes, %d edges, %d subgraphs",
+             lg->nodes->length, lg->edges->length, lg->subgraphs->length);
 
     return lg;
 }
@@ -206,6 +311,17 @@ static void free_layout_graph_internal(LayoutGraph* lg) {
     }
     arraylist_free(lg->layers);
 
+    // free subgraphs
+    if (lg->subgraphs) {
+        for (int i = 0; i < lg->subgraphs->length; i++) {
+            LayoutSubgraph* sg = (LayoutSubgraph*)lg->subgraphs->data[i];
+            if (sg->node_ids) arraylist_free(sg->node_ids);
+            if (sg->subgraphs) arraylist_free(sg->subgraphs);
+            free(sg);
+        }
+        arraylist_free(lg->subgraphs);
+    }
+
     free(lg);
 }
 
@@ -214,6 +330,7 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
     GraphLayout* layout = (GraphLayout*)calloc(1, sizeof(GraphLayout));
     layout->node_positions = arraylist_new(lg->nodes->length > 0 ? lg->nodes->length : 1);
     layout->edge_paths = arraylist_new(lg->edges->length > 0 ? lg->edges->length : 1);
+    layout->subgraph_positions = arraylist_new(lg->subgraphs->length > 0 ? lg->subgraphs->length : 1);
 
     layout->node_spacing_x = opts->node_sep;
     layout->node_spacing_y = opts->rank_sep;
@@ -261,6 +378,57 @@ static GraphLayout* extract_graph_layout(LayoutGraph* lg, GraphLayoutOptions* op
         }
 
         arraylist_append(layout->edge_paths, path);
+    }
+
+    // extract subgraph positions - compute bounds from member nodes
+    for (int i = 0; i < lg->subgraphs->length; i++) {
+        LayoutSubgraph* sg = (LayoutSubgraph*)lg->subgraphs->data[i];
+
+        // compute bounding box from member nodes
+        float min_x = 1e9f, min_y = 1e9f, max_x = -1e9f, max_y = -1e9f;
+        bool has_nodes = false;
+
+        for (int j = 0; j < sg->node_ids->length; j++) {
+            const char* node_id = (const char*)sg->node_ids->data[j];
+
+            // find node position
+            for (int k = 0; k < lg->nodes->length; k++) {
+                LayoutNode* node = (LayoutNode*)lg->nodes->data[k];
+                if (strcmp(node->id, node_id) == 0) {
+                    float nx1 = node->x - node->width / 2.0f;
+                    float ny1 = node->y - node->height / 2.0f;
+                    float nx2 = node->x + node->width / 2.0f;
+                    float ny2 = node->y + node->height / 2.0f;
+
+                    if (nx1 < min_x) min_x = nx1;
+                    if (ny1 < min_y) min_y = ny1;
+                    if (nx2 > max_x) max_x = nx2;
+                    if (ny2 > max_y) max_y = ny2;
+                    has_nodes = true;
+                    break;
+                }
+            }
+        }
+
+        if (!has_nodes) {
+            // empty subgraph, skip
+            continue;
+        }
+
+        // add padding and label height
+        float padding = sg->padding;
+        float label_height = sg->label_height;
+
+        SubgraphPosition* sgpos = (SubgraphPosition*)calloc(1, sizeof(SubgraphPosition));
+        sgpos->subgraph_id = sg->id;
+        sgpos->label = sg->label;
+        sgpos->x = min_x - padding;
+        sgpos->y = min_y - padding - label_height;
+        sgpos->width = (max_x - min_x) + 2 * padding;
+        sgpos->height = (max_y - min_y) + 2 * padding + label_height;
+        sgpos->label_height = label_height;
+
+        arraylist_append(layout->subgraph_positions, sgpos);
     }
 
     // compute graph bounds
@@ -344,6 +512,15 @@ void free_graph_layout(GraphLayout* layout) {
         free(path);
     }
     arraylist_free(layout->edge_paths);
+
+    // free subgraph positions
+    if (layout->subgraph_positions) {
+        for (int i = 0; i < layout->subgraph_positions->length; i++) {
+            SubgraphPosition* sgpos = (SubgraphPosition*)layout->subgraph_positions->data[i];
+            free(sgpos);
+        }
+        arraylist_free(layout->subgraph_positions);
+    }
 
     free(layout);
 }
