@@ -28,6 +28,7 @@
 // Graph layout includes
 #include "../radiant/layout_graph.hpp"
 #include "../radiant/graph_to_svg.hpp"
+#include "../radiant/graph_theme.hpp"
 #include "input/input-graph.h"
 
 // Network module includes
@@ -1268,6 +1269,9 @@ int main(int argc, char *argv[]) {
             printf("  -s, --scale              User zoom scale factor (default: 1.0)\n");
             printf("  --pixel-ratio            Device pixel ratio for HiDPI/Retina (default: 1.0, use 2.0 for crisp text)\n");
             printf("  --flavor <flavor>        LaTeX rendering pipeline: latex-js (default), tex-proper\n");
+            printf("  --theme <name>           Color theme for graph diagrams (default: zinc-dark)\n");
+            printf("                           Dark: tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark\n");
+            printf("                           Light: github-light, solarized-light, catppuccin-latte, zinc-light\n");
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
@@ -1277,6 +1281,7 @@ int main(int argc, char *argv[]) {
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
             printf("  %s render paper.tex -o output.dvi         # LaTeX to DVI (TeX typesetting)\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
+            printf("  %s render diagram.mmd -o out.svg --theme tokyo-night  # Graph with theme\n", argv[0]);
             printf("  %s render index.html -o out.png -s 2.0           # Render at 2x zoom\n", argv[0]);
             printf("  %s render index.html -o out.png --pixel-ratio 2  # Crisp text on Retina\n", argv[0]);
             printf("  %s render test/page.html -o result.svg           # Render with relative paths\n", argv[0]);
@@ -1292,6 +1297,7 @@ int main(int argc, char *argv[]) {
         float render_scale = 1.0f;  // Default user zoom scale
         float pixel_ratio = 1.0f;  // Default device pixel ratio (use 2.0 for Retina)
         const char* latex_flavor_str = NULL;  // LaTeX rendering flavor
+        const char* theme_name = NULL;  // Graph theme name
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -1364,6 +1370,17 @@ int main(int argc, char *argv[]) {
                     }
                 } else {
                     printf("Error: --flavor option requires an argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "--theme") == 0 || strcmp(argv[i], "-t") == 0) {
+                if (i + 1 < argc) {
+                    theme_name = argv[++i];
+                } else {
+                    printf("Error: --theme option requires a theme name\n");
+                    printf("Available themes: tokyo-night, nord, dracula, catppuccin-mocha, one-dark,\n");
+                    printf("                  github-dark, github-light, solarized-light, catppuccin-latte,\n");
+                    printf("                  zinc-dark, zinc-light, dark, light\n");
                     log_finish();
                     return 1;
                 }
@@ -1473,8 +1490,16 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
 
-            // Generate SVG from layout
-            Item svg_item = graph_to_svg(input->root.element, layout, input);
+            // Generate SVG from layout with optional theme
+            Item svg_item;
+            if (theme_name) {
+                SvgGeneratorOptions* opts = create_themed_svg_options(theme_name);
+                svg_item = graph_to_svg_with_options(input->root.element, layout, opts, input);
+                free(opts);
+                log_info("Using theme '%s' for graph rendering", theme_name);
+            } else {
+                svg_item = graph_to_svg(input->root.element, layout, input);
+            }
             if (get_type_id(svg_item) != LMD_TYPE_ELEMENT) {
                 printf("Error: Failed to generate SVG from graph\n");
                 free_graph_layout(layout);
