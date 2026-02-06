@@ -1,4 +1,5 @@
 #include "graph_to_svg.hpp"
+#include "graph_theme.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lib/log.h"
@@ -19,7 +20,57 @@ SvgGeneratorOptions* create_default_svg_options() {
     opts->font_family = "Arial";  // simple name without fallback - ThorVG doesn't handle CSS font lists
     opts->font_size = 14.0f;
     opts->include_grid = false;
+    opts->theme = NULL;  // Use default colors if no theme
     return opts;
+}
+
+// Create SVG options with a theme
+SvgGeneratorOptions* create_themed_svg_options(const char* theme_name) {
+    SvgGeneratorOptions* opts = (SvgGeneratorOptions*)calloc(1, sizeof(SvgGeneratorOptions));
+    opts->canvas_padding = 20.0f;
+    opts->font_family = "Arial";
+    opts->font_size = 14.0f;
+    opts->default_stroke_width = 2.0f;
+    opts->include_grid = false;
+
+    // Apply theme
+    const DiagramTheme* theme = get_theme_by_name(theme_name);
+    opts->theme = theme;
+    opts->default_fill = theme->node_fill;
+    opts->default_stroke = theme->node_stroke;
+
+    return opts;
+}
+
+// Helper functions to get themed colors
+static const char* get_themed_node_fill(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->node_fill;
+    return opts->default_fill;
+}
+
+static const char* get_themed_node_stroke(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->node_stroke;
+    return opts->default_stroke;
+}
+
+static const char* get_themed_text_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->text;
+    return "black";
+}
+
+static const char* get_themed_line_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->line;
+    return opts->default_stroke;
+}
+
+static const char* get_themed_arrow_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->arrow;
+    return opts->default_stroke;
+}
+
+static const char* get_themed_bg_color(SvgGeneratorOptions* opts) {
+    if (opts->theme) return opts->theme->bg;
+    return "#ffffff";
 }
 
 // Helper: get attribute from graph element or use default
@@ -503,15 +554,33 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     MarkBuilder builder(input);
     Pool* pool = builder.pool();
 
+    // Get themed colors
+    const char* node_fill = get_themed_node_fill(opts);
+    const char* node_stroke = get_themed_node_stroke(opts);
+    const char* text_color = get_themed_text_color(opts);
+    const char* line_color = get_themed_line_color(opts);
+    const char* arrow_color = get_themed_arrow_color(opts);
+    const char* bg_color = get_themed_bg_color(opts);
+
     // create root SVG element
     float svg_width = layout->graph_width + 2 * opts->canvas_padding;
     float svg_height = layout->graph_height + 2 * opts->canvas_padding;
 
     // create defs section for markers
-    Item arrow_marker = create_arrow_marker(builder, opts->default_stroke);
+    Item arrow_marker = create_arrow_marker(builder, arrow_color);
     Item defs = builder.element("defs")
         .child(arrow_marker)
         .final();
+
+    // create background rect if using a theme with non-white background
+    Item bg_rect = ItemNull;
+    if (opts->theme) {
+        bg_rect = builder.element("rect")
+            .attr("width", (double)svg_width)
+            .attr("height", (double)svg_height)
+            .attr("fill", bg_color)
+            .final();
+    }
 
     // render edges first (so they appear behind nodes)
     ElementBuilder edges_group_builder = builder.element("g");
@@ -520,7 +589,7 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     for (int i = 0; i < layout->edge_paths->length; i++) {
         EdgePath* edge_path = (EdgePath*)layout->edge_paths->data[i];
         Item path_item = render_edge_path(builder, pool, edge_path,
-                                          opts->default_stroke,
+                                          line_color,
                                           opts->default_stroke_width);
         if (path_item.item != 0) {
             edges_group_builder.child(path_item);
@@ -539,11 +608,11 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
         // get node attributes from original graph
         const char* shape = get_node_attribute(graph, node_id, "shape", "box");
         const char* label = get_node_attribute(graph, node_id, "label", node_id);
-        const char* fill = get_node_attribute(graph, node_id, "fill", opts->default_fill);
+        const char* fill = get_node_attribute(graph, node_id, "fill", node_fill);
 
-        // render shape
+        // render shape with themed colors
         Item shape_item = render_node_shape(builder, pool, pos, shape, fill,
-                                           opts->default_stroke,
+                                           node_stroke,
                                            opts->default_stroke_width);
 
         // render label with manual centering
@@ -561,7 +630,7 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
             .attr("y", (double)text_y)
             .attr("font-family", opts->font_family)
             .attr("font-size", (double)opts->font_size)
-            .attr("fill", "black")
+            .attr("fill", text_color)
             .text(label)
             .final();
 
@@ -590,13 +659,19 @@ Item graph_to_svg_with_options(Element* graph, GraphLayout* layout,
     stringbuf_free(transform_sb);
 
     // create root SVG element with all children
-    Item svg = builder.element("svg")
-        .attr("width", (double)svg_width)
-        .attr("height", (double)svg_height)
-        .attr("xmlns", "http://www.w3.org/2000/svg")
-        .child(defs)
-        .child(main_group)
-        .final();
+    ElementBuilder svg_builder = builder.element("svg");
+    svg_builder.attr("width", (double)svg_width);
+    svg_builder.attr("height", (double)svg_height);
+    svg_builder.attr("xmlns", "http://www.w3.org/2000/svg");
+    svg_builder.child(defs);
+
+    // Add background rect if using theme
+    if (bg_rect.item != 0) {
+        svg_builder.child(bg_rect);
+    }
+
+    svg_builder.child(main_group);
+    Item svg = svg_builder.final();
 
     log_info("SVG generation complete: %.1f x %.1f", svg_width, svg_height);
 

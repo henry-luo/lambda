@@ -4,6 +4,9 @@
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 
+// Forward declaration for theme support
+struct DiagramTheme;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -73,6 +76,9 @@ typedef struct SvgGeneratorOptions {
     const char* font_family;     // Font for labels
     float font_size;             // Default font size (default: 14)
     bool include_grid;           // Draw background grid (default: false)
+
+    // Theme support (optional - if set, overrides default colors)
+    const struct DiagramTheme* theme;  // Color theme (NULL = use default colors)
 } SvgGeneratorOptions;
 
 // Internal: Node in layout graph (extends Element data)
