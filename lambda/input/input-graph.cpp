@@ -148,69 +148,51 @@ void add_graph_attribute(Input* input, Element* element, const char* name, const
     }
 }
 
+// Helper function to ensure graph has capacity for more items
+static void ensure_graph_capacity(Input* input, Element* graph) {
+    if (graph->items == NULL) {
+        // Initialize the items array if not already done
+        graph->capacity = 16;
+        graph->items = (Item*)pool_alloc(input->pool, sizeof(Item) * graph->capacity);
+        graph->length = 0;
+    } else if (graph->length >= graph->capacity) {
+        // Need to grow the array
+        size_t new_capacity = graph->capacity * 2;
+        Item* new_items = (Item*)pool_alloc(input->pool, sizeof(Item) * new_capacity);
+        memcpy(new_items, graph->items, sizeof(Item) * graph->length);
+        graph->items = new_items;
+        graph->capacity = new_capacity;
+    }
+}
+
 // Helper function to add a node to a graph (as direct child)
 void add_node_to_graph(Input* input, Element* graph, Element* node) {
     if (!graph || !node) return;
 
-    // Add node as direct child element to the graph
-    // In the Lambda Element system, this would be managed automatically
-    // when the node is parsed within the graph context
+    ensure_graph_capacity(input, graph);
 
-    // For now, we'll use the existing child management system
-    // This is a simplified implementation that relies on the Lambda Element list behavior
-
-    // The Element inherits from List, so we can add child items
-    if (graph->items == NULL) {
-        // Initialize the items array if not already done
-        graph->capacity = 10;
-        graph->items = (Item*)pool_alloc(input->pool, sizeof(Item) * graph->capacity);
-        graph->length = 0;
-    }
-
-    if (graph->length < graph->capacity) {
-        Item node_item = {.element = node};
-        graph->items[graph->length++] = node_item;
-    }
+    Item node_item = {.element = node};
+    graph->items[graph->length++] = node_item;
 }
 
 // Helper function to add an edge to a graph (as direct child)
 void add_edge_to_graph(Input* input, Element* graph, Element* edge) {
     if (!graph || !edge) return;
 
-    // Add edge as direct child element to the graph
-    // Similar to add_node_to_graph implementation
+    ensure_graph_capacity(input, graph);
 
-    if (graph->items == NULL) {
-        // Initialize the items array if not already done
-        graph->capacity = 10;
-        graph->items = (Item*)pool_alloc(input->pool, sizeof(Item) * graph->capacity);
-        graph->length = 0;
-    }
-
-    if (graph->length < graph->capacity) {
-        Item edge_item = {.element = edge};
-        graph->items[graph->length++] = edge_item;
-    }
+    Item edge_item = {.element = edge};
+    graph->items[graph->length++] = edge_item;
 }
 
 // Helper function to add a cluster to a graph (as direct child)
 void add_cluster_to_graph(Input* input, Element* graph, Element* cluster) {
     if (!graph || !cluster) return;
 
-    // Add cluster as direct child element to the graph
-    // Similar to add_node_to_graph implementation
+    ensure_graph_capacity(input, graph);
 
-    if (graph->items == NULL) {
-        // Initialize the items array if not already done
-        graph->capacity = 10;
-        graph->items = (Item*)pool_alloc(input->pool, sizeof(Item) * graph->capacity);
-        graph->length = 0;
-    }
-
-    if (graph->length < graph->capacity) {
-        Item cluster_item = {.element = cluster};
-        graph->items[graph->length++] = cluster_item;
-    }
+    Item cluster_item = {.element = cluster};
+    graph->items[graph->length++] = cluster_item;
 }
 
 // Helper functions for attribute parsing with CSS-aligned naming
