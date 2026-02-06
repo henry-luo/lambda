@@ -64,63 +64,30 @@ const FontMetrics* get_math_extension_font(float size_pt);
 
 ## Pipeline Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          LaTeX/TeX Typesetting Pipeline                     │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-  LaTeX Source (.tex)
-        │
-        ▼
-┌───────────────────┐
-│  Tree-sitter      │  grammar: tree-sitter-latex/grammar.js
-│  LaTeX Parser     │  implementation: input-latex-ts.cpp
-└───────────────────┘
-        │
-        ▼
-┌───────────────────┐
-│  Lambda AST       │  Mark/Element tree (Lambda's universal data model)
-│  (Mark Tree)      │  Can be dumped via: lambda convert test.tex -f latex -t mark /tmp/test.mk
-└───────────────────┘
-        │
-        ├────────────────────────────┐
-        ▼                            ▼
-┌───────────────────┐      ┌───────────────────┐
-│  tex_latex_bridge │      │  tex_math_bridge  │   (for embedded math)
-│  LaTeX → TexNode  │      │  Math → TexNode   │
-└───────────────────┘      └───────────────────┘
-        │                            │
-        └────────────┬───────────────┘
-                     ▼
-┌─────────────────────────────────────┐
-│           TexNode Tree              │   tex_node.hpp
-│  (Unified typesetting node system)  │   - Char, Ligature, HList, VList
-│                                     │   - Math: Fraction, Radical, Scripts
-│                                     │   - Glue, Kern, Rule, Penalty
-└─────────────────────────────────────┘
-                     │
-        ┌────────────┼────────────┐
-        ▼            ▼            ▼
-┌─────────────┐ ┌─────────┐ ┌─────────────┐
-│ tex_hlist   │ │tex_vlist│ │tex_linebreak│   Horizontal/Vertical list building
-│ HList Build │ │VList    │ │ Knuth-Plass │   Optimal line breaking algorithm
-└─────────────┘ └─────────┘ └─────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────┐
-│         tex_pagebreak               │   Page breaking
-│    Page Layout & Breaking           │   tex_pagebreak.hpp
-└─────────────────────────────────────┘
-                     │
-        ┌────────────┼────────────┬────────────┐
-        ▼            ▼            ▼            ▼
-┌───────────┐  ┌───────────┐  ┌─────────┐  ┌─────────┐
-│ tex_dvi   │  │ tex_pdf   │  │ tex_svg │  │ tex_png │
-│ DVI Out   │  │ PDF Out   │  │ SVG Out │  │ PNG Out │
-└───────────┘  └───────────┘  └─────────┘  └─────────┘
-      │              │              │            │
-      ▼              ▼              ▼            ▼
-   output.dvi    output.pdf    output.svg   output.png
+```mermaid
+flowchart TD
+    subgraph Pipeline["LaTeX/TeX Typesetting Pipeline"]
+        A[LaTeX Source .tex] --> B["Tree-sitter LaTeX Parser<br><i>grammar.js, input-latex-ts.cpp</i>"]
+        B --> C["Lambda AST (Mark Tree)<br><i>Lambda's universal data model</i>"]
+        C --> D1["tex_latex_bridge<br>LaTeX → TexNode"]
+        C --> D2["tex_math_bridge<br>Math → TexNode"]
+        D1 --> E["TexNode Tree<br><i>tex_node.hpp</i><br>Char, Ligature, HList, VList<br>Fraction, Radical, Scripts<br>Glue, Kern, Rule, Penalty"]
+        D2 --> E
+        E --> F1["tex_hlist<br>HList Build"]
+        E --> F2["tex_vlist<br>VList"]
+        E --> F3["tex_linebreak<br>Knuth-Plass"]
+        F1 --> G["tex_pagebreak<br>Page Layout & Breaking"]
+        F2 --> G
+        F3 --> G
+        G --> H1["tex_dvi<br>DVI Out"]
+        G --> H2["tex_pdf<br>PDF Out"]
+        G --> H3["tex_svg<br>SVG Out"]
+        G --> H4["tex_png<br>PNG Out"]
+        H1 --> I1[output.dvi]
+        H2 --> I2[output.pdf]
+        H3 --> I3[output.svg]
+        H4 --> I4[output.png]
+    end
 ```
 
 ### Stage Descriptions
@@ -414,7 +381,7 @@ TabularColSpec spec = parse_tabular_colspec(col_spec, arena);
 
 // Content collection using TabularItem structs
 // - TABULAR_CONTENT: Regular cell content (text, inline_math)
-// - TABULAR_ROW_SEP: Row separator (\\, linebreak_command)  
+// - TABULAR_ROW_SEP: Row separator (\\, linebreak_command)
 // - TABULAR_HLINE: Horizontal rule
 
 // Row building with convert_inline_item() for proper math handling
