@@ -477,6 +477,28 @@ void runner_cleanup(Runner* runner) {
     log_debug("runner cleanup end");
 }
 
+// Helper function to recursively resolve all sys:// paths in an Item tree
+// This must be called before deep_copy while the execution context is still valid
+// Only handles List/Array since those are the common containers for script results
+extern "C" Item path_resolve_for_iteration(Path* path);
+
+static void resolve_sys_paths_recursive(Item item) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_PATH) {
+        Path* path = item.path;
+        if (path && path_get_scheme(path) == PATH_SCHEME_SYS && path->result == 0) {
+            path_resolve_for_iteration(path);
+        }
+    } else if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY) {
+        List* list = item.list;
+        for (int64_t i = 0; i < list->length; i++) {
+            resolve_sys_paths_recursive(list->items[i]);
+        }
+    }
+    // Note: Maps and Elements could also contain paths, but for script results
+    // we mainly need to handle List/Array which collect top-level expressions
+}
+
 // Common helper function to execute a compiled script and wrap the result in an Input*
 // This handles the execution, result wrapping, and cleanup logic shared between run_script and run_script_with_run_main
 // Made non-static so it can be used by MIR execution path in transpile-mir.cpp
@@ -527,6 +549,9 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         runner_cleanup(runner);
         return nullptr;
     }
+
+    // Resolve all sys:// paths in result before deep copy (while context is still valid)
+    resolve_sys_paths_recursive(result);
 
     // Use MarkBuilder to deep copy result to output's arena
     // This ensures all data is copied to the output's memory space

@@ -993,9 +993,22 @@ Item MarkBuilder::deep_copy_internal(Item item) {
         return createMetaType(((TypeType*)item.type)->type->type_id);
     }
 
-    case LMD_TYPE_PATH:
-        // Path is a pointer type, just return as-is (no deep copy needed)
+    case LMD_TYPE_PATH: {
+        // For sys:// paths, resolve and deep-copy the result
+        Path* path = item.path;
+        if (path && path_get_scheme(path) == PATH_SCHEME_SYS) {
+            // If already resolved, deep-copy the result
+            if (path->result != 0) {
+                return deep_copy_internal({.item = path->result});
+            }
+            // Note: path_resolve_for_iteration is only available in full lambda runtime,
+            // not in lambda-input library. Caller is responsible for resolving paths
+            // before deep_copy if needed.
+        }
+        // For non-sys paths, we need to deep-copy the path structure
+        // For now, just return as-is (caller should be aware paths may reference external memory)
         return item;
+    }
 
     case LMD_TYPE_ANY:
         return deep_copy_internal(item);
