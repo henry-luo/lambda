@@ -1,8 +1,8 @@
 # Lambda Script
 
-A general-purpose, cross-platform, pure functional scripting language and document processing engine.
+A general-purpose, cross-platform, functional scripting language and document processing engine.
 
-Built from scratch in C/C++ with a custom and light-weight runtime (only **6 MB**), Tree-sitter parsing, MIR-based JIT compilation.
+Built from scratch in C/C++ with a custom and light-weight runtime (only **8 MB**), Tree-sitter parsing, MIR-based JIT compilation.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
 > A stable subset of the literal data model is separately formalised and released as
@@ -19,11 +19,12 @@ Internally, Lambda treats documents as structured data. Different input formats 
 ## Features
 
 ### 1. Lambda script (pure functional runtime)
-- **Pure-functional core** with immutable data structures (lists, maps, elements) and first-class functions.
+- **Pure-functional core** with immutable data structures (lists, arrays, maps, elements) and first-class functions and types.
+- **Expressive pipe operator** (`|`) for fluent set-oriented data transformation pipelines with inline mapping and filtering.
+- **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
+- **Powerful for-expressions** with `where`, `order by`, `limit`, `offset` clauses for SQL-like data querying.
 - **Interactive REPL** for exploration and debugging.
-- **Fast parsing** with a Tree-sitter based frontend.
 - **Optional MIR JIT** execution path for performance-sensitive workloads.
-- **Reference counting + pooled allocators** for predictable memory behavior.
 
 ### 2. Markup input parsing & formatting
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
@@ -35,18 +36,103 @@ Internally, Lambda treats documents as structured data. Different input formats 
 - **Rich type system** with type inference and explicit type annotations, similar to that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 - **Format-aware validation** helpers that unwrap/normalize documents before validation.
-- **Detailed error reporting** with paths and expected/actual diagnostics.
 
 ### 4. Radiant HTML/CSS/SVG layout, rendering & viewer
 - **Browser-compatible layout engine** supporting block/inline flow, flexbox, grid, and tables.
 - **CSS cascade + computed style resolution**, with pixel-ratio aware sizing.
 - **Render targets**: SVG / PDF / PNG / JPEG output via `lambda render`.
 - **Unified interactive viewer** via `lambda view`:
-   - HTML / XML (treated as HTML) with CSS styling
+   - HTML / XML (treated as HTML with CSS styling) 
    - Markdown / Wiki (rendered with styling)
    - LaTeX (`.tex`) via conversion to HTML
-   - PDF viewing
-   - Lambda script results (`.ls`) evaluated and rendered
+   - Lambda script (`.ls`) evaluated to HTML and rendered (think of PHP)
+
+## Language Highlights
+
+### Pipe Operator & Data Pipelines
+
+The pipe operator `|` enables fluent data transformations. Use `~` to reference the current item:
+
+```lambda
+// Map: double each element
+[1, 2, 3] | ~ * 2                    // [2, 4, 6]
+
+// Extract fields
+users | ~.name                       // ["Alice", "Bob", "Carol"]
+
+// Filter with 'where'
+[1, 2, 3, 4, 5] where ~ > 3          // [4, 5]
+
+// Chain operations: filter → map → aggregate
+users where ~.age >= 18 | ~.name | len   // count adult names
+```
+
+### Vector Arithmetic
+
+Scalar operations automatically broadcast over collections:
+
+```lambda
+1 + [2, 3]           // [3, 4]       — scalar + array
+[1, 2] * 2           // [2, 4]       — array * scalar
+[1, 2] + [3, 4]      // [4, 6]       — element-wise
+[1, 2] ^ 2           // [1, 4]       — element-wise power
+```
+
+### For-Expressions with SQL-like Clauses
+
+Powerful comprehensions with `let`, `where`, `order by`, `limit`, `offset`:
+
+```lambda
+// Filter and transform
+for (x in data where x > 0) x * 2
+
+// With local bindings
+for (x in data, let sq = x * x where sq > 10) sq
+
+// Sorting and pagination
+for (x in items order by x.price desc limit 5) x.name
+```
+
+### Rich Type System
+
+```lambda
+// Type annotations
+let x: int = 42
+let items: [string] = ["a", "b"]
+
+// Union and optional types
+type Result = int | error
+type Name = string?
+
+// Function types
+fn add(a: int, b: int) int => a + b
+```
+
+### Elements (Markup Literals)
+
+First-class markup syntax for document generation:
+
+```lambda
+let card = <div class: "card";
+    <h2; "Title">
+    <p; "Content here.">
+>
+format(card, 'html)
+```
+
+### Built-in Multi-Format I/O
+
+```lambda
+// Read any format
+let data = input("config.yaml", 'yaml)
+let doc = input("article.md", 'markdown)
+
+// Convert between formats
+format(data, 'json)
+
+// Write to file (in procedural functions)
+data |> "/tmp/output.json"
+```
 
 ## Demo
 <p align="center">
@@ -64,37 +150,40 @@ Internally, Lambda treats documents as structured data. Different input formats 
 
 ## Quick Start
 
-### Prerequisites
+### Install From Source
 
-Lambda is built from source. The dependency scripts also install Node.js/npm (used by Tree-sitter generation via `npx`).
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/henry-luo/lambda.git
+   cd lambda
+   ```
 
-**macOS (native build):**
+2. **Install dependencies:**
+   ```bash
+   # macOS
+   ./setup-mac-deps.sh
+
+   # Linux
+   ./setup-linux-deps.sh
+
+   # Windows (under MSYS2)
+   ./setup-windows-deps.sh
+   ```
+
+3. **Build:**
+   ```bash
+   make build
+   ```
+#### Build System
+
+Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
+
 ```bash
-./setup-mac-deps.sh
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-./setup-linux-deps.sh
-```
-
-**Windows (native build under MSYS2):**
-```bash
-./setup-windows-deps.sh
-```
-
-### Building
-
-**Recommended (Premake-based Make targets):**
-```bash
-make build      # Incremental build (default)
-make debug      # Debug build (AddressSanitizer enabled)
-make release    # Optimized release build
-```
-
-**More build help:**
-```bash
-make help
+make build             # Incremental build (recommended)
+make release           # Optimized release build
+make test              # Run unit test
+make clean             # Clean build artifacts
+make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar changes)
 ```
 
 ### Running
@@ -130,33 +219,6 @@ The build produces a runnable executable at the repo root: `lambda.exe`.
 
 Tip: `./lambda.exe <command> --help` prints detailed options and examples.
 
-## Installation
-
-### From Source
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/henry-luo/lambda.git
-   cd lambda
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   # macOS
-   ./setup-mac-deps.sh
-
-   # Linux
-   ./setup-linux-deps.sh
-
-   # Windows
-   ./setup-windows-deps.sh
-   ```
-
-3. **Build:**
-   ```bash
-   make build
-   ```
-
 ## Examples
 
 ### Document Processing
@@ -181,30 +243,27 @@ for (row in csv) {
 ["Alice", "Bob", "Charlie"]
 ```
 
-## Testing
-
-```bash
-make build-test
-make test
-```
-
-## Build System
-
-Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
-
-```bash
-make build             # Incremental build (recommended)
-make release           # Optimized release build
-make clean             # Clean build artifacts
-make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar changes)
-```
-
 ## Documentation
 
-- Language reference: `doc/Lambda_Reference.md`
-- Validator guide: `doc/Lambda_Validator_Guide.md`
-- Radiant layout design: `doc/Radiant_Layout_Design.md`
-- Mark doc schema (for lightweight markup, like Markdown, Wiki, RST, etc.): `doc/Doc_Schema.md`
+### Language Reference
+
+| Document | Description |
+|----------|-------------|
+| [Lambda Reference](doc/Lambda_Reference.md) | Language overview, modules, I/O, and error handling |
+| [Data & Collections](doc/Lambda_Data.md) | Literals, arrays, lists, maps, elements, and ranges |
+| [Type System](doc/Lambda_Type.md) | Types, unions, patterns, and type declarations |
+| [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, control flow, and comprehensions |
+| [Functions](doc/Lambda_Func.md) | Function declarations, closures, and procedures |
+| [System Functions](doc/Lambda_Sys_Func.md) | Built-in functions (math, string, collection, I/O) |
+| [Cheatsheet](doc/Lambda_Cheatsheet.md) | Quick reference for syntax and common patterns |
+
+### Other Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Validator Guide](doc/Lambda_Validator_Guide.md) | Schema-based validation for data structures |
+| [Radiant Layout Design](doc/Radiant_Layout_Design.md) | HTML/CSS layout engine internals |
+| [Doc Schema](doc/Doc_Schema.md) | Schema for lightweight markup (Markdown, Wiki, RST) |
 
 ## Platform Support
 
@@ -212,7 +271,7 @@ make generate-grammar  # Regenerate Tree-sitter parser (auto-runs when grammar c
 | -------- | ------ | --------------------------- |
 | macOS    | ✅ Full | Native development platform |
 | Linux    | ✅ Full | Ubuntu 20.04+ tested        |
-| Windows  | ✅ Full | Native build via MSYS2;     |
+| Windows  | ✅ Full | Native build via MSYS2      |
 
 ## License
 
@@ -223,7 +282,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **MIR Project**: JIT compilation infrastructure
 - **Tree-sitter**: Incremental parsing framework
 - **ThorVG**: SVG vector graphics library
-- **GoogleTest**: C++ unit testing framework
 
 ## Support
 

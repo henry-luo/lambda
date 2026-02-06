@@ -89,20 +89,20 @@ type([1,2]) == [int]      // true
 
 Lambda's type system forms a hierarchy with `any` at the top and `null` at the bottom:
 
-```
-                    any
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-     scalar      collection    function
-        │            │            │
-   ┌────┴────┐   ┌───┴───┐       fn
-   │         │   │       │
- number   string │    element
-   │             │
-┌──┴──┐    ┌────┴────┐
-│     │    │    │    │
-int float  list array map
+```mermaid
+flowchart TD
+    any --> scalar
+    any --> collection
+    any --> function
+    scalar --> number
+    scalar --> string
+    number --> int
+    number --> float
+    collection --> list
+    collection --> array
+    collection --> map
+    collection --> element
+    function --> fn
 ```
 
 ### Subtype Relations
