@@ -337,94 +337,133 @@ count_args(1, 2, 3)        // 3
 
 ---
 
-## ## Input/Parsing and Formatting
+## Input/Output Functions
 
-Lambda Script provides comprehensive support for parsing and formatting various document types.
+Lambda Script provides comprehensive support for file I/O with unified path/URL handling and multiple document formats.
 
-### Input Functions
+### Unified Path and URL Handling
+
+Lambda uses `Path` literals with unified syntax for both local files and remote URLs:
+
+```lambda
+// Local paths
+let local = @./data/config.json          // Relative path
+let absolute = @/Users/name/project/     // Absolute path
+
+// Remote URLs
+let api = @https://api.example.com/data  // HTTPS URL
+let file_url = @file:///path/to/file     // File URL
+
+// All work uniformly with I/O functions
+let data = input(local)
+let remote = input(api)
+```
+
+### Pure I/O Functions
+
+These functions can be used anywhere (in both `fn` and `pn` functions).
+
+#### input(target) / input(target, format)
+
+Parse content from a file path or URL.
 
 | Function | Description | Example |
 |----------|-------------|---------|
-| `input(file)` | Parse file (auto-detect format) | `input("data.json")` |
-| `input(file, format)` | Parse file with specified format | `input("data.json", 'json)` |
+| `input(target)` | Parse target (auto-detect format) | `input(@./data.json)` |
+| `input(target, format)` | Parse target with specified format | `input("data.json", 'json)` |
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
 
 | Format | Description | Example |
 |--------|-------------|---------|
-| JSON | JavaScript Object Notation | `input("data.json", 'json')` |
-| XML | Extensible Markup Language | `input("config.xml", 'xml')` |
-| HTML | HyperText Markup Language | `input("page.html", 'html')` |
-| YAML | YAML Ain't Markup Language | `input("config.yaml", 'yaml')` |
-| TOML | Tom's Obvious Minimal Language | `input("config.toml", 'toml')` |
-| Markdown | Markdown markup | `input("doc.md", 'markdown')` |
-| CSV | Comma-Separated Values | `input("data.csv", 'csv')` |
-| LaTeX | LaTeX markup | `input("doc.tex", 'latex')` |
-| RTF | Rich Text Format | `input("doc.rtf", 'rtf')` |
-| PDF | Portable Document Format | `input("doc.pdf", 'pdf')` |
-| CSS | Cascading Style Sheets | `input("style.css", 'css')` |
-| INI | Configuration files | `input("config.ini", 'ini')` |
-| Math | Mathematical expressions | `input("formula.txt", 'math')` |
+| JSON | JavaScript Object Notation | `input(@./data.json, 'json)` |
+| XML | Extensible Markup Language | `input(@./config.xml, 'xml)` |
+| HTML | HyperText Markup Language | `input(@./page.html, 'html)` |
+| YAML | YAML Ain't Markup Language | `input(@./config.yaml, 'yaml)` |
+| TOML | Tom's Obvious Minimal Language | `input(@./config.toml, 'toml)` |
+| Markdown | Markdown markup | `input(@./doc.md, 'markdown)` |
+| CSV | Comma-Separated Values | `input(@./data.csv, 'csv)` |
+| LaTeX | LaTeX markup | `input(@./doc.tex, 'latex)` |
+| RTF | Rich Text Format | `input(@./doc.rtf, 'rtf)` |
+| PDF | Portable Document Format | `input(@./doc.pdf, 'pdf)` |
+| CSS | Cascading Style Sheets | `input(@./style.css, 'css)` |
+| INI | Configuration files | `input(@./config.ini, 'ini)` |
+| Math | Mathematical expressions | `input(@./formula.txt, 'math)` |
 
-#### Input Function Usage
+**Input Function Usage:**
 
 ```lambda
-// Basic input parsing
-let data = input("file.json", 'json');
-let config = input("settings.yaml", 'yaml');
+// Basic input parsing with Path literals
+let data = input(@./file.json, 'json)
+let config = input(@./settings.yaml, 'yaml)
 
-// Input with options
-let math_expr = input("formula.txt", {'type': 'math', 'flavor': 'latex'});
-let csv_data = input("data.csv", {'type': 'csv', 'delimiter': ','});
+// Input from URLs
+let api_data = input(@https://api.example.com/users.json)
+
+// Input with options map
+let math_expr = input(@./formula.txt, {type: 'math, flavor: 'latex})
+let csv_data = input(@./data.csv, {type: 'csv, delimiter: ','})
 
 // Auto-detection (based on file extension)
-let auto_data = input("document.md");  // Automatically detects Markdown
+let auto_data = input(@./document.md)  // Automatically detects Markdown
 ```
 
-Lambda Script includes a sophisticated mathematical expression parser supporting multiple syntaxes:
+#### exists(target)
+
+Check if a file, directory, or URL target exists. Returns `true` or `false`.
 
 ```lambda
-// LaTeX syntax
-let latex_formula = input("formula.tex", {'type': 'math', 'flavor': 'latex'});
-// Supports: \frac{x}{y}, \sin(x), \alpha, \sum_{i=1}^{n}, etc.
+let file_exists = exists(@./config.json)
+let dir_exists = exists(@./data/)
 
-// ASCII syntax
-let ascii_formula = input("formula.txt", {'type': 'math', 'flavor': 'ascii'});
-// Supports: x/y, sin(x), alpha, sum(i=1 to n), etc.
+if exists(@./cache.json) {
+    let cached = input(@./cache.json)
+}
 ```
 
-### Format Functions
+#### format(data) / format(data, type)
 
-| Function             | Description                          | Example              |
-| -------------------- | ------------------------------------ | -------------------- |
-| `format(data)`       | Format data as Lambda representation | `format(obj)`        |
-| `format(data, type)` | Format data as specified type        | `format(obj, 'json)` |
+Format data as a string in various formats. This is a pure function that returns a string.
 
-#### Format Function Usage
+| Function | Description | Example |
+|----------|-------------|---------|
+| `format(data)` | Format data as Lambda representation | `format(obj)` |
+| `format(data, type)` | Format data as specified type | `format(obj, 'json)` |
 
 ```lambda
 // Format data as different types
-let json_output = format(data, 'json');
-let yaml_output = format(data, 'yaml');
-let xml_output = format(data, 'xml');
+let json_str = format(data, 'json)
+let yaml_str = format(data, 'yaml)
+let xml_str = format(data, 'xml)
 
 // Format with options
-let pretty_json = format(data, {'type': 'json', 'indent': 2});
-let compact_json = format(data, {'type': 'json', 'compact': true});
+let pretty_json = format(data, {type: 'json, indent: 2})
+let compact_json = format(data, {type: 'json, compact: true})
 ```
 
 ---
-## Procedural Functions
+## Procedural I/O Functions
 
 Functions that have side effects (I/O, state changes). These are only available in procedural functions (`pn`).
+
+### Overview
 
 | Function | Description | Example |
 |----------|-------------|---------|
 | `print(x)` | Print to console | `print("Hello!")` |
-| `output(data, file)` | Write data to file (auto-detect format) | `output(data, "out.json")` |
-| `output(data, file, format)` | Write data to file with explicit format | `output(data, "out.txt", 'json')` |
-| `fetch(url, options)` | HTTP fetch | `fetch("https://api.example.com", {})` |
-| `cmd(command, args)` | Execute shell command | `cmd("ls", "-la")` |
+| `output(data, target)` | Write data to file/URL | `output(data, @./out.json)` |
+| `data \|> target` | Pipe output (write/truncate) | `data \|> @./result.json` |
+| `data \|>> target` | Pipe output (append) | `line \|>> @./log.txt` |
+| `io.copy(src, dst)` | Copy file or directory | `io.copy(@./a.txt, @./b.txt)` |
+| `io.move(src, dst)` | Move/rename file or directory | `io.move(@./old, @./new)` |
+| `io.delete(target)` | Delete file or directory | `io.delete(@./temp.txt)` |
+| `io.mkdir(path)` | Create directory | `io.mkdir(@./data/)` |
+| `io.touch(path)` | Create empty file or update timestamp | `io.touch(@./flag.txt)` |
+| `io.symlink(target, link)` | Create symbolic link | `io.symlink(@./src, @./link)` |
+| `io.chmod(path, mode)` | Change file permissions | `io.chmod(@./script.sh, "755")` |
+| `io.rename(src, dst)` | Rename file or directory | `io.rename(@./a.txt, @./b.txt)` |
+| `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(@https://api.example.com, {method: 'POST})` |
+| `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
 
 ### print(x)
 
@@ -436,22 +475,25 @@ print(42)
 print([1, 2, 3])
 ```
 
-### output(data, file) / output(data, file, format)
+### output(data, target) / output(data, target, format)
 
-Writes data to a file in various formats. The format can be auto-detected from the file extension or explicitly specified.
+Writes data to a file or URL. The format can be auto-detected from the target extension or explicitly specified.
 
 ```lambda
 pn save_data() {
     let data = {name: "Alice", age: 30, scores: [95, 87, 92]}
     
-    // Auto-detect format from file extension
-    output(data, "result.json")     // Writes JSON
-    output(data, "result.yaml")     // Writes YAML
-    output(data, "result.xml")      // Writes XML
+    // Using Path literals
+    output(data, @./result.json)     // Writes JSON
+    output(data, @./result.yaml)     // Writes YAML
+    output(data, @./result.xml)      // Writes XML
     
     // Explicit format specification
-    output(data, "data.txt", 'json')    // Force JSON format
-    output(data, "data.out", 'yaml')    // Force YAML format
+    output(data, @./data.txt, 'json)    // Force JSON format
+    output(data, @./data.out, 'yaml)    // Force YAML format
+    
+    // With options
+    output(data, @./pretty.json, {type: 'json, indent: 4})
 }
 ```
 
@@ -468,20 +510,163 @@ pn save_data() {
 | `toml` | `.toml` | TOML format |
 | `ini` | `.ini` | INI configuration format |
 
-### fetch(url, options)
+### Pipe Output Operators: |> and |>>
 
-Performs an HTTP request.
+Lambda provides pipe output operators for convenient file writing in procedural functions.
+
+#### |> (Write/Truncate)
+
+The `|>` operator writes data to a target, truncating existing content:
 
 ```lambda
-let response = fetch("https://api.example.com/data", {})
+pn generate_report() {
+    let report = {title: "Monthly Report", date: today(), items: [...]}
+    report |> @./reports/monthly.json
+    
+    // Equivalent to:
+    output(report, @./reports/monthly.json)
+}
 ```
 
-### cmd(command, args)
+#### |>> (Append)
 
-Executes a shell command.
+The `|>>` operator appends data to a target:
 
 ```lambda
-let result = cmd("echo", "Hello")
+pn log_event(event) {
+    let entry = format({time: now(), event: event}, 'json)
+    entry |>> @./logs/events.jsonl
+}
+
+pn process_items(items) {
+    for item in items {
+        process(item) |>> @./output.txt
+    }
+}
+```
+
+### io Module Functions
+
+The `io` module provides procedural functions for file system operations.
+
+#### io.copy(source, destination)
+
+Copy a file or directory to a new location.
+
+```lambda
+pn backup_config() {
+    io.copy(@./config.json, @./backup/config.json)
+    io.copy(@./data/, @./backup/data/)  // Copy directory recursively
+}
+```
+
+#### io.move(source, destination)
+
+Move or rename a file or directory.
+
+```lambda
+pn archive_logs() {
+    io.move(@./logs/current.log, @./logs/archive/2024-01.log)
+}
+```
+
+#### io.delete(target)
+
+Delete a file or directory.
+
+```lambda
+pn cleanup() {
+    io.delete(@./temp.txt)
+    io.delete(@./cache/)  // Delete directory recursively
+}
+```
+
+#### io.mkdir(path)
+
+Create a directory (and parent directories if needed).
+
+```lambda
+pn setup_project() {
+    io.mkdir(@./src/)
+    io.mkdir(@./tests/)
+    io.mkdir(@./docs/api/)  // Creates parent dirs too
+}
+```
+
+#### io.touch(path)
+
+Create an empty file or update its modification timestamp.
+
+```lambda
+pn mark_complete() {
+    io.touch(@./build/.done)
+}
+```
+
+#### io.symlink(target, link_path)
+
+Create a symbolic link.
+
+```lambda
+pn setup_links() {
+    io.symlink(@./config/production.json, @./config.json)
+}
+```
+
+#### io.chmod(path, mode)
+
+Change file permissions (Unix-style).
+
+```lambda
+pn make_executable() {
+    io.chmod(@./scripts/deploy.sh, "755")
+    io.chmod(@./secrets.env, "600")
+}
+```
+
+#### io.rename(source, destination)
+
+Rename a file or directory (alias for move within same directory).
+
+```lambda
+pn rename_file() {
+    io.rename(@./draft.txt, @./final.txt)
+}
+```
+
+#### io.fetch(url, options)
+
+Perform HTTP requests with full control over method, headers, and body.
+
+```lambda
+pn api_operations() {
+    // GET request
+    let data = io.fetch(@https://api.example.com/users, {
+        method: 'GET,
+        headers: {Authorization: "Bearer token123"}
+    })
+    
+    // POST request
+    let result = io.fetch(@https://api.example.com/users, {
+        method: 'POST,
+        headers: {Content-Type: "application/json"},
+        body: format({name: "Alice", email: "alice@example.com"}, 'json)
+    })
+}
+```
+
+### cmd(command, args...)
+
+Execute a shell command and return the result.
+
+```lambda
+pn run_commands() {
+    let files = cmd("ls", "-la")
+    let date = cmd("date", "+%Y-%m-%d")
+    
+    // With multiple arguments
+    cmd("git", "commit", "-m", "Update files")
+}
 ```
 
 ---
@@ -582,15 +767,30 @@ if (result is error) {
 | `drop` | 2 | Drop first n |
 | `zip` | 2 | Zip vectors |
 
-### I/O Functions
+### I/O Functions (Pure)
 | Function | Args | Description |
 |----------|------|-------------|
-| `input` | 1-2 | Parse file |
-| `format` | 1-2 | Format data |
-| `print` | 1 | Print (proc) |
-| `output` | 2 | Write file (proc) |
-| `fetch` | 2 | HTTP fetch (proc) |
-| `cmd` | 2 | Shell command (proc) |
+| `input` | 1-2 | Parse file/URL |
+| `exists` | 1 | Check if target exists |
+| `format` | 1-2 | Format data as string |
+
+### I/O Functions (Procedural)
+| Function | Args | Description |
+|----------|------|-------------|
+| `print` | 1 | Print to console |
+| `output` | 2-3 | Write to file/URL |
+| `\|>` | 2 | Pipe write (truncate) |
+| `\|>>` | 2 | Pipe write (append) |
+| `io.copy` | 2 | Copy file/directory |
+| `io.move` | 2 | Move file/directory |
+| `io.delete` | 1 | Delete file/directory |
+| `io.mkdir` | 1 | Create directory |
+| `io.touch` | 1 | Create/update file |
+| `io.symlink` | 2 | Create symbolic link |
+| `io.chmod` | 2 | Change permissions |
+| `io.rename` | 2 | Rename file/directory |
+| `io.fetch` | 2 | HTTP request |
+| `cmd` | 1+ | Shell command |
 
 ### Date/Time Functions
 | Function | Args | Description |
