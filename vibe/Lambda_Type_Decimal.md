@@ -1,814 +1,623 @@
-# Lambda Runtime: libmpdec Decimal Support - FULLY IMPLEMENTED ✅
+# Lambda Decimal Enhancement Proposal
 
-## Implementation Status: **FULLY COMPLETED** 🎉
-
-**Date Completed**: August 19, 2025  
-**Migration**: Successfully migrated from GMP to libmpdec with complete arithmetic support
-
-### ✅ **Complete Implementation Summary**
-Lambda has successfully transitioned from GMP (GNU Multiple Precision Arithmetic Library) to **libmpdec** (the Python decimal library) for high-precision decimal arithmetic. This provides better precision, IEEE 754-2008 compliance, and improved cross-platform support with **FULL ARITHMETIC OPERATIONS** now implemented and tested.
-
-## Current State Analysis
-
-### ✅ **Successfully Implemented & Verified**
-1. **Library Migration**: Replaced GMP with libmpdec in build system and dependencies
-2. **Data Structure**: Updated `Decimal` struct to use `mpd_t*` (libmpdec type)
-3. **Memory Management**: Heap-allocated, reference-counted decimal values using libmpdec
-4. **Parsing**: `build_lit_decimal()` uses `mpd_qset_string()` for decimal literal parsing
-5. **Printing**: `print_decimal()` uses `mpd_to_sci()` for scientific notation output
-6. **Runtime Integration**: Full integration with Lambda's JIT compilation and execution
-7. **Type System**: `LMD_TYPE_DECIMAL` fully integrated with boxing/unboxing macros
-8. **🆕 Complete Arithmetic Operations**: All arithmetic functions now use libmpdec with `mpd_defaultcontext()`
-9. **🆕 Context Management**: Proper `mpd_context_t` usage preventing crashes and ensuring stability
-10. **🆕 Mixed Type Operations**: Seamless arithmetic between decimal, int, and float types
-11. **🆕 Error Handling**: Division by zero detection and proper error propagation
-
-### ✅ **Verified Working Features**
-- **Basic Literals**: `12.34n` → `12.34` ✅
-- **Variable Assignment**: `let x = 123.456n; x` → `123.456` ✅  
-- **Array Support**: `[1.5n, 2.75n, 3.14159n]` → `[1.5, 2.75, 3.14159]` ✅
-- **Constant Pool**: Decimal literals stored and retrieved correctly ✅
-- **Memory Management**: Reference counting and cleanup working ✅
-- **🆕 Addition**: `3.14159n + 2.71828n` → `5.85987` ✅
-- **🆕 Subtraction**: `3.14159n - 2.71828n` → `0.42331` ✅
-- **🆕 Multiplication**: `3.14159n * 2.71828n` → `8.5397212652` ✅
-- **🆕 Division**: `3.14159n / 2.71828n` → `1.1557271509925393999146519122386214812` ✅
-- **🆕 Modulo**: `7.5n % 2.3n` → `0.6` ✅
-- **🆕 Power**: `2.71828n ^ 2` → `7.3890461584000002` ✅
-- **🆕 Mixed Types**: `42 + 2.718281828n` → `44.718281828` ✅
-- **🆕 Complex Expressions**: `(3.14159n + 2.71828n) * (3.14159n - 2.71828n)` → `2.4805415697` ✅
-- **🆕 High Precision**: 38-digit precision calculations working correctly ✅
-- **🆕 Financial Calculations**: Tax calculations with exact decimal precision ✅
-- **🆕 Zero Operations**: Proper handling of zero in all operations ✅
-
-### ✅ **All Previous Limitations Now RESOLVED**
-1. ~~**Arithmetic Operations**~~: ✅ **COMPLETED** - All arithmetic functions (`fn_add`, `fn_sub`, `fn_mul`, `fn_div`, `fn_pow`, `fn_mod`) now fully implemented with libmpdec
-2. ~~**Context Management**~~: ✅ **COMPLETED** - Proper `mpd_defaultcontext()` usage prevents crashes and ensures stable operations
-3. ~~**Division by Zero**~~: ✅ **COMPLETED** - Comprehensive division by zero detection and error handling
-4. ~~**Mixed Type Operations**~~: ✅ **COMPLETED** - Seamless arithmetic between decimal, int, and float types
-5. ~~**Type Inference**~~: ✅ **COMPLETED** - Fixed AST builder to properly handle decimal arithmetic expressions
-6. ~~**Transpiler Support**~~: ✅ **COMPLETED** - Fixed bugs in transpiler for non-literal decimal expressions
-
-### Architecture Decision: libmpdec Benefits
-
-**Chosen Solution**: `mpd_t*` (libmpdec Multi-precision Decimal)
-- ✅ **Pros**: IEEE 754-2008 standard compliance, exact decimal arithmetic, optimized performance
-- ✅ **Pros**: Better cross-platform support, memory-efficient implementation
-- ✅ **Pros**: Standard decimal behavior familiar to users from Python/JavaScript
-- ✅ **Pros**: No precision loss in decimal operations, proper rounding controls
-
-**Migration from GMP Benefits**:
-- Better precision control and standards compliance
-- Reduced memory overhead for decimal-specific operations  
-- Improved cross-platform compatibility
-- More intuitive decimal behavior for end users
+**Author**: Lambda Team  
+**Date**: February 6, 2026  
+**Status**: Partially Implemented  
+**Scope**: Decimal type semantics, syntax enhancement, code consolidation
 
 ---
 
-## Implementation Status: All Phases Complete
+## Executive Summary
 
-## ✅ **Phase 0: libmpdec Migration** (COMPLETED)
-## ✅ **Phase 1: Core Arithmetic Operations** (COMPLETED)
-## ✅ **Phase 2: Context Management & Error Handling** (COMPLETED)
-## ✅ **Phase 3: Mixed Type Operations** (COMPLETED)
-## ✅ **Phase 4: Type System Integration** (COMPLETED)
+This proposal enhances Lambda's decimal support by:
+1. Introducing dual decimal types: **fixed-precision** (`123n`) and **unlimited-precision** (`123N`)
+2. Consolidating all decimal handling code into a single `lambda-decimal.cpp` module
+3. Maintaining backward compatibility with existing decimal syntax
 
-### **🎉 MAJOR BREAKTHROUGH: Complete Arithmetic Implementation**
+---
 
-**All decimal arithmetic operations are now fully functional with comprehensive test coverage!**
+## 1. Decimal Support in Other Languages
 
-### **✅ Phase 1: Core Arithmetic Operations** (COMPLETED ✅)
+### 1.0 Why libmpdec? (Migration from GMP)
 
-**Files**: `lambda/lambda-eval.cpp` - **FULLY IMPLEMENTED**
+Lambda originally used GMP (GNU Multiple Precision Arithmetic Library) for decimal support, but migrated to **libmpdec** in August 2025 for several important reasons:
 
-**1.1 Runtime Arithmetic Functions** ✅
-All arithmetic functions now use `mpd_defaultcontext()` for stable, reliable operations:
+| Aspect | GMP | libmpdec |
+|--------|-----|----------|
+| **Precision Model** | Binary floating-point (`mpf_t`) | True decimal (`mpd_t`) |
+| **Standards** | No decimal standard | IEEE 754-2008 compliant |
+| **Decimal Accuracy** | `0.1 + 0.2` has binary rounding | `0.1 + 0.2 = 0.3` exactly |
+| **Context Control** | Manual precision management | Built-in context system |
+| **Cross-Platform** | Complex build on Windows | Better portability |
+| **Memory Overhead** | Higher for decimal ops | Optimized for decimal |
+| **Ecosystem** | General-purpose | Used by Python's `decimal` module |
 
-```cpp
-// ✅ IMPLEMENTED: All arithmetic operations with libmpdec
-Item fn_add(Item item_a, Item item_b) {
-    // Handles decimal + decimal, decimal + int, decimal + float
-    mpd_context_t ctx = *mpd_defaultcontext();  // Stable context
-    // Full implementation with error handling ✅
-}
+**Key Decision**: libmpdec provides **true decimal arithmetic** (base-10), while GMP's `mpf_t` is binary floating-point that approximates decimals. For financial and user-facing calculations, exact decimal representation is essential.
 
-Item fn_sub(Item item_a, Item item_b) {
-    // Decimal subtraction with mixed type support ✅
-}
+**Context Management**: libmpdec uses `mpd_context_t` for precision control:
+- `mpd_defaultcontext()` → 28-38 digit precision (stable, fast)
+- `mpd_maxcontext()` → Maximum precision (can cause performance issues)
 
-Item fn_mul(Item item_a, Item item_b) {
-    // Decimal multiplication with proper precision ✅
-}
+Lambda uses `mpd_defaultcontext()` by default for predictable behavior.
 
-Item fn_div(Item item_a, Item item_b) {
-    // Division with zero-check and error handling ✅
-}
+### 1.1 Survey of Decimal Implementations
 
-Item fn_mod(Item item_a, Item item_b) {
-    // Modulo operation using mpd_rem() ✅
-}
+| Language       | Type                    | Precision                           | Syntax                     | Notes                           |
+| -------------- | ----------------------- | ----------------------------------- | -------------------------- | ------------------------------- |
+| **Python**     | `decimal.Decimal`       | Configurable (default 28, max ~10⁹) | `Decimal("123.45")`        | Uses libmpdec (same as Lambda)  |
+| **Java**       | `BigDecimal`            | Unlimited                           | `new BigDecimal("123.45")` | Arbitrary precision, immutable  |
+| **C#**         | `decimal`               | 28-29 digits (128-bit)              | `123.45m`                  | Fixed precision, native type    |
+| **Ruby**       | `BigDecimal`            | Unlimited                           | `BigDecimal("123.45")`     | Arbitrary precision             |
+| **Haskell**    | `Rational`              | Unlimited                           | `123.45` (with pragma)     | Exact rational arithmetic       |
+| **Go**         | `big.Float` / `big.Rat` | Configurable                        | Constructor call           | Standard library types          |
+| **SQL**        | `DECIMAL(p,s)`          | Typically 38 max                    | `123.45`                   | Database-dependent              |
+| **JavaScript** | None native             | N/A                                 | N/A                        | Uses `BigInt` for integers only |
+| **Rust**       | `rust_decimal` (crate)  | 28-29 digits                        | Constructor                | Third-party library             |
 
-Item fn_pow(Item item_a, Item item_b) {
-    // Power operation using mpd_pow() ✅
-}
+### 1.2 Language Design Patterns
+
+**Pattern A: Fixed Precision with Literal Suffix (C#, F#)**
+```csharp
+decimal price = 19.99m;  // 'm' suffix for decimal literal
 ```
 
-**1.2 Helper Functions** ✅
-**Files**: `lambda/lambda-eval.cpp`
-
-```cpp
-// ✅ IMPLEMENTED: Complete helper function suite
-mpd_t* convert_to_decimal(Item item);           // Converts any numeric type to decimal ✅
-Item push_decimal(mpd_t* dec);                  // Pushes decimal to runtime stack ✅
-void cleanup_temp_decimal(mpd_t* dec, int type);// Proper memory management ✅
-bool decimal_is_zero(mpd_t* dec);              // Zero check using mpd_iszero() ✅
+**Pattern B: Unlimited Precision via Constructor (Java, Ruby, Python)**
+```java
+BigDecimal value = new BigDecimal("123.456789012345678901234567890");
 ```
 
-### **✅ Phase 2: Context Management & Error Handling** (COMPLETED ✅)
-
-**Critical Fix**: Replaced `mpd_maxcontext()` with `mpd_defaultcontext()` throughout all arithmetic functions.
-
-**2.1 Context Management** ✅
-- **Problem**: `mpd_maxcontext()` was causing SIGFPE crashes due to extreme precision values
-- **Solution**: `mpd_defaultcontext()` provides stable, reasonable precision (38 digits)
-- **Result**: All decimal operations now execute without crashes ✅
-
-**2.2 Division by Zero Handling** ✅
-```cpp
-// ✅ IMPLEMENTED: Comprehensive division by zero prevention
-if (mpd_iszero(b_dec)) {
-    printf("decimal division by zero error\n");
-    return create_error_item(ARITHMETIC_ERROR, "division by zero");
-}
+**Pattern C: Configurable Context (Python)**
+```python
+from decimal import Decimal, getcontext
+getcontext().prec = 50  # Set precision for subsequent operations
+value = Decimal("3.14159265358979323846264338327950288")
 ```
 
-**2.3 Error Propagation** ✅
-- Status checking for all libmpdec operations
-- Proper cleanup on error conditions
-- Graceful error reporting to user
+---
 
-### **✅ Phase 3: Mixed Type Operations** (COMPLETED ✅)
+## 2. Fixed vs Unlimited Decimal: Trade-offs
 
-**3.1 Type Conversion System** ✅
-```cpp
-// ✅ IMPLEMENTED: Seamless type conversions
-42 + 2.718281828n      → 44.718281828        // int + decimal ✅
-3.14 + 2.71828n        → 5.8582818280000001  // float + decimal ✅
-2.71828n * 3           → 8.1548399999999997  // decimal * int ✅
-```
+### 2.1 Performance Comparison
 
-**3.2 Automatic Type Promotion** ✅
-- Operations involving decimals automatically promote to decimal precision
-- No precision loss in mixed arithmetic
-- Consistent behavior across all operation types
+| Aspect | Fixed (38 digits) | Unlimited |
+|--------|-------------------|-----------|
+| **Memory per value** | 24-32 bytes | Variable (grows with digits) |
+| **Addition** | O(1) ~5 ns | O(n) ~15-1000+ ns |
+| **Multiplication** | O(1) ~20 ns | O(n²) to O(n log n) |
+| **Division** | O(1) ~50 ns | O(n²) to O(n log n) |
+| **Cache efficiency** | Excellent | Degrades with size |
+| **Memory allocation** | Predictable | Dynamic, may fragment |
+| **Latency variance** | Low | High (can spike) |
 
-### **✅ Phase 4: Type System Integration** (COMPLETED ✅)
+### 2.2 Benchmark Estimates
 
-**4.1 AST Builder Integration** ✅
-**Files**: `lambda/build_ast.cpp`
-- Fixed type inference for decimal arithmetic expressions
-- Proper handling of mixed-type binary expressions
-- Correct transpiler output for decimal operations
+| Operation | 38-digit | 100-digit | 1,000-digit | 10,000-digit |
+|-----------|----------|-----------|-------------|--------------|
+| Add | ~5 ns | ~15 ns | ~100 ns | ~1 μs |
+| Multiply | ~20 ns | ~200 ns | ~10 μs | ~500 μs |
+| Divide | ~50 ns | ~500 ns | ~50 μs | ~5 ms |
+| Memory | 32 B | ~64 B | ~500 B | ~5 KB |
 
-**4.2 Transpiler Integration** ✅  
-**Files**: `lambda/transpile.cpp`
-- Fixed bugs in handling non-literal decimal expressions
-- Proper identifier resolution for decimal variables
-- Correct runtime function calls for decimal arithmetic
+### 2.3 Use Case Guidance
 
-### **🔬 Comprehensive Testing Results**
+| Use Case | Recommended Type | Rationale |
+|----------|------------------|-----------|
+| Financial calculations | Fixed (`n`) | Predictable, fast, 38 digits exceeds any currency need |
+| Scientific computation | Fixed (`n`) | 38 digits > IEEE double precision |
+| Cryptographic math | Unlimited (`N`) | May need thousands of digits |
+| Symbolic/exact math | Unlimited (`N`) | Preserves full precision |
+| High-frequency data | Fixed (`n`) | Consistent low latency |
+| Educational/exploratory | Unlimited (`N`) | Flexibility over performance |
 
-**Test File**: `test/lambda/decimal.ls` - **120+ test cases PASSING** ✅
+### 2.4 Decimal vs Float Precision
 
-#### **Basic Operations Testing** ✅
+**Why decimals matter** - floating-point binary representation cannot exactly represent many decimal fractions:
+
 ```lambda
-// ✅ All basic arithmetic verified
-3.14159n + 2.71828n     → 5.85987
-3.14159n - 2.71828n     → 0.42331  
-3.14159n * 2.71828n     → 8.5397212652
-3.14159n / 2.71828n     → 1.1557271509925393999146519122386214812
-7.5n % 2.3n             → 0.6
-2.71828n ^ 2            → 7.3890461584000002
+// Float (binary approximation)
+0.1 + 0.2          → 0.30000000000000004  // ❌ Imprecise
+
+// Decimal (exact base-10)
+0.1n + 0.2n        → 0.3                   // ✅ Exact
 ```
 
-#### **Mixed Type Operations Testing** ✅
-```lambda
-// ✅ All mixed-type combinations verified
-let int_val = 42
-let float_val = 3.14  
-let decimal_val = 2.718281828n
-
-int_val + decimal_val    → 44.718281828        // ✅
-decimal_val + int_val    → 44.718281828        // ✅  
-float_val + decimal_val  → 5.8582818280000001  // ✅
-decimal_val + float_val  → 5.8582818280000001  // ✅
-```
-
-#### **Complex Expressions Testing** ✅
-```lambda
-// ✅ Nested operations with proper precedence
-(3.14159n + 2.71828n) * (3.14159n - 2.71828n)  → 2.4805415697
-3.14159n^2 + 2*3.14159n*2.71828n + 2.71828n^2  → 34.3380764168999993
-(decimal_val + int_val) * float_val             → 140.4154049399200044718281828
-```
-
-#### **Precision Testing** ✅
-```lambda
-// ✅ Exact decimal arithmetic vs. floating point
-let precise_decimal = 0.1n + 0.2n    → 0.3 (exact!)
-let float_addition = 0.1 + 0.2       → 0.3000000 (approximation)
-precise_decimal == 0.3n              → true  // ✅ Exact equality
-```
-
-#### **Financial Calculations Testing** ✅
-```lambda
-// ✅ Real-world financial scenario
-let price = 19.99n
-let tax_rate = 0.08n  
-let quantity = 3
-let subtotal = price * quantity       → 59.97
-let tax_amount = subtotal * tax_rate  → 4.7976
-let total = subtotal + tax_amount     → 64.7676  // Perfect precision ✅
-```
-
-#### **High Precision Constants Testing** ✅
-```lambda
-// ✅ Mathematical constants with 30+ digit precision
-let pi_approx = 3.141592653589793238462643383279n
-let e_approx = 2.718281828459045235360287471353n
-let golden_ratio = 1.618033988749894848204586834366n
-// All operations on these high-precision values working correctly ✅
-```
-
-#### **Zero Operations Testing** ✅
-```lambda
-// ✅ Proper zero handling in all operations
-3.14159n + 0.0n     → 3.14159    // Addition identity ✅
-3.14159n - 0.0n     → 3.14159    // Subtraction identity ✅  
-3.14159n * 0.0n     → 0.000000   // Multiplication by zero ✅
-0.0n / 3.14159n     → 0E+4       // Zero dividend ✅
-// Division by zero properly detected and prevented ✅
-```
+This is critical for:
+- **Financial calculations**: Currency must be exact
+- **User-facing values**: Display values should match input
+- **Comparison operations**: `0.1 + 0.2 == 0.3` should be true
 
 ---
 
-## 🔄 **Future Enhancement Opportunities** (Optional Advanced Features)
+## 3. Proposed Syntax Enhancement
 
-While the core decimal system is now **FULLY FUNCTIONAL**, these remain as potential future enhancements:
+### 3.1 Dual Decimal Literals
 
-1. **Advanced Comparison Operations**: While basic arithmetic works, some comparison operators still need decimal support
-2. **Mathematical Functions**: Advanced functions like sqrt, sin, cos, etc. for decimals
-3. **Precision Control**: User-configurable precision settings (currently uses libmpdec default of 38 digits)
-4. **Optimizations**: Performance optimizations for very high-precision calculations
-5. **Additional Numeric Types**: Complex numbers, rational numbers, etc.
+| Syntax | Type | Precision | Internal Representation |
+|--------|------|-----------|-------------------------|
+| `123n` | Fixed decimal | 38 digits | `LMD_TYPE_DECIMAL` with `unlimited=0` |
+| `123N` | Unlimited decimal | Unbounded | `LMD_TYPE_DECIMAL` with `unlimited=1` |
 
-These are **nice-to-have** features, not blockers for production use.
-
----
-
-## 🔄 **Next Phases: Advanced Features** (Future Work - Optional)
-
-## Phase 5: Advanced Comparisons 🎯 (Optional)
-
-### 5.1 Enhanced Comparison Operations (TO BE IMPLEMENTED)
-**Files**: `lambda/lambda-eval.cpp`
-
-**Enhance comparison functions**:
+**Implementation Note**: Both fixed and unlimited decimals use the same `LMD_TYPE_DECIMAL` type ID. The distinction is tracked via the `unlimited` flag in the `Decimal` struct:
 
 ```cpp
-Item fn_eq(Item a_item, Item b_item) {
-    // ... existing fast paths ...
-    
-    // Add libmpdec decimal comparison support
-    if (a_item.type_id == LMD_TYPE_DECIMAL || b_item.type_id == LMD_TYPE_DECIMAL) {
-        mpd_context_t ctx = *mpd_defaultcontext();
-        
-        mpd_t* a_dec = convert_to_decimal(a_item);
-        mpd_t* b_dec = convert_to_decimal(b_item);
-        
-        int cmp_result = mpd_cmp(a_dec, b_dec, &ctx);
-        bool equal = (cmp_result == 0);
-        
-        cleanup_temp_decimal(a_dec, a_item.type_id);
-        cleanup_temp_decimal(b_dec, b_item.type_id);
-        
-        return {.item = b2it(equal)};
-    }
-}
-```
-
-**Functions to enhance**:
-- 🔄 `fn_eq` / `fn_ne` - Equality using `mpd_cmp()`
-- 🔄 `fn_lt` / `fn_le` - Less-than using `mpd_cmp()`
-- 🔄 `fn_gt` / `fn_ge` - Greater-than using `mpd_cmp()`
-
-**Timeline**: 1-2 days  
-**Testing**: Add decimal comparison tests to `test/lambda/decimal.ls`
-
----
-
-## Phase 6: System Functions & Type Conversions 🎯 (Optional)
-
-### 6.1 Enhanced System Functions
-**Files**: `lambda/lambda-eval.cpp`
-
-**Add decimal support to system functions**:
-
-```cpp
-// In sys_func_* implementations
-case SYSFUNC_NUMBER:
-    if (input_type == LMD_TYPE_DECIMAL) {
-        return item;  // Already a decimal, return as-is
-    }
-    // Convert other types to decimal
-    return create_decimal_from_item(item);
-
-case SYSFUNC_INT:
-    if (input_type == LMD_TYPE_DECIMAL) {
-        mpd_t* dec = (mpd_t*)item.pointer;
-        long int_val = mpd_get_ssize(dec, &ctx);  // Convert to signed integer
-        return (Item){.item = i2it(int_val)};
-    }
-
-case SYSFUNC_FLOAT:
-    if (input_type == LMD_TYPE_DECIMAL) {
-        mpd_t* dec = (mpd_t*)item.pointer;
-        double float_val = mpd_to_double(dec, &ctx);
-        return push_d(float_val);
-    }
-```
-
-**New system function**:
-```cpp
-case SYSFUNC_DECIMAL:  // New: decimal() conversion function
-    return create_decimal_from_item(item);
-```
-
-### 6.2 Mathematical Functions
-**Files**: `lambda/lambda-eval.cpp`
-
-**Enhance mathematical system functions**:
-
-```cpp
-// Functions to enhance with decimal support
-Item fn_abs(Item item);    // mpd_abs
-Item fn_round(Item item);  // mpd_round
-Item fn_floor(Item item);  // mpd_floor  
-Item fn_ceil(Item item);   // mpd_ceil
-Item fn_sqrt(Item item);   // mpd_sqrt
-```
-
-**Timeline**: 2-3 days
-**Testing**: Add comprehensive system function tests
-    }
-```
-
-**New system function**:
-```cpp
-case SYSFUNC_DECIMAL:  // New: decimal() conversion function
-    return create_decimal_from_item(item);
-```
-
-### 3.2 Mathematical Functions
-**Files**: `lambda/lambda-eval.cpp`
-
-**Enhance mathematical system functions**:
-
-```cpp
-// Functions to enhance with decimal support
-Item fn_abs(Item item);    // mpf_abs
-Item fn_round(Item item);  // mpf_round (implement custom rounding)
-Item fn_floor(Item item);  // mpf_floor  
-Item fn_ceil(Item item);   // mpf_ceil
-Item fn_sqrt(Item item);   // mpf_sqrt
-```
-
-**Timeline**: 2-3 days
-**Testing**: Add comprehensive system function tests
-
----
-
-## Phase 4: String Integration & I/O 🎯
-
-### 4.1 Enhanced String Operations
-**Files**: `lambda/lambda-eval.cpp`
-
-**String parsing enhancements**:
-```cpp
-Item fn_pos(Item item) {
-    // ... existing string parsing code ...
-    
-    // Enhanced decimal parsing for strings
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
-        String* str = (String*)item.pointer;
-        
-        // Try parsing as decimal first (higher precision)
-        mpf_t dec_val;
-        mpf_init(dec_val);
-        int parse_result = mpf_set_str(dec_val, str->chars, 10);
-        
-        if (parse_result == 0) {  // Successfully parsed
-            return push_decimal(&dec_val);
-        }
-        
-        mpf_clear(dec_val);
-        // Fall back to existing integer/float parsing
-        // ... existing code ...
-    }
-}
-```
-
-### 4.2 Enhanced String Formatting  
-**Files**: `lambda/print.cpp`
-
-**Improve decimal printing**:
-```cpp
-// In print_item() for LMD_TYPE_DECIMAL case
-case LMD_TYPE_DECIMAL: {
-    mpf_t *num = (mpf_t*)item.pointer;
-    
-    // Configurable precision output
-    char format_str[32];
-    snprintf(format_str, sizeof(format_str), "%%.%dFf", get_decimal_display_precision());
-    
-    if (HAS_GMP_IO()) {
-        gmp_sprintf(buf, format_str, *num);
-    } else {
-        // Fallback with precision warning
-        double approximation = mpf_get_d(*num);
-        snprintf(buf, sizeof(buf), "%.15g", approximation);
-        // Consider adding precision loss warning
-    }
-    
-    strbuf_append_str(buffer, buf);
-    break;
-}
-```
-
-**Timeline**: 1-2 days
-**Testing**: String conversion and formatting tests
-
----
-
-## Phase 5: Memory Management & Performance 🎯
-
-### 5.1 GMP Memory Integration
-**Files**: `lambda/lambda-mem.cpp` (new), `lambda/lambda-eval.cpp`
-
-**Custom GMP memory functions**:
-```cpp
-// GMP memory integration with Lambda's pool system
-void* gmp_malloc_func(size_t size);
-void* gmp_realloc_func(void* oldptr, size_t old_size, size_t new_size);  
-void gmp_free_func(void* ptr, size_t size);
-
-// Initialize GMP memory integration
-void init_gmp_memory_integration() {
-    mp_set_memory_functions(gmp_malloc_func, gmp_realloc_func, gmp_free_func);
-}
-```
-
-### 5.2 Decimal Cleanup Integration
-**Files**: `lambda/lambda-eval.cpp`
-
-**Reference counting for decimals**:
-```cpp
-// Integrate decimal cleanup with existing ref counting
-void cleanup_item(Item item) {
-    if (item.type_id == LMD_TYPE_DECIMAL) {
-        mpf_t* dec = (mpf_t*)item.pointer;
-        mpf_clear(*dec);
-        heap_free(dec);  // Use existing heap management
-    }
-    // ... existing cleanup code ...
-}
-```
-
-### 5.3 Performance Optimizations
-**Strategies**:
-- **Precision Caching**: Cache common precisions to avoid repeated `mpf_init2` calls
-- **Small Number Fast Path**: Use native arithmetic for small decimals that fit in double
-- **Operation Chaining**: Minimize temporary allocations in expression chains
-- **Lazy Conversion**: Only convert to decimal when mixed-type operations require it
-
-**Timeline**: 2-3 days
-**Testing**: Memory leak tests, performance benchmarks
-
----
-
-## Phase 6: Cross-Platform & Edge Cases 🎯
-
-### 6.1 Windows Support Enhancement
-**Files**: `windows-deps/src/gmp_stub.c`, `windows-deps/include/gmp.h`
-
-**Enhance Windows stub**:
-```c
-// Add missing mpf_t functions to Windows stub
-void mpf_init(mpf_t x);
-void mpf_clear(mpf_t x);
-void mpf_add(mpf_t rop, mpf_srcptr op1, mpf_srcptr op2);
-void mpf_sub(mpf_t rop, mpf_srcptr op1, mpf_srcptr op2);
-void mpf_mul(mpf_t rop, mpf_srcptr op1, mpf_srcptr op2);
-void mpf_div(mpf_t rop, mpf_srcptr op1, mpf_srcptr op2);
-int mpf_cmp(mpf_srcptr op1, mpf_srcptr op2);
-double mpf_get_d(mpf_srcptr op);
-// ... other essential functions
-```
-
-**Alternative**: Link against full GMP for Windows builds
-
-### 6.2 Edge Case Handling
-**Files**: `lambda/lambda-eval.cpp`
-
-**Comprehensive error handling**:
-```cpp
-// Division by zero for decimals
-Item fn_div_decimal(mpf_t* a, mpf_t* b) {
-    if (mpf_cmp_ui(*b, 0) == 0) {
-        printf("decimal division by zero error\n");
-        return ItemError;
-    }
-    
-    mpf_t result;
-    mpf_init(result);
-    mpf_div(result, *a, *b);
-    return push_decimal(&result);
-}
-
-// Overflow/underflow detection
-bool check_decimal_overflow(const mpf_t* dec) {
-    // Check if decimal exceeds reasonable bounds
-    return mpf_cmp_d(*dec, 1e308) > 0 || mpf_cmp_d(*dec, -1e308) < 0;
-}
-```
-
-**Edge cases to handle**:
-- ✅ Division by zero
-- ✅ Very large numbers (overflow detection)  
-- ✅ Very small numbers (underflow to zero)
-- ✅ Invalid string conversions
-- ✅ Memory allocation failures
-- ✅ Precision loss warnings
-
-**Timeline**: 2-3 days
-**Testing**: Comprehensive edge case test suite
-
----
-
-## Phase 7: Configuration & Documentation 🎯
-
-### 7.1 Decimal Configuration
-**Files**: `lambda/lambda-eval.cpp`, build configs
-
-**Configuration options**:
-```cpp
-// Global decimal configuration
-typedef struct {
-    unsigned int default_precision;     // Default: 256 bits
-    unsigned int display_precision;     // Default: 15 decimal places
-    bool round_on_display;             // Default: true
-    bool warn_on_precision_loss;       // Default: false
-} DecimalConfig;
-
-DecimalConfig decimal_config = {
-    .default_precision = 256,
-    .display_precision = 15,
-    .round_on_display = true,
-    .warn_on_precision_loss = false
+struct Decimal {
+    uint16_t ref_cnt:15;   // reference count (up to 32767)
+    uint16_t unlimited:1;  // 0 = fixed (38 digits), 1 = unlimited
+    mpd_t* dec_val;        // libmpdec decimal number
 };
 ```
 
-### 7.2 Build System Integration
-**Files**: `Makefile`, `build_lambda_config.json`
+### 3.2 Examples
 
-**GMP build detection**:
-```makefile
-# Enhanced GMP detection
-GMP_AVAILABLE := $(shell pkg-config --exists gmp && echo yes || echo no)
-ifeq ($(GMP_AVAILABLE),yes)
-    GMP_CFLAGS := $(shell pkg-config --cflags gmp)
-    GMP_LIBS := $(shell pkg-config --libs gmp)
-    DECIMAL_FLAGS := -DLAMBDA_DECIMAL_FULL_GMP
-else
-    DECIMAL_FLAGS := -DLAMBDA_DECIMAL_STUB
-    $(warning "GMP not found, using stub implementation")
-endif
-```
-
-### 7.3 Documentation & Examples
-**Files**: `doc/decimals.md`, `test/lambda/decimal_examples.ls`
-
-**Example Lambda scripts**:
 ```lambda
-// Financial calculations with exact precision
+// Fixed-precision decimal (38 digits) - CURRENT BEHAVIOR
 let price = 19.99n
-let tax_rate = 0.08n  
-let total = price * (1.0n + tax_rate)
+let tax_rate = 0.0825n
+let total = price * (1n + tax_rate)  // Fast, predictable
 
-// High-precision mathematical calculations
-let pi_approx = 3.14159265358979323846n
-let circumference = 2.0n * pi_approx * radius
+// Unlimited-precision decimal - NEW
+let pi_100 = 3.14159265358979323846264338327950288419716939937510N
+let e_100 = 2.71828182845904523536028747135266249775724709369995N
+let result = pi_100 * e_100  // Full precision preserved
 
-// Decimal comparisons
-if (total > 20.0n) {
-    print("Expensive item")
+// Mixed operations promote to unlimited
+let mixed = 123n + 456N  // Result is unlimited decimal
+```
+
+### 3.3 Type Promotion Rules
+
+| Operand A | Operand B | Result Type |
+|-----------|-----------|-------------|
+| `int` | `decimal` (fixed) | `decimal` (fixed) |
+| `int` | `decimal` (unlimited) | `decimal` (unlimited) |
+| `float` | `decimal` (fixed) | `decimal` (fixed) |
+| `float` | `decimal` (unlimited) | `decimal` (unlimited) |
+| `decimal` (fixed) | `decimal` (fixed) | `decimal` (fixed) |
+| `decimal` (fixed) | `decimal` (unlimited) | `decimal` (unlimited) |
+| `decimal` (unlimited) | `decimal` (unlimited) | `decimal` (unlimited) |
+
+**Rule**: If either operand has `unlimited=1`, the result has `unlimited=1`.
+
+### 3.4 Explicit Conversion Functions
+
+```lambda
+// Convert between decimal types
+let fixed = to_decimal(123N)     // Unlimited → Fixed (may lose precision)
+let unlimited = to_decimal_big(123n)  // Fixed → Unlimited
+
+// Precision control for unlimited decimals
+let pi = compute_pi_to(1000)  // Returns 1000-digit decimal_big
+```
+
+---
+
+## 4. Code Consolidation: `lambda-decimal.cpp`
+
+### 4.1 Current State (Fragmented)
+
+Decimal handling code is currently scattered across multiple files:
+
+| File | Decimal Code |
+|------|--------------|
+| `lambda-eval-num.cpp` | Arithmetic operations (`fn_add`, `fn_sub`, etc.) |
+| `lambda-data.cpp` | `Decimal` struct, memory management |
+| `build_ast.cpp` | `build_lit_decimal()` parsing |
+| `print.cpp` | `print_decimal()` formatting |
+| `mark_builder.cpp` | Decimal construction for input parsing |
+| `input/input.cpp` | `InputManager::decimal_context()` |
+| `runner.cpp` | Context initialization |
+
+### 4.2 Proposed Structure: `lambda/lambda-decimal.cpp`
+
+```cpp
+// lambda/lambda-decimal.cpp - Centralized decimal handling
+// =========================================================
+
+#include "lambda-decimal.hpp"
+#include <mpdecimal.h>
+
+// ─────────────────────────────────────────────────────────
+// Section 1: Context Management
+// ─────────────────────────────────────────────────────────
+
+// Global contexts for fixed and unlimited precision
+static mpd_context_t g_fixed_ctx;      // 38-digit precision
+static mpd_context_t g_unlimited_ctx;  // Max precision
+
+void decimal_init() {
+    // Initialize fixed-precision context (38 digits)
+    mpd_defaultcontext(&g_fixed_ctx);
+    
+    // Initialize unlimited-precision context
+    mpd_maxcontext(&g_unlimited_ctx);
+}
+
+mpd_context_t* decimal_fixed_context() { return &g_fixed_ctx; }
+mpd_context_t* decimal_unlimited_context() { return &g_unlimited_ctx; }
+
+// ─────────────────────────────────────────────────────────
+// Section 2: Parsing (from string literals)
+// ─────────────────────────────────────────────────────────
+
+// Parse "123.45n" → fixed decimal
+Item decimal_parse_fixed(const char* str, size_t len);
+
+// Parse "123.45N" → unlimited decimal  
+Item decimal_parse_unlimited(const char* str, size_t len);
+
+// Auto-detect and parse decimal literal
+Item decimal_parse(const char* str, size_t len, bool is_unlimited);
+
+// ─────────────────────────────────────────────────────────
+// Section 3: Formatting (to string)
+// ─────────────────────────────────────────────────────────
+
+// Format decimal to string (scientific notation for large values)
+String* decimal_to_string(Item decimal_item);
+
+// Format with explicit precision/format control
+String* decimal_format(Item decimal_item, const char* format_spec);
+
+// ─────────────────────────────────────────────────────────
+// Section 4: Memory Management
+// ─────────────────────────────────────────────────────────
+
+// Allocate new decimal value
+Decimal* decimal_alloc(bool is_unlimited);
+
+// Increment reference count
+void decimal_retain(Decimal* dec);
+
+// Decrement reference count, free if zero
+void decimal_release(Decimal* dec);
+
+// Create decimal from mpd_t (takes ownership)
+Item decimal_from_mpd(mpd_t* value, bool is_unlimited);
+
+// ─────────────────────────────────────────────────────────
+// Section 5: Type Conversion
+// ─────────────────────────────────────────────────────────
+
+// Convert any numeric Item to mpd_t*
+mpd_t* decimal_convert_to_mpd(Item item, mpd_context_t* ctx);
+
+// Convert decimal to other types
+int64_t decimal_to_int64(Item decimal_item);
+double decimal_to_double(Item decimal_item);
+
+// Promote fixed decimal to unlimited
+Item decimal_promote_to_unlimited(Item fixed_decimal);
+
+// Truncate unlimited to fixed (may lose precision)
+Item decimal_truncate_to_fixed(Item unlimited_decimal);
+
+// ─────────────────────────────────────────────────────────
+// Section 6: Arithmetic Operations
+// ─────────────────────────────────────────────────────────
+
+// Core arithmetic (handles both fixed and unlimited)
+Item decimal_add(Item a, Item b);
+Item decimal_sub(Item a, Item b);
+Item decimal_mul(Item a, Item b);
+Item decimal_div(Item a, Item b);
+Item decimal_mod(Item a, Item b);
+Item decimal_pow(Item a, Item b);
+Item decimal_neg(Item a);
+Item decimal_abs(Item a);
+
+// Comparison
+int decimal_cmp(Item a, Item b);  // Returns -1, 0, 1
+bool decimal_eq(Item a, Item b);
+bool decimal_lt(Item a, Item b);
+bool decimal_gt(Item a, Item b);
+
+// ─────────────────────────────────────────────────────────
+// Section 7: Mathematical Functions
+// ─────────────────────────────────────────────────────────
+
+Item decimal_sqrt(Item a);
+Item decimal_exp(Item a);
+Item decimal_ln(Item a);
+Item decimal_log10(Item a);
+Item decimal_floor(Item a);
+Item decimal_ceil(Item a);
+Item decimal_round(Item a, int places);
+
+// ─────────────────────────────────────────────────────────
+// Section 8: Utility Functions
+// ─────────────────────────────────────────────────────────
+
+bool decimal_is_zero(Item a);
+bool decimal_is_negative(Item a);
+bool decimal_is_integer(Item a);
+bool decimal_is_unlimited(Item a);
+int decimal_precision(Item a);  // Number of significant digits
+int decimal_scale(Item a);      // Digits after decimal point
+```
+
+### 4.3 Header File: `lambda/lambda-decimal.hpp`
+
+```cpp
+// lambda/lambda-decimal.hpp
+#ifndef LAMBDA_DECIMAL_HPP
+#define LAMBDA_DECIMAL_HPP
+
+#include "lambda-data.hpp"
+
+// Forward declaration - mpdecimal.h is only included in lambda-decimal.cpp
+typedef struct mpd_context_t mpd_context_t;
+typedef struct mpd_t mpd_t;
+
+// ─────────────────────────────────────────────────────────
+// Implementation Note
+// ─────────────────────────────────────────────────────────
+// Both fixed and unlimited decimals use LMD_TYPE_DECIMAL.
+// The distinction is tracked via the `unlimited` flag in Decimal struct.
+// This simplifies the type system while preserving full functionality.
+
+// ─────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────
+
+// Initialization (call once at startup)
+void decimal_init();
+void decimal_cleanup();
+
+// Context access
+mpd_context_t* decimal_fixed_context();
+mpd_context_t* decimal_unlimited_context();
+
+// Parsing
+Item decimal_parse_fixed(const char* str, size_t len);
+Item decimal_parse_unlimited(const char* str, size_t len);
+
+// Formatting
+String* decimal_to_string(Item decimal_item);
+
+// Memory
+void decimal_retain(Decimal* dec);
+void decimal_release(Decimal* dec);
+
+// Conversion
+mpd_t* decimal_convert_to_mpd(Item item, mpd_context_t* ctx);
+Item decimal_promote_to_unlimited(Item fixed_decimal);
+
+// Arithmetic
+Item decimal_add(Item a, Item b);
+Item decimal_sub(Item a, Item b);
+Item decimal_mul(Item a, Item b);
+Item decimal_div(Item a, Item b);
+Item decimal_mod(Item a, Item b);
+Item decimal_pow(Item a, Item b);
+
+// Comparison
+int decimal_cmp(Item a, Item b);
+
+// Predicates
+bool decimal_is_zero(Item a);
+bool decimal_is_unlimited(Item a);
+
+#endif // LAMBDA_DECIMAL_HPP
+```
+
+### 4.4 Migration Plan
+
+| Phase | Task | Files Affected | Status |
+|-------|------|----------------|--------|
+| 1 | Create `lambda-decimal.cpp/hpp` with existing fixed decimal code | New files | ✅ Done |
+| 2 | Update `lambda-eval-num.cpp` to call `decimal_*` functions | `lambda-eval-num.cpp` | ✅ Done |
+| 3 | Move parsing from `build_ast.cpp` to `decimal_parse_*` | `build_ast.cpp` | ✅ Done |
+| 4 | Move formatting from `print.cpp` to `decimal_to_string` | `print.cpp` | ✅ Done |
+| 5 | Add `unlimited` flag to `Decimal` struct | `lambda-data.hpp` | ✅ Done |
+| 6 | Update grammar to recognize `N` suffix | `grammar.js` | Pending |
+| 7 | Implement unlimited decimal operations | `lambda-decimal.cpp` | ✅ Done |
+| 8 | Add tests for unlimited decimals | `test/lambda/decimal.ls` | Pending |
+
+---
+
+## 5. Grammar Changes
+
+### 5.1 Current Grammar (tree-sitter)
+
+```javascript
+// lambda/tree-sitter-lambda/grammar.js (current)
+lit_decimal: $ => seq(
+  $.number,
+  'n'  // lowercase only
+),
+```
+
+### 5.2 Proposed Grammar
+
+```javascript
+// lambda/tree-sitter-lambda/grammar.js (proposed)
+lit_decimal: $ => seq(
+  $.number,
+  'n'  // fixed precision (38 digits)
+),
+
+lit_decimal_big: $ => seq(
+  $.number,
+  'N'  // unlimited precision
+),
+```
+
+### 5.3 AST Node Types
+
+```cpp
+// AST nodes for decimal literals
+AST_LIT_DECIMAL      // For 123n literals (builds Decimal with unlimited=0)
+AST_LIT_DECIMAL_BIG  // For 123N literals (builds Decimal with unlimited=1)
+```
+
+**Note**: Both AST node types produce the same runtime type (`LMD_TYPE_DECIMAL`), differing only in the `unlimited` flag setting.
+
+---
+
+## 6. Backward Compatibility
+
+| Aspect | Impact | Mitigation |
+|--------|--------|------------|
+| Existing `123n` syntax | None | Unchanged behavior |
+| Arithmetic semantics | None for fixed-only code | Same 38-digit precision |
+| Performance | None for fixed-only code | No overhead if `N` not used |
+| Memory usage | None for fixed-only code | `DecimalBig` only allocated when needed |
+
+---
+
+## 7. Implementation Timeline
+
+| Week | Milestone |
+|------|-----------|
+| 1 | Create `lambda-decimal.cpp/hpp`, migrate existing code |
+| 2 | Add `LMD_TYPE_DECIMAL_BIG`, update type system |
+| 3 | Update grammar, parser for `N` suffix |
+| 4 | Implement unlimited decimal arithmetic |
+| 5 | Testing, documentation, edge cases |
+| 6 | Performance optimization, benchmarks |
+
+---
+
+## 8. Design Decisions
+
+1. **Precision limit for "unlimited"**: Should we cap at some practical limit (e.g., 1 million digits) to prevent runaway memory usage? *(Open)*
+
+2. **Default type for division**: `1n / 3n` returns **fixed decimal**. Use `1N / 3N` explicitly for unlimited precision. ✅ *Decided*
+
+3. **Serialization**: How should unlimited decimals be represented in JSON output? (Proposed: string with `"N"` suffix marker) *(Open)*
+
+4. **REPL display**: **No truncation** — display full decimal value regardless of length. ✅ *Decided*
+
+---
+
+## 9. References
+
+- [libmpdec Documentation](https://www.bytereef.org/mpdecimal/doc/libmpdec/index.html)
+- [IEEE 754-2008 Decimal Floating-Point](https://en.wikipedia.org/wiki/IEEE_754#Decimal_floating-point)
+- [Python decimal module](https://docs.python.org/3/library/decimal.html)
+- [Java BigDecimal](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/math/BigDecimal.html)
+
+---
+
+## 10. libmpdec Integration Details
+
+### 10.1 Key libmpdec Functions Used
+
+| Function | Purpose |
+|----------|---------|
+| `mpd_new(ctx)` | Allocate new decimal value |
+| `mpd_del(dec)` | Free decimal value |
+| `mpd_qset_string(dec, str, ctx, &status)` | Parse string to decimal |
+| `mpd_to_sci(dec, fmt)` | Format decimal to string |
+| `mpd_add/sub/mul/div(r, a, b, ctx)` | Arithmetic operations |
+| `mpd_pow(r, a, b, ctx)` | Power operation |
+| `mpd_rem(r, a, b, ctx)` | Modulo operation |
+| `mpd_cmp(a, b, ctx)` | Comparison (-1, 0, 1) |
+| `mpd_iszero(dec)` | Zero check |
+| `mpd_copy(dst, src, ctx)` | Copy decimal value |
+| `mpd_defaultcontext()` | Get default context (38 digits) |
+| `mpd_maxcontext()` | Get max precision context |
+
+### 10.2 Context Configuration
+
+```cpp
+// Fixed precision context (default)
+mpd_context_t g_fixed_ctx;
+mpd_defaultcontext(&g_fixed_ctx);  // 28-38 digits
+
+// Unlimited precision context
+mpd_context_t g_unlimited_ctx;
+mpd_maxcontext(&g_unlimited_ctx);  // ~10^9 digits max
+```
+
+### 10.3 Error Handling Pattern
+
+```cpp
+uint32_t status = 0;
+mpd_qset_string(dec, str, ctx, &status);
+if (status != 0) {
+    // Handle parse error
+    mpd_del(dec);
+    return ItemError;
+}
+
+// Division by zero check
+if (mpd_iszero(b_dec)) {
+    log_error("decimal division by zero");
+    return ItemError;
 }
 ```
 
-**Timeline**: 1-2 days
-
 ---
 
-## Testing Strategy
+## Appendix A: Current Implementation Status
 
-### Unit Tests
-**File**: `test/lambda/decimal_comprehensive.ls`
+Lambda's decimal support was fully implemented in August 2025, migrating from GMP to libmpdec. The dual-precision system was implemented in February 2026.
+
+### Core Features (Completed)
+
+- ✅ 38-digit fixed precision via `mpd_defaultcontext()`
+- ✅ Unlimited precision via `mpd_maxcontext()`
+- ✅ All arithmetic operations (+, -, *, /, %, ^)
+- ✅ Mixed-type operations (int/float/decimal)
+- ✅ IEEE 754-2008 compliance
+- ✅ Reference-counted memory management
+- ✅ Error handling (division by zero, overflow)
+- ✅ Promotion rules (fixed + unlimited → unlimited)
+
+### Verified Working Features
 
 ```lambda
-// Arithmetic operations
-let a = 123.456n
-let b = 789.012n
-assert(a + b == 912.468n)
-assert(a - b == -665.556n)
-assert(a * b == 97408.047872n)
+// Basic operations
+3.14159n + 2.71828n     → 5.85987
+3.14159n * 2.71828n     → 8.5397212652
+3.14159n / 2.71828n     → 1.1557271509925393999146519122386214812
 
-// High precision
-let precise = 1.23456789012345678901234567890n
-assert(precise > 1.23456789012345678901234567889n)
+// Mixed types
+42 + 2.718281828n       → 44.718281828
+3.14 + 2.71828n         → 5.8582818280000001
 
-// Type conversions
-assert(int(123.999n) == 123)
-assert(float(123.456n) == 123.456)
-assert(string(123.456n) == "123.456")
+// Exact decimal arithmetic (vs float)
+0.1n + 0.2n             → 0.3  // Exact!
 
-// Edge cases
-assert(0.0n / 1.0n == 0.0n)
-assert(error(1.0n / 0.0n))  // Division by zero
+// Financial calculations
+let price = 19.99n
+let tax = price * 0.08n → 1.5992
+let total = price + tax → 21.5892
 ```
 
-### Performance Tests
-**File**: `test/performance/decimal_perf.ls`
+### Implementation Details
 
-```lambda
-// Large number arithmetic
-let large_a = 999999999999999999999999999999.999999999999999n
-let large_b = 111111111111111111111111111111.111111111111111n
-time_operation(large_a * large_b)
-
-// Precision stress test
-let precision_test = 1.0n
-for i in 1 to 1000 {
-    precision_test = precision_test / 3.0n * 3.0n  // Should remain 1.0
-}
-assert(precision_test == 1.0n)
+**Decimal Struct** (`lambda-data.hpp`):
+```cpp
+struct Decimal {
+    uint16_t ref_cnt:15;   // reference count (up to 32767)
+    uint16_t unlimited:1;  // 0 = fixed (38 digits), 1 = unlimited
+    mpd_t* dec_val;        // libmpdec decimal number
+};
 ```
 
----
+**Key Functions** (`lambda-decimal.cpp`):
+- `decimal_is_unlimited(Item)` - checks the `unlimited` flag
+- `decimal_is_any(Item)` - checks if item is `LMD_TYPE_DECIMAL`
+- `should_be_unlimited(Item a, Item b)` - determines result precision
+- `decimal_push_result(mpd_t*, bool)` - creates Item with correct flag
 
-## 🎉 **Migration Complete - Summary**
+### Files Modified
 
-### **✅ What's Working Now (August 19, 2025)**
+| File | Changes |
+|------|---------|
+| `lambda-data.hpp` | `Decimal` struct with `unlimited` flag |
+| `lambda-decimal.cpp` | Centralized decimal operations |
+| `lambda-decimal.hpp` | Public API declarations |
+| `lambda-eval-num.cpp` | Arithmetic dispatch to decimal functions |
+| `build_ast.cpp` | Decimal literal parsing |
+| `print.cpp` | Decimal formatting |
 
-1. **Complete libmpdec Integration**: Successfully migrated from GMP to libmpdec
-2. **Basic Decimal Support**: Literals, variables, arrays, and printing all working
-3. **Memory Management**: Reference counting and heap allocation working correctly  
-4. **JIT Compilation**: Decimals fully integrated with Lambda's runtime and transpiler
-5. **Cross-Platform Ready**: libmpdec provides better cross-platform support than GMP
+### Pending Work
 
-### **🚀 Next Development Priorities**
+- ⏳ Grammar update for `N` suffix parsing
+- ⏳ Unit tests for unlimited decimal operations
+- ⏳ Explicit conversion functions (`to_decimal`, `to_decimal_big`)
 
-1. **Arithmetic Operations** (Phase 1): Add +, -, *, /, % for decimals using libmpdec functions
-2. **Comparisons** (Phase 2): Add ==, !=, <, <=, >, >= for decimals  
-3. **Type Conversions** (Phase 3): Convert between decimals and other numeric types
-4. **Advanced Features** (Phase 4): Mathematical functions (sqrt, pow, etc.)
-
-### **🎯 Development Impact**
-
-- **Performance**: libmpdec is optimized specifically for decimal arithmetic
-- **Standards Compliance**: IEEE 754-2008 decimal arithmetic standards
-- **Precision**: No floating-point precision issues for decimal calculations
-- **User Experience**: Predictable decimal behavior matching Python/JavaScript semantics
-
-### **📁 Key Files Modified**
-
-- `lambda/lambda-data.hpp`: Updated Decimal struct to use `mpd_t*`
-- `lambda/build_ast.cpp`: Complete rewrite of `build_lit_decimal()`
-- `lambda/print.cpp`: Complete rewrite of `print_decimal()`
-- `lambda/lambda-eval.cpp`: Updated debug logging and reference counting
-- `build_lambda_config.json`: Updated build dependencies from GMP to libmpdec
-
-**The decimal foundation is now solid and ready for arithmetic operations! 🎯**
-
-### Integration Tests
-- ✅ Mixed arithmetic (decimal + int + float)
-- ✅ System function integration
-- ✅ String parsing and formatting
-- ✅ Memory management under load
-- ✅ Cross-platform compatibility
-
----
-
-## Risk Assessment & Mitigation
-
-### High-Risk Areas
-1. **Memory Management**: GMP allocations not integrated with Lambda's pool system
-   - **Mitigation**: Custom GMP memory functions, thorough leak testing
-   
-2. **Performance Impact**: Decimal operations significantly slower than native arithmetic
-   - **Mitigation**: Fast paths for common cases, optional decimal mode
-   
-3. **Cross-Platform Issues**: GMP availability varies across platforms
-   - **Mitigation**: Robust stub implementation, build-time detection
-
-4. **Precision Expectations**: Users may expect unlimited precision
-   - **Mitigation**: Clear documentation, configurable precision limits
-
-### Medium-Risk Areas
-1. **API Consistency**: Decimal behavior differs from int/float
-   - **Mitigation**: Comprehensive testing, clear type conversion rules
-
-2. **Build Complexity**: GMP dependency adds build complications
-   - **Mitigation**: Optional compilation, fallback mechanisms
-
----
-
-## Success Metrics
-
-### Phase Completion Criteria
-- ✅ All arithmetic operations support decimal operands
-- ✅ All comparison operations handle decimal types
-- ✅ System functions seamlessly convert to/from decimals
-- ✅ No memory leaks in decimal operations
-- ✅ Performance within 10x of native operations for common cases
-- ✅ Cross-platform build success (macOS, Linux, Windows)
-
-### Quality Gates
-- ✅ 100% test coverage for decimal operations
-- ✅ All existing tests continue to pass
-- ✅ Performance benchmarks meet targets
-- ✅ Memory usage analysis shows no excessive overhead
-
----
-
-## 🎉 **IMPLEMENTATION COMPLETE - Final Summary**
-
-### **✅ What's Fully Working Now (August 19, 2025)**
-
-1. **✅ Complete libmpdec Integration**: Successfully migrated from GMP to libmpdec with zero crashes
-2. **✅ All Core Arithmetic Operations**: +, -, *, /, %, ^ all working perfectly with mixed types
-3. **✅ Robust Context Management**: Using `mpd_defaultcontext()` for stable, reliable operations
-4. **✅ Comprehensive Error Handling**: Division by zero detection and proper error propagation
-5. **✅ Mixed Type Support**: Seamless arithmetic between decimal, int, and float types
-6. **✅ High Precision**: 38-digit precision calculations working correctly
-7. **✅ Memory Management**: Reference counting and heap allocation working correctly  
-8. **✅ JIT Compilation**: Decimals fully integrated with Lambda's runtime and transpiler
-9. **✅ Production Ready**: Comprehensive test suite with 120+ test cases all passing
-
-### **🚀 Ready for Production Use**
-
-**Lambda now has complete, industrial-grade decimal arithmetic support suitable for:**
-- Financial calculations requiring exact precision
-- Scientific computing with high-precision requirements  
-- Any application where floating-point precision issues are unacceptable
-
-### **🎯 Development Impact**
-
-- **✅ Performance**: libmpdec provides optimized decimal arithmetic
-- **✅ Standards Compliance**: IEEE 754-2008 decimal arithmetic standards
-- **✅ Precision**: No floating-point precision issues for decimal calculations
-- **✅ User Experience**: Predictable decimal behavior matching Python/JavaScript semantics
-- **✅ Stability**: Robust context management prevents crashes and ensures reliable operation
-
-### **📁 Key Files Successfully Modified**
-
-- **✅ `lambda/lambda-data.hpp`**: Updated Decimal struct to use `mpd_t*`
-- **✅ `lambda/build_ast.cpp`**: Complete rewrite of `build_lit_decimal()` + type inference fixes
-- **✅ `lambda/print.cpp`**: Complete rewrite of `print_decimal()`
-- **✅ `lambda/lambda-eval.cpp`**: Complete implementation of all arithmetic functions with libmpdec
-- **✅ `lambda/transpile.cpp`**: Fixed bugs for decimal expressions and identifier resolution
-- **✅ `build_lambda_config.json`**: Updated build dependencies from GMP to libmpdec
-- **✅ `test/lambda/decimal.ls`**: Comprehensive test suite with 120+ test cases
-
-### **🔬 Test Coverage Achievement**
-
-**✅ Basic Arithmetic**: All operators (+, -, *, /, %, ^) with decimals  
-**✅ Mixed Type Operations**: decimal ↔ int ↔ float seamlessly  
-**✅ Complex Expressions**: Nested operations with proper precedence  
-**✅ High Precision**: 30+ digit mathematical constants  
-**✅ Financial Scenarios**: Real-world tax/pricing calculations  
-**✅ Edge Cases**: Zero operations, boundary values, error conditions  
-**✅ Memory Management**: No leaks, proper cleanup under all conditions
-
-### **🏆 Mission Accomplished**
-
-**The decimal migration from GMP to libmpdec is now FULLY COMPLETE with comprehensive arithmetic support!**
-
-All core decimal functionality is implemented, tested, and ready for production use. The Lambda language now provides:
-
-- **Exact decimal arithmetic** free from floating-point precision issues
-- **High-precision calculations** with 38-digit precision by default  
-- **Mixed-type operations** that work seamlessly across numeric types
-- **Robust error handling** that prevents crashes and provides clear feedback
-- **Industrial-grade reliability** suitable for financial and scientific applications
-
-**🎯 The decimal foundation is solid, complete, and production-ready! 🚀**
+See [Lambda_Type_Decimal.md](./Lambda_Type_Decimal.md) for historical implementation notes.
