@@ -92,8 +92,8 @@ _underscore_name
 ```lambda
 // Array/list index access
 arr[0]
-arr[-1]           // Last element
-arr[1:4]          // Slice
+arr.1             // same as arr[1]
+arr[1 to 4]       // Slice
 
 // Map field access
 map.key
@@ -573,21 +573,20 @@ pn example() {
 
 From highest to lowest:
 
-| Precedence | Operators | Description |
-|------------|-----------|-------------|
-| 1 | `()`, `[]`, `.` | Primary |
-| 2 | `-`, `+`, `not` | Unary |
-| 3 | `^` | Exponentiation |
-| 4 | `*`, `/`, `div`, `%` | Multiplicative |
-| 5 | `+`, `-` | Additive |
-| 6 | `<`, `<=`, `>`, `>=` | Relational |
-| 7 | `==`, `!=` | Equality |
-| 8 | `and` | Logical AND |
-| 9 | `or` | Logical OR |
-| 10 | `to` | Range |
-| 11 | `is`, `in` | Type operations |
-| 12 | `\|` | Pipe |
-| 13 | `where` | Filter |
+| Precedence | Operators            | Description     |
+| ---------- | -------------------- | --------------- |
+| 1          | `()`, `[]`, `.`      | Primary         |
+| 2          | `-`, `+`, `not`      | Unary           |
+| 3          | `^`                  | Exponentiation  |
+| 4          | `*`, `/`, `div`, `%` | Multiplicative  |
+| 5          | `+`, `-`             | Additive        |
+| 6          | `<`, `<=`, `>`, `>=` | Relational      |
+| 7          | `==`, `!=`           | Equality        |
+| 8          | `and`                | Logical AND     |
+| 9          | `or`                 | Logical OR      |
+| 10         | `to`                 | Range           |
+| 11         | `is`, `in`           | Type operations |
+| 12         | `\|`, `where`        | Pipe, Filter    |
 
 ### Arithmetic Operators
 
