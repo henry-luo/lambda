@@ -16,9 +16,8 @@ extern "C" {
 #define SYM_DECIMAL sym_decimal
 #define SYM_STRING sym_string
 #define SYM_SYMBOL sym_symbol
-#define SYM_STRING_CONTENT sym_string_content
-#define SYM_SYMBOL_CONTENT sym_symbol_content
-#define SYM_ESCAPE_SEQUENCE sym_escape_sequence
+// Note: string_content, symbol_content, escape_sequence no longer exist
+// as strings and symbols are now single tokens that include escapes
 #define SYM_DATETIME sym_datetime
 #define SYM_TIME sym_time
 #define SYM_BINARY sym_binary
