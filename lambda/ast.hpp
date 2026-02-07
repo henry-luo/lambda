@@ -174,6 +174,7 @@ typedef struct NameEntry {
     AstNode* node;              // AST node that defines the name
     struct NameEntry* next;
     AstImportNode* import;      // the module that the name is imported from, if any
+    struct NameScope* scope;    // the scope where this entry was defined
 } NameEntry;
 
 // name_scope
@@ -402,8 +403,9 @@ typedef struct AstReturnNode : AstNode {
 
 // assignment statement (procedural only)
 typedef struct AstAssignStamNode : AstNode {
-    String* target;   // variable name to assign to
-    AstNode *value;   // value expression
+    String* target;       // variable name to assign to
+    AstNode *target_node; // AST node of the target variable (for type info)
+    AstNode *value;       // value expression
 } AstAssignStamNode;
 
 typedef struct AstArrayNode : AstNode {
