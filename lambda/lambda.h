@@ -425,7 +425,7 @@ bool path_ends_with_wildcard(Path* path);                         // Check if le
 void path_load_metadata(Path* path);                              // Load metadata via stat()
 
 // System function: exists() - check if file/directory exists
-Item fn_exists(Item path);                                        // Check if path exists
+Bool fn_exists(Item path);                                        // Check if path exists
 
 // Create function wrappers for first-class usage
 Function* to_fn(fn_ptr ptr);
