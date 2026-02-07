@@ -97,10 +97,10 @@ arr[1:4]          // Slice
 
 // Map field access
 map.key
-map["key"]
+map["key"]       // dynamic key
 obj.nested.field
 
-// Safe navigation (built-in)
+// Safe navigation (optional chaining) built-in
 obj.maybeNull.field    // Returns null if maybeNull is null
 ```
 
@@ -204,21 +204,26 @@ value or "default"          // Returns value if truthy, else "default"
 
 Lambda has simple truthiness rules:
 
-| Falsy Values | Truthy Values (Everything Else) |
-|--------------|--------------------------------|
-| `null` | `true`, all numbers (including `0`) |
-| `false` | All strings (including `""`) |
-| | All collections (including `[]`, `{}`) |
-| | All functions |
+| Falsy Values | Note                                                   |
+| ------------ | ------------------------------------------------------ |
+| `null`       |                                                        |
+| `false`      |                                                        |
+| "", ''       | Empty string `""` is normalised to `null` under Lambda |
 
-**Important**: Unlike many languages, `0`, `""`, and empty collections are **truthy** in Lambda.
+| Truthy Values (Everything Else)                          |
+| -------------------------------------------------------- |
+| `true`, all numbers (including `0`)                      |
+| All strings, symbols (Lambda string/symbol is non-empty) |
+| All collections (including `[]`, `{}`)                   |
+| All functions                                            |
+**Important**: Unlike many languages, `0` and empty collections are **truthy** in Lambda.
 
 ```lambda
 if (0) "yes" else "no"           // "yes" - 0 is truthy
-if ("") "yes" else "no"          // "yes" - empty string is truthy
 if ([]) "yes" else "no"          // "yes" - empty array is truthy
 if (null) "yes" else "no"        // "no" - null is falsy
 if (false) "yes" else "no"       // "no" - false is falsy
+if ("") "yes" else "no"          // "no" - empty string is falsy
 ```
 
 ---
@@ -353,7 +358,7 @@ When the left side is a scalar, `~` binds to the whole value:
 
 ### Aggregated Pipe (without `~`)
 
-When `~` is not used, the pipe passes the entire collection:
+When `~` is not used, the pipe passes the entire collection/data on left side to right side:
 
 ```lambda
 [3, 1, 4, 1, 5] | sum        // 14
@@ -617,10 +622,11 @@ From highest to lowest:
 
 ### Set Operators
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `&` | Intersection | `set1 & set2` |
-| `!` | Exclusion | `set1 ! set2` |
+| Operator | Description  | Example        |
+| -------- | ------------ | -------------- |
+| `&`      | Intersection | `set1 & set2`  |
+| `\|`     | Union        | `set1 \| set2` |
+| `!`      | Exclusion    | `set1 ! set2`  |
 
 ### Type Operators
 
