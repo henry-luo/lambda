@@ -141,7 +141,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     // Validate target type: must be string, symbol, or path
     TypeId target_type = get_type_id(target_item);
     if (target_type != LMD_TYPE_STRING && target_type != LMD_TYPE_SYMBOL && target_type != LMD_TYPE_PATH) {
-        log_error("pn_output_internal: target must be string, symbol, or path, got type %d", target_type);
+        log_error("pn_output_internal: target must be string, symbol, or path, got type %s", get_type_name(target_type));
         return ItemError;
     }
     
@@ -516,7 +516,7 @@ Item pn_output3(Item source, Item target_item, Item options_item) {
         // extract atomic option
         atomic = get_map_bool_field(options, "atomic", false);
     } else if (options_type != LMD_TYPE_NULL) {
-        log_error("pn_output3: options must be a map or null, got type %d", options_type);
+        log_error("pn_output3: options must be a map or null, got type %s", get_type_name(options_type));
         return ItemError;
     }
     
@@ -554,7 +554,7 @@ Item pn_fetch(Item url, Item options) {
     // Validate URL parameter
     String* url_str;
     if (url._type_id != LMD_TYPE_STRING && url._type_id != LMD_TYPE_SYMBOL) {
-        log_debug("fetch url must be a string or symbol, got type %d", url._type_id);
+        log_debug("fetch url must be a string or symbol, got type %s", get_type_name(url._type_id));
         return ItemError;
     }
     url_str = url.get_string();
@@ -627,7 +627,7 @@ Item pn_fetch(Item url, Item options) {
         }
     }
     else if (options_type != LMD_TYPE_NULL) {
-        log_debug("fetch options must be a map or null, got type %d", options_type);
+        log_debug("fetch options must be a map or null, got type %s", get_type_name(options_type));
         // Continue with default config
     }
 
