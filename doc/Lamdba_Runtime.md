@@ -1,6 +1,6 @@
 # Lambda Runtime Data Management
 
-### Lambda Data Structures
+## Lambda Data Structures
 Lambda runtime uses the following design/convention to represent and manage its runtime data:
 - for simple scalar types: LMD_TYPE_NULL, LMD_TYPE_BOOL, LMD_TYPE_INT
 	- they are packed into Item, with high bits set to TypeId;
@@ -35,7 +35,7 @@ Lambda header files defined the runtime data. They are layer one up on the other
 - *transpiler.hpp*:
 	- the full Lambda transpiler and code runner;
 
-### Function Parameter Handling
+## Function Parameter Handling
 
 #### Parameter Count Mismatch
 - **Missing arguments**: automatically filled with `ITEM_NULL` at transpile time
@@ -55,7 +55,7 @@ Primitive ↔ Item conversions at function boundaries:
 | **Boxing** (primitive → Item) | `i2it()`, `l2it()`, `d2it()`, `b2it()`, `s2it()` | Return values from typed functions |
 | **Unboxing** (Item → primitive) | `it2i()`, `it2l()`, `it2d()`, `it2b()` | Pass Item args to typed parameters |
 
-### String Memory Management
+## String Memory Management
 
 Lambda uses three distinct string allocation strategies optimized for different use cases:
 
@@ -121,6 +121,38 @@ NamePools support parent-child relationships for schema inheritance:
 - Schema definitions share names with document instances
 - No memory duplication for inherited names
 - Efficient for validation and transformation pipelines
+
+## Memory Management
+
+Lambda Script uses automatic memory management with reference counting and memory pools:
+
+### Reference Counting
+
+- All values are automatically reference counted
+- Memory is freed when reference count reaches zero
+- No manual memory management required
+
+### Memory Pools
+
+- Objects are allocated from memory pools for efficiency
+- Pools are automatically managed by the runtime
+- Reduces fragmentation and improves performance
+
+### Immutability
+
+- Most data structures are immutable by default
+- Immutability eliminates many memory safety issues
+- Structural sharing for efficient memory usage
+
+```lambda
+// Immutable collections
+let list1 = (1, 2, 3);
+let list2 = (0, list1...);  // Shares structure with list1
+
+// Mutable collections (arrays)
+let arr = [1, 2, 3];
+// arr is mutable, but assignment creates new references
+```
 
 ### Coding Guidelines
 - Start comments in lowercase.
