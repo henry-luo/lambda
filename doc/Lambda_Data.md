@@ -297,6 +297,125 @@ let content = input(/etc.hosts, 'text)    // Load file content
 let data = input(https.api.example.com.data, 'json)  // Fetch URL
 ```
 
+### System Info Paths (`sys.*`)
+
+The `sys` path scheme provides cross-platform access to system information. Values are **lazily resolved** — data is only fetched when accessed.
+
+#### System Info Categories
+
+| Path | Type | Description |
+|------|------|-------------|
+| `sys.os` | Map | Operating system information |
+| `sys.cpu` | Map | CPU/processor information |
+| `sys.memory` | Map | Memory statistics |
+| `sys.proc` | Map | Process information |
+| `sys.home` | Path | User home directory |
+| `sys.temp` | Path | System temporary directory |
+| `sys.time` | Map | Current time and timezone |
+| `sys.lambda` | Map | Lambda runtime information |
+| `sys.locale` | Map | Locale settings |
+
+#### OS Information (`sys.os.*`)
+
+```lambda
+sys.os.name              // "Darwin", "Linux", "Windows"
+sys.os.version           // "23.2.0", "6.5.0", "10.0.22631"
+sys.os.kernel            // Full kernel version string
+sys.os.platform          // "darwin", "linux", "windows"
+sys.os.hostname          // Machine hostname
+```
+
+#### CPU Information (`sys.cpu.*`)
+
+```lambda
+sys.cpu.model            // "Apple M2", "Intel Core i7-12700K"
+sys.cpu.cores            // Number of CPU cores (e.g., 8)
+sys.cpu.architecture     // "arm64", "x86_64"
+```
+
+#### Memory Information (`sys.memory.*`)
+
+```lambda
+sys.memory.total         // Total memory in bytes
+sys.memory.free          // Free memory in bytes
+sys.memory.used          // Used memory in bytes
+```
+
+#### Process Information (`sys.proc.*`)
+
+```lambda
+// Current process
+sys.proc.self.pid        // Current process ID
+sys.proc.self.ppid       // Parent process ID
+sys.proc.self.uid        // User ID (Unix)
+sys.proc.self.gid        // Group ID (Unix)
+sys.proc.self.argv       // Command-line arguments as list
+sys.proc.self.cwd        // Current working directory (as Path)
+sys.process              // Alias for sys.proc.self
+
+// Environment variables
+sys.proc.self.env        // Map of all environment variables
+sys.proc.self.env.PATH   // Specific variable: $PATH
+sys.proc.self.env.HOME   // Specific variable: $HOME
+
+// System uptime
+sys.proc.uptime          // System uptime in seconds
+```
+
+#### Directory Paths (`sys.home`, `sys.temp`)
+
+These return actual `path` values that can be used for file operations:
+
+```lambda
+sys.home                 // User home directory (e.g., /Users/alice)
+sys.temp                 // Temp directory (e.g., /tmp)
+
+// Path composition with sys paths
+let config = sys.home ++ ".config" ++ "app.json"
+// Result: /Users/alice/.config.'app.json'
+
+let tempfile = sys.temp ++ "output.txt"
+// Result: /tmp.'output.txt'
+```
+
+#### Time Information (`sys.time.*`)
+
+```lambda
+sys.time.now             // Current datetime
+sys.time.zone            // Timezone name (e.g., "America/Los_Angeles")
+sys.time.offset          // UTC offset in seconds
+```
+
+#### Lambda Runtime (`sys.lambda.*`)
+
+```lambda
+sys.lambda.version       // Lambda version (e.g., "0.9.0")
+sys.lambda.build         // Build date
+sys.lambda.features      // List of enabled features
+```
+
+#### Full Example
+
+```lambda
+// Build a system report
+let report = {
+    os: sys.os.name ++ " " ++ sys.os.version,
+    cpu: sys.cpu.model,
+    cores: sys.cpu.cores,
+    memory_gb: sys.memory.total / (1024 ^ 3),
+    home: sys.home,
+    user: sys.proc.self.env.USER
+}
+
+// Check if running on macOS
+if (sys.os.platform == "darwin") {
+    // macOS-specific code
+}
+
+// Access environment variables
+let path_dirs = split(sys.proc.self.env.PATH, ":")
+```
+
 ---
 
 ## Collections
