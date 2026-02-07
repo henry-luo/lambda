@@ -1,0 +1,5 @@
+["--- Basic Escape Sequences ---", ["newline", "a
+b"], ["tab", "a	b"], ["backslash", "a\b"], ["quote", "a"b"], ["slash", "a/b"], "--- Comment Characters in Strings ---", "/* not a comment */", "start /* middle */ end", "// also not a comment", "*/ end marker", "/* start marker", "--- Unicode Escapes ---", ["4-digit", "ABC"], ["braces", "ABC"], ["chinese", "中文"], ["emoji", "😀"], "--- Mixed ---", "path\to\file", "say "hello"", "a /* b */ c", "--- Symbol Escapes ---", 'sym-quote-'', 'sym-backslash-\', "--- Data Structures ---", {
+    key: "/* ok */"
+  }, <el attr: "// ok">, "--- Multi-line ---", "Line1
+Line2", "--- Done ---"]
