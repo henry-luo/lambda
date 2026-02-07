@@ -970,23 +970,23 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
  * Check if a path exists (file or directory).
  * Uses unified Target API for consistent path handling.
  * Accepts: String, Symbol, or Path items.
- * Returns: bool Item (true/false)
+ * Returns: Bool (BOOL_TRUE/BOOL_FALSE) for direct use in C conditions
  */
-Item fn_exists(Item path_item) {
+Bool fn_exists(Item path_item) {
     log_debug("fn_exists: ENTERED, path_item=0x%llx", (unsigned long long)path_item);
     
     // Use unified Target API
     Target* target = item_to_target(path_item, NULL);
     if (!target) {
         log_debug("fn_exists: failed to convert item to target");
-        return b2it(false);
+        return BOOL_FALSE;
     }
     
     bool exists = target_exists(target);
     log_debug("fn_exists: target exists=%d", exists);
     
     target_free(target);
-    return b2it(exists);
+    return exists ? BOOL_TRUE : BOOL_FALSE;
 }
 
 #endif // PATH_NO_ITERATION

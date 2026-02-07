@@ -17,7 +17,7 @@ extern void lambda_stack_overflow_error(const char* func_name);
 
 // Path resolution functions (implemented in path.c)
 extern Item path_resolve_for_iteration(Path* path);
-extern Item fn_exists(Item path);
+extern Bool fn_exists(Item path);
 
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
