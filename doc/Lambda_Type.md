@@ -93,9 +93,14 @@ Lambda's type system forms a hierarchy with `any` at the top and `null` at the b
 flowchart TD
     any --> scalar
     any --> collection
+    any --> type
     any --> function
+    scalar --> bool
     scalar --> number
     scalar --> string
+    scalar --> symbol
+    scalar --> datetime
+    scalar --> binary
     number --> int
     number --> float
     collection --> list
@@ -499,66 +504,147 @@ fn handle(data: any) => {
 
 ## String Patterns
 
-String patterns define validation rules for string values, similar to regular expressions but integrated into the type system.
+String patterns define named validation rules for string and symbol values, using a regex-like syntax integrated into the type system.
 
-### Basic String Patterns
+### Pattern Definition Syntax
 
 ```lambda
-// Literal pattern
-type Greeting = "hello" | "hi" | "hey"
+// String pattern: defines a pattern type for strings
+string PatternName = pattern_expression
 
-// String with prefix
-type HttpUrl = string & starts_with("http://")
-type HttpsUrl = string & starts_with("https://")
-
-// String with suffix
-type JsonFile = string & ends_with(".json")
-type ImageFile = string & ends_with(".png" | ".jpg" | ".gif")
-
-// String with pattern
-type Email = string & matches("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}")
-type Phone = string & matches("\\d{3}-\\d{3}-\\d{4}")
+// Symbol pattern: defines a pattern type for symbols
+symbol PatternName = pattern_expression
 ```
 
-### Pattern Constraints
+### Literal Patterns
 
 ```lambda
-// Length constraints
-type ShortString = string & len(1..10)
-type NonEmpty = string & len(1..)
-type FixedLength = string & len(5)
+// Exact string match
+string Hello = "hello"
 
-// Combined constraints
-type Username = string & len(3..20) & matches("[a-zA-Z][a-zA-Z0-9_]*")
-type Password = string & len(8..) & matches(".*[A-Z].*") & matches(".*[0-9].*")
+// Alternatives with union operator
+string Greeting = "hello" | "hi" | "hey"
+
+// HTTP methods
+string HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH"
 ```
 
-### String Literal Types
+### Character Classes
 
 ```lambda
-// Exact string values as types
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
-type LogLevel = "debug" | "info" | "warn" | "error"
-type Direction = "north" | "south" | "east" | "west"
+// Built-in character classes
+\d    // digit [0-9]
+\w    // word character [a-zA-Z0-9_]
+\s    // whitespace
+\a    // alphabetic [a-zA-Z]
 
-// Usage
-fn request(method: HttpMethod, url: string) => ...
-request("GET", "/api/users")     // OK
-request("PATCH", "/api/users")   // Type error
-```
+// Any single character
+\.
 
-### Template String Patterns
-
-```lambda
-// Template patterns with interpolation
-type VersionString = `v${int}.${int}.${int}`
-type IdString = `user_${int}`
-type PathString = `/api/${string}/${int}`
+// Any characters (zero or more) - shorthand for \.*
+...
 
 // Examples
-"v1.2.3" is VersionString      // true
-"user_123" is IdString         // true
-"/api/users/42" is PathString  // true
+string Digit = \d                    // single digit
+string Word = \w+                    // one or more word characters
+string Anything = ...                // any string
+```
+
+### Character Ranges
+
+```lambda
+// Range with 'to' keyword (like regex [a-z])
+string LowerLetter = "a" to "z"
+string UpperLetter = "A" to "Z"
+string HexDigit = "0" to "9" | "a" to "f" | "A" to "F"
+```
+
+### Occurrence Modifiers
+
+```lambda
+// Standard quantifiers
+?       // zero or one (optional)
++       // one or more
+*       // zero or more
+
+// Exact count
+[n]     // exactly n occurrences
+
+// Bounded ranges
+[n+]    // n or more occurrences
+[n, m]  // between n and m occurrences (inclusive)
+
+// Examples
+string OptionalPrefix = "pre"? \w+           // optional "pre" prefix
+string Identifier = \a \w*                    // letter followed by word chars
+string ThreeDigits = \d[3]                    // exactly 3 digits
+string Phone = \d[3] "-" \d[3] "-" \d[4]      // 555-123-4567
+string ZipCode = \d[5] ("-" \d[4])?           // 12345 or 12345-6789
+```
+
+### Pattern Composition
+
+```lambda
+// Sequence: patterns concatenate
+string FullName = \a+ " " \a+                 // first space last
+
+// Union: match either pattern
+string YesNo = "yes" | "no"
+
+// Intersection: must match both patterns
+string AlphaNum = \a & \w                     // alpha that is also word char
+
+// Negation: exclude pattern
+string NotDigit = !\d                         // any char except digit
+```
+
+### Complex Pattern Examples
+
+```lambda
+// Email-like pattern
+string Email = \w+ "@" \w+ "." \a[2, 6]
+
+// URL path segment
+string PathSegment = ("/" \w+)+
+
+// Version string: v1.2.3
+string Version = "v" \d+ "." \d+ "." \d+
+
+// Hex color: #RGB or #RRGGBB
+string HexDigit = "0" to "9" | "a" to "f" | "A" to "F"
+string HexColor = "#" (HexDigit[3] | HexDigit[6])
+
+// Date format: YYYY-MM-DD
+string DatePattern = \d[4] "-" \d[2] "-" \d[2]
+
+// Username: 3-20 chars, starts with letter
+string Username = \a \w[2, 19]
+```
+
+### Symbol Patterns
+
+Symbol patterns work identically but define patterns for symbol values:
+
+```lambda
+// Symbol pattern for identifiers
+symbol Keyword = 'if' | 'else' | 'for' | 'while'
+```
+
+### Using Patterns as Types
+
+Pattern names can be used as types for validation:
+
+```lambda
+// Use pattern as parameter type
+fn validate_email(email: Email) => ...
+
+// Use in type annotations
+let method: HttpMethod = "GET"
+
+// Type checking with 'is'
+"hello" is Greeting              // true
+"goodbye" is Greeting            // false
+"v1.2.3" is Version              // true
 ```
 
 ---
@@ -684,24 +770,6 @@ let c: Coordinate = p          // OK: same structure
 type Point3D = {x: int, y: int, z: int}
 let p3d: Point3D = {x: 1, y: 2, z: 3}
 let p2d: Point2D = p3d         // OK: Point3D has all Point2D fields
-```
-
-### Covariance and Contravariance
-
-```lambda
-// Arrays are covariant in element type
-let ints: [int] = [1, 2, 3]
-let nums: [number] = ints      // OK: int is subtype of number
-
-// Function return types are covariant
-type GetNumber = fn () number
-type GetInt = fn () int
-let f: GetNumber = (() => 42): GetInt  // OK
-
-// Function parameter types are contravariant
-type TakesAny = fn (any) void
-type TakesInt = fn (int) void
-let g: TakesInt = ((x: any) => ...): TakesAny  // OK
 ```
 
 ---
