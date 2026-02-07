@@ -7364,45 +7364,41 @@
       ]
     },
     "assign_stam": {
-      "type": "PREC_RIGHT",
-      "value": 0,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "FIELD",
-            "name": "target",
-            "content": {
-              "type": "SYMBOL",
-              "name": "identifier"
-            }
-          },
-          {
-            "type": "STRING",
-            "value": "="
-          },
-          {
-            "type": "FIELD",
-            "name": "value",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_expression"
-            }
-          },
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": ";"
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "target",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
           }
-        ]
-      }
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": ";"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
     },
     "occurrence": {
       "type": "CHOICE",
@@ -9167,6 +9163,18 @@
       },
       {
         "type": "SYMBOL",
+        "name": "call_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "index_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "member_expr"
+      },
+      {
+        "type": "SYMBOL",
         "name": "primary_expr"
       },
       {
@@ -9252,6 +9260,10 @@
       {
         "type": "SYMBOL",
         "name": "assign_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "assign_stam"
       }
     ],
     [
