@@ -113,7 +113,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     double scalar_val = item_to_double(scalar);
     
     if (std::isnan(scalar_val)) {
-        log_error("vec_scalar_op: non-numeric scalar type %d", scalar_type);
+        log_error("vec_scalar_op: non-numeric scalar type %s", get_type_name(scalar_type));
         return ItemError;
     }
 
@@ -501,7 +501,7 @@ Item fn_prod(Item item) {
         return push_l(prod);
     }
     
-    log_error("fn_prod: unsupported type %d", type);
+    log_error("fn_prod: unsupported type %s", get_type_name(type));
     return ItemError;
 }
 

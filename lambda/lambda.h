@@ -82,6 +82,42 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
+// Get human-readable name for a TypeId (for error messages)
+static inline const char* get_type_name(TypeId type_id) {
+    switch (type_id) {
+        case LMD_TYPE_RAW_POINTER: return "raw_pointer";
+        case LMD_TYPE_NULL: return "null";
+        case LMD_TYPE_BOOL: return "bool";
+        case LMD_TYPE_INT: return "int";
+        case LMD_TYPE_INT64: return "int64";
+        case LMD_TYPE_FLOAT: return "float";
+        case LMD_TYPE_DECIMAL: return "decimal";
+        case LMD_TYPE_NUMBER: return "number";
+        case LMD_TYPE_DTIME: return "datetime";
+        case LMD_TYPE_SYMBOL: return "symbol";
+        case LMD_TYPE_STRING: return "string";
+        case LMD_TYPE_BINARY: return "binary";
+        case LMD_TYPE_LIST: return "list";
+        case LMD_TYPE_RANGE: return "range";
+        case LMD_TYPE_ARRAY_INT: return "array[int]";
+        case LMD_TYPE_ARRAY_INT64: return "array[int64]";
+        case LMD_TYPE_ARRAY_FLOAT: return "array[float]";
+        case LMD_TYPE_ARRAY: return "array";
+        case LMD_TYPE_MAP: return "map";
+        case LMD_TYPE_ELEMENT: return "element";
+        case LMD_TYPE_TYPE: return "type";
+        case LMD_TYPE_TYPE_UNARY: return "type_unary";
+        case LMD_TYPE_TYPE_BINARY: return "type_binary";
+        case LMD_TYPE_FUNC: return "function";
+        case LMD_TYPE_PATTERN: return "pattern";
+        case LMD_TYPE_ANY: return "any";
+        case LMD_TYPE_ERROR: return "error";
+        case LMD_TYPE_UNDEFINED: return "undefined";
+        case LMD_TYPE_PATH: return "path";
+        default: return "unknown";
+    }
+}
+
 // 3-state boolean:
 typedef enum {
     BOOL_FALSE = 0,

@@ -638,7 +638,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_str(strbuf, "any");
         break;
     default:
-        strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
+        strbuf_append_format(strbuf, "[unknown type %s!!]", get_type_name(type_id));
     }
 }
 
