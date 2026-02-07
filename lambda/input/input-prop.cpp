@@ -83,26 +83,60 @@ static String* parse_raw_value(InputContext& ctx, const char **prop) {
                 (*prop) += 2;
                 continue;
             } else if (*next == 'u' && *(next+1) && *(next+2) && *(next+3) && *(next+4)) {
-                // unicode escape sequence \uXXXX
+                // unicode escape sequence \uXXXX (including surrogate pairs for emojis)
                 char hex_str[5];
                 strncpy(hex_str, next + 1, 4);
                 hex_str[4] = '\0';
 
                 char* end;
-                unsigned long unicode_val = strtoul(hex_str, &end, 16);
+                unsigned long codepoint = strtoul(hex_str, &end, 16);
                 if (end == hex_str + 4) {
-                    // valid unicode escape - convert to UTF-8
-                    if (unicode_val <= 0x7F) {
-                        stringbuf_append_char(sb, (char)unicode_val);
-                    } else if (unicode_val <= 0x7FF) {
-                        stringbuf_append_char(sb, 0xC0 | (unicode_val >> 6));
-                        stringbuf_append_char(sb, 0x80 | (unicode_val & 0x3F));
+                    // check for surrogate pairs (used for characters > U+FFFF like emojis)
+                    // high surrogate: 0xD800-0xDBFF, low surrogate: 0xDC00-0xDFFF
+                    if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+                        // this is a high surrogate, look for low surrogate
+                        const char* look_ahead = next + 5; // after first \uXXXX
+                        if (*look_ahead == '\\' && *(look_ahead+1) == 'u' &&
+                            *(look_ahead+2) && *(look_ahead+3) && *(look_ahead+4) && *(look_ahead+5)) {
+                            char hex_low[5];
+                            strncpy(hex_low, look_ahead + 2, 4);
+                            hex_low[4] = '\0';
+                            char* end_low;
+                            unsigned long low_surrogate = strtoul(hex_low, &end_low, 16);
+                            if (end_low == hex_low + 4 && low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
+                                // valid surrogate pair - combine into full codepoint
+                                codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low_surrogate - 0xDC00);
+                                (*prop) += 12; // skip both \uXXXX\uXXXX
+                            } else {
+                                // not a valid low surrogate, output replacement char
+                                codepoint = 0xFFFD;
+                                (*prop) += 6;
+                            }
+                        } else {
+                            // lone high surrogate - output replacement character
+                            codepoint = 0xFFFD;
+                            (*prop) += 6;
+                        }
                     } else {
-                        stringbuf_append_char(sb, 0xE0 | (unicode_val >> 12));
-                        stringbuf_append_char(sb, 0x80 | ((unicode_val >> 6) & 0x3F));
-                        stringbuf_append_char(sb, 0x80 | (unicode_val & 0x3F));
+                        (*prop) += 6; // skip \uXXXX
                     }
-                    (*prop) += 6; // skip \uXXXX
+
+                    // valid unicode escape - convert to UTF-8
+                    if (codepoint <= 0x7F) {
+                        stringbuf_append_char(sb, (char)codepoint);
+                    } else if (codepoint <= 0x7FF) {
+                        stringbuf_append_char(sb, 0xC0 | (codepoint >> 6));
+                        stringbuf_append_char(sb, 0x80 | (codepoint & 0x3F));
+                    } else if (codepoint <= 0xFFFF) {
+                        stringbuf_append_char(sb, 0xE0 | (codepoint >> 12));
+                        stringbuf_append_char(sb, 0x80 | ((codepoint >> 6) & 0x3F));
+                        stringbuf_append_char(sb, 0x80 | (codepoint & 0x3F));
+                    } else {
+                        stringbuf_append_char(sb, 0xF0 | (codepoint >> 18));
+                        stringbuf_append_char(sb, 0x80 | ((codepoint >> 12) & 0x3F));
+                        stringbuf_append_char(sb, 0x80 | ((codepoint >> 6) & 0x3F));
+                        stringbuf_append_char(sb, 0x80 | (codepoint & 0x3F));
+                    }
                     continue;
                 }
             }

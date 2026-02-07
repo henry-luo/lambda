@@ -22,6 +22,16 @@
   ["chinese", "\u4E2D\u6587"],         // 中文
   ["emoji", "\u{1F600}"],              // 😀
   
+  "--- Surrogate Pairs ---",
+  ["book-surrogate", "\uD83D\uDCDA"],       // 📚 via surrogate pair
+  ["book-direct", "\u{1F4DA}"],             // 📚 via direct codepoint
+  ["party-surrogate", "\uD83C\uDF89"],      // 🎉 via surrogate pair
+  ["party-direct", "\u{1F389}"],            // 🎉 via direct codepoint
+  ["rocket-surrogate", "\uD83D\uDE80"],     // 🚀 via surrogate pair
+  ["heart-surrogate", "\uD83D\uDC96"],      // 💖 via surrogate pair
+  ["surrogate-match", "\uD83D\uDCDA" == "\u{1F4DA}"],  // should be true
+  ["mixed-surrogates", "Hello \uD83D\uDCDA World \uD83C\uDF89!"],  // Hello 📚 World 🎉!
+  
   "--- Mixed ---",
   "path\\to\\file",
   "say \"hello\"",
