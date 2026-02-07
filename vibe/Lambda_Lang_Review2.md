@@ -9,26 +9,20 @@ Lambda Script has a clean, modern functional syntax that's quite pleasant to wor
 
 ## Pain Points Encountered
 
-### 1. Critical Parser Bug: Block Comments in Strings
+### 1. ~~Critical Parser Bug: Block Comments in Strings~~ ✅ FIXED
 
-**Issue**: `/*` and `*/` inside string literals are incorrectly parsed as block comment delimiters, causing subsequent code to be treated as inside a comment.
+**Issue**: `/*` and `*/` inside string literals were incorrectly parsed as block comment delimiters, causing subsequent code to be treated as inside a comment.
 
 **Example**:
 ```lambda
-// This breaks everything after it:
+// This used to break everything after it:
 let pattern = "src/*.c"
 
-// Functions defined after this become "undefined"
+// Functions defined after this became "undefined"
 fn later_function() = ...  // ERROR: undefined function
 ```
 
-**Workaround**:
-```lambda
-let STAR = "*"
-let pattern = "src/" ++ STAR ++ ".c"
-```
-
-**Recommendation**: Fix the Tree-sitter grammar to properly prioritize string literal tokens over comment delimiters. This is a fundamental lexer issue.
+**Status**: Fixed in Tree-sitter grammar. String literals now correctly take precedence over comment delimiters.
 
 ---
 
@@ -58,11 +52,14 @@ Type mismatch: expected 15, got 12
 
 ---
 
-### 4. JSON Parser Strictness
+### 4. ~~JSON Parser Unicode Handling~~ ✅ FIXED
 
-**Issue**: The JSON parser fails on valid JSON that other parsers accept. For example, certain nested structures in `build_lambda_config.json` cause parse failures.
+**Issue**: The JSON parser failed on valid JSON containing Unicode surrogate pairs (used for emojis like 📚 encoded as `\uD83D\uDCDA`).
 
-**Recommendation**: Ensure JSON parser handles edge cases and provides clear error messages with line numbers.
+**Status**: Fixed. The JSON parser (and also TOML, Properties, and Lambda string parsers) now correctly handles:
+- Surrogate pairs: `\uD83D\uDCDA` → 📚 (proper 4-byte UTF-8)
+- Direct codepoints: `\u{1F4DA}` → 📚 (Lambda strings)
+- BMP characters: `\u4E2D` → 中
 
 ---
 
@@ -159,9 +156,10 @@ x ?? default        // Null coalescing (distinct from `or`)
 
 Lambda has solid foundations and a surprisingly complete feature set. The main areas for improvement are:
 
-1. **Critical**: Fix the block comment parser bug in strings
+1. ~~**Critical**: Fix the block comment parser bug in strings~~ ✅ FIXED
 2. **High**: Improve error messages with human-readable types
 3. **Medium**: Add string interpolation
-4. **Low**: Null-safe chaining operator (`?.`)
+4. ~~**Medium**: Fix JSON/TOML Unicode surrogate pair handling~~ ✅ FIXED
+5. **Low**: Null-safe chaining operator (`?.`)
 
 The language is more feature-rich than initially apparent - with destructuring, named arguments, default parameters, and type annotations already supported. With fixes for the parser bug and error messages, it would be quite pleasant for data processing tasks.
