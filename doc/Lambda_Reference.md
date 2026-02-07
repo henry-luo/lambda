@@ -192,7 +192,7 @@ import module1, module2, alias: module3;
 
 ### Module Structure
 
-Each Lambda Script file is a module that can export public declarations:
+Each Lambda Script file is a module that can export public declarations. Currently only variable and function definitions can be exported:
 
 ```lambda
 // math_utils.ls
@@ -201,6 +201,9 @@ pub E = 2.71828;
 
 pub fn square(x: float) => x * x;
 pub fn cube(x: float) => x * x * x;
+
+// Private variable (not exported)
+let v = 123;
 
 // Private function (not exported)
 fn helper(x: float) => x + 1;

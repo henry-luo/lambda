@@ -25,35 +25,6 @@ This document covers Lambda's expressions and statements, including control flow
 
 ---
 
-## Expression-Oriented Design
-
-Lambda is an **expression-oriented** language where nearly everything evaluates to a value:
-
-```lambda
-// If is an expression (returns a value)
-let result = if (x > 0) "positive" else "non-positive"
-
-// For is an expression (returns a collection)
-let squares = (for (i in 1 to 5) i * i)  // [1, 4, 9, 16, 25]
-
-// Blocks return their last expression
-let computed = {
-    let a = 10
-    let b = 20
-    a + b    // Block returns 30
-}
-```
-
-### Expressions vs Statements
-
-| Construct | Expression Form | Statement Form |
-|-----------|-----------------|----------------|
-| If | `if (cond) a else b` | `if (cond) { ... }` |
-| For | `(for (x in col) expr)` | `for x in col { ... }` |
-| Let | `(let x = 1, x + 1)` | `let x = 1;` |
-
----
-
 ## Primary Expressions
 
 ### Literals
@@ -480,9 +451,17 @@ type("hello")      // 'string
 
 ## Statements
 
-Statements are used in procedural contexts and don't necessarily return values.
+### Common Statements
 
-### Let Statements
+`let`, `if` and `for` statements work in both functional and procedural context.
+
+| Construct | Expression Form       | Statement Form         |
+| --------- | --------------------- | ---------------------- |
+| If        | `if (cond) a else b`  | `if (cond) { ... }`    |
+| For       | `for (x in col) expr` | `for x in col { ... }` |
+| Let       | `(let x = 1, x + 1)`  | `let x = 1;`           |
+
+#### Let Statements
 
 ```lambda
 // Variable declaration
@@ -494,15 +473,7 @@ let x: int = 42;
 let items: [string] = ["a", "b", "c"];
 ```
 
-### Public Declarations
-
-```lambda
-// Export variables
-pub PI = 3.14159;
-pub greeting = "Hello, World!";
-```
-
-### If Statements
+#### If Statements
 
 ```lambda
 // If statement (can omit else)
@@ -517,7 +488,7 @@ if (temperature > 30) {
 }
 ```
 
-### For Statements
+#### For Statements
 
 ```lambda
 for item in [1, 2, 3] {
@@ -538,7 +509,7 @@ for x in [1, 2], y in [3, 4] {
 
 ### Procedural Statements
 
-These are only available in `pn` (procedural) functions:
+`var`, `while`, `break`, `continue` and `return` statements are only available in `pn` (procedural) functions:
 
 ```lambda
 pn example() {
