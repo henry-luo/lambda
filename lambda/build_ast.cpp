@@ -1373,6 +1373,34 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                         char* endptr;
                         uint32_t code_point = strtoul(hex_digits, &endptr, 16);
                         if (endptr == hex_digits + 4) {
+                            // Check for surrogate pairs (used for characters > U+FFFF like emojis)
+                            // High surrogate: 0xD800-0xDBFF, Low surrogate: 0xDC00-0xDFFF
+                            if (code_point >= 0xD800 && code_point <= 0xDBFF) {
+                                // This is a high surrogate, look for low surrogate
+                                if (i + 11 < content_len && 
+                                    content_start[i + 6] == '\\' && content_start[i + 7] == 'u') {
+                                    char hex_low[5] = {0};
+                                    memcpy(hex_low, content_start + i + 8, 4);
+                                    char* endptr_low;
+                                    uint32_t low_surrogate = strtoul(hex_low, &endptr_low, 16);
+                                    if (endptr_low == hex_low + 4 && 
+                                        low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
+                                        // Valid surrogate pair - combine into full codepoint
+                                        code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
+                                        i += 6; // skip extra \uXXXX for low surrogate
+                                    } else {
+                                        // Not a valid low surrogate, output replacement char
+                                        code_point = 0xFFFD;
+                                    }
+                                } else {
+                                    // Lone high surrogate - output replacement character
+                                    code_point = 0xFFFD;
+                                }
+                            } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
+                                // Lone low surrogate - output replacement character
+                                code_point = 0xFFFD;
+                            }
+                            
                             // Convert Unicode code point to UTF-8
                             if (code_point <= 0x7F) {
                                 stringbuf_append_char(str_buf, (char)code_point);
@@ -1381,6 +1409,12 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                                 stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
                             } else if (code_point <= 0xFFFF) {
                                 stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
+                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                            } else {
+                                // 4-byte UTF-8 encoding for code points > 0xFFFF (emojis, etc.)
+                                stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
+                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
                                 stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
                                 stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
                             }

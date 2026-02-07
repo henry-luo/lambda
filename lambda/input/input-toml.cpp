@@ -57,13 +57,56 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
             tracker.advance(4);
 
             int codepoint = (int)strtol(hex, NULL, 16);
+
+            // check for surrogate pairs (used for characters > U+FFFF like emojis)
+            // high surrogate: 0xD800-0xDBFF, low surrogate: 0xDC00-0xDFFF
+            if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
+                // this is a high surrogate, look for low surrogate
+                if (**toml == '\\' && *(*toml + 1) == 'u') {
+                    // validate next 4 hex digits
+                    bool valid_low = true;
+                    for (int i = 0; i < 4; i++) {
+                        if (!isxdigit(*(*toml + 2 + i))) {
+                            valid_low = false;
+                            break;
+                        }
+                    }
+                    if (valid_low) {
+                        char hex_low[5] = {0};
+                        strncpy(hex_low, *toml + 2, 4);
+                        int low_surrogate = (int)strtol(hex_low, NULL, 16);
+                        if (low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
+                            // valid surrogate pair - combine into full codepoint
+                            codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low_surrogate - 0xDC00);
+                            (*toml) += 6; // skip \uXXXX for low surrogate
+                            tracker.advance(6);
+                        } else {
+                            // not a valid low surrogate, output replacement char
+                            codepoint = 0xFFFD;
+                        }
+                    } else {
+                        // lone high surrogate - output replacement character
+                        codepoint = 0xFFFD;
+                    }
+                } else {
+                    // lone high surrogate - output replacement character
+                    codepoint = 0xFFFD;
+                }
+            }
+
+            // convert codepoint to UTF-8
             if (codepoint < 0x80) {
                 stringbuf_append_char(sb, (char)codepoint);
             } else if (codepoint < 0x800) {
                 stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
                 stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            } else {
+            } else if (codepoint < 0x10000) {
                 stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+            } else {
+                stringbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
+                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
                 stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
                 stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
             }
