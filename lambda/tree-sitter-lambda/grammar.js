@@ -487,7 +487,7 @@ module.exports = grammar({
       $.element,
       alias($._non_null_base_type, $.base_type),
       $.identifier,
-      $.index_expr,  // like Go
+      $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
       $.member_expr,
       $.call_expr,
