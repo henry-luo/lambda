@@ -39,16 +39,21 @@ if (len(items) == 0) "" else str_join(items, ", ")
 
 ---
 
-### 3. Cryptic Type Error Messages
+### 3. ~~Cryptic Type Error Messages~~ ✅ FIXED
 
-**Issue**: Errors show internal type IDs instead of human-readable names.
+**Issue**: Errors showed internal type IDs instead of human-readable names.
 
-**Example**:
+**Example** (before fix):
 ```
 Type mismatch: expected 15, got 12
 ```
 
-**Recommendation**: Display type names like `string`, `list`, `map` instead of numeric IDs.
+**Status**: Fixed. Error messages now display human-readable type names:
+```
+Type mismatch: expected list, got map
+```
+
+Added global `get_type_name(TypeId)` function in `lambda.h` and updated ~30 error messages across `lambda-eval.cpp`, `lambda-proc.cpp`, `lambda-data.cpp`, `lambda-data-runtime.cpp`, `mark_editor.cpp`, `lambda-vector.cpp`, `print.cpp`, and `build_ast.cpp`.
 
 ---
 
@@ -79,27 +84,7 @@ Type mismatch: expected 15, got 12
 f"Hello {name}, you have {count} messages"
 ```
 
----
-
-### 4. Shorthand Lambda Syntax
-
-**Current**:
-```lambda
-map(items, fn(x) = x.name)
-```
-
-**Suggested** (additional shorthand):
-```lambda
-map(items, _.name)        // Scala-style placeholder
-// or
-map(items, |x| x.name)    // Rust-style
-// or
-map(items, \x -> x.name)  // Haskell-style
-```
-
----
-
-### 5. Null-Safe Chaining
+### 2. Null-Safe Chaining
 
 **Current**:
 ```lambda
@@ -157,7 +142,7 @@ x ?? default        // Null coalescing (distinct from `or`)
 Lambda has solid foundations and a surprisingly complete feature set. The main areas for improvement are:
 
 1. ~~**Critical**: Fix the block comment parser bug in strings~~ ✅ FIXED
-2. **High**: Improve error messages with human-readable types
+2. ~~**High**: Improve error messages with human-readable types~~ ✅ FIXED
 3. **Medium**: Add string interpolation
 4. ~~**Medium**: Fix JSON/TOML Unicode surrogate pair handling~~ ✅ FIXED
 5. **Low**: Null-safe chaining operator (`?.`)
