@@ -331,8 +331,7 @@ else { print("Success:", result) }
 9. `or` - Logical OR
 10. `to` - Range
 11. `is` `in` - Type operations
-12. `|` - Pipe
-13. `where` - Filter
+12. `|` `where` - Pipe and Filter
 
 ## Quick Examples
 
