@@ -2103,8 +2103,16 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
+    // Create a new scope for the 'then' branch to allow variable shadowing
+    NameScope* then_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    then_scope->parent = tp->current_scope;
+    then_scope->is_proc = tp->current_scope->is_proc;
+    tp->current_scope = then_scope;
+
     TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
+
+    tp->current_scope = then_scope->parent;  // restore scope
 
     // Defensive validation: ensure then clause was built successfully
     if (!ast_node->then) {
@@ -2118,7 +2126,15 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         ast_node->otherwise = NULL;  // optional for IF statements
     }
     else {
+        // Create a new scope for the 'else' branch to allow variable shadowing
+        NameScope* else_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        else_scope->parent = tp->current_scope;
+        else_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = else_scope;
+
         ast_node->otherwise = build_expr(tp, else_node);
+
+        tp->current_scope = else_scope->parent;  // restore scope
     }
 
     // Additional validation: ensure expressions have valid types

@@ -1443,16 +1443,19 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     Type* else_type = if_node->otherwise ? if_node->otherwise->type : nullptr;
 
     strbuf_append_str(tp->code_buf, "(");
-    // Always use is_truthy() to properly extract boolean from Item tagged value
-    // Direct boolean expressions would fail because Item(false) = 0x200000000000000 is non-zero in C
-    strbuf_append_str(tp->code_buf, "is_truthy(");
+    // For boolean-typed conditions (comparisons, etc.), use expression directly since
+    // comparison functions like fn_le return Bool which can be used as C boolean.
+    // For non-boolean expressions, use is_truthy() to extract boolean from Item
+    // (Direct Item booleans would fail because Item(false) = 0x200000000000000 is non-zero in C)
     if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL) {
         transpile_expr(tp, if_node->cond);
     }
     else {
+        strbuf_append_str(tp->code_buf, "is_truthy(");
         transpile_box_item(tp, if_node->cond);
+        strbuf_append_str(tp->code_buf, ")");
     }
-    strbuf_append_str(tp->code_buf, ") ? ");
+    strbuf_append_str(tp->code_buf, " ? ");
 
     // Determine if branches have incompatible types that need coercion
     bool need_boxing = true;
@@ -2237,15 +2240,18 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
         return;
     }
 
-    strbuf_append_str(tp->code_buf, "while (");
-    // Always use is_truthy() to properly extract boolean from Item tagged value
-    strbuf_append_str(tp->code_buf, "is_truthy(");
+    strbuf_append_str(tp->code_buf, "\nwhile (");
+    // For boolean-typed conditions (comparisons, etc.), use expression directly since
+    // comparison functions like fn_le return Bool which can be used as C boolean.
+    // For non-boolean expressions, use is_truthy() to extract boolean from Item.
     if (while_node->cond->type && while_node->cond->type->type_id == LMD_TYPE_BOOL) {
         transpile_expr(tp, while_node->cond);
     } else {
+        strbuf_append_str(tp->code_buf, "is_truthy(");
         transpile_box_item(tp, while_node->cond);
+        strbuf_append_str(tp->code_buf, ")");
     }
-    strbuf_append_str(tp->code_buf, ")) {");
+    strbuf_append_str(tp->code_buf, ") {");
     // use procedural statements (no wrapper) for while body
     if (while_node->body->node_type == AST_NODE_CONTENT) {
         transpile_proc_statements(tp, (AstListNode*)while_node->body);
@@ -2268,12 +2274,11 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
     }
 
     strbuf_append_str(tp->code_buf, "if (");
+    // For boolean-typed conditions (comparisons, etc.), use expression directly since
+    // comparison functions like fn_le return Bool which can be used as C boolean.
+    // For non-boolean expressions, use is_truthy() to extract boolean from Item.
     if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL) {
-        // For Item-returning expressions (like function calls), use is_truthy to extract bool
-        // This handles tagged booleans correctly (Item with type_id = LMD_TYPE_BOOL)
-        strbuf_append_str(tp->code_buf, "is_truthy(");
         transpile_expr(tp, if_node->cond);
-        strbuf_append_char(tp->code_buf, ')');
     } else {
         strbuf_append_str(tp->code_buf, "is_truthy(");
         transpile_box_item(tp, if_node->cond);
@@ -2320,7 +2325,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
 // return statement (procedural only)
 void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
     log_debug("transpile return stam");
-    strbuf_append_str(tp->code_buf, "return ");
+    strbuf_append_str(tp->code_buf, "\nreturn ");
     if (return_node->value) {
         transpile_box_item(tp, return_node->value);
     } else {

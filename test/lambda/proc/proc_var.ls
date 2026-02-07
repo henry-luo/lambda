@@ -192,6 +192,29 @@ pn test_assign_concat_fn_call() {
     msg  // should be "Hello42"
 }
 
+// Test 18: variable shadowing in inner scope
+pn test_var_shadowing() {
+    var x = 10
+    if (x > 5) {
+        var x = 20   // shadow outer x
+        x = x + 5    // modify inner x
+    }
+    x  // should be 10 (outer x unchanged)
+}
+
+// Test 19: variable shadowing in else branch
+pn test_var_shadowing_else() {
+    var y = 100
+    if (false) {
+        var y = 200
+    }
+    else {
+        var y = 300  // shadow in else branch
+        y = y + 50
+    }
+    y  // should be 100 (outer y unchanged)
+}
+
 // Main procedure to run tests
 pn main() {
     print("T1:")
@@ -228,5 +251,9 @@ pn main() {
     print(test_assign_with_array_index())
     print(" T17:")
     print(test_assign_concat_fn_call())
+    print(" T18:")
+    print(test_var_shadowing())
+    print(" T19:")
+    print(test_var_shadowing_else())
     "done"
 }
