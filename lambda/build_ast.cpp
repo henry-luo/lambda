@@ -3074,7 +3074,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         }
         shape_entry->type = item->type;
         if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
-            log_error("invalid map item type %d, should be map or any", item->type->type_id);
+            log_error("invalid map item type %s, should be map or any", get_type_name(item->type->type_id));
         }
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { type->shape = shape_entry; }

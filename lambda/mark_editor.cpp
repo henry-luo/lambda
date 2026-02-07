@@ -281,7 +281,7 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
         break;
     }
     default:
-        log_error("store_value_at_offset: unsupported type %d", type_id);
+        log_error("store_value_at_offset: unsupported type %s", get_type_name(type_id));
         break;
     }
 }
@@ -1681,7 +1681,7 @@ Item MarkEditor::array_set(Item array, int index, Item value) {
         }
     }
 
-    log_error("array_set: unsupported array type %d", array_type);
+    log_error("array_set: unsupported array type %s", get_type_name(array_type));
     return ItemError;
 }
 
@@ -1756,7 +1756,7 @@ Item MarkEditor::array_insert(Item array, int index, Item value) {
         }
     }
 
-    log_error("array_insert: unsupported array type %d", array_type);
+    log_error("array_insert: unsupported array type %s", get_type_name(array_type));
     return ItemError;
 }
 
@@ -1812,7 +1812,7 @@ Item MarkEditor::array_delete(Item array, int index) {
         }
     }
 
-    log_error("array_delete: unsupported array type %d", array_type);
+    log_error("array_delete: unsupported array type %s", get_type_name(array_type));
     return ItemError;
 }
 

@@ -272,7 +272,7 @@ String *str_repeat(String *str, int64_t times) {
 Item fn_normalize(Item str_item, Item type_item) {
     // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
     if (str_item._type_id != LMD_TYPE_STRING) {
-        log_debug("normalize: first argument must be a string, got type: %d", str_item._type_id);
+        log_debug("normalize: first argument must be a string, got type: %s", get_type_name(str_item._type_id));
         return ItemError;
     }
 
@@ -344,7 +344,7 @@ Range* fn_to(Item item_a, Item item_b) {
         return range;
     }
     else {
-        log_error("unknown range type: %d, %d\n", item_a._type_id, item_b._type_id);
+        log_error("unknown range type: %s, %s", get_type_name(item_a._type_id), get_type_name(item_b._type_id));
         return NULL;
     }
 }
@@ -565,7 +565,7 @@ Bool fn_is(Item a, Item b) {
     if (b_type_id == LMD_TYPE_PATTERN) {
         TypeId a_type_id = get_type_id(a);
         if (a_type_id != LMD_TYPE_STRING && a_type_id != LMD_TYPE_SYMBOL) {
-            log_error("pattern matching requires string or symbol, got type: %d", a_type_id);
+            log_error("pattern matching requires string or symbol, got type: %s", get_type_name(a_type_id));
             return BOOL_ERROR;
         }
         TypePattern* pattern = (TypePattern*)b.type;  // pattern is stored as Type*
@@ -575,7 +575,7 @@ Bool fn_is(Item a, Item b) {
     }
     
     if (b_type_id != LMD_TYPE_TYPE && b_type_id != LMD_TYPE_TYPE_UNARY && b_type_id != LMD_TYPE_TYPE_BINARY) {
-        log_error("2nd argument must be a type or pattern, got type: %d", b_type_id);
+        log_error("2nd argument must be a type or pattern, got type: %s", get_type_name(b_type_id));
         return BOOL_ERROR;
     }
     
@@ -727,7 +727,7 @@ Bool fn_eq(Item a_item, Item b_item) {
         bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
-    log_error("unknown comparing type %d\n", a_item._type_id);
+    log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
     return BOOL_ERROR;
 }
 
@@ -783,7 +783,7 @@ Bool fn_lt(Item a_item, Item b_item) {
         bool result = strcmp(str_a->chars, str_b->chars) < 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
-    log_error("unknown comparing type %d\n", a_item._type_id);
+    log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
     return BOOL_ERROR;
 }
 
@@ -834,7 +834,7 @@ Bool fn_gt(Item a_item, Item b_item) {
         bool result = strcmp(str_a->chars, str_b->chars) > 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
-    log_error("unknown comparing type %d\n", a_item._type_id);
+    log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
     return BOOL_ERROR;
 }
 
@@ -1081,7 +1081,7 @@ String* fn_string(Item itm) {
         return NULL;
     default:
         // for other types
-        log_error("fn_string unhandled type %d", itm._type_id);
+        log_error("fn_string unhandled type: %s", get_type_name(itm._type_id));
         return &STR_NULL;
     }
 }
@@ -1109,7 +1109,7 @@ TypePattern* const_pattern(int pattern_index) {
     }
     Type* type = (Type*)(type_list->data[pattern_index]);
     if (type->type_id != LMD_TYPE_PATTERN) {
-        log_error("const_pattern: index %d is not a pattern, got type_id=%d", pattern_index, type->type_id);
+        log_error("const_pattern: index %d is not a pattern, got type: %s", pattern_index, get_type_name(type->type_id));
         return nullptr;
     }
     log_debug("const_pattern %d -> %p", pattern_index, type);
@@ -1152,7 +1152,7 @@ Item fn_input2(Item target_item, Item type) {
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
     if (target_type_id != LMD_TYPE_STRING && target_type_id != LMD_TYPE_SYMBOL && target_type_id != LMD_TYPE_PATH) {
-        log_debug("input target must be a string, symbol, or path, got type %d", target_type_id);
+        log_debug("input target must be a string, symbol, or path, got type: %s", get_type_name(target_type_id));
         return ItemNull;  // todo: push error
     }
     
@@ -1191,7 +1191,7 @@ Item fn_input2(Item target_item, Item type) {
                 type_str = input_type.get_string();
             }
             else {
-        log_debug("input type must be a string or symbol, got type %d", type_value_type);
+        log_debug("input type must be a string or symbol, got type: %s", get_type_name(type_value_type));
                 // todo: push error
                 type_str = NULL;  // input type ignored
             }
@@ -1207,14 +1207,14 @@ Item fn_input2(Item target_item, Item type) {
                 flavor_str = input_flavor.get_string();
             }
             else {
-                log_debug("input flavor must be a string or symbol, got type %d", flavor_value_type);
+                log_debug("input flavor must be a string or symbol, got type: %s", get_type_name(flavor_value_type));
                 // todo: push error
                 flavor_str = NULL;  // input flavor ignored
             }
         }
     }
     else {
-        log_debug("input type must be a string, symbol, or map, got type %d", type_id);
+        log_debug("input type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
         target_free(target);
         return ItemNull;  // todo: push error
     }
@@ -1271,7 +1271,7 @@ String* fn_format2(Item item, Item type) {
                 type_str = format_type.get_string();
             }
             else {
-                log_debug("format type must be a string or symbol, got type %d", type_value_type);
+                log_debug("format type must be a string or symbol, got type: %s", get_type_name(type_value_type));
                 // todo: push error
                 type_str = NULL;  // format type ignored
             }
@@ -1287,14 +1287,14 @@ String* fn_format2(Item item, Item type) {
                 flavor_str = format_flavor.get_string();
             }
             else {
-                log_debug("format flavor must be a string or symbol, got type %d", flavor_value_type);
+                log_debug("format flavor must be a string or symbol, got type: %s", get_type_name(flavor_value_type));
                 // todo: push error
                 flavor_str = NULL;  // format flavor ignored
             }
         }
     }
     else {
-        log_debug("format type must be a string, symbol, or map, got type %d", type_id);
+        log_debug("format type must be a string, symbol, or map, got type: %s", get_type_name(type_id));
         return NULL;  // todo: push error
     }
 
