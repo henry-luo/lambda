@@ -252,30 +252,31 @@ module.exports = grammar({
 
     // Literal Values
 
-    // Empty strings ("") are allowed - they map to null at the data level
-    string: $ => seq('"', optional($._string_content), '"'),
-
-    _string_content: $ => repeat1(choice(
-      $.string_content,
-      $.escape_sequence,
+    // String as single token to prevent /* inside strings being parsed as comments
+    // Matches: "", "content", "content with \" escapes"
+    // Escape sequences: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX, \u{X...}
+    string: _ => token(seq(
+      '"',
+      repeat(choice(
+        /[^"\\]+/,  // any chars except " and \
+        /\\["\\\/bfnrt]/,  // simple escapes
+        /\\u[0-9a-fA-F]{4}/,  // \uXXXX
+        /\\u\{[0-9a-fA-F]+\}/,  // \u{X...}
+      )),
+      '"',
     )),
 
-    // String content: can span multiple lines
-    string_content: _ => token.immediate(/[^\\"]+/),
-
-    // Empty symbols ('') are allowed - they map to null at the data level
-    symbol: $ => seq("'", optional($._symbol_content), "'"),
-
-    _symbol_content: $ => repeat1(choice(
-      $.symbol_content,
-      $.escape_sequence,
-    )),
-
-    symbol_content: _ => token.immediate(/[^\\'\n]+/),
-
-    escape_sequence: _ => token.immediate(seq(
-      '\\',
-      /(\"|\\|\/|b|f|n|r|t|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]+\})/,
+    // Symbol as single token (same reason as string)
+    // Symbols don't allow newlines within them
+    symbol: _ => token(seq(
+      "'",
+      repeat(choice(
+        /[^'\\\n]+/,  // any chars except ', \, and newline
+        /\\['\\\/bfnrt]/,  // simple escapes
+        /\\u[0-9a-fA-F]{4}/,  // \uXXXX
+        /\\u\{[0-9a-fA-F]+\}/,  // \u{X...}
+      )),
+      "'",
     )),
 
     binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),

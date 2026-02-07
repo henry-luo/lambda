@@ -3254,25 +3254,6 @@
     }
   },
   {
-    "type": "string",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "string_content",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "string_pattern",
     "named": true,
     "fields": {
@@ -3300,25 +3281,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "symbol",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "symbol_content",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -3534,10 +3496,6 @@
     "named": false
   },
   {
-    "type": "\"",
-    "named": false
-  },
-  {
     "type": "%",
     "named": false
   },
@@ -3727,11 +3685,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "desc",
@@ -3760,10 +3718,6 @@
   {
     "type": "error",
     "named": false
-  },
-  {
-    "type": "escape_sequence",
-    "named": true
   },
   {
     "type": "false",
@@ -3918,7 +3872,11 @@
     "named": false
   },
   {
-    "type": "string_content",
+    "type": "string",
+    "named": true
+  },
+  {
+    "type": "symbol",
     "named": true
   },
   {
@@ -3926,20 +3884,16 @@
     "named": false
   },
   {
-    "type": "symbol_content",
-    "named": true
-  },
-  {
     "type": "t'",
     "named": false
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

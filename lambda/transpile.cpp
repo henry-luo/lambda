@@ -3679,9 +3679,17 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
     strbuf_append_char(tp->code_buf, ',');
     if (field_node->field->node_type == AST_NODE_IDENT) {
-        TSSymbol symbol = ts_node_symbol(field_node->field->node);
-        TypeString* type = (TypeString*)build_lit_string(tp, field_node->field->node, symbol);
-        strbuf_append_format(tp->code_buf, "const_s2it(%d)", type->const_index);
+        // For identifier fields (like m.a), create a string constant from the identifier name
+        AstIdentNode* id_node = (AstIdentNode*)field_node->field;
+        String* name = id_node->name;
+        // Create a TypeString for the field name
+        TypeString* str_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_STRING, sizeof(TypeString));
+        str_type->is_const = 1;
+        str_type->is_literal = 1;
+        str_type->string = name;  // reuse the pooled name string
+        arraylist_append(tp->const_list, name);
+        str_type->const_index = tp->const_list->length - 1;
+        strbuf_append_format(tp->code_buf, "const_s2it(%d)", str_type->const_index);
     }
     else {
         transpile_box_item(tp, field_node->field);
