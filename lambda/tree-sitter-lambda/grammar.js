@@ -181,6 +181,9 @@ module.exports = grammar({
 
   precedences: $ => [[
     $.fn_expr_stam,
+    $.call_expr,
+    $.index_expr,
+    $.member_expr,
     $.primary_expr,
     $.unary_expr,
     // binary operators
@@ -205,7 +208,8 @@ module.exports = grammar({
     $.for_expr,
     $.let_expr,
     $.fn_expr,
-    $.assign_expr
+    $.assign_expr,
+    $.assign_stam,
   ],
   [
     $.fn_type,
@@ -778,10 +782,10 @@ module.exports = grammar({
 
     // assignment statement for mutable variables (procedural only)
     // use prec.right to prefer consuming expression when present
-    assign_stam: $ => prec.right(seq(
+    assign_stam: $ => seq(
       field('target', $.identifier), '=', field('value', $._expression),
       optional(';')
-    )),
+    ),
 
     // Type Definitions: ----------------------------------
 

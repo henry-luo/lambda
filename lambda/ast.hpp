@@ -174,6 +174,7 @@ typedef struct NameEntry {
     AstNode* node;              // AST node that defines the name
     struct NameEntry* next;
     AstImportNode* import;      // the module that the name is imported from, if any
+    struct NameScope* scope;    // the scope where this entry was defined
 } NameEntry;
 
 // name_scope
