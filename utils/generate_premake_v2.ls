@@ -9,6 +9,58 @@ fn arr_merge(a, b) {
      if (n == 0) a else [for (x in a) x, for (y in b) y])
 }
 
+// Get library includes from external libraries
+fn get_lib_includes(c) {
+    (let libs = c.libraries or [],
+     let includes = [for (lib in libs where lib.include != null and lib.include != "") lib.include],
+     includes)
+}
+
+// Get platform-specific includes
+fn get_platform_includes(c, platform: string) {
+    (let platforms = c.platforms or {},
+     let plat_config = if (platform == "macos") platforms.macos or {}
+                       else if (platform == "linux") platforms.linux or {}
+                       else platforms.windows or {},
+     plat_config.includes or [])
+}
+
+// Get framework linkoptions for macOS
+fn gen_frameworks_block(platform: string) {
+    if (platform == "macos")
+        ind(1) ++ "linkoptions {\n" ++
+        ind(2) ++ "\"-framework CoreFoundation\",\n" ++
+        ind(2) ++ "\"-framework CoreServices\",\n" ++
+        ind(2) ++ "\"-framework SystemConfiguration\",\n" ++
+        ind(2) ++ "\"-framework Cocoa\",\n" ++
+        ind(2) ++ "\"-framework IOKit\",\n" ++
+        ind(2) ++ "\"-framework CoreVideo\",\n" ++
+        ind(2) ++ "\"-framework OpenGL\",\n" ++
+        ind(2) ++ "\"-framework Foundation\",\n" ++
+        ind(1) ++ "}\n\n"
+    else ""
+}
+
+// Get static library paths for linkoptions
+fn get_static_lib_paths(c) {
+    (let libs = c.libraries or [],
+     let static_libs = [for (lib in libs where lib.link == "static" and lib.lib != null and lib.lib != "") lib],
+     let paths = [for (lib in static_libs) 
+         (let p = lib.lib,
+          let is_abs = starts_with(p, "/"),
+          if (is_abs) p else "../../" ++ p)],
+     paths)
+}
+
+// Generate static libraries block as linkoptions
+fn gen_static_libs_block(paths) {
+    (let valid_paths = [for (p in paths where p != null and p != "") p],
+     let n = len(valid_paths),
+     if (n == 0) ""
+     else (let items = [for (p in valid_paths) ind(2) ++ q(p) ++ ","],
+           ind(1) ++ "linkoptions {\n" ++ join_items(items, "\n") ++ "\n" ++ ind(1) ++ "}\n\n"))
+}
+
 fn detect_platform() {
     (let p = sys.os.platform,
      if (p == "darwin") "macos"
@@ -22,7 +74,8 @@ fn ind(n: int) {
     if (n <= 0) ""
     else if (n == 1) "    "
     else if (n == 2) "        "
-    else "            "
+    else if (n == 3) "            "
+    else "                "
 }
 
 fn strip_exe(name: string) {
@@ -109,9 +162,10 @@ fn gen_remove_files_block(patterns) {
 }
 
 fn gen_includes_block(includes) {
-    (let n = len(includes),
+    (let inc = includes or [],
+     let n = len(inc),
      if (n == 0) ""
-     else (let items = [for (inc in includes) ind(2) ++ q(inc) ++ ","],
+     else (let items = [for (i in inc) ind(2) ++ q(i) ++ ","],
            ind(1) ++ "includedirs {\n" ++ join_items(items, "\n") ++ "\n" ++ ind(1) ++ "}\n\n"))
 }
 
@@ -119,14 +173,37 @@ fn gen_libdirs_block(platform: string) {
     if (platform == "macos")
         ind(1) ++ "libdirs {\n" ++
         ind(2) ++ "\"/opt/homebrew/lib\",\n" ++
+        ind(2) ++ "\"/opt/homebrew/Cellar/criterion/2.4.2_2/lib\",\n" ++
+        ind(2) ++ "\"build/lib\",\n" ++
         ind(2) ++ "\"/usr/local/lib\",\n" ++
         ind(1) ++ "}\n\n"
     else if (platform == "linux")
         ind(1) ++ "libdirs {\n" ++
         ind(2) ++ "\"/usr/local/lib\",\n" ++
+        ind(2) ++ "\"build/lib\",\n" ++
         ind(2) ++ "\"/usr/lib\",\n" ++
         ind(1) ++ "}\n\n"
     else ""
+}
+
+fn gen_filter_block() {
+    ind(1) ++ "filter \"files:**.c\"\n" ++
+    ind(2) ++ "buildoptions {\n" ++
+    ind(3) ++ "\"-pedantic\",\n" ++
+    ind(3) ++ "\"-fdiagnostics-color=auto\",\n" ++
+    ind(3) ++ "\"-fno-omit-frame-pointer\",\n" ++
+    ind(3) ++ "\"-std=c17\",\n" ++
+    ind(2) ++ "}\n" ++
+    ind(1) ++ "\n" ++
+    ind(1) ++ "filter \"files:**.cpp\"\n" ++
+    ind(2) ++ "buildoptions {\n" ++
+    ind(3) ++ "\"-pedantic\",\n" ++
+    ind(3) ++ "\"-fdiagnostics-color=auto\",\n" ++
+    ind(3) ++ "\"-fno-omit-frame-pointer\",\n" ++
+    ind(3) ++ "\"-std=c++17\",\n" ++
+    ind(2) ++ "}\n" ++
+    ind(1) ++ "\n" ++
+    ind(1) ++ "filter {}\n\n"
 }
 
 fn gen_links_block(libs) {
@@ -170,16 +247,11 @@ fn gen_defines_block(defs) {
 }
 
 fn get_base_includes(c, platform: string) {
-    (let base = c.includes or [],
-     let is_macos = platform == "macos",
-     let is_linux = platform == "linux",
-     let extra = if (is_macos)
-         ["/opt/homebrew/include", "/opt/homebrew/opt/freetype/include/freetype2",
-          "/opt/homebrew/include/libpng16", "/usr/local/include", "lib/mem-pool/include"]
-     else if (is_linux)
-         ["/usr/include", "/usr/include/freetype2", "/usr/local/include", "lib/mem-pool/include"]
-     else ["lib/mem-pool/include"],
-     arr_merge(base, extra))
+    (let global_inc = c.includes or [],
+     let plat_inc = get_platform_includes(c, platform),
+     let lib_inc = get_lib_includes(c),
+     let extra = ["lib/mem-pool/include"],
+     arr_merge(arr_merge(arr_merge(global_inc, plat_inc), lib_inc), extra))
 }
 
 fn find_target(targets, name: string) {
@@ -212,11 +284,14 @@ fn gen_lambda_input(c, platform: string) {
            let patterns = t.source_patterns or [],
            let excludes = t.exclude_patterns or [],
            let includes = get_base_includes(c, platform),
-           gen_project_header("lambda-input-full-cpp", "StaticLib", "C++", "build/lib") ++
+           let link_type = t.link or "static",
+           let kind = if (link_type == "dynamic") "SharedLib" else "StaticLib",
+           gen_project_header("lambda-input-full-cpp", kind, "C++", "build/lib") ++
            gen_files_block(sources) ++
            gen_source_patterns_block(patterns) ++
            gen_remove_files_block(excludes) ++
            gen_includes_block(includes) ++
+           gen_filter_block() ++
            gen_libdirs_block(platform) ++
            gen_buildopts_block(["-std=c++17", "-fno-omit-frame-pointer"])))
 }
@@ -236,19 +311,18 @@ fn gen_lambda_exe(c, platform: string) {
      let all_patterns = arr_merge(c_patterns, cpp_patterns),
      let is_macos = platform == "macos",
      let is_linux = platform == "linux",
-     let sys_libs = if (is_macos)
-         ["c++", "Cocoa.framework", "IOKit.framework", "CoreFoundation.framework", "OpenGL.framework"]
-     else if (is_linux)
-         ["stdc++", "pthread", "dl", "m"]
-     else ["stdc++", "pthread"],
+     let static_paths = get_static_lib_paths(c),
+     let link_libs = ["re2", "lambda-lib", "lambda-input-full-cpp"],
      gen_project_header(name, "ConsoleApp", "C++", ".") ++
      ind(1) ++ "targetname " ++ q(name) ++ "\n" ++
      ind(1) ++ "targetextension \".exe\"\n\n" ++
      gen_files_block(all_patterns) ++
      gen_includes_block(includes) ++
+     gen_filter_block() ++
      gen_libdirs_block(platform) ++
-     gen_links_block(sys_libs) ++
-     gen_linkopts_block(libs, platform) ++
+     gen_static_libs_block(static_paths) ++
+     gen_links_block(link_libs) ++
+     gen_frameworks_block(platform) ++
      gen_buildopts_block(["-std=c++17", "-fno-omit-frame-pointer"]))
 }
 
@@ -267,19 +341,17 @@ fn gen_single_test(test, c, platform: string) {
      let src_path = if (has_source) (if (has_test_prefix) source else "test/" ++ source) else "",
      let has_src_path = src_path != "",
      let all_sources = if (has_src_path) arr_merge([src_path], add_srcs) else add_srcs,
-     let is_macos = platform == "macos",
-     let sys_libs = if (is_macos)
-         ["c++", "Cocoa.framework", "IOKit.framework", "CoreFoundation.framework", "OpenGL.framework"]
-     else ["stdc++", "pthread", "dl", "m"],
-     let link_libs = arr_merge(arr_merge(deps, test_libs), sys_libs),
+     let static_paths = get_static_lib_paths(c),
+     let link_libs = arr_merge(deps, test_libs),
      gen_project_header(proj_name, "ConsoleApp", "C++", "test") ++
      ind(1) ++ "targetname " ++ q(proj_name) ++ "\n" ++
      ind(1) ++ "targetextension \".exe\"\n\n" ++
      gen_files_block(all_sources) ++
      gen_includes_block(includes) ++
      gen_libdirs_block(platform) ++
+     gen_static_libs_block(static_paths) ++
      gen_links_block(link_libs) ++
-     gen_linkopts_block(libs, platform) ++
+     gen_frameworks_block(platform) ++
      gen_buildopts_block(["-std=c++17", "-fno-omit-frame-pointer"]))
 }
 
