@@ -90,8 +90,8 @@ nan
 -inf
 
 // Decimals (arbitrary precision)
-123.456n
--789.012N
+123.456n       // decimal128
+-789.012N      // unlimited precision decimal
 ```
 
 **Special float values**:
@@ -225,14 +225,14 @@ sys.platform                  // Operating system platform
 
 ### Path Schemes
 
-| Scheme | Root Syntax | Example | Resolves To |
-|--------|-------------|---------|-------------|
-| Absolute file | `/` | `/etc.hosts` | `/etc/hosts` |
-| Relative (current) | `.` | `.src.main` | `./src/main` |
-| Relative (parent) | `..` | `..shared.lib` | `../shared/lib` |
-| HTTP | `http` | `http.api.example.com` | `http://api.example.com` |
-| HTTPS | `https` | `https.secure.api` | `https://secure.api` |
-| System | `sys` | `sys.env.PATH` | System environment variable |
+| Scheme             | Root Syntax | Example                  | Resolves To                 |
+| ------------------ | ----------- | ------------------------ | --------------------------- |
+| Absolute file      | `/`         | `/etc.hosts`             | `/etc/hosts`                |
+| Relative (current) | `.`         | `.src.main`              | `./src/main`                |
+| Relative (parent)  | `..`        | `..shared.lib`           | `../shared/lib`             |
+| HTTP               | `http`      | `http.'api.example.com'` | `http://api.example.com`    |
+| HTTPS              | `https`     | `https.'secure.api'`     | `https://secure.api`        |
+| System             | `sys`       | `sys.env.PATH`           | System environment variable |
 
 ### Wildcards
 
