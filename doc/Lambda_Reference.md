@@ -344,40 +344,6 @@ let value = if (x == 0) error("Invalid input") else process(x);
 
 ---
 
-## Memory Management
-
-Lambda Script uses automatic memory management with reference counting and memory pools:
-
-### Reference Counting
-
-- All values are automatically reference counted
-- Memory is freed when reference count reaches zero
-- No manual memory management required
-
-### Memory Pools
-
-- Objects are allocated from memory pools for efficiency
-- Pools are automatically managed by the runtime
-- Reduces fragmentation and improves performance
-
-### Immutability
-
-- Most data structures are immutable by default
-- Immutability eliminates many memory safety issues
-- Structural sharing for efficient memory usage
-
-```lambda
-// Immutable collections
-let list1 = (1, 2, 3);
-let list2 = (0, list1...);  // Shares structure with list1
-
-// Mutable collections (arrays)
-let arr = [1, 2, 3];
-// arr is mutable, but assignment creates new references
-```
-
----
-
 ## Examples
 
 ### Basic Data Processing
