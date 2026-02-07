@@ -156,31 +156,7 @@ List* generate_field_suggestions(const char* typo_field, TypeMap* map_type, Pool
 
 // ==================== Type Mismatch Suggestions ====================
 
-/**
- * Get human-readable type name
- */
-static const char* get_type_name(TypeId type_id) {
-    switch (type_id) {
-        case LMD_TYPE_NULL: return "null";
-        case LMD_TYPE_BOOL: return "bool";
-        case LMD_TYPE_INT: return "int";
-        case LMD_TYPE_FLOAT: return "float";
-        case LMD_TYPE_DECIMAL: return "decimal";
-        case LMD_TYPE_NUMBER: return "number";
-        case LMD_TYPE_STRING: return "string";
-        case LMD_TYPE_SYMBOL: return "symbol";
-        case LMD_TYPE_BINARY: return "binary";
-        case LMD_TYPE_DTIME: return "datetime";
-        case LMD_TYPE_RANGE: return "range";
-        case LMD_TYPE_LIST: return "list";
-        case LMD_TYPE_ARRAY: return "array";
-        case LMD_TYPE_MAP: return "map";
-        case LMD_TYPE_ELEMENT: return "element";
-        case LMD_TYPE_TYPE: return "type";
-        case LMD_TYPE_FUNC: return "function";
-        default: return "unknown";
-    }
-}
+// Note: get_type_name() is now provided globally via lambda.h
 
 /**
  * Generate type mismatch suggestions

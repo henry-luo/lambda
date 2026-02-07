@@ -448,7 +448,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return typeditem_to_item((TypedItem*)field_ptr);
             }
             default:
-                log_error("unknown map item type %d", type_id);
+                log_error("unknown map item type %s", get_type_name(type_id));
                 return ItemError;
             }
         }
@@ -467,7 +467,7 @@ Item map_get(Map* map, Item key) {
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
         key_str = key.get_string()->chars;
     } else {
-        log_error("map_get: key must be string or symbol, got type %d", key._type_id);
+        log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;  // only string or symbol keys are supported
     }
     log_debug("map_get key:'%s'", key_str);

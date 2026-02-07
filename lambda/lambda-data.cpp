@@ -574,7 +574,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
-                log_error("expected a map, got data of type %d", type_id);
+                log_error("expected a map, got data of type %s", get_type_name(type_id));
                 *(Map**)field_ptr = nullptr;
             }
         } else {
@@ -670,7 +670,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.path = item.path;
                     break;
                 default:
-                    log_error("unknown type %d in set_fields", type_id);
+                    log_error("unknown type %s in set_fields", get_type_name(type_id));
                     // set as ERROR
                     titem = {.type_id = LMD_TYPE_ERROR};
                 }
@@ -679,7 +679,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             default:
-                log_error("unknown type %d", field->type->type_id);
+                log_error("unknown type %s", get_type_name(field->type->type_id));
             }
         }
         field = field->next;
@@ -780,7 +780,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         break;
     }
     default:
-        log_error("unknown map item type %d", type_id);
+        log_error("unknown map item type %s", get_type_name(type_id));
         return ItemError;
     }
     return result;
@@ -826,7 +826,7 @@ ConstItem Map::get(const Item key) const {
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
         key_str = key.get_string()->chars;
     } else {
-        log_error("map_get_const: key must be string or symbol, got type %d", key._type_id);
+        log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return null_result;  // only string or symbol keys are supported
     }
     log_debug("map_get_const key: %s", key_str);
