@@ -1243,120 +1243,173 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // Empty strings ("" or '') map to null in Lambda
+    // With single-token strings/symbols, we parse the raw token text directly
+    // Binary is still a multi-node structure: b' + hex_binary/base64_binary + '
     String* str;
     log_debug("build lit string with symbol: %d", symbol);
 
-    int cnt = ts_node_named_child_count(node);
-    log_debug("string child count:: %d", cnt);
+    // Handle binary separately since it has child nodes
+    if (symbol == SYM_BINARY) {
+        TypeString* str_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeString));
+        str_type->is_const = 1;  str_type->is_literal = 1;
+        
+        // Binary has a child node (hex_binary or base64_binary)
+        int cnt = ts_node_named_child_count(node);
+        if (cnt == 0) {
+            log_debug("build_lit_string: empty binary literal, returning null type");
+            return &LIT_NULL;
+        }
+        
+        TSNode child = ts_node_named_child(node, 0);
+        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
+        int content_len = end - start;
+        
+        str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
+        str_type->string = str;
+        memcpy(str->chars, tp->source + start, content_len);
+        str->chars[content_len] = '\0';
+        str->len = content_len;
+        str->ref_cnt = 1;
+        
+        arraylist_append(tp->const_list, str);
+        str_type->const_index = tp->const_list->length - 1;
+        return (Type*)str_type;
+    }
 
-    // Handle empty string/symbol case - no content children means empty literal
-    // When string is "" or symbol is '', cnt == 0 (no string_content/symbol_content children)
-    // But for SYM_IDENT, cnt is also 0 (identifiers don't have named children)
-    // Only return null for actual string/symbol literals that are empty
-    if (cnt == 0 && (symbol == SYM_STRING || symbol == SYM_SYMBOL)) {
+    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+    int raw_len = end - start;
+    const char* raw = tp->source + start;
+
+    // Determine quote character and content boundaries
+    char quote_char = (symbol == SYM_STRING) ? '"' : '\'';  // symbols use single quotes
+    
+    // Skip opening quote
+    if (raw_len < 2 || raw[0] != quote_char || raw[raw_len - 1] != quote_char) {
+        log_error("Invalid string literal format: %.*s", raw_len, raw);
+        return &LIT_NULL;
+    }
+    
+    const char* content_start = raw + 1;
+    int content_len = raw_len - 2;  // exclude both quotes
+    
+    // Handle empty string/symbol case
+    if (content_len == 0) {
         log_debug("build_lit_string: empty string/symbol literal, returning null type");
         return &LIT_NULL;
     }
 
-    // Calculate content length
-    int len = 0;
-    TSNode child;
-    if (cnt == 0) {
-        // For identifiers (SYM_IDENT), use the node itself
-        child = node;
-        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        len = end - start;
-    } else if (cnt == 1) {
-        child = ts_node_named_child(node, 0);
-        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        len = end - start;
-        // Check if content is empty after parsing (shouldn't happen normally)
-        if (len == 0) {
-            log_debug("build_lit_string: empty content child, returning null type");
-            return &LIT_NULL;
-        }
-    }
-
     TypeString* str_type = (TypeString*)alloc_type(tp->pool,
-        symbol == SYM_STRING ? LMD_TYPE_STRING :
-        symbol == SYM_BINARY ? LMD_TYPE_BINARY :
-        LMD_TYPE_SYMBOL, sizeof(TypeString));
+        symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(TypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
 
-    // Check if the single child is an escape sequence - if so, needs special processing
+    // Check if there are any escape sequences in the content
     bool has_escape = false;
-    if (cnt == 1) {
-        TSNode first_child = ts_node_named_child(node, 0);
-        has_escape = (ts_node_symbol(first_child) == SYM_ESCAPE_SEQUENCE);
-    }
-
-    if (cnt <= 1 && !has_escape) {
-        // For cnt == 0 (identifiers) or cnt == 1 (simple string content, no escapes)
-        if (cnt == 0) {
-            child = node;
-        } else {
-            child = ts_node_named_child(node, 0);
+    for (int i = 0; i < content_len; i++) {
+        if (content_start[i] == '\\') {
+            has_escape = true;
+            break;
         }
-        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        len = end - start;
-        // copy the string
-        str = (String*)pool_alloc(tp->pool, sizeof(String) + len + 1);
-        str_type->string = (String*)str;
-        const char* str_content = tp->source + start;
-        memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
-        str->chars[len] = '\0';  str->len = len;
-        str->ref_cnt = 1;  // set to 1 to prevent it from being freed
     }
-    else { // got escape sequence or multiple content parts
-        StringBuf *str_buf = stringbuf_new(tp->pool);  // todo: reuse the stringbuf
-        TSNode child = ts_node_named_child(node, 0);
-        while (!ts_node_is_null(child)) {
-            TSSymbol symbol = ts_node_symbol(child);
-            if (symbol == SYM_STRING_CONTENT || symbol == SYM_SYMBOL_CONTENT) {
-                // handle normnal string
-                stringbuf_append_str_n(str_buf, tp->source + ts_node_start_byte(child), ts_node_end_byte(child) - ts_node_start_byte(child));
-            }
-            else if (symbol == SYM_ESCAPE_SEQUENCE) {
-                // handle escape sequences: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX, \u{...}
-                const char* escape_start = tp->source + ts_node_start_byte(child);
-                int escape_len = ts_node_end_byte(child) - ts_node_start_byte(child);
 
-                if (escape_len >= 2 && escape_start[0] == '\\') {
-                    char escape_char = escape_start[1];
-                    switch (escape_char) {
-                    case '"':
-                        stringbuf_append_char(str_buf, '"');
-                        break;
-                    case '\\':
-                        stringbuf_append_char(str_buf, '\\');
-                        break;
-                    case '/':
-                        stringbuf_append_char(str_buf, '/');
-                        break;
-                    case 'b':
-                        stringbuf_append_char(str_buf, '\b');
-                        break;
-                    case 'f':
-                        stringbuf_append_char(str_buf, '\f');
-                        break;
-                    case 'n':
-                        stringbuf_append_char(str_buf, '\n');
-                        break;
-                    case 'r':
-                        stringbuf_append_char(str_buf, '\r');
-                        break;
-                    case 't':
-                        stringbuf_append_char(str_buf, '\t');
-                        break;
-                    case 'u':
-                        // handle Unicode escape sequences: \uXXXX or \u{...}
-                        if (escape_len >= 6 && escape_start[2] != '{') {
-                            // \uXXXX format (exactly 4 hex digits)
-                            char hex_digits[5] = {0};
-                            memcpy(hex_digits, escape_start + 2, 4);
+    if (!has_escape) {
+        // No escapes - simple copy
+        str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
+        str_type->string = str;
+        memcpy(str->chars, content_start, content_len);
+        str->chars[content_len] = '\0';
+        str->len = content_len;
+        str->ref_cnt = 1;
+    }
+    else {
+        // Has escape sequences - process them
+        StringBuf *str_buf = stringbuf_new(tp->pool);
+        
+        for (int i = 0; i < content_len; i++) {
+            if (content_start[i] == '\\' && i + 1 < content_len) {
+                char escape_char = content_start[i + 1];
+                switch (escape_char) {
+                case '"':
+                    stringbuf_append_char(str_buf, '"');
+                    i++;
+                    break;
+                case '\'':
+                    stringbuf_append_char(str_buf, '\'');
+                    i++;
+                    break;
+                case '\\':
+                    stringbuf_append_char(str_buf, '\\');
+                    i++;
+                    break;
+                case '/':
+                    stringbuf_append_char(str_buf, '/');
+                    i++;
+                    break;
+                case 'b':
+                    stringbuf_append_char(str_buf, '\b');
+                    i++;
+                    break;
+                case 'f':
+                    stringbuf_append_char(str_buf, '\f');
+                    i++;
+                    break;
+                case 'n':
+                    stringbuf_append_char(str_buf, '\n');
+                    i++;
+                    break;
+                case 'r':
+                    stringbuf_append_char(str_buf, '\r');
+                    i++;
+                    break;
+                case 't':
+                    stringbuf_append_char(str_buf, '\t');
+                    i++;
+                    break;
+                case 'u':
+                    // Handle Unicode escape sequences: \uXXXX or \u{...}
+                    if (i + 5 < content_len && content_start[i + 2] != '{') {
+                        // \uXXXX format (exactly 4 hex digits)
+                        char hex_digits[5] = {0};
+                        memcpy(hex_digits, content_start + i + 2, 4);
+                        char* endptr;
+                        uint32_t code_point = strtoul(hex_digits, &endptr, 16);
+                        if (endptr == hex_digits + 4) {
+                            // Convert Unicode code point to UTF-8
+                            if (code_point <= 0x7F) {
+                                stringbuf_append_char(str_buf, (char)code_point);
+                            } else if (code_point <= 0x7FF) {
+                                stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
+                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                            } else if (code_point <= 0xFFFF) {
+                                stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
+                                stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                            }
+                            i += 5;  // skip \uXXXX
+                        } else {
+                            log_error("Invalid Unicode escape: \\u%s", hex_digits);
+                            stringbuf_append_char(str_buf, '\\');
+                            stringbuf_append_char(str_buf, 'u');
+                            i++;
+                        }
+                    }
+                    else if (i + 3 < content_len && content_start[i + 2] == '{') {
+                        // \u{...} format (variable length hex digits)
+                        const char* hex_start = content_start + i + 3;
+                        const char* hex_end = NULL;
+                        for (const char* p = hex_start; p < content_start + content_len; p++) {
+                            if (*p == '}') {
+                                hex_end = p;
+                                break;
+                            }
+                        }
+                        if (hex_end && hex_end > hex_start) {
+                            int hex_len = hex_end - hex_start;
+                            char* hex_str = (char*)malloc(hex_len + 1);
+                            memcpy(hex_str, hex_start, hex_len);
+                            hex_str[hex_len] = '\0';
                             char* endptr;
-                            uint32_t code_point = strtoul(hex_digits, &endptr, 16);
-                            if (endptr == hex_digits + 4) {  // successful parsing
+                            uint32_t code_point = strtoul(hex_str, &endptr, 16);
+                            if (endptr == hex_str + hex_len && code_point <= 0x10FFFF) {
                                 // Convert Unicode code point to UTF-8
                                 if (code_point <= 0x7F) {
                                     stringbuf_append_char(str_buf, (char)code_point);
@@ -1367,75 +1420,48 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                                     stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
                                     stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
                                     stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                }
-                            } else {
-                                log_error("Invalid Unicode escape sequence: %.*s", escape_len, escape_start);
-                                // append as-is on error
-                                stringbuf_append_str_n(str_buf, escape_start, escape_len);
-                            }
-                        }
-                        else if (escape_len > 4 && escape_start[2] == '{') {
-                            // \u{...} format (variable length hex digits)
-                            const char* hex_start = escape_start + 3;
-                            const char* hex_end = escape_start + escape_len - 1;  // should be '}'
-                            if (hex_end > hex_start && *hex_end == '}') {
-                                int hex_len = hex_end - hex_start;
-                                char* hex_str = (char*)malloc(hex_len + 1);
-                                memcpy(hex_str, hex_start, hex_len);
-                                hex_str[hex_len] = '\0';
-                                char* endptr;
-                                uint32_t code_point = strtoul(hex_str, &endptr, 16);
-                                if (endptr == hex_str + hex_len && code_point <= 0x10FFFF) {
-                                    // Convert Unicode code point to UTF-8
-                                    if (code_point <= 0x7F) {
-                                        stringbuf_append_char(str_buf, (char)code_point);
-                                    } else if (code_point <= 0x7FF) {
-                                        stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
-                                        stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                    } else if (code_point <= 0xFFFF) {
-                                        stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
-                                        stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                        stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                    } else {
-                                        // 4-byte UTF-8 encoding for code points > 0xFFFF
-                                        stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
-                                        stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
-                                        stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
-                                        stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
-                                    }
                                 } else {
-                                    log_error("Invalid Unicode escape sequence: %.*s", escape_len, escape_start);
-                                    // append as-is on error
-                                    stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                                    // 4-byte UTF-8 encoding for code points > 0xFFFF
+                                    stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
+                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
+                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
                                 }
-                                free(hex_str);
+                                i = (hex_end - content_start);  // position at '}'
                             } else {
-                                log_error("Malformed Unicode escape sequence: %.*s", escape_len, escape_start);
-                                stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                                log_error("Invalid Unicode escape: \\u{%s}", hex_str);
+                                stringbuf_append_char(str_buf, '\\');
+                                stringbuf_append_char(str_buf, 'u');
+                                i++;
                             }
+                            free(hex_str);
                         } else {
-                            log_error("Invalid Unicode escape sequence length: %.*s", escape_len, escape_start);
-                            stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                            log_error("Malformed Unicode escape sequence");
+                            stringbuf_append_char(str_buf, '\\');
+                            stringbuf_append_char(str_buf, 'u');
+                            i++;
                         }
-                        break;
-                    default:
-                        // unknown escape sequence, append as-is
-                        log_warn("Unknown escape sequence: \\%c", escape_char);
-                        stringbuf_append_str_n(str_buf, escape_start, escape_len);
-                        break;
+                    } else {
+                        log_error("Invalid Unicode escape sequence length");
+                        stringbuf_append_char(str_buf, '\\');
+                        stringbuf_append_char(str_buf, 'u');
+                        i++;
                     }
-                } else {
-                    // malformed escape sequence
-                    log_error("Malformed escape sequence: %.*s", escape_len, escape_start);
-                    stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                    break;
+                default:
+                    // Unknown escape sequence, keep as-is
+                    log_warn("Unknown escape sequence: \\%c", escape_char);
+                    stringbuf_append_char(str_buf, '\\');
+                    stringbuf_append_char(str_buf, escape_char);
+                    i++;
+                    break;
                 }
+            } else {
+                stringbuf_append_char(str_buf, content_start[i]);
             }
-            else {
-                log_error("Unknown string child symbol: %d", symbol);
-            }
-            child = ts_node_next_named_sibling(child);
         }
-        // convert StringBuf to String
+        
+        // Convert StringBuf to String
         str = stringbuf_to_string(str_buf);
         log_debug("final string: %.*s", str->len, str->chars);
 
