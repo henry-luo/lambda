@@ -16,10 +16,10 @@ This document covers Lambda's function system, including pure functional (`fn`) 
 2. [Function Declarations](#function-declarations)
 3. [Function Parameters](#function-parameters)
 4. [Function Calls](#function-calls)
-5. [Closures](#closures)
-6. [Higher-Order Functions](#higher-order-functions)
-7. [Procedural Functions](#procedural-functions)
-8. [Method-Style Calls](#method-style-calls)
+5. [Method-Style Calls](#method-style-calls)
+6. [Closures](#closures)
+7. [Higher-Order Functions](#higher-order-functions)
+8. [Procedural Functions](#procedural-functions)
 
 ---
 
@@ -258,6 +258,68 @@ let add5 = (x) => add(5, x)
 add5(3)   // 8
 ```
 
+### Method-Style Calls
+
+System functions can be called using method syntax:
+
+```lambda
+// Traditional prefix style
+len(arr)
+sum([1, 2, 3])
+slice("hello", 0, 3)
+
+// Method style (equivalent)
+arr.len()
+[1, 2, 3].sum()
+"hello".slice(0, 3)
+
+// Array operations
+[3, 1, 4, 1, 5].sort()          // [1, 1, 3, 4, 5]
+[3, 1, 4, 1, 5].sum()           // 14
+[3, 1, 4, 1, 5].unique()        // [3, 1, 4, 5]
+
+// Chained
+[5, 3, 1, 4, 2].sort().reverse()  // [5, 4, 3, 2, 1]
+
+// Type conversion
+42.string()                      // "42"
+"123".int()                      // 123
+3.14.floor()                     // 3
+```
+
+#### Supported Functions
+
+| Category | Prefix Style | Method Style |
+|----------|--------------|--------------|
+| **Type** | `len(arr)` | `arr.len()` |
+| **Type** | `type(val)` | `val.type()` |
+| **Type** | `string(42)` | `42.string()` |
+| **String** | `slice(s, 0, 5)` | `s.slice(0, 5)` |
+| **String** | `contains(s, "x")` | `s.contains("x")` |
+| **Collection** | `reverse(arr)` | `arr.reverse()` |
+| **Collection** | `sort(arr)` | `arr.sort()` |
+| **Collection** | `take(arr, 3)` | `arr.take(3)` |
+| **Stats** | `sum(nums)` | `nums.sum()` |
+| **Stats** | `avg(nums)` | `nums.avg()` |
+| **Math** | `abs(x)` | `x.abs()` |
+| **Math** | `sqrt(x)` | `x.sqrt()` |
+#### Method Chaining
+
+Method syntax enables fluent operations:
+
+```lambda
+// Chained method calls
+let result = data
+    .filter(x => x > 0)
+    .map(x => x * 2)
+    .sort()
+    .take(10)
+    .sum()
+
+// Equivalent nested calls (harder to read)
+let result = sum(take(sort(map(filter(data, x => x > 0), x => x * 2)), 10))
+```
+
 ---
 
 ## Closures
@@ -270,23 +332,6 @@ Closures are functions that capture variables from their enclosing scope.
 let multiplier = 3
 let triple = (x) => x * multiplier
 triple(5)  // 15
-```
-
-### Factory Functions
-
-Closures enable factory patterns:
-
-```lambda
-fn make_adder(base: int) {
-    fn adder(y) => base + y  // Captures 'base'
-    adder
-}
-
-let add10 = make_adder(10)
-let add100 = make_adder(100)
-
-add10(5)     // 15
-add100(5)    // 105
 ```
 
 ### Capturing Multiple Variables
@@ -384,7 +429,7 @@ fn reduce(arr, init, f) => {
 }
 
 // Usage
-filter([1, 2, 3, 4, 5], (x) => x > 2)     // [3, 4, 5]
+filter([1, 2, 3, 4, 5], (x) => x > 2)      // [3, 4, 5]
 map([1, 2, 3], (x) => x * 2)               // [2, 4, 6]
 reduce([1, 2, 3, 4], 0, (a, b) => a + b)   // 10
 ```
@@ -409,15 +454,15 @@ pn counter() {
 
 ### Key Differences from `fn`
 
-| Feature | `fn` (Functional) | `pn` (Procedural) |
-|---------|-------------------|-------------------|
-| Mutable variables | No | Yes (`var`) |
-| Assignment | No | Yes (`x = value`) |
-| While loops | No | Yes |
-| Break/Continue | No | Yes |
-| Early return | No | Yes (`return`) |
-| File output | No | Yes (`output()`, `\|>`) |
-| Side effects | Discouraged | Allowed |
+| Feature           | `fn` (Functional) | `pn` (Procedural)               |
+| ----------------- | ----------------- | ------------------------------- |
+| Mutable variables | No                | Yes (`var`)                     |
+| Assignment        | No                | Yes (`x = value`)               |
+| While loops       | No                | Yes                             |
+| Break/Continue    | No                | Yes                             |
+| Early return      | No                | Yes (`return`)                  |
+| File output       | No                | Yes (`output()`, `\|>`, `\|>>`) |
+| Side effects      | No                | Allowed                         |
 
 ### Implicit Return
 
@@ -454,61 +499,6 @@ pn find_first_even(nums: [int]) {
 }
 ```
 
-### Control Flow
-
-```lambda
-// While loop
-pn countdown(n: int) {
-    var x = n
-    while (x > 0) {
-        print(x)
-        x = x - 1
-    }
-    "Done"
-}
-
-// Break and continue
-pn process_items(items: [int]) {
-    var i = 0
-    while (i < len(items)) {
-        if (items[i] < 0) {
-            break              // Exit loop
-        }
-        if (items[i] == 0) {
-            i = i + 1
-            continue           // Skip iteration
-        }
-        process(items[i])
-        i = i + 1
-    }
-}
-```
-
-### If Statements
-
-```lambda
-pn classify(x: int) {
-    var result = ""
-    if (x > 0) {
-        result = "positive"
-    } else if (x < 0) {
-        result = "negative"
-    } else {
-        result = "zero"
-    }
-    result
-}
-
-// If without else
-pn abs_value(x: int) {
-    var result = x
-    if (x < 0) {
-        result = -x
-    }
-    result
-}
-```
-
 ### File Output in Procedural Functions
 
 ```lambda
@@ -531,80 +521,6 @@ pn save_report(data) {
 ```
 
 The `main()` procedure serves as the entry point.
-
----
-
-## Method-Style Calls
-
-System functions can be called using method syntax:
-
-```lambda
-// Traditional prefix style
-len(arr)
-sum([1, 2, 3])
-slice("hello", 0, 3)
-
-// Method style (equivalent)
-arr.len()
-[1, 2, 3].sum()
-"hello".slice(0, 3)
-```
-
-### Supported Functions
-
-| Category | Prefix Style | Method Style |
-|----------|--------------|--------------|
-| **Type** | `len(arr)` | `arr.len()` |
-| **Type** | `type(val)` | `val.type()` |
-| **Type** | `string(42)` | `42.string()` |
-| **String** | `slice(s, 0, 5)` | `s.slice(0, 5)` |
-| **String** | `contains(s, "x")` | `s.contains("x")` |
-| **Collection** | `reverse(arr)` | `arr.reverse()` |
-| **Collection** | `sort(arr)` | `arr.sort()` |
-| **Collection** | `take(arr, 3)` | `arr.take(3)` |
-| **Stats** | `sum(nums)` | `nums.sum()` |
-| **Stats** | `avg(nums)` | `nums.avg()` |
-| **Math** | `abs(x)` | `x.abs()` |
-| **Math** | `sqrt(x)` | `x.sqrt()` |
-
-### Method Chaining
-
-Method syntax enables fluent operations:
-
-```lambda
-// Chained method calls
-let result = data
-    .filter(x => x > 0)
-    .map(x => x * 2)
-    .sort()
-    .take(10)
-    .sum()
-
-// Equivalent nested calls (harder to read)
-let result = sum(take(sort(map(filter(data, x => x > 0), x => x * 2)), 10))
-```
-
-### Examples
-
-```lambda
-// String operations
-"Hello, World!".len()           // 13
-"Hello, World!".contains("World")  // true
-"Hello, World!".slice(0, 5)     // "Hello"
-
-// Array operations
-[3, 1, 4, 1, 5].sort()          // [1, 1, 3, 4, 5]
-[3, 1, 4, 1, 5].sum()           // 14
-[3, 1, 4, 1, 5].unique()        // [3, 1, 4, 5]
-
-// Chained
-[5, 3, 1, 4, 2].sort().reverse()  // [5, 4, 3, 2, 1]
-
-// Type conversion
-42.string()                      // "42"
-"123".int()                      // 123
-3.14.floor()                     // 3
-```
 
 ---
 
