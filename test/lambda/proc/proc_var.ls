@@ -142,6 +142,56 @@ pn test_print_conditional() {
     1
 }
 
+// Test 13: var declared inside while block (should be local, not captured)
+pn test_var_in_while_block() {
+    var i = 0
+    var sum = 0
+    while (i < 3) {
+        var temp = i * 10   // this var should be local, not closure captured
+        sum = sum + temp
+        i = i + 1
+    }
+    sum  // should be 0*10 + 1*10 + 2*10 = 0 + 10 + 20 = 30
+}
+
+// Test 14: var declared inside nested if-while blocks
+pn test_var_in_nested_blocks() {
+    var result = 0
+    var i = 0
+    while (i < 3) {
+        if (i > 0) {
+            var doubled = i * 2  // nested var should be local
+            result = result + doubled
+        }
+        i = i + 1
+    }
+    result  // should be 1*2 + 2*2 = 2 + 4 = 6
+}
+
+// Test 15: assignment with function call in binary expression (grammar fix test)
+fn double_val(x) { x * 2 }
+
+pn test_assign_with_fn_call() {
+    var s = 1
+    s = s + double_val(s)   // was parsed incorrectly before fix
+    s  // should be 1 + 2 = 3
+}
+
+// Test 16: assignment with array indexing in binary expression
+pn test_assign_with_array_index() {
+    let arr = [10, 20, 30]
+    var s = 5
+    s = s + arr[1]   // was parsed incorrectly before fix
+    s  // should be 5 + 20 = 25
+}
+
+// Test 17: assignment with string concat and function call
+pn test_assign_concat_fn_call() {
+    var msg = "Hello"
+    msg = msg ++ string(42)   // test ++ with function call
+    msg  // should be "Hello42"
+}
+
 // Main procedure to run tests
 pn main() {
     print("T1:")
@@ -168,5 +218,15 @@ pn main() {
     print(test_var_null_while())
     print(" T12:")
     test_print_conditional()
+    print(" T13:")
+    print(test_var_in_while_block())
+    print(" T14:")
+    print(test_var_in_nested_blocks())
+    print(" T15:")
+    print(test_assign_with_fn_call())
+    print(" T16:")
+    print(test_assign_with_array_index())
+    print(" T17:")
+    print(test_assign_concat_fn_call())
     "done"
 }
