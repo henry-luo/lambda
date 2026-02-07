@@ -1932,13 +1932,17 @@ Item fn_str_join(Item list_item, Item sep_item) {
         return ItemError;
     }
     
-    if (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL) {
-        log_debug("fn_str_join: separator must be a string or symbol");
+    // allow null/empty separator - treat as empty string
+    String* sep = nullptr;
+    size_t sep_len = 0;
+    
+    if (sep_type == LMD_TYPE_STRING || sep_type == LMD_TYPE_SYMBOL) {
+        sep = sep_item.get_string();
+        sep_len = sep ? sep->len : 0;
+    } else if (sep_type != LMD_TYPE_NULL) {
+        log_debug("fn_str_join: separator must be a string, symbol, or null");
         return ItemError;
     }
-
-    String* sep = sep_item.get_string();
-    size_t sep_len = sep ? sep->len : 0;
 
     // calculate total length
     size_t total_len = 0;
