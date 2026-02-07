@@ -2245,14 +2245,16 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
     } else {
         transpile_box_item(tp, while_node->cond);
     }
-    strbuf_append_str(tp->code_buf, ")) {\n");
-    // use procedural content for while body
+    strbuf_append_str(tp->code_buf, ")) {");
+    // use procedural statements (no wrapper) for while body
     if (while_node->body->node_type == AST_NODE_CONTENT) {
-        transpile_proc_content(tp, (AstListNode*)while_node->body);
+        transpile_proc_statements(tp, (AstListNode*)while_node->body);
     } else {
+        strbuf_append_str(tp->code_buf, "\n ");
         transpile_expr(tp, while_node->body);
+        strbuf_append_char(tp->code_buf, ';');
     }
-    strbuf_append_str(tp->code_buf, ";\n}");
+    strbuf_append_str(tp->code_buf, "\n}");
 }
 
 // procedural if statement - generates C-style if/else blocks

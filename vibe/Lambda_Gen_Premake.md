@@ -718,14 +718,13 @@ During the initial implementation of `utils/generate_premake.ls`, several transp
 
 ### Transpiler Bugs / Limitations
 
-| Issue                  | Description                                                                                                                  | Workaround                                                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `input()` null in `pn` | `input()` returns null when called inside a `pn` function with JIT compilation                                               | Load config at top-level with `let config = input(...)` before `pn main()`     |
-| `var = var ++ fn()`    | Concatenating a function call result directly causes parse errors                                                            | Use intermediate variable: `h = fn(); lua = lua ++ h`                          |
-| `replace(s, old, "")`  | Replacing with empty string returns null                                                                                     | Use `slice(s, 0, len(s) - n)` to remove suffix                                 |
-| Type coercion warnings | Multiple `if (x == null) "default" else x` expressions cause "incompatible types" warnings that can break `main()` detection | Minimize null checks; use direct field access when config is known to be valid |
-| `var` inside blocks    | Cannot declare `var` inside `while` or `if` blocks                                                                           | Declare all `var` at top of `pn` function                                      |
-| `if` blocks in `fn`    | Block-style `if (cond) { ... }` doesn't work in pure functions                                                               | Use expression-style: `if (cond) value else other`                             |
+| Issue                  | Description                                                                                                                  | Workaround                                                                     | Latest Status                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `input()` null in `pn` | `input()` returns null when called inside a `pn` function with JIT compilation                                               | Load config at top-level with `let config = input(...)` before `pn main()`     | Bug fixed. `input()` now works in pn.                  |
+| `var = var ++ fn()`    | Concatenating a function call result directly causes parse errors                                                            | Use intermediate variable: `h = fn(); lua = lua ++ h`                          | Assignment statement bug fixed.                        |
+| `replace(s, old, "")`  | Replacing with empty string returns null                                                                                     | Use `slice(s, 0, len(s) - n)` to remove suffix                                 |                                                        |
+| Type coercion warnings | Multiple `if (x == null) "default" else x` expressions cause "incompatible types" warnings that can break `main()` detection | Minimize null checks; use direct field access when config is known to be valid | Bug fixed. `if (x == null)`check is no longer a issue. |
+| `var` inside blocks    | Cannot declare `var` inside `while` or `if` blocks                                                                           | Declare all `var` at top of `pn` function                                      | Bug fixed. `var` now works in blocks.                  |
 
 ### Working Pattern: Hybrid Functional + Procedural
 
@@ -757,11 +756,8 @@ pn main() {
 
 ### Code Style Requirements
 
-1. **All `var` declarations at function top** - no inline declarations
-2. **Intermediate variables for fn results** - `h = fn(); result = result ++ h`
-3. **Expression-style if-else in fn** - `if (cond) a else b` not `if (cond) { a }`
-4. **Use `slice()` not `replace()` for suffix removal**
-5. **Minimize null checks** to avoid type coercion issues
+1. **Intermediate variables for fn results** - `h = fn(); result = result ++ h`
+2. **Use `slice()` not `replace()` for suffix removal**
 
 ---
 
