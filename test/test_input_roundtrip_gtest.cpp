@@ -41,6 +41,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/mark_reader.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
@@ -431,6 +432,145 @@ TEST_F(JsonTests, JsonEmptyStringHandling) {
 
     printf("JSON empty string handling test completed\n");
     return;
+}
+
+// Test Unicode surrogate pair handling in JSON
+// Emojis and characters above U+FFFF are encoded as surrogate pairs in JSON (e.g., \uD83D\uDCDA for 📚)
+TEST_F(JsonTests, JsonUnicodeSurrogatePairs) {
+    printf("\n=== Testing JSON Unicode surrogate pair handling ===\n");
+
+    // JSON with various Unicode escapes including surrogate pairs for emojis
+    // 📚 = U+1F4DA = \uD83D\uDCDA (surrogate pair)
+    // 🎉 = U+1F389 = \uD83C\uDF89 (surrogate pair)
+    // ä = U+00E4 = \u00E4 (BMP character, no surrogate)
+    // 中 = U+4E2D = \u4E2D (BMP character, no surrogate)
+    const char* json_with_surrogates = "{\n"
+        "  \"book_emoji\": \"\\uD83D\\uDCDA\",\n"
+        "  \"party_emoji\": \"\\uD83C\\uDF89\",\n"
+        "  \"umlaut\": \"\\u00E4\",\n"
+        "  \"chinese\": \"\\u4E2D\",\n"
+        "  \"mixed\": \"Hello \\uD83D\\uDCDA World \\u00E4\",\n"
+        "  \"plain\": \"No escapes here\"\n"
+        "}";
+
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("json");
+    String* flavor_str = NULL;
+
+    // Get current directory for URL resolution
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("unicode_test.json", cwd);
+
+    // Make a mutable copy of the JSON string
+    char* json_copy = strdup(json_with_surrogates);
+
+    printf("Parsing JSON with Unicode surrogate pairs...\n");
+
+    // Parse the JSON content
+    Input* parsed_input = input_from_source(json_copy, dummy_url, type_str, flavor_str);
+
+    ASSERT_NE(parsed_input, nullptr) << "Failed to parse JSON with Unicode escapes";
+
+    printf("JSON with surrogates parsed successfully\n");
+
+    // Get the root item from the parsed input
+    Item root_item = parsed_input->root;
+    ASSERT_NE(root_item.item, ITEM_NULL) << "Root item should not be null";
+    ASSERT_EQ(get_type_id(root_item), LMD_TYPE_MAP) << "Root should be a map";
+
+    // Verify the parsed emoji values are correct UTF-8
+    // 📚 in UTF-8 is: F0 9F 93 9A
+    // 🎉 in UTF-8 is: F0 9F 8E 89
+    MapReader map_reader = MapReader::fromItem(root_item);
+    ASSERT_TRUE(map_reader.size() > 0) << "Map should not be empty";
+
+    // Get book_emoji field
+    ItemReader book_reader = map_reader.get("book_emoji");
+    ASSERT_TRUE(book_reader.isString()) << "book_emoji should be a string";
+    
+    String* book_str = book_reader.asString();
+    ASSERT_NE(book_str, nullptr) << "book_emoji string should not be null";
+    
+    // Verify correct UTF-8 encoding for 📚 (U+1F4DA)
+    // Expected bytes: F0 9F 93 9A
+    ASSERT_EQ(book_str->len, 4U) << "📚 should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)book_str->chars[0], 0xF0) << "First byte should be 0xF0";
+    EXPECT_EQ((unsigned char)book_str->chars[1], 0x9F) << "Second byte should be 0x9F";
+    EXPECT_EQ((unsigned char)book_str->chars[2], 0x93) << "Third byte should be 0x93";
+    EXPECT_EQ((unsigned char)book_str->chars[3], 0x9A) << "Fourth byte should be 0x9A";
+    
+    printf("book_emoji parsed correctly as UTF-8: ");
+    for (uint32_t i = 0; i < book_str->len; i++) {
+        printf("%02X ", (unsigned char)book_str->chars[i]);
+    }
+    printf("(📚)\n");
+
+    // Get party_emoji field
+    ItemReader party_reader = map_reader.get("party_emoji");
+    ASSERT_TRUE(party_reader.isString()) << "party_emoji should be a string";
+    
+    String* party_str = party_reader.asString();
+    ASSERT_NE(party_str, nullptr) << "party_emoji string should not be null";
+    
+    // Verify correct UTF-8 encoding for 🎉 (U+1F389)
+    // Expected bytes: F0 9F 8E 89
+    ASSERT_EQ(party_str->len, 4U) << "🎉 should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)party_str->chars[0], 0xF0) << "First byte should be 0xF0";
+    EXPECT_EQ((unsigned char)party_str->chars[1], 0x9F) << "Second byte should be 0x9F";
+    EXPECT_EQ((unsigned char)party_str->chars[2], 0x8E) << "Third byte should be 0x8E";
+    EXPECT_EQ((unsigned char)party_str->chars[3], 0x89) << "Fourth byte should be 0x89";
+    
+    printf("party_emoji parsed correctly as UTF-8: ");
+    for (uint32_t i = 0; i < party_str->len; i++) {
+        printf("%02X ", (unsigned char)party_str->chars[i]);
+    }
+    printf("(🎉)\n");
+
+    // Get umlaut field (BMP character, no surrogate pair)
+    ItemReader umlaut_reader = map_reader.get("umlaut");
+    ASSERT_TRUE(umlaut_reader.isString()) << "umlaut should be a string";
+    
+    String* umlaut_str = umlaut_reader.asString();
+    ASSERT_NE(umlaut_str, nullptr) << "umlaut string should not be null";
+    
+    // Verify correct UTF-8 encoding for ä (U+00E4)
+    // Expected bytes: C3 A4
+    ASSERT_EQ(umlaut_str->len, 2U) << "ä should be 2 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)umlaut_str->chars[0], 0xC3) << "First byte should be 0xC3";
+    EXPECT_EQ((unsigned char)umlaut_str->chars[1], 0xA4) << "Second byte should be 0xA4";
+    
+    printf("umlaut parsed correctly as UTF-8: ");
+    for (uint32_t i = 0; i < umlaut_str->len; i++) {
+        printf("%02X ", (unsigned char)umlaut_str->chars[i]);
+    }
+    printf("(ä)\n");
+
+    // Get chinese field (BMP character, 3-byte UTF-8)
+    ItemReader chinese_reader = map_reader.get("chinese");
+    ASSERT_TRUE(chinese_reader.isString()) << "chinese should be a string";
+    
+    String* chinese_str = chinese_reader.asString();
+    ASSERT_NE(chinese_str, nullptr) << "chinese string should not be null";
+    
+    // Verify correct UTF-8 encoding for 中 (U+4E2D)
+    // Expected bytes: E4 B8 AD
+    ASSERT_EQ(chinese_str->len, 3U) << "中 should be 3 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)chinese_str->chars[0], 0xE4) << "First byte should be 0xE4";
+    EXPECT_EQ((unsigned char)chinese_str->chars[1], 0xB8) << "Second byte should be 0xB8";
+    EXPECT_EQ((unsigned char)chinese_str->chars[2], 0xAD) << "Third byte should be 0xAD";
+    
+    printf("chinese parsed correctly as UTF-8: ");
+    for (uint32_t i = 0; i < chinese_str->len; i++) {
+        printf("%02X ", (unsigned char)chinese_str->chars[i]);
+    }
+    printf("(中)\n");
+
+    printf("JSON Unicode surrogate pair test completed successfully\n");
+
+    // Cleanup
+    free(json_copy);
+    url_destroy(dummy_url);
+    url_destroy(cwd);
 }
 
 // XML Tests
