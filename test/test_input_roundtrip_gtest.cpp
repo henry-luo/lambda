@@ -1944,6 +1944,125 @@ TEST_F(TomlTests, SimpleTomlRoundtrip) {
     url_destroy(cwd);
 }
 
+// Test Unicode surrogate pair handling in TOML strings
+// TOML supports \uXXXX (4 hex) and \UXXXXXXXX (8 hex) escapes
+TEST_F(TomlTests, TomlUnicodeSurrogatePairs) {
+    printf("\n=== Testing TOML Unicode surrogate pair handling ===\n");
+
+    // TOML with various Unicode escapes including surrogate pairs
+    // 📚 = U+1F4DA = \uD83D\uDCDA (surrogate pair) or \U0001F4DA (direct)
+    // 🎉 = U+1F389 = \uD83C\uDF89 (surrogate pair) or \U0001F389 (direct)
+    // ä = U+00E4 = \u00E4 (BMP character)
+    const char* toml_with_unicode = "[emoji]\n"
+        "book_surrogate = \"\\uD83D\\uDCDA\"\n"
+        "party_surrogate = \"\\uD83C\\uDF89\"\n"
+        "book_direct = \"\\U0001F4DA\"\n"
+        "umlaut = \"\\u00E4\"\n";
+
+    String* type_str = create_lambda_string("toml");
+    String* flavor_str = NULL;
+
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("unicode_test.toml", cwd);
+
+    char* toml_copy = strdup(toml_with_unicode);
+
+    printf("Parsing TOML with Unicode escapes...\n");
+    Input* parsed_input = input_from_source(toml_copy, dummy_url, type_str, flavor_str);
+
+    ASSERT_NE(parsed_input, nullptr) << "Failed to parse TOML with Unicode escapes";
+    printf("TOML with Unicode parsed successfully\n");
+
+    // Get the root and navigate to emoji section
+    Item root_item = parsed_input->root;
+    ASSERT_EQ(get_type_id(root_item), LMD_TYPE_MAP) << "Root should be a map";
+
+    MapReader root_reader = MapReader::fromItem(root_item);
+    ItemReader emoji_section = root_reader.get("emoji");
+    ASSERT_TRUE(emoji_section.isMap()) << "emoji section should be a map";
+
+    MapReader emoji_reader = emoji_section.asMap();
+
+    // Test surrogate pair: book_surrogate should be 📚
+    ItemReader book_surrogate_reader = emoji_reader.get("book_surrogate");
+    ASSERT_TRUE(book_surrogate_reader.isString()) << "book_surrogate should be a string";
+    String* book_str = book_surrogate_reader.asString();
+    ASSERT_NE(book_str, nullptr);
+    
+    // 📚 in UTF-8: F0 9F 93 9A
+    ASSERT_EQ(book_str->len, 4U) << "📚 should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)book_str->chars[0], 0xF0);
+    EXPECT_EQ((unsigned char)book_str->chars[1], 0x9F);
+    EXPECT_EQ((unsigned char)book_str->chars[2], 0x93);
+    EXPECT_EQ((unsigned char)book_str->chars[3], 0x9A);
+    
+    printf("book_surrogate (\\uD83D\\uDCDA) parsed correctly as: ");
+    for (uint32_t i = 0; i < book_str->len; i++) {
+        printf("%02X ", (unsigned char)book_str->chars[i]);
+    }
+    printf("(📚)\n");
+
+    // Test surrogate pair: party_surrogate should be 🎉
+    ItemReader party_reader = emoji_reader.get("party_surrogate");
+    ASSERT_TRUE(party_reader.isString()) << "party_surrogate should be a string";
+    String* party_str = party_reader.asString();
+    ASSERT_NE(party_str, nullptr);
+    
+    // 🎉 in UTF-8: F0 9F 8E 89
+    ASSERT_EQ(party_str->len, 4U) << "🎉 should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)party_str->chars[0], 0xF0);
+    EXPECT_EQ((unsigned char)party_str->chars[1], 0x9F);
+    EXPECT_EQ((unsigned char)party_str->chars[2], 0x8E);
+    EXPECT_EQ((unsigned char)party_str->chars[3], 0x89);
+    
+    printf("party_surrogate (\\uD83C\\uDF89) parsed correctly as: ");
+    for (uint32_t i = 0; i < party_str->len; i++) {
+        printf("%02X ", (unsigned char)party_str->chars[i]);
+    }
+    printf("(🎉)\n");
+
+    // Test direct \U escape: book_direct should also be 📚
+    ItemReader book_direct_reader = emoji_reader.get("book_direct");
+    ASSERT_TRUE(book_direct_reader.isString()) << "book_direct should be a string";
+    String* book_direct_str = book_direct_reader.asString();
+    ASSERT_NE(book_direct_str, nullptr);
+    
+    ASSERT_EQ(book_direct_str->len, 4U) << "📚 via \\U should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)book_direct_str->chars[0], 0xF0);
+    EXPECT_EQ((unsigned char)book_direct_str->chars[1], 0x9F);
+    EXPECT_EQ((unsigned char)book_direct_str->chars[2], 0x93);
+    EXPECT_EQ((unsigned char)book_direct_str->chars[3], 0x9A);
+    
+    printf("book_direct (\\U0001F4DA) parsed correctly as: ");
+    for (uint32_t i = 0; i < book_direct_str->len; i++) {
+        printf("%02X ", (unsigned char)book_direct_str->chars[i]);
+    }
+    printf("(📚)\n");
+
+    // Test BMP character: umlaut should be ä
+    ItemReader umlaut_reader = emoji_reader.get("umlaut");
+    ASSERT_TRUE(umlaut_reader.isString()) << "umlaut should be a string";
+    String* umlaut_str = umlaut_reader.asString();
+    ASSERT_NE(umlaut_str, nullptr);
+    
+    // ä in UTF-8: C3 A4
+    ASSERT_EQ(umlaut_str->len, 2U) << "ä should be 2 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)umlaut_str->chars[0], 0xC3);
+    EXPECT_EQ((unsigned char)umlaut_str->chars[1], 0xA4);
+    
+    printf("umlaut (\\u00E4) parsed correctly as: ");
+    for (uint32_t i = 0; i < umlaut_str->len; i++) {
+        printf("%02X ", (unsigned char)umlaut_str->chars[i]);
+    }
+    printf("(ä)\n");
+
+    printf("TOML Unicode surrogate pair test completed successfully\n");
+
+    free(toml_copy);
+    url_destroy(dummy_url);
+    url_destroy(cwd);
+}
+
 // INI Tests
 class IniTests : public InputRoundtripTest {};
 
@@ -2027,6 +2146,120 @@ TEST_F(IniTests, PropertiesRoundtrip) {
     ASSERT_GT(formatted_prop->len, 0U) << "Formatted Properties should not be empty";
 
     printf("Properties roundtrip test completed\n");
+
+    free(prop_copy);
+    url_destroy(dummy_url);
+    url_destroy(cwd);
+}
+
+// Test Unicode surrogate pair handling in Properties files
+// Java Properties files support \uXXXX escapes
+TEST_F(IniTests, PropertiesUnicodeSurrogatePairs) {
+    printf("\n=== Testing Properties Unicode surrogate pair handling ===\n");
+
+    // Properties with Unicode escapes including surrogate pairs for emojis
+    // 📚 = U+1F4DA = \uD83D\uDCDA (surrogate pair)
+    // 🎉 = U+1F389 = \uD83C\uDF89 (surrogate pair)
+    // ä = U+00E4 = \u00E4 (BMP character)
+    const char* properties_with_unicode = 
+        "book_emoji=\\uD83D\\uDCDA\n"
+        "party_emoji=\\uD83C\\uDF89\n"
+        "umlaut=\\u00E4\n"
+        "chinese=\\u4E2D\n";
+
+    String* type_str = create_lambda_string("properties");
+    String* flavor_str = NULL;
+
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("unicode_test.properties", cwd);
+
+    char* prop_copy = strdup(properties_with_unicode);
+
+    printf("Parsing Properties with Unicode escapes...\n");
+    Input* parsed_input = input_from_source(prop_copy, dummy_url, type_str, flavor_str);
+
+    ASSERT_NE(parsed_input, nullptr) << "Failed to parse Properties with Unicode escapes";
+    printf("Properties with Unicode parsed successfully\n");
+
+    Item root_item = parsed_input->root;
+    ASSERT_EQ(get_type_id(root_item), LMD_TYPE_MAP) << "Root should be a map";
+
+    MapReader map_reader = MapReader::fromItem(root_item);
+
+    // Test surrogate pair: book_emoji should be 📚
+    ItemReader book_reader = map_reader.get("book_emoji");
+    ASSERT_TRUE(book_reader.isString()) << "book_emoji should be a string";
+    String* book_str = book_reader.asString();
+    ASSERT_NE(book_str, nullptr);
+    
+    // 📚 in UTF-8: F0 9F 93 9A
+    ASSERT_EQ(book_str->len, 4U) << "📚 should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)book_str->chars[0], 0xF0);
+    EXPECT_EQ((unsigned char)book_str->chars[1], 0x9F);
+    EXPECT_EQ((unsigned char)book_str->chars[2], 0x93);
+    EXPECT_EQ((unsigned char)book_str->chars[3], 0x9A);
+    
+    printf("book_emoji (\\uD83D\\uDCDA) parsed correctly as: ");
+    for (uint32_t i = 0; i < book_str->len; i++) {
+        printf("%02X ", (unsigned char)book_str->chars[i]);
+    }
+    printf("(📚)\n");
+
+    // Test surrogate pair: party_emoji should be 🎉
+    ItemReader party_reader = map_reader.get("party_emoji");
+    ASSERT_TRUE(party_reader.isString()) << "party_emoji should be a string";
+    String* party_str = party_reader.asString();
+    ASSERT_NE(party_str, nullptr);
+    
+    // 🎉 in UTF-8: F0 9F 8E 89
+    ASSERT_EQ(party_str->len, 4U) << "🎉 should be 4 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)party_str->chars[0], 0xF0);
+    EXPECT_EQ((unsigned char)party_str->chars[1], 0x9F);
+    EXPECT_EQ((unsigned char)party_str->chars[2], 0x8E);
+    EXPECT_EQ((unsigned char)party_str->chars[3], 0x89);
+    
+    printf("party_emoji (\\uD83C\\uDF89) parsed correctly as: ");
+    for (uint32_t i = 0; i < party_str->len; i++) {
+        printf("%02X ", (unsigned char)party_str->chars[i]);
+    }
+    printf("(🎉)\n");
+
+    // Test BMP character: umlaut should be ä
+    ItemReader umlaut_reader = map_reader.get("umlaut");
+    ASSERT_TRUE(umlaut_reader.isString()) << "umlaut should be a string";
+    String* umlaut_str = umlaut_reader.asString();
+    ASSERT_NE(umlaut_str, nullptr);
+    
+    // ä in UTF-8: C3 A4
+    ASSERT_EQ(umlaut_str->len, 2U) << "ä should be 2 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)umlaut_str->chars[0], 0xC3);
+    EXPECT_EQ((unsigned char)umlaut_str->chars[1], 0xA4);
+    
+    printf("umlaut (\\u00E4) parsed correctly as: ");
+    for (uint32_t i = 0; i < umlaut_str->len; i++) {
+        printf("%02X ", (unsigned char)umlaut_str->chars[i]);
+    }
+    printf("(ä)\n");
+
+    // Test BMP 3-byte character: chinese should be 中
+    ItemReader chinese_reader = map_reader.get("chinese");
+    ASSERT_TRUE(chinese_reader.isString()) << "chinese should be a string";
+    String* chinese_str = chinese_reader.asString();
+    ASSERT_NE(chinese_str, nullptr);
+    
+    // 中 in UTF-8: E4 B8 AD
+    ASSERT_EQ(chinese_str->len, 3U) << "中 should be 3 bytes in UTF-8";
+    EXPECT_EQ((unsigned char)chinese_str->chars[0], 0xE4);
+    EXPECT_EQ((unsigned char)chinese_str->chars[1], 0xB8);
+    EXPECT_EQ((unsigned char)chinese_str->chars[2], 0xAD);
+    
+    printf("chinese (\\u4E2D) parsed correctly as: ");
+    for (uint32_t i = 0; i < chinese_str->len; i++) {
+        printf("%02X ", (unsigned char)chinese_str->chars[i]);
+    }
+    printf("(中)\n");
+
+    printf("Properties Unicode surrogate pair test completed successfully\n");
 
     free(prop_copy);
     url_destroy(dummy_url);
