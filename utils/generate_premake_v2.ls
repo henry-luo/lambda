@@ -9,18 +9,6 @@ fn arr_merge(a, b) {
      if (n == 0) a else [for (x in a) x, for (y in b) y])
 }
 
-// Workaround for str_join crash with empty separator - use recursion
-fn str_concat_helper(strs, idx: int, acc: string) {
-    if (idx >= len(strs)) acc
-    else str_concat_helper(strs, idx + 1, acc ++ strs[idx])
-}
-
-fn str_concat(strs) {
-    (let n = len(strs),
-     if (n == 0) "" else str_concat_helper(strs, 0, ""))
-}
-}
-
 fn detect_platform() {
     (let p = sys.os.platform,
      if (p == "darwin") "macos"
@@ -142,9 +130,10 @@ fn gen_libdirs_block(platform: string) {
 }
 
 fn gen_links_block(libs) {
-    (let n = len(libs),
+    (let valid_libs = [for (lib in libs where lib != null and lib != "") lib],
+     let n = len(valid_libs),
      if (n == 0) ""
-     else (let items = [for (lib in libs) ind(2) ++ q(lib) ++ ","],
+     else (let items = [for (lib in valid_libs) ind(2) ++ q(lib) ++ ","],
            ind(1) ++ "links {\n" ++ join_items(items, "\n") ++ "\n" ++ ind(1) ++ "}\n\n"))
 }
 
