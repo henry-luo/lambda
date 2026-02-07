@@ -239,4 +239,5 @@ NEVER use printf/fprintf/std::cout for debugging
 - Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
 - Lambda language documentation at `doc/Lambda_Reference.md`
 - After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
+- For any temporal files, create them under `./temp` directory.
 - **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.

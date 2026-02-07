@@ -311,20 +311,34 @@ bool is_ancestor_scope(NameScope* ancestor, NameScope* descendant) {
     return false;
 }
 
-// Check if a name entry is defined in a scope or its descendants (local to function)
+// Check if a name entry is defined in a scope or any of its descendant scopes (local to function)
+// This includes variables declared in while blocks, if blocks, for loops, etc.
 bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
-    // Check if entry is in fn_scope or any nested scope within the function
-    NameScope* scope = fn_scope;
-    while (scope) {
-        NameEntry* e = scope->first;
+    if (!entry) return false;
+    
+    // With the entry->scope field, we can now check if the entry's defining scope
+    // is fn_scope itself or a descendant of fn_scope (nested block within the function).
+    // If yes, the variable is local to this function; if no, it's a capture from outer scope.
+    
+    NameScope* entry_scope = entry->scope;
+    if (!entry_scope) {
+        // Fallback for entries without scope info (shouldn't happen for var/let)
+        // Check if entry is directly in fn_scope
+        NameEntry* e = fn_scope->first;
         while (e) {
             if (e == entry) return true;
             e = e->next;
         }
-        // Note: we only check the immediate scope, not children
-        // This is because fn_scope contains params and local vars
-        break;
+        return false;
     }
+    
+    // Check if entry_scope is fn_scope or a descendant of fn_scope
+    NameScope* scope = entry_scope;
+    while (scope) {
+        if (scope == fn_scope) return true;
+        scope = scope->parent;
+    }
+    
     return false;
 }
 
@@ -599,6 +613,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
     entry->name = node->name;
     entry->node = (AstNode*)node;  entry->import = import;
+    entry->scope = tp->current_scope;  // track which scope this variable belongs to
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
@@ -2088,8 +2103,16 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
 
+    // Create a new scope for the 'then' branch to allow variable shadowing
+    NameScope* then_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    then_scope->parent = tp->current_scope;
+    then_scope->is_proc = tp->current_scope->is_proc;
+    tp->current_scope = then_scope;
+
     TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
+
+    tp->current_scope = then_scope->parent;  // restore scope
 
     // Defensive validation: ensure then clause was built successfully
     if (!ast_node->then) {
@@ -2103,7 +2126,15 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         ast_node->otherwise = NULL;  // optional for IF statements
     }
     else {
+        // Create a new scope for the 'else' branch to allow variable shadowing
+        NameScope* else_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        else_scope->parent = tp->current_scope;
+        else_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = else_scope;
+
         ast_node->otherwise = build_expr(tp, else_node);
+
+        tp->current_scope = else_scope->parent;  // restore scope
     }
 
     // Additional validation: ensure expressions have valid types
@@ -3557,6 +3588,10 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
     TSNode target_node = ts_node_child_by_field_id(assign_node, FIELD_TARGET);
     StrView target_str = ts_node_source(tp, target_node);
     ast_node->target = name_pool_create_strview(tp->name_pool, target_str);
+
+    // lookup target variable to get its type info
+    NameEntry* entry = lookup_name(tp, target_str);
+    ast_node->target_node = entry ? entry->node : NULL;
 
     // build value expression
     TSNode value_node = ts_node_child_by_field_id(assign_node, FIELD_VALUE);
