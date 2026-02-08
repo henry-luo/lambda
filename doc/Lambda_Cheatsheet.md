@@ -91,6 +91,7 @@ t'2025-01-01T14:30:00Z'  // DateTime
 **Indexing & Slicing:**
 ```lambda
 arr[0]            // First element
+arr.0             // Alt. syntax for const index
 arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
