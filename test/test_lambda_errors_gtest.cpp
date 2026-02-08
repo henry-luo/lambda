@@ -1,6 +1,6 @@
 //==============================================================================
 // Lambda Structured Error System Tests
-// 
+//
 // Tests the error handling infrastructure including:
 // - Error code categories (1xx syntax, 2xx semantic, 3xx runtime, etc.)
 // - Error message formatting
@@ -31,7 +31,7 @@ TEST_F(ErrorCodeCategoryTest, SyntaxErrorCategory) {
     EXPECT_TRUE(ERR_IS_SYNTAX(ERR_UNEXPECTED_TOKEN));
     EXPECT_TRUE(ERR_IS_SYNTAX(ERR_MISSING_TOKEN));
     EXPECT_TRUE(ERR_IS_SYNTAX(ERR_UNTERMINATED_STRING));
-    
+
     // Should not be other categories
     EXPECT_FALSE(ERR_IS_SEMANTIC(ERR_SYNTAX_ERROR));
     EXPECT_FALSE(ERR_IS_RUNTIME(ERR_SYNTAX_ERROR));
@@ -45,7 +45,7 @@ TEST_F(ErrorCodeCategoryTest, SemanticErrorCategory) {
     EXPECT_TRUE(ERR_IS_SEMANTIC(ERR_TYPE_MISMATCH));
     EXPECT_TRUE(ERR_IS_SEMANTIC(ERR_UNDEFINED_VARIABLE));
     EXPECT_TRUE(ERR_IS_SEMANTIC(ERR_UNDEFINED_FUNCTION));
-    
+
     // Should not be other categories
     EXPECT_FALSE(ERR_IS_SYNTAX(ERR_TYPE_MISMATCH));
     EXPECT_FALSE(ERR_IS_RUNTIME(ERR_TYPE_MISMATCH));
@@ -57,7 +57,7 @@ TEST_F(ErrorCodeCategoryTest, RuntimeErrorCategory) {
     EXPECT_TRUE(ERR_IS_RUNTIME(ERR_NULL_REFERENCE));
     EXPECT_TRUE(ERR_IS_RUNTIME(ERR_DIVISION_BY_ZERO));
     EXPECT_TRUE(ERR_IS_RUNTIME(ERR_INDEX_OUT_OF_BOUNDS));
-    
+
     // Should not be other categories
     EXPECT_FALSE(ERR_IS_SYNTAX(ERR_RUNTIME_ERROR));
     EXPECT_FALSE(ERR_IS_SEMANTIC(ERR_RUNTIME_ERROR));
@@ -68,7 +68,7 @@ TEST_F(ErrorCodeCategoryTest, IOErrorCategory) {
     EXPECT_TRUE(ERR_IS_IO(ERR_IO_ERROR));
     EXPECT_TRUE(ERR_IS_IO(ERR_FILE_NOT_FOUND));
     EXPECT_TRUE(ERR_IS_IO(ERR_NETWORK_ERROR));
-    
+
     // Should not be other categories
     EXPECT_FALSE(ERR_IS_SYNTAX(ERR_IO_ERROR));
     EXPECT_FALSE(ERR_IS_RUNTIME(ERR_IO_ERROR));
@@ -79,7 +79,7 @@ TEST_F(ErrorCodeCategoryTest, InternalErrorCategory) {
     EXPECT_TRUE(ERR_IS_INTERNAL(ERR_INTERNAL_ERROR));
     EXPECT_TRUE(ERR_IS_INTERNAL(ERR_NOT_IMPLEMENTED));
     EXPECT_TRUE(ERR_IS_INTERNAL(ERR_POOL_EXHAUSTED));
-    
+
     // Should not be other categories
     EXPECT_FALSE(ERR_IS_SYNTAX(ERR_INTERNAL_ERROR));
     EXPECT_FALSE(ERR_IS_RUNTIME(ERR_INTERNAL_ERROR));
@@ -102,11 +102,11 @@ TEST_F(ErrorCreationTest, CreateSimpleError) {
         .column = 0
     };
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, "Test error message", &loc);
-    
+
     ASSERT_NE(error, nullptr);
     EXPECT_EQ(error->code, ERR_SYNTAX_ERROR);
     EXPECT_STREQ(error->message, "Test error message");
-    
+
     err_free(error);
 }
 
@@ -116,15 +116,15 @@ TEST_F(ErrorCreationTest, CreateErrorWithLocation) {
         .line = 42,
         .column = 10
     };
-    
+
     LambdaError* error = err_create(ERR_TYPE_MISMATCH, "Type mismatch error", &loc);
-    
+
     ASSERT_NE(error, nullptr);
     EXPECT_EQ(error->code, ERR_TYPE_MISMATCH);
     EXPECT_EQ(error->location.line, 42u);
     EXPECT_EQ(error->location.column, 10u);
     EXPECT_STREQ(error->location.file, "test.ls");
-    
+
     err_free(error);
 }
 
@@ -134,13 +134,13 @@ TEST_F(ErrorCreationTest, CreateFormattedError) {
         .line = 0,
         .column = 0
     };
-    LambdaError* error = err_createf(ERR_UNDEFINED_VARIABLE, &loc, 
+    LambdaError* error = err_createf(ERR_UNDEFINED_VARIABLE, &loc,
         "Variable '%s' not defined in scope", "myVar");
-    
+
     ASSERT_NE(error, nullptr);
     EXPECT_EQ(error->code, ERR_UNDEFINED_VARIABLE);
     EXPECT_NE(strstr(error->message, "myVar"), nullptr);
-    
+
     err_free(error);
 }
 
@@ -152,16 +152,16 @@ TEST_F(ErrorCreationTest, CreateErrorWithHelp) {
     };
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, "Missing semicolon", &loc);
     ASSERT_NE(error, nullptr);
-    
+
     err_add_help(error, "Consider adding ';' at the end of the statement");
-    
+
     // after adding help, the help field should not be null
     ASSERT_NE(error->help, nullptr) << "help should be set after err_add_help";
-    
+
     // check the content - help text contains "adding"
-    EXPECT_TRUE(strstr(error->help, "adding") != nullptr) 
+    EXPECT_TRUE(strstr(error->help, "adding") != nullptr)
         << "help text should contain 'adding', got: " << error->help;
-    
+
     err_free(error);
 }
 
@@ -181,16 +181,16 @@ TEST_F(ErrorFormattingTest, FormatBasicError) {
         .line = 10,
         .column = 5
     };
-    
+
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, "Unexpected token", &loc);
     char* formatted = err_format(error);
-    
+
     ASSERT_NE(formatted, nullptr);
     // Check that it contains key elements
     EXPECT_NE(strstr(formatted, "script.ls"), nullptr);
     EXPECT_NE(strstr(formatted, "10"), nullptr);
     EXPECT_NE(strstr(formatted, "Unexpected token"), nullptr);
-    
+
     free(formatted);
     err_free(error);
 }
@@ -220,8 +220,8 @@ class SourceContextTest : public ::testing::Test {
 protected:
     void SetUp() override {}
     void TearDown() override {}
-    
-    const char* sample_source = 
+
+    const char* sample_source =
         "let x = 10\n"
         "let y = 20\n"
         "let z = x + y + undefined_var\n"
@@ -234,13 +234,13 @@ TEST_F(SourceContextTest, GetSourceLine) {
     ASSERT_NE(line1, nullptr);
     EXPECT_STREQ(line1, "let x = 10");
     free(line1);
-    
+
     // line 3
     char* line3 = err_get_source_line(sample_source, 3);
     ASSERT_NE(line3, nullptr);
     EXPECT_STREQ(line3, "let z = x + y + undefined_var");
     free(line3);
-    
+
     // line beyond source
     char* line10 = err_get_source_line(sample_source, 10);
     EXPECT_EQ(line10, nullptr);
@@ -250,10 +250,10 @@ TEST_F(SourceContextTest, GetSourceLineCount) {
     // sample_source has 4 lines, but trailing newline counts as start of line 5
     int count = err_get_source_line_count(sample_source);
     EXPECT_GE(count, 4);  // at least 4 lines
-    
+
     // single line with no newline
     EXPECT_EQ(err_get_source_line_count("hello"), 1);
-    
+
     // empty source
     EXPECT_EQ(err_get_source_line_count(""), 1);
     EXPECT_EQ(err_get_source_line_count(nullptr), 0);
@@ -268,13 +268,13 @@ TEST_F(SourceContextTest, ExtractContext) {
         .end_column = 29,  // span "undefined_var"
         .source = nullptr
     };
-    
+
     LambdaError* error = err_create(ERR_UNDEFINED_VARIABLE, "undefined variable 'undefined_var'", &loc);
-    
+
     // extract context (stores source reference)
     err_extract_context(error, sample_source, 2);
     EXPECT_EQ(error->location.source, sample_source);
-    
+
     err_free(error);
 }
 
@@ -287,29 +287,29 @@ TEST_F(SourceContextTest, FormatWithContextLines) {
         .end_column = 29,
         .source = nullptr
     };
-    
+
     LambdaError* error = err_create(ERR_UNDEFINED_VARIABLE, "undefined variable 'undefined_var'", &loc);
     err_extract_context(error, sample_source, 1);
-    
+
     char* formatted = err_format_with_context(error, 1);
     ASSERT_NE(formatted, nullptr);
-    
+
     // should contain location prefix
-    EXPECT_NE(strstr(formatted, "test.ls:3:17"), nullptr) 
+    EXPECT_NE(strstr(formatted, "test.ls:3:17"), nullptr)
         << "Should contain location prefix\n" << formatted;
-    
+
     // should contain error code
-    EXPECT_NE(strstr(formatted, "E202"), nullptr) 
+    EXPECT_NE(strstr(formatted, "E202"), nullptr)
         << "Should contain error code\n" << formatted;
-    
+
     // should contain the error line
     EXPECT_NE(strstr(formatted, "let z = x + y + undefined_var"), nullptr)
         << "Should contain source line\n" << formatted;
-    
+
     // should contain carets for span
     EXPECT_NE(strstr(formatted, "^"), nullptr)
         << "Should contain caret pointer\n" << formatted;
-    
+
     free(formatted);
     err_free(error);
 }
@@ -323,13 +323,13 @@ TEST_F(SourceContextTest, FormatWithMultipleContextLines) {
         .end_column = 5,
         .source = nullptr
     };
-    
+
     LambdaError* error = err_create(ERR_TYPE_MISMATCH, "expected int, found string", &loc);
     err_extract_context(error, sample_source, 2);
-    
+
     char* formatted = err_format_with_context(error, 2);
     ASSERT_NE(formatted, nullptr);
-    
+
     // with context_lines=2, should show lines 1,2,3,4,5 (but only 4 exist)
     EXPECT_NE(strstr(formatted, "let x = 10"), nullptr)
         << "Should contain context line before\n" << formatted;
@@ -337,7 +337,7 @@ TEST_F(SourceContextTest, FormatWithMultipleContextLines) {
         << "Should contain context line before\n" << formatted;
     EXPECT_NE(strstr(formatted, "let z ="), nullptr)
         << "Should contain error line\n" << formatted;
-    
+
     free(formatted);
     err_free(error);
 }
@@ -361,12 +361,12 @@ TEST_F(JSONOutputTest, FormatSingleError) {
         .end_column = 15,
         .source = nullptr
     };
-    
+
     LambdaError* error = err_create(ERR_TYPE_MISMATCH, "expected int, found string", &loc);
     char* json = err_format_json(error);
-    
+
     ASSERT_NE(json, nullptr);
-    
+
     // check JSON structure
     EXPECT_NE(strstr(json, "\"code\": 201"), nullptr) << "Should contain error code\n" << json;
     EXPECT_NE(strstr(json, "\"name\": \"TYPE_MISMATCH\""), nullptr) << "Should contain error name\n" << json;
@@ -375,7 +375,7 @@ TEST_F(JSONOutputTest, FormatSingleError) {
     EXPECT_NE(strstr(json, "\"file\": \"test.ls\""), nullptr) << "Should contain file\n" << json;
     EXPECT_NE(strstr(json, "\"line\": 10"), nullptr) << "Should contain line\n" << json;
     EXPECT_NE(strstr(json, "\"column\": 5"), nullptr) << "Should contain column\n" << json;
-    
+
     free(json);
     err_free(error);
 }
@@ -384,13 +384,13 @@ TEST_F(JSONOutputTest, FormatErrorWithHelp) {
     SourceLocation loc = { .file = "test.ls", .line = 5, .column = 1 };
     LambdaError* error = err_create(ERR_UNDEFINED_VARIABLE, "variable 'x' not defined", &loc);
     err_add_help(error, "Did you mean 'y'?");
-    
+
     char* json = err_format_json(error);
     ASSERT_NE(json, nullptr);
-    
+
     EXPECT_NE(strstr(json, "\"help\": \"Did you mean 'y'?\""), nullptr)
         << "Should contain help text\n" << json;
-    
+
     free(json);
     err_free(error);
 }
@@ -398,20 +398,20 @@ TEST_F(JSONOutputTest, FormatErrorWithHelp) {
 TEST_F(JSONOutputTest, FormatErrorArray) {
     SourceLocation loc1 = { .file = "test.ls", .line = 5, .column = 1 };
     SourceLocation loc2 = { .file = "test.ls", .line = 10, .column = 8 };
-    
+
     LambdaError* errors[2];
     errors[0] = err_create(ERR_SYNTAX_ERROR, "unexpected token", &loc1);
     errors[1] = err_create(ERR_TYPE_MISMATCH, "type mismatch", &loc2);
-    
+
     char* json = err_format_json_array(errors, 2);
     ASSERT_NE(json, nullptr);
-    
+
     // check structure
     EXPECT_NE(strstr(json, "\"errors\":"), nullptr) << "Should contain errors array\n" << json;
     EXPECT_NE(strstr(json, "\"errorCount\": 2"), nullptr) << "Should contain count\n" << json;
     EXPECT_NE(strstr(json, "SYNTAX_ERROR"), nullptr) << "Should contain first error\n" << json;
     EXPECT_NE(strstr(json, "TYPE_MISMATCH"), nullptr) << "Should contain second error\n" << json;
-    
+
     free(json);
     err_free(errors[0]);
     err_free(errors[1]);
@@ -420,16 +420,16 @@ TEST_F(JSONOutputTest, FormatErrorArray) {
 TEST_F(JSONOutputTest, EscapeSpecialCharacters) {
     SourceLocation loc = { .file = "path/to/file.ls", .line = 1, .column = 1 };
     LambdaError* error = err_create(ERR_SYNTAX_ERROR, "unexpected \"quote\" and \\backslash", &loc);
-    
+
     char* json = err_format_json(error);
     ASSERT_NE(json, nullptr);
-    
+
     // special chars should be escaped
-    EXPECT_NE(strstr(json, "\\\"quote\\\""), nullptr) 
+    EXPECT_NE(strstr(json, "\\\"quote\\\""), nullptr)
         << "Quotes should be escaped\n" << json;
     EXPECT_NE(strstr(json, "\\\\backslash"), nullptr)
         << "Backslash should be escaped\n" << json;
-    
+
     free(json);
     err_free(error);
 }
@@ -447,7 +447,7 @@ protected:
 TEST_F(StackTraceTest, CaptureStackTraceWithoutDebugInfo) {
     // Capture stack trace without debug info table
     StackFrame* trace = err_capture_stack_trace(nullptr, 10);
-    
+
     // Should return something (or NULL if not supported)
     // The frames might have unknown function names
     if (trace) {
@@ -459,7 +459,7 @@ TEST_F(StackTraceTest, CaptureStackTraceWithoutDebugInfo) {
             frame = frame->next;
         }
         EXPECT_GT(count, 0);
-        
+
         err_free_stack_trace(trace);
     }
 }
@@ -477,20 +477,20 @@ protected:
 TEST_F(ErrorChainingTest, ChainedErrors) {
     SourceLocation loc1 = { .file = "main.ls", .line = 50 };
     SourceLocation loc2 = { .file = "util.ls", .line = 20 };
-    
+
     LambdaError* cause = err_create(ERR_FILE_NOT_FOUND, "Config file missing", &loc2);
     LambdaError* error = err_create(ERR_IO_ERROR, "Failed to initialize", &loc1);
     error->cause = cause;
-    
+
     EXPECT_NE(error->cause, nullptr);
     EXPECT_EQ(error->cause->code, ERR_FILE_NOT_FOUND);
-    
+
     // Format should include both errors
     char* formatted = err_format_with_context(error, 0);
     EXPECT_NE(strstr(formatted, "Failed to initialize"), nullptr);
     EXPECT_NE(strstr(formatted, "Caused by"), nullptr);
     EXPECT_NE(strstr(formatted, "Config file missing"), nullptr);
-    
+
     free(formatted);
     err_free(error);  // should also free cause
 }
@@ -538,10 +538,10 @@ class NegativeScriptTest : public ::testing::Test {
 protected:
     void SetUp() override {}
     void TearDown() override {}
-    
+
     void ExpectErrorWithoutCrash(const char* script_path) {
         ScriptResult result = run_lambda_script(script_path);
-        
+
         // Should NOT crash
         EXPECT_EQ(result.output.find("Segmentation fault"), std::string::npos)
             << "Script crashed: " << script_path;
@@ -550,15 +550,15 @@ protected:
         EXPECT_EQ(result.output.find("core dumped"), std::string::npos)
             << "Script core dumped: " << script_path;
     }
-    
+
     void ExpectErrorCode(const char* script_path, const char* expected_error_indicator) {
         ScriptResult result = run_lambda_script(script_path);
-        
+
         // Should contain error indicator
         bool has_error = result.output.find(expected_error_indicator) != std::string::npos ||
                         result.output.find("[ERR!]") != std::string::npos ||
                         result.output.find("error") != std::string::npos;
-        
+
         EXPECT_TRUE(has_error) << "Expected error for: " << script_path
                                << "\nOutput: " << result.output;
     }
@@ -569,7 +569,7 @@ TEST_F(NegativeScriptTest, SyntaxErrorMalformedRange) {
     ExpectErrorWithoutCrash("test/lambda/negative/test_syntax_errors.ls");
 }
 
-// Type error tests  
+// Type error tests
 TEST_F(NegativeScriptTest, TypeErrorFuncParam) {
     ExpectErrorWithoutCrash("test/lambda/negative/func_param_negative.ls");
 }
