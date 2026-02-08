@@ -39,7 +39,7 @@ int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
 fn (a: int, b: string) bool   // Function type
-fn int                        // Function type (no params)
+fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
 <div id:symbol; <br>>         // Element type
 ```
