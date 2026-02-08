@@ -1,0 +1,18 @@
+"=== Let binding with for-expression array ==="
+[1, 3, 5]
+[2, 6, 10]
+true
+{
+  evens: [2, 4, 6],
+  odds: [1, 3, 5],
+  even_count: 3,
+  odd_count: 3
+}
+9
+[6, 8, 10]
+{
+  names: ["Alice", "Bob", "Carol"],
+  ages: [25, 15, 30],
+  adults: ["Alice", "Carol"]
+}
+"=== End of let-binding tests ==="
