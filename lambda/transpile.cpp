@@ -2435,7 +2435,9 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
             strbuf_append_str(tp->code_buf, ");\n");
             item = item->next;
         }
-        strbuf_append_str(tp->code_buf, " (Item)arr; })");
+        // return arr as Array* (consistent with non-spreadable path which returns array_fill result)
+        // boxing to Item will be done by transpile_box_item when needed
+        strbuf_append_str(tp->code_buf, " arr; })");
         return;
     }
 

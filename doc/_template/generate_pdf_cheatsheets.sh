@@ -98,33 +98,32 @@ fi
 
 echo
 
-# Generate portrait PDF
-echo -e "${BLUE}Generating portrait PDF...${NC}"
-if pandoc ../Lambda_Cheatsheet.md \
-    -o Lambda_Cheatsheet_Portrait.pdf \
-    --template=template_portrait.tex \
-    --pdf-engine=xelatex \
-    -V geometry:a4paper,portrait,margin=0.5in; then
-
-    if [[ -f "Lambda_Cheatsheet_Portrait.pdf" ]]; then
-        PDF_SIZE=$(stat -f%z "Lambda_Cheatsheet_Portrait.pdf" 2>/dev/null || stat -c%s "Lambda_Cheatsheet_Portrait.pdf" 2>/dev/null || echo "unknown")
-        echo -e "${GREEN}✓ Portrait PDF generated successfully${NC}"
-        echo "  File: Lambda_Cheatsheet_Portrait.pdf (${PDF_SIZE} bytes)"
-    else
-        echo -e "${RED}✗ Portrait PDF generation failed${NC}"
-        exit 1
-    fi
-else
-    echo -e "${RED}✗ Portrait PDF generation failed${NC}"
-    exit 1
-fi
+# # Generate portrait PDF (commented out - using landscape only)
+# echo -e "${BLUE}Generating portrait PDF...${NC}"
+# if pandoc ../Lambda_Cheatsheet.md \
+#     -o Lambda_Cheatsheet_Portrait.pdf \
+#     --template=template_portrait.tex \
+#     --pdf-engine=xelatex \
+#     -V geometry:a4paper,portrait,margin=0.5in; then
+# 
+#     if [[ -f "Lambda_Cheatsheet_Portrait.pdf" ]]; then
+#         PDF_SIZE=$(stat -f%z "Lambda_Cheatsheet_Portrait.pdf" 2>/dev/null || stat -c%s "Lambda_Cheatsheet_Portrait.pdf" 2>/dev/null || echo "unknown")
+#         echo -e "${GREEN}✓ Portrait PDF generated successfully${NC}"
+#         echo "  File: Lambda_Cheatsheet_Portrait.pdf (${PDF_SIZE} bytes)"
+#     else
+#         echo -e "${RED}✗ Portrait PDF generation failed${NC}"
+#         exit 1
+#     fi
+# else
+#     echo -e "${RED}✗ Portrait PDF generation failed${NC}"
+#     exit 1
+# fi
 
 echo
-echo -e "${GREEN}All PDFs generated successfully!${NC}"
+echo -e "${GREEN}PDF generated successfully!${NC}"
 echo
 echo "Generated files:"
 echo "  - ../Lambda_Cheatsheet.pdf (landscape, 3-column)"
-echo "  - Lambda_Cheatsheet_Portrait.pdf (portrait, 3-column)"
 echo
 echo -e "${YELLOW}Tips:${NC}"
 echo "  - To customize formatting, edit the template_*.tex files"
