@@ -315,11 +315,11 @@ bool is_ancestor_scope(NameScope* ancestor, NameScope* descendant) {
 // This includes variables declared in while blocks, if blocks, for loops, etc.
 bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
     if (!entry) return false;
-    
+
     // With the entry->scope field, we can now check if the entry's defining scope
     // is fn_scope itself or a descendant of fn_scope (nested block within the function).
     // If yes, the variable is local to this function; if no, it's a capture from outer scope.
-    
+
     NameScope* entry_scope = entry->scope;
     if (!entry_scope) {
         // Fallback for entries without scope info (shouldn't happen for var/let)
@@ -331,14 +331,14 @@ bool is_local_to_scope(NameEntry* entry, NameScope* fn_scope) {
         }
         return false;
     }
-    
+
     // Check if entry_scope is fn_scope or a descendant of fn_scope
     NameScope* scope = entry_scope;
     while (scope) {
         if (scope == fn_scope) return true;
         scope = scope->parent;
     }
-    
+
     return false;
 }
 
@@ -678,7 +678,7 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
     if (symbol == SYM_PATH_PARENT) {
         return PATH_SCHEME_PARENT; // .. is parent path
     }
-    
+
     // path_expr: (/ | . | ..) optional(field)
     if (symbol == SYM_PATH_EXPR) {
         // determine scheme from first child (path_root, path_self, or path_parent)
@@ -686,7 +686,7 @@ static int collect_path_segments_if_path(Transpiler* tp, TSNode node, ArrayList*
         TSSymbol first_sym = ts_node_symbol(first_child);
         int scheme = (first_sym == SYM_PATH_ROOT) ? PATH_SCHEME_FILE :
                      (first_sym == SYM_PATH_PARENT) ? PATH_SCHEME_PARENT : PATH_SCHEME_REL;
-        
+
         // check for optional field
         TSNode field_node = ts_node_child_by_field_id(node, FIELD_FIELD);
         if (!ts_node_is_null(field_node)) {
@@ -873,14 +873,14 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
 // This is used to determine if pipe expression needs argument injection
 static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
     if (ts_node_is_null(node)) return false;
-    
+
     TSSymbol symbol = ts_node_symbol(node);
-    
+
     // Check for current_item (~) or current_index (~#)
     if (symbol == sym_current_item || symbol == sym_current_index) {
         return true;
     }
-    
+
     // Recursively check children
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
@@ -889,7 +889,7 @@ static bool tsnode_has_current_item_ref(Transpiler* tp, TSNode node) {
             return true;
         }
     }
-    
+
     return false;
 }
 
@@ -945,7 +945,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     // For method calls, first build the object to get its type for validation
     AstNode* method_object = NULL;
     TypeId obj_type_id = LMD_TYPE_ANY;
-    
+
     // Check if this is a built-in module call (e.g., fs.copy())
     // Built-in modules are identified by name and don't require building the object
     bool is_builtin_module_call = false;
@@ -975,7 +975,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             }
         }
     }
-    
+
     if (is_method_call && !is_builtin_module_call && !ts_node_is_null(object_node)) {
         method_object = build_expr(tp, object_node);
         if (method_object && method_object->type) {
@@ -1021,7 +1021,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         int lookup_arg_count = arg_count + tp->pipe_inject_args;
         sys_func_info = get_sys_func_info(&func_name, lookup_arg_count);
         if (sys_func_info && tp->pipe_inject_args > 0) {
-            log_debug("pipe inject: lookup %.*s with %d args (was %d)", 
+            log_debug("pipe inject: lookup %.*s with %d args (was %d)",
                 (int)func_name.length, func_name.str, lookup_arg_count, arg_count);
             ast_node->pipe_inject = true;
         }
@@ -1252,25 +1252,25 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     if (symbol == SYM_BINARY) {
         TypeString* str_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeString));
         str_type->is_const = 1;  str_type->is_literal = 1;
-        
+
         // Binary has a child node (hex_binary or base64_binary)
         int cnt = ts_node_named_child_count(node);
         if (cnt == 0) {
             log_debug("build_lit_string: empty binary literal, returning null type");
             return &LIT_NULL;
         }
-        
+
         TSNode child = ts_node_named_child(node, 0);
         int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
         int content_len = end - start;
-        
+
         str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
         str_type->string = str;
         memcpy(str->chars, tp->source + start, content_len);
         str->chars[content_len] = '\0';
         str->len = content_len;
         str->ref_cnt = 1;
-        
+
         arraylist_append(tp->const_list, str);
         str_type->const_index = tp->const_list->length - 1;
         return (Type*)str_type;
@@ -1282,16 +1282,16 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
     // Determine quote character and content boundaries
     char quote_char = (symbol == SYM_STRING) ? '"' : '\'';  // symbols use single quotes
-    
+
     // Skip opening quote
     if (raw_len < 2 || raw[0] != quote_char || raw[raw_len - 1] != quote_char) {
         log_error("Invalid string literal format: %.*s", raw_len, raw);
         return &LIT_NULL;
     }
-    
+
     const char* content_start = raw + 1;
     int content_len = raw_len - 2;  // exclude both quotes
-    
+
     // Handle empty string/symbol case
     if (content_len == 0) {
         log_debug("build_lit_string: empty string/symbol literal, returning null type");
@@ -1323,7 +1323,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     else {
         // Has escape sequences - process them
         StringBuf *str_buf = stringbuf_new(tp->pool);
-        
+
         for (int i = 0; i < content_len; i++) {
             if (content_start[i] == '\\' && i + 1 < content_len) {
                 char escape_char = content_start[i + 1];
@@ -1377,13 +1377,13 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                             // High surrogate: 0xD800-0xDBFF, Low surrogate: 0xDC00-0xDFFF
                             if (code_point >= 0xD800 && code_point <= 0xDBFF) {
                                 // This is a high surrogate, look for low surrogate
-                                if (i + 11 < content_len && 
+                                if (i + 11 < content_len &&
                                     content_start[i + 6] == '\\' && content_start[i + 7] == 'u') {
                                     char hex_low[5] = {0};
                                     memcpy(hex_low, content_start + i + 8, 4);
                                     char* endptr_low;
                                     uint32_t low_surrogate = strtoul(hex_low, &endptr_low, 16);
-                                    if (endptr_low == hex_low + 4 && 
+                                    if (endptr_low == hex_low + 4 &&
                                         low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
                                         // Valid surrogate pair - combine into full codepoint
                                         code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low_surrogate - 0xDC00);
@@ -1400,7 +1400,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                                 // Lone low surrogate - output replacement character
                                 code_point = 0xFFFD;
                             }
-                            
+
                             // Convert Unicode code point to UTF-8
                             if (code_point <= 0x7F) {
                                 stringbuf_append_char(str_buf, (char)code_point);
@@ -1494,7 +1494,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
                 stringbuf_append_char(str_buf, content_start[i]);
             }
         }
-        
+
         // Convert StringBuf to String
         str = stringbuf_to_string(str_buf);
         log_debug("final string: %.*s", str->len, str->chars);
@@ -1759,7 +1759,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }
     else { // from _parenthesized_expr
         ast_node->expr = build_expr(tp, child);
-        ast_node->type = ast_node->expr->type;
+        if (ast_node->expr) {
+            ast_node->type = ast_node->expr->type;
+        } else {
+            // build_expr returned NULL (e.g., comment-only parenthesized expr or parse error)
+            record_semantic_error(tp, child, ERR_INVALID_LITERAL, "Empty or invalid parenthesized expression");
+            return (AstNode*)ast_node;
+        }
     }
     log_debug("end build primary expr");
     return (AstNode*)ast_node;
@@ -1876,9 +1882,9 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             log_debug("pipe without ~: will inject first arg");
         }
     }
-    
+
     ast_node->right = build_expr(tp, right_node);
-    
+
     // Reset pipe_inject_args after building right side
     if (pipe_inject) {
         tp->pipe_inject_args = 0;
