@@ -39,7 +39,7 @@ int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
 fn (a: int, b: string) bool   // Function type
-fn int                        // Function type (no params)
+fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
 <div id:symbol; <br>>         // Element type
 ```
@@ -88,6 +88,15 @@ t'2025-01-01T14:30:00Z'  // DateTime
 <div id: "main">  // Element
 ```
 
+**Indexing & Slicing:**
+```lambda
+arr[0]            // First element
+arr.0             // Alt. syntax for const index
+arr[1 to 3]       // Slice (indices 1, 2, 3)
+map.key           // Map field access
+map["key"]        // Map field by string
+```
+
 ## Variables & Declarations
 
 **Let Expressions:**
@@ -101,12 +110,6 @@ t'2025-01-01T14:30:00Z'  // DateTime
 let x = 42;               // Variable declaration
 let y : int = 100;        // With type annotation
 let a = 1, b = 2;         // Multiple variables
-```
-
-**Public Declarations:**
-```lambda
-pub PI = 3.14159;         // Export variable
-pub fn square(x) => x * x; // Export function
 ```
 
 ## Operators
@@ -266,8 +269,6 @@ fn outer(n) { fn inner(x)=>x+n; inner } // closure
 
 `input(file,fmt)` `format(data,fmt)` `print(v)` `output(data,file)` `fetch(url,opts)` `cmd(c,args)` `error(msg)` `varg()`
 
-\vspace{1em}
-
 ## Input/Output Formats
 
 **Supported Input Types:** `json`, `xml`, `yaml`, `markdown`, `csv`, `html`, `latex`, `toml`, `rtf`, `css`, `ini`, `math`, `pdf`
@@ -285,7 +286,7 @@ input("math.txt", {'type':'math', 'flavor':'ascii'})
 format(data, 'yaml')                // Format as YAML
 ```
 
-## Modules & Imports
+## Modules, Imports & Exports
 
 **Import Syntax:**
 ```lambda
@@ -293,6 +294,12 @@ import module_name;               // Basic import
 import .relative_module;          // Relative import
 import alias: module_name;        // Import with alias
 import mod1, mod2, alias: mod3;   // Multiple imports
+```
+
+**Export Declarations:**
+```lambda
+pub PI = 3.14159;             // Export variable
+pub fn square(x) => x * x;    // Export function
 ```
 
 **Module Usage Example:**

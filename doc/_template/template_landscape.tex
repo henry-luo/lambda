@@ -1,4 +1,4 @@
-\documentclass[8pt,landscape,a4paper]{article}
+\documentclass[8pt,landscape,a4paper,oneside]{article}
 \usepackage[utf8]{inputenc}
 \usepackage{multicol}
 \usepackage[landscape,margin=0.3in]{geometry}
@@ -16,11 +16,21 @@
 \renewcommand{\headrulewidth}{0pt} % Remove header rule
 \renewcommand{\footrulewidth}{0pt} % Remove footer rule
 
+% Prevent blank pages
+\raggedbottom
+\let\cleardoublepage\clearpage
+
 % Better page breaking and orphan/widow control
 \setlength{\columnsep}{15pt}
 \raggedcolumns
 \widowpenalty=10000
 \clubpenalty=10000
+
+% Prevent premature column/page breaks in multicol
+\setlength{\multicolsep}{0pt}
+\setlength{\premulticols}{1pt}
+\setlength{\postmulticols}{1pt}
+\setlength{\multicolbaselineskip}{0pt}
 
 % Define colors for shaded environments
 \definecolor{shadecolor}{rgb}{0.97,0.97,0.97}
@@ -123,9 +133,9 @@
 \vspace{3pt}
 
 % Start 3-column layout
-\begin{multicols*}{3}
+\begin{multicols}{3}
 \raggedright
 $body$
-\end{multicols*}
+\end{multicols}
 
 \end{document}
