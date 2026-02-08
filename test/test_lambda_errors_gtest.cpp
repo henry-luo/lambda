@@ -678,6 +678,12 @@ TEST_F(NegativeScriptTest, RuntimeError_InvalidOperation) {
 //     ExpectErrorWithoutCrash("test/lambda/negative/runtime/stack_overflow.ls");
 // }
 
+// --- Fuzzy Crash Regression Tests ---
+
+TEST_F(NegativeScriptTest, FuzzyCrash_EmptyParenthesizedExpr) {
+    ExpectErrorWithoutCrash("test/lambda/negative/fuzzy_crashes/empty_parenthesized_expr.ls");
+}
+
 // --- I/O Error Tests (4xx) ---
 
 TEST_F(NegativeScriptTest, IOError_FileNotFound) {
