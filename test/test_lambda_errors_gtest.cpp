@@ -678,10 +678,42 @@ TEST_F(NegativeScriptTest, RuntimeError_InvalidOperation) {
 //     ExpectErrorWithoutCrash("test/lambda/negative/runtime/stack_overflow.ls");
 // }
 
+TEST_F(NegativeScriptTest, RuntimeError_CallNonFunction) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_call_nonfunc.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_ClosureCallStack) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_closure_call_stack.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_DeepCallStack) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_deep_call_stack.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_DivByZero) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_div_zero.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_TooManyArgs) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_too_many_args.ls");
+}
+
+TEST_F(NegativeScriptTest, RuntimeError_TypeError) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_type_error.ls");
+}
+
 // --- Fuzzy Crash Regression Tests ---
 
 TEST_F(NegativeScriptTest, FuzzyCrash_EmptyParenthesizedExpr) {
     ExpectErrorWithoutCrash("test/lambda/negative/fuzzy_crashes/empty_parenthesized_expr.ls");
+}
+
+TEST_F(NegativeScriptTest, FuzzyCrash_ClosureJitCorruption) {
+    ExpectErrorWithoutCrash("test/lambda/negative/fuzzy_crashes/closure_jit_corruption.ls");
+}
+
+TEST_F(NegativeScriptTest, FuzzyCrash_TypeValidationGenericMapArray) {
+    ExpectErrorWithoutCrash("test/lambda/negative/fuzzy_crashes/type_validation_generic_map_array.ls");
 }
 
 // --- I/O Error Tests (4xx) ---
