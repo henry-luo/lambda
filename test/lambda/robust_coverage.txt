@@ -1,0 +1,21 @@
+'Element Null Fields:'
+42
+123
+1
+99
+"hello"
+<test n: null, v: 55>
+'Mixed-Type Conditionals:'
+"hello"
+42
+true
+true
+true
+true
+'Modulo Equality:'
+true
+true
+true
+true
+true
+true
