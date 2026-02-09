@@ -2090,10 +2090,10 @@ static AstCallNode* get_pipe_call_node(AstNode* right) {
 static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNode* call_node) {
     AstNode* fn_node = call_node->function;
     bool is_sys_func = (fn_node->node_type == AST_NODE_SYS_FUNC);
-    
+
     if (is_sys_func) {
         AstSysFuncNode* sys_fn = (AstSysFuncNode*)fn_node;
-        
+
         // If pipe_inject is set, the fn_info already points to the N+1 arg version
         // Just emit the call with left as first arg
         strbuf_append_str(tp->code_buf, sys_fn->fn_info->is_proc ? "pn_" : "fn_");
@@ -2102,10 +2102,10 @@ static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNod
             strbuf_append_int(tp->code_buf, sys_fn->fn_info->arg_count);
         }
         strbuf_append_char(tp->code_buf, '(');
-        
+
         // First argument: the piped data
         transpile_box_item(tp, left);
-        
+
         // Remaining arguments from original call
         AstNode* arg = call_node->argument;
         while (arg) {
@@ -2113,7 +2113,7 @@ static void transpile_pipe_call_inject(Transpiler* tp, AstNode* left, AstCallNod
             transpile_box_item(tp, arg);
             arg = arg->next;
         }
-        
+
         strbuf_append_char(tp->code_buf, ')');
     } else {
         // For user-defined functions, fall back to fn_pipe_call
@@ -2144,7 +2144,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
             transpile_pipe_call_inject(tp, pipe_node->left, call_node);
             return;
         }
-        
+
         // Otherwise, use runtime fn_pipe_call
         strbuf_append_str(tp->code_buf, "fn_pipe_call(");
         transpile_box_item(tp, pipe_node->left);
@@ -2263,6 +2263,10 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
         strbuf_append_str(tp->code_buf, ")");
     }
     strbuf_append_str(tp->code_buf, ") {");
+    // MIR JIT workaround: track while loop depth so that native variable
+    // assignments inside while loops use *(&x)=v pattern, preventing MIR's
+    // optimizer from mishandling SSA destruction of swap patterns (see Mir_Bug.md)
+    tp->while_depth++;
     // use procedural statements (no wrapper) for while body
     if (while_node->body->node_type == AST_NODE_CONTENT) {
         transpile_proc_statements(tp, (AstListNode*)while_node->body);
@@ -2271,6 +2275,7 @@ void transpile_while(Transpiler* tp, AstWhileNode *while_node) {
         transpile_expr(tp, while_node->body);
         strbuf_append_char(tp->code_buf, ';');
     }
+    tp->while_depth--;
     strbuf_append_str(tp->code_buf, "\n}");
 }
 
@@ -2394,11 +2399,28 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
         return;
     }
 
-    strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
-    strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
-    strbuf_append_char(tp->code_buf, '=');
-    
-    // If target variable has Item type (e.g., was declared with var x = null), 
+    // MIR JIT workaround: inside while loops, use *(&_var)=value for native
+    // scalar types to force memory store/load. This prevents MIR's GVN/SSA
+    // destruction from incorrectly reordering swap-pattern assignments.
+    bool use_ptr_write = false;
+    if (tp->while_depth > 0 && assign_node->target_node && assign_node->target_node->type) {
+        TypeId tid = assign_node->target_node->type->type_id;
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL) {
+            use_ptr_write = true;
+        }
+    }
+
+    if (use_ptr_write) {
+        strbuf_append_str(tp->code_buf, "\n *(&_");
+        strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+        strbuf_append_str(tp->code_buf, ")=");
+    } else {
+        strbuf_append_str(tp->code_buf, "\n _");  // add underscore prefix for variable name
+        strbuf_append_str_n(tp->code_buf, assign_node->target->chars, assign_node->target->len);
+        strbuf_append_char(tp->code_buf, '=');
+    }
+
+    // If target variable has Item type (e.g., was declared with var x = null),
     // we need to box the value properly
     bool needs_boxing = false;
     if (assign_node->target_node && assign_node->target_node->type) {
@@ -2408,7 +2430,7 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
             needs_boxing = true;
         }
     }
-    
+
     if (needs_boxing) {
         transpile_box_item(tp, assign_node->value);
     } else {
