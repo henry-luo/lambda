@@ -81,6 +81,7 @@ extern "C" {
 #define SYM_FN_TYPE sym_fn_type
 #define SYM_RETURN_TYPE sym_return_type
 #define SYM_ERROR_UNION_TYPE sym_error_union_type
+#define SYM_ERROR_TYPE_PATTERN sym_error_type_pattern
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_TYPE_DEFINE sym_type_stam
