@@ -869,6 +869,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         // ANY and ERROR types are already Item at runtime - no boxing needed
         transpile_expr(tp, item);
         break;
+    case LMD_TYPE_TYPE_BINARY:
+        // Union types (T | error from T^) - value is already Item at runtime
+        transpile_expr(tp, item);
+        break;
     default:
         log_debug("unknown box item type: %d", item->type->type_id);
     }
