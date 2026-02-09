@@ -237,7 +237,18 @@ NEVER use printf/fprintf/std::cout for debugging
 - Don't use std::string or std::* containers, like std::vector or std::map. Use ./lib equivalents.
 - Grammar regeneration is automatic - don't manually edit `parser.c`
 - Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
-- Lambda language documentation at `doc/Lambda_Reference.md`
+- Lambda language documentation:
+- **Lambda Reference Docs**:
+  - `doc/Lambda_Reference.md` — Language overview and quick reference
+  - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
+  - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
+  - `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
+  - `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
+  - `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, `?` propagation, `let a^err` destructuring)
+  - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
+  - `doc/Lambda_Validator_Guide.md` — Schema-based data validation
+  - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
+  - `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
 - After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
 - For any temporal files, create them under `./temp` directory.
 - **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.
