@@ -8323,8 +8323,33 @@
         {
           "type": "SYMBOL",
           "name": "binary_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "error_union_type"
         }
       ]
+    },
+    "error_union_type": {
+      "type": "PREC_LEFT",
+      "value": -1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "ok",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_type_expr"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "^"
+          }
+        ]
+      }
     },
     "return_type": {
       "type": "PREC_RIGHT",

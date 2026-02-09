@@ -70,6 +70,10 @@
           "named": true
         },
         {
+          "type": "error_union_type",
+          "named": true
+        },
+        {
           "type": "primary_type",
           "named": true
         },
@@ -94,6 +98,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -164,6 +172,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -246,6 +258,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -751,6 +767,10 @@
             "named": true
           },
           {
+            "type": "error_union_type",
+            "named": true
+          },
+          {
             "type": "primary_type",
             "named": true
           },
@@ -784,6 +804,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -1001,6 +1025,10 @@
           "named": true
         },
         {
+          "type": "error_union_type",
+          "named": true
+        },
+        {
           "type": "primary_type",
           "named": true
         },
@@ -1118,6 +1146,34 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "error_union_type",
+    "named": true,
+    "fields": {
+      "ok": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
+            "named": true
+          },
+          {
+            "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_occurrence",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1295,6 +1351,10 @@
             "named": true
           },
           {
+            "type": "error_union_type",
+            "named": true
+          },
+          {
             "type": "primary_type",
             "named": true
           },
@@ -1396,6 +1456,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -2231,6 +2295,10 @@
           "named": true
         },
         {
+          "type": "error_union_type",
+          "named": true
+        },
+        {
           "type": "primary_type",
           "named": true
         },
@@ -2439,6 +2507,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -2762,6 +2834,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -3415,6 +3491,10 @@
             "named": true
           },
           {
+            "type": "error_union_type",
+            "named": true
+          },
+          {
             "type": "primary_type",
             "named": true
           },
@@ -3430,6 +3510,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -3557,6 +3641,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -3927,11 +4015,11 @@
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "desc",
@@ -3967,11 +4055,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -4123,11 +4211,11 @@
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "t'",
@@ -4135,11 +4223,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

@@ -886,7 +886,17 @@ module.exports = grammar({
       $.primary_type,
       $.type_occurrence,
       $.binary_type,
+      $.error_union_type,
     ),
+
+    // Error union type: T^ means T | error
+    // Used in parameters and let bindings to accept values that may be errors
+    // Note: In return types, use T^. instead (to avoid grammar conflicts)
+    // Use lower precedence than fn_type to avoid conflict with fn_type's return type
+    error_union_type: $ => prec.left(-1, seq(
+      field('ok', $._type_expr),
+      '^'
+    )),
 
     // Return type with optional error type: T or T^E or T^.
     // T^E means function returns T on success, E on error

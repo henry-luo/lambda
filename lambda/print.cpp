@@ -138,6 +138,10 @@ void write_type(StrBuf* code_buf, Type *type) {
     case LMD_TYPE_TYPE:
         strbuf_append_str(code_buf, "Type*");
         break;
+    case LMD_TYPE_TYPE_BINARY:
+        // Union types (T | error from T^) - use Item since value could be either type
+        strbuf_append_str(code_buf, "Item");
+        break;
     default:
         log_error("unknown type to write %d", type_id);
     }
