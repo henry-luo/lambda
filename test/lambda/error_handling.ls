@@ -10,8 +10,8 @@ fn may_fail(x) int^ {
 }
 
 // Test successful case
-may_fail(5)
-may_fail(0)
+may_fail(5)?
+may_fail(0)?
 
 // ============================================
 // 2. Function with explicit error type T^E
@@ -22,8 +22,8 @@ fn divide(a, b) int^error {
     else a / b
 }
 
-divide(10, 2)
-divide(15, 3)
+divide(10, 2)?
+divide(15, 3)?
 
 // ============================================
 // 3. Function without error (plain return type)
@@ -40,11 +40,11 @@ safe_add(3, 4)
 // ============================================
 
 fn compute(x) int^ {
-    let doubled = may_fail(x)
+    let doubled = may_fail(x)?
     doubled + 10
 }
 
-compute(5)
+compute(5)?
 
 // ============================================
 // 5. Arrow function with error type
@@ -52,8 +52,8 @@ compute(5)
 
 fn positive_sqrt(x) float^ => if (x < 0) raise error("negative") else x ^ 0.5
 
-positive_sqrt(16)
-positive_sqrt(25)
+positive_sqrt(16)?
+positive_sqrt(25)?
 
 // ============================================
 // 6. Multiple raise points
@@ -65,9 +65,9 @@ fn validate(x) int^ {
     else x
 }
 
-validate(50)
-validate(0)
-validate(100)
+validate(50)?
+validate(0)?
+validate(100)?
 
 // ============================================
 // 7. Expression body with raise
@@ -75,8 +75,8 @@ validate(100)
 
 fn require_even(n) int^ => if (n % 2 != 0) raise error("odd") else n
 
-require_even(4)
-require_even(10)
+require_even(4)?
+require_even(10)?
 
 // ============================================
 // 8. Type checking with error functions
@@ -95,15 +95,15 @@ fn check_bounds(x) int^ {
     valid * 2
 }
 
-check_bounds(25)
+check_bounds(25)?
 
 // ============================================
 // 10. Function returning error from nested call
 // ============================================
 
 fn double_validated(x) int^ {
-    let v = validate(x)
+    let v = validate(x)?
     v * 2
 }
 
-double_validated(30)
+double_validated(30)?

@@ -517,6 +517,7 @@ module.exports = grammar({
     call_expr: $ => seq(
       field('function', choice($.primary_expr, $.import)),
       $._arguments,
+      optional(field('propagate', '?')),
     ),
 
     index_expr: $ => seq(
@@ -634,9 +635,16 @@ module.exports = grammar({
 
     // use prec.right so the expression is consumed greedily
     // Single assignment: let x = expr
+    // Error destructuring: let a^err = expr
     // Positional decomposition: let a, b = expr
     // Named decomposition: let a, b at expr
     assign_expr: $ => prec.right(choice(
+      // error destructuring: let name^error_name = expr
+      seq(
+        field('name', $.identifier),
+        '^', field('error', $.identifier),
+        '=', field('as', $._expression),
+      ),
       // single variable assignment
       seq(
         field('name', $.identifier),

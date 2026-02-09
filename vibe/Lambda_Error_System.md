@@ -296,9 +296,107 @@ error: index out of bounds
 
 ---
 
-## Static Analysis Requirements
+## Error Handling Enforcement
 
-The compiler must enforce:
+Lambda enforces that errors from `T^` functions are **always explicitly handled**. Ignoring an error is a compile-time error — not a warning, not optional.
+
+### Enforcement Rules
+
+When calling a function that returns `T^` (i.e., `can_raise` is true), the caller **must** do one of:
+
+| Pattern | Meaning | Allowed? |
+|---------|---------|----------|
+| `let a^err = F()` | Capture value and error explicitly | ✅ |
+| `let a = F()?` | Propagate error, bind unwrapped value | ✅ |
+| `let a^err = F()?` | Propagate error, also capture (redundant but valid) | ✅ |
+| `F()?` | Propagate error, discard value | ✅ |
+| `let a = F()` | **Ignoring error** | ❌ Compile error |
+| `F()` | **Ignoring error and value** | ❌ Compile error |
+
+### Error Destructuring (`let a^err = expr`)
+
+The `^` in a let binding captures both the success value and the error:
+
+```lambda
+let result^err = divide(10, x)
+if err != null then
+  print("error: " + err.message)
+  0  // default value
+else
+  result * 2
+```
+
+**Semantics:** If the expression returns an error, `result` is `null` and `err` holds the error. If it succeeds, `result` holds the value and `err` is `null`.
+
+### Error Propagation (`?` operator)
+
+The `?` postfix operator on a call expression unwraps the success value or propagates the error to the caller:
+
+```lambda
+fn compute(x: int) int^ =
+  let a = parse(input)?      // propagate if error
+  let b = divide(a, x)?      // propagate if error
+  a + b                       // normal return
+```
+
+**Semantics:** If the call returns an error, `?` immediately returns that error from the enclosing function. Otherwise, the expression evaluates to the unwrapped success value.
+
+### Enforcement on System Functions
+
+Built-in I/O functions that may fail are annotated with `can_raise` and enforce the same rules:
+
+```lambda
+// ❌ Compile error: unhandled error from 'input'
+let data = input("file.json")
+
+// ✅ Propagate error
+let data = input("file.json")?
+
+// ✅ Capture error explicitly
+let data^err = input("file.json")
+
+// ❌ Compile error: unhandled error from 'io.mkdir'
+io.mkdir("output")
+
+// ✅ Propagate error
+io.mkdir("output")?
+```
+
+### Enforcement on User-Defined Functions
+
+User-defined functions with `T^` or `T^E` return types enforce the same rules at their call sites:
+
+```lambda
+fn divide(a: int, b: int) int^ =
+  if b == 0 then raise error("division by zero")
+  else a / b
+
+// ❌ Compile error: 'divide' returns int^ but error is not handled
+let result = divide(10, 0)
+
+// ✅ Propagate
+let result = divide(10, 0)?
+
+// ✅ Destructure
+let result^err = divide(10, 0)
+```
+
+### Comparison: Error Handling Enforcement Across Languages
+
+| Aspect | **Go** | **Rust** | **Zig** | **Lambda** |
+|--------|--------|----------|---------|------------|
+| **Can ignore error?** | ✅ Yes (`f()` discards error) | ⚠️ Warning via `#[must_use]` | ❌ Compile error | ❌ Compile error |
+| **Propagation syntax** | Manual: `if err != nil { return err }` | `f()?` | `try f()` | `f()?` |
+| **Destructure error** | `val, err := f()` | `match f() { Ok(v) => ..., Err(e) => ... }` | `f() catch \|err\| { ... }` | `let val^err = f()` |
+| **Discard value, handle error** | `_, err := f()` | `if let Err(e) = f() { ... }` | `_ = f() catch \|err\| { ... }` | `let _^err = f()` |
+| **Type preserved through error?** | ⚠️ `error` is interface (type erased) | ✅ `T` and `E` both statically known | ✅ `T` and `E` both statically known | ✅ `T` and `E` both statically known |
+| **Enforcement mechanism** | Convention only | Lint attribute | Language rule | Language rule |
+
+**Key insight:** Go's lack of enforcement is widely criticized — ignored errors cause production bugs. Rust's `#[must_use]` is a warning that can be suppressed. Zig and Lambda take the strongest stance: **the compiler refuses to compile code that ignores errors.**
+
+### Static Analysis Rules
+
+The compiler enforces:
 
 1. **Functions with `T` return type cannot contain `raise`**
    ```lambda
@@ -306,10 +404,10 @@ The compiler must enforce:
      raise error("oops")  // ❌ compile error: function does not declare error return
    ```
 
-2. **Error-returning functions must be handled**
+2. **Error-returning function calls must be handled**
    ```lambda
-   fn main() =
-     divide(10, 0)  // ❌ compile error: unhandled error return
+   divide(10, 0)           // ❌ compile error: unhandled error return
+   let x = divide(10, 0)   // ❌ compile error: unhandled error return
    ```
 
 3. **Normal return cannot be error type**
@@ -318,10 +416,9 @@ The compiler must enforce:
      return error("oops")  // ❌ compile error: use 'raise' for errors
    ```
 
-4. **`?` only valid in error-returning functions**
+4. **`?` only valid on error-returning calls**
    ```lambda
-   fn pure() int =
-     parse("42")?  // ❌ compile error: cannot propagate error from non-error function
+   let x = add(1, 2)?  // ❌ compile error: 'add' does not return errors
    ```
 
 ---
