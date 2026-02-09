@@ -733,7 +733,7 @@ typedef struct Context {
     Item pn_cmd(Item cmd, Item args);
     Item pn_fetch(Item url, Item options);
     Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
-    Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - with options map {format, mode, atomic}
+    Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
     Item pn_output_append(Item source, Item target);      // used by |>> pipe operator (append mode)
 
     // io module functions (procedural)

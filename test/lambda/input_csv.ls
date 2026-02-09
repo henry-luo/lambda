@@ -1,4 +1,4 @@
-let csv =input("test/input/test.csv", 'csv')
+let csv =input("test/input/test.csv", 'csv')?
 csv[1]
 "Seniors:"
 for row in csv {

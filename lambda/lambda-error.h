@@ -95,6 +95,7 @@ typedef enum LambdaErrorCode {
     ERR_BREAK_OUTSIDE_LOOP = 225,     // break used outside loop
     ERR_CONTINUE_OUTSIDE_LOOP = 226,  // continue used outside loop
     ERR_RETURN_OUTSIDE_FUNCTION = 227,// return used outside function
+    ERR_UNHANDLED_ERROR = 228,        // error-returning call not handled with ? or ^err
     
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors
