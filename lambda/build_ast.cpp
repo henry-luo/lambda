@@ -39,11 +39,16 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false},
-    // datetime functions - date/time with 1 arg are method-eligible
-    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME, false},
-    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME, false},
-    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY, false},  // no args
+    // datetime functions - overloaded with arg count suffix
+    {SYSFUNC_DATETIME0, "datetime", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false},  // datetime() - current
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_ANY, false},    // datetime(str) - parse
+    {SYSFUNC_DATE0, "date", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false},          // date() - current date
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false},          // date(dt) - extract date
+    {SYSFUNC_DATE3, "date", 3, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false},          // date(y,m,d) - construct
+    {SYSFUNC_TIME0, "time", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false},          // time() - current time
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_DTIME, false},          // time(dt) - extract time
+    {SYSFUNC_TIME3, "time", 3, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false},          // time(h,m,s) - construct
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY, false},   // justnow() - ms timestamp
     // collection functions
     {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // variable args, not method-eligible
     {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // slice(obj, start, end) -> obj.slice(start, end)
@@ -2687,10 +2692,10 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         ast_node->type = (Type*)&LIT_TYPE_DTIME;
     }
     else if (strview_equal(&type_name, "time")) {
-        ast_node->type = (Type*)&LIT_TYPE_DTIME;
+        ast_node->type = (Type*)&LIT_TYPE_TIME;
     }
     else if (strview_equal(&type_name, "date")) {
-        ast_node->type = (Type*)&LIT_TYPE_DTIME;
+        ast_node->type = (Type*)&LIT_TYPE_DATE;
     }
     else if (strview_equal(&type_name, "binary")) {
         ast_node->type = (Type*)&LIT_TYPE_BINARY;

@@ -134,6 +134,7 @@ public:
     bool isMap() const;
     bool isArray() const;
     bool isList() const;
+    bool isDatetime() const;
 
     // Safe type conversion (returns default-constructed on mismatch)
     String* asString() const;
@@ -142,6 +143,7 @@ public:
     int32_t asInt32() const;
     double asFloat() const;
     bool asBool() const;
+    DateTime asDatetime() const;
     ElementReader asElement() const;  // No pool needed - returns stack-based wrapper
     MapReader asMap() const;
     ArrayReader asArray() const;

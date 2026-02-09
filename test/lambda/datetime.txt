@@ -1,0 +1,54 @@
+"Sub-type checks"
+true
+true
+false
+false
+true
+true
+false
+false
+true
+true
+true
+"Date properties"
+2025
+4
+26
+"Time properties"
+10
+30
+45
+"Computed properties"
+6
+1
+2
+true
+false
+29
+"Precision checks"
+true
+true
+false
+false
+"UTC checks"
+true
+false
+"UTC offset"
+'+05:30'
+'+00:00'
+"Comparison"
+true
+true
+true
+"Constructors"
+true
+true
+true
+true
+"String conversion"
+true
+true
+"Format function"
+true
+true
+true
