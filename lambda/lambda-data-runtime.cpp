@@ -567,6 +567,11 @@ Item item_attr(Item data, const char* key) {
     if (!data.item || !key) { return ItemNull; }
     TypeId type_id = get_type_id(data);
     switch (type_id) {
+    case LMD_TYPE_DTIME: {
+        // datetime member properties - delegate to fn_member for consistency
+        Item key_item = {.item = y2it(heap_create_name(key))};
+        return fn_member(data, key_item);
+    }
     case LMD_TYPE_MAP: {
         Map* map = data.map;
         bool is_found;

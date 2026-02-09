@@ -270,8 +270,13 @@ typedef enum SysFunc {
     SYSFUNC_SYMBOL,
     SYSFUNC_BINARY,
     SYSFUNC_DATETIME,
+    SYSFUNC_DATETIME0,  // datetime() - 0 args, current datetime
     SYSFUNC_DATE,
+    SYSFUNC_DATE0,      // date() - 0 args, current date
+    SYSFUNC_DATE3,      // date(y,m,d) - 3 args, construct from components
     SYSFUNC_TIME,
+    SYSFUNC_TIME0,      // time() - 0 args, current time
+    SYSFUNC_TIME3,      // time(h,m,s) - 3 args, construct from components
     SYSFUNC_JUSTNOW,
     SYSFUNC_SET,
     SYSFUNC_SLICE,
@@ -443,6 +448,8 @@ extern Type TYPE_BINARY;
 extern Type TYPE_SYMBOL;
 extern Type TYPE_PATH;
 extern Type TYPE_DTIME;
+extern Type TYPE_DATE;   // sub-type of datetime (precision: DATE_ONLY or YEAR_ONLY)
+extern Type TYPE_TIME;   // sub-type of datetime (precision: TIME_ONLY)
 extern Type TYPE_LIST;
 extern Type TYPE_RANGE;
 extern TypeArray TYPE_ARRAY;
@@ -479,6 +486,8 @@ extern TypeType LIT_TYPE_BINARY;
 extern TypeType LIT_TYPE_SYMBOL;
 extern TypeType LIT_TYPE_PATH;
 extern TypeType LIT_TYPE_DTIME;
+extern TypeType LIT_TYPE_DATE;   // sub-type: date-only datetime
+extern TypeType LIT_TYPE_TIME;   // sub-type: time-only datetime
 extern TypeType LIT_TYPE_LIST;
 extern TypeType LIT_TYPE_RANGE;
 extern TypeType LIT_TYPE_ARRAY;

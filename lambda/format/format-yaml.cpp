@@ -5,6 +5,8 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/datetime.h"
+#include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include <string.h>
 
@@ -265,6 +267,19 @@ static void format_item_reader(YamlContext& ctx, const ItemReader& item, int ind
     } else if (item.isInt() || item.isFloat()) {
         // use centralized number formatting
         format_number(ctx.output(), item.item());
+    } else if (item.getType() == LMD_TYPE_DTIME) {
+        // format datetime as ISO 8601 string for YAML output
+        DateTime* dt = (DateTime*)item.item().datetime_ptr;
+        if (dt) {
+            stringbuf_append_char(ctx.output(), '"');
+            StrBuf* temp = strbuf_new();
+            datetime_format_iso8601(temp, dt);
+            stringbuf_append_str(ctx.output(), temp->str);
+            strbuf_free(temp);
+            stringbuf_append_char(ctx.output(), '"');
+        } else {
+            stringbuf_append_str(ctx.output(), "null");
+        }
     } else if (item.isString()) {
         String* str = item.asString();
         if (str) {
