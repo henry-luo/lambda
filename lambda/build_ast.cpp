@@ -1069,7 +1069,12 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
                 ast_node->type = &TYPE_ERROR;
                 return (AstNode*)ast_node;
             }
-            ast_node->type = func_type->returned;
+            // If function can raise errors, result type is Item (union of success and error)
+            if (func_type->can_raise) {
+                ast_node->type = &TYPE_ANY;
+            } else {
+                ast_node->type = func_type->returned;
+            }
             if (!ast_node->type) { // e.g. recursive fn
                 ast_node->type = &TYPE_ANY;
             }
@@ -2972,6 +2977,97 @@ static void parse_occurrence_count(StrView op_str, int* min_count, int* max_coun
     log_debug("parsed occurrence: min=%d, max=%d from '%.*s'", *min_count, *max_count, (int)op_str.length, op_str.str);
 }
 
+// Build return type node with optional error type: T or T^E or T^
+// Returns a TypeType wrapping TypeFunc with the return type info
+AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
+    log_debug("build return type");
+
+    // Get the "ok" field (required - the success return type)
+    TSNode ok_node = ts_node_child_by_field_id(return_type_node, field_ok);
+    if (ts_node_is_null(ok_node)) {
+        log_error("Error: return type missing success type");
+        return NULL;
+    }
+
+    AstNode* ok_type_expr = build_expr(tp, ok_node);
+    if (!ok_type_expr) {
+        log_error("Error: failed to parse success return type");
+        return NULL;
+    }
+
+    // Validate that ok_type_expr is actually a type (TypeType)
+    Type* ok_type = NULL;
+    if (ok_type_expr->type && ok_type_expr->type->type_id == LMD_TYPE_TYPE) {
+        ok_type = ((TypeType*)ok_type_expr->type)->type;
+    } else {
+        StrView type_str = ts_node_source(tp, ok_node);
+        log_error("Error: invalid return type '%.*s' - not a valid type",
+            (int)type_str.length, type_str.str);
+        ok_type = &TYPE_ANY;
+    }
+
+    // Check for optional error type: T^E or T^
+    TSNode error_node = ts_node_child_by_field_id(return_type_node, field_error);
+    Type* error_type = NULL;
+    bool can_raise = false;
+
+    // Check if there's a ^ in the return type (either T^E or T^.)
+    // The ^ token indicates the function can raise errors
+    TSTreeCursor cursor = ts_tree_cursor_new(return_type_node);
+    bool has_child = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_child) {
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        StrView child_str = ts_node_source(tp, child);
+        if (child_str.length == 1 && child_str.str[0] == '^') {
+            can_raise = true;
+            break;
+        }
+        has_child = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    if (!ts_node_is_null(error_node)) {
+        // T^E - explicit error type
+        AstNode* error_type_expr = build_expr(tp, error_node);
+        if (error_type_expr && error_type_expr->type && error_type_expr->type->type_id == LMD_TYPE_TYPE) {
+            error_type = ((TypeType*)error_type_expr->type)->type;
+        } else {
+            StrView error_str = ts_node_source(tp, error_node);
+            log_error("Error: invalid error type '%.*s' - not a valid type",
+                (int)error_str.length, error_str.str);
+            error_type = &TYPE_ERROR;
+        }
+        can_raise = true;
+    } else if (can_raise) {
+        // T^ - any error type (inferred)
+        error_type = &TYPE_ERROR;
+    }
+
+    // Create a temporary structure to hold the return type info
+    // We'll return the ok_type_expr with additional info attached via a wrapper
+    // For now, we'll use a special approach: store error_type info in the type list
+    // and return the ok_type_expr augmented with metadata
+
+    // Store the error type and can_raise info in a custom way
+    // For function declarations, the caller (build_func) will extract this info
+    // We'll use a TypeFunc wrapper to carry the return type + error type info
+    AstFuncNode* wrapper_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, return_type_node, sizeof(AstFuncNode));
+    wrapper_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeFunc* fn_type_info = (TypeFunc*)alloc_type(tp->pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    ((TypeType*)wrapper_node->type)->type = (Type*)fn_type_info;
+
+    fn_type_info->returned = ok_type;
+    fn_type_info->error_type = error_type;
+    fn_type_info->can_raise = can_raise;
+
+    log_debug("return type: ok=%d, error=%d, can_raise=%d",
+        ok_type ? ok_type->type_id : -1,
+        error_type ? error_type->type_id : -1,
+        can_raise);
+
+    return (AstNode*)wrapper_node;
+}
+
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     log_debug("build occurrence type");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
@@ -3595,6 +3691,58 @@ AstNode* build_return_stam(Transpiler* tp, TSNode return_node) {
     return (AstNode*)ast_node;
 }
 
+// raise statement - raises an error to the caller
+// Allowed in:
+// 1. Procedural functions (pn) - can always raise
+// 2. Pure functions (fn) with error return type (T^E or T@)
+AstNode* build_raise_stam(Transpiler* tp, TSNode raise_node) {
+    log_debug("build raise stam");
+
+    // Check if we're in a context where raise is allowed
+    // For now, we allow raise in procedures (is_proc=true) and will add
+    // function error type checking later for full error handling support
+    // TODO: Also allow in pure functions with error return type
+    if (!tp->current_scope->is_proc) {
+        // For now, log warning but continue - this allows raise in fn bodies
+        log_debug("'raise' in pure function - function should have error return type");
+    }
+
+    AstRaiseNode* ast_node = (AstRaiseNode*)alloc_ast_node(tp, AST_NODE_RAISE_STAM, raise_node, sizeof(AstRaiseNode));
+
+    // build required error value
+    TSNode value_node = ts_node_child_by_field_id(raise_node, FIELD_VALUE);
+    if (!ts_node_is_null(value_node)) {
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ERROR;
+    } else {
+        log_error("Error: 'raise' requires an error expression");
+        ast_node->value = NULL;
+        ast_node->type = &TYPE_ERROR;
+    }
+
+    return (AstNode*)ast_node;
+}
+
+// raise expression (functional) - raises an error in expression context
+AstNode* build_raise_expr(Transpiler* tp, TSNode raise_node) {
+    log_debug("build raise expr");
+
+    AstRaiseNode* ast_node = (AstRaiseNode*)alloc_ast_node(tp, AST_NODE_RAISE_EXPR, raise_node, sizeof(AstRaiseNode));
+
+    // build required error value
+    TSNode value_node = ts_node_child_by_field_id(raise_node, FIELD_VALUE);
+    if (!ts_node_is_null(value_node)) {
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ERROR;
+    } else {
+        log_error("Error: 'raise' requires an error expression");
+        ast_node->value = NULL;
+        ast_node->type = &TYPE_ERROR;
+    }
+
+    return (AstNode*)ast_node;
+}
+
 // var statement for mutable variables (procedural only)
 AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
     log_debug("build var stam");
@@ -3820,7 +3968,23 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
             AstNode* type_expr = build_expr(tp, child);
             // validate that type_expr is actually a type (TypeType)
             if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
-                fn_type->returned = ((TypeType*)type_expr->type)->type;
+                Type* inner_type = ((TypeType*)type_expr->type)->type;
+                // Check if it's a return_type wrapper (TypeFunc carrying return type + error type)
+                if (inner_type && inner_type->type_id == LMD_TYPE_FUNC) {
+                    TypeFunc* return_type_info = (TypeFunc*)inner_type;
+                    fn_type->returned = return_type_info->returned;
+                    fn_type->error_type = return_type_info->error_type;
+                    fn_type->can_raise = return_type_info->can_raise;
+                    log_debug("function return type: ok=%d, error=%d, can_raise=%d",
+                        fn_type->returned ? fn_type->returned->type_id : -1,
+                        fn_type->error_type ? fn_type->error_type->type_id : -1,
+                        fn_type->can_raise);
+                } else {
+                    // Regular type expression (no error type)
+                    fn_type->returned = inner_type;
+                    fn_type->error_type = NULL;
+                    fn_type->can_raise = false;
+                }
             } else {
                 StrView type_str = ts_node_source(tp, child);
                 log_error("Error: invalid return type '%.*s' - not a valid type",
@@ -3997,7 +4161,23 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                             TSNode type_child = ts_tree_cursor_current_node(&cursor);
                             AstNode* type_expr = build_expr(tp, type_child);
                             if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
-                                fn_type->returned = ((TypeType*)type_expr->type)->type;
+                                Type* inner_type = ((TypeType*)type_expr->type)->type;
+                                // Check if it's a return_type wrapper (TypeFunc carrying return type + error type)
+                                if (inner_type && inner_type->type_id == LMD_TYPE_FUNC) {
+                                    TypeFunc* return_type_info = (TypeFunc*)inner_type;
+                                    fn_type->returned = return_type_info->returned;
+                                    fn_type->error_type = return_type_info->error_type;
+                                    fn_type->can_raise = return_type_info->can_raise;
+                                    log_debug("pass 2 function return type: ok=%d, error=%d, can_raise=%d",
+                                        fn_type->returned ? fn_type->returned->type_id : -1,
+                                        fn_type->error_type ? fn_type->error_type->type_id : -1,
+                                        fn_type->can_raise);
+                                } else {
+                                    // Regular type expression (no error type)
+                                    fn_type->returned = inner_type;
+                                    fn_type->error_type = NULL;
+                                    fn_type->can_raise = false;
+                                }
                                 has_declared_return_type = true;
                             } else {
                                 StrView type_str = ts_node_source(tp, type_child);
@@ -4108,6 +4288,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_continue_stam(tp, expr_node);
     case SYM_RETURN_STAM:
         return build_return_stam(tp, expr_node);
+    case SYM_RAISE_STAM:
+        return build_raise_stam(tp, expr_node);
+    case SYM_RAISE_EXPR:
+        return build_raise_expr(tp, expr_node);
     case SYM_VAR_STAM:
         return build_var_stam(tp, expr_node);
     case SYM_ASSIGN_STAM:
@@ -4186,6 +4370,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_binary_type(tp, expr_node);
     case SYM_TYPE_OCCURRENCE:
         return build_occurrence_type(tp, expr_node);
+    case SYM_RETURN_TYPE:
+        return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
         return build_named_argument(tp, expr_node);
     case SYM_IMPORT_MODULE:
