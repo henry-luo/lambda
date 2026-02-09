@@ -357,9 +357,13 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
     case LMD_TYPE_FLOAT:
         print_double(strbuf, titem->double_val);
         break;
-    case LMD_TYPE_DTIME:
-        strbuf_append_format(strbuf, "%ld", titem->datetime_val);
+    case LMD_TYPE_DTIME: {
+        DateTime dt = titem->datetime_val;
+        strbuf_append_str(strbuf, "t'");
+        datetime_format_lambda(strbuf, &dt);
+        strbuf_append_char(strbuf, '\'');
         break;
+    }
     case LMD_TYPE_DECIMAL:
         print_decimal(strbuf, titem->decimal);
         break;

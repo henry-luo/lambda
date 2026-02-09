@@ -721,7 +721,17 @@ typedef struct Context {
     Item fn_error(Item message);  // raise a user-defined error
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
-    DateTime fn_datetime();
+
+    // datetime constructors
+    DateTime fn_datetime0();                       // datetime() - current datetime
+    DateTime fn_datetime1(Item arg);               // datetime(str) - parse from string
+    DateTime fn_date0();                           // date() - current date
+    DateTime fn_date1(Item arg);                   // date(dt) - extract date portion
+    DateTime fn_date3(Item y, Item m, Item d);     // date(y,m,d) - construct from components
+    DateTime fn_time0();                           // time() - current time
+    DateTime fn_time1(Item arg);                   // time(dt) - extract time portion
+    DateTime fn_time3(Item h, Item m, Item s);     // time(h,m,s) - construct from components
+    DateTime fn_justnow();                         // justnow() - current ms timestamp
 
     // variadic parameter access
     void set_vargs(List* vargs);  // set current variadic args
