@@ -100,6 +100,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, control flow, and operators |
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
+| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `?` propagation, `let a^err` destructuring, compile-time enforcement |
 
 ### Reference Documentation
 
@@ -298,52 +299,26 @@ pn export_data(data) {
 
 ## Error Handling
 
-### Error Values
-
-Lambda Script uses explicit error values for error handling:
+Lambda uses an **error-as-return-value** paradigm — no `try`/`throw`/`catch` exceptions. Functions declare error return types with `T^E` syntax, raise errors with the `raise` keyword, and callers must explicitly handle errors using the `?` propagation operator or `let a^err` destructuring. Ignoring an error is a **compile-time error**.
 
 ```lambda
-// Creating errors
-error("Something went wrong")
-error("Division by zero in calculation")
+// Function that may fail
+fn divide(a, b) int^ {
+    if (b == 0) raise error("division by zero")
+    else a / b
+}
 
-// Functions that may return errors
-fn safe_divide(a: float, b: float) float | error {
-    if (b == 0.0) {
-        error("Division by zero")
-    } else {
-        a / b
-    }
+// Propagate error with ?
+let result = divide(10, x)?
+
+// Or destructure to handle locally
+let result^err = divide(10, x)
+if (err != null) {
+    print("error: " ++ err.message)
 }
 ```
 
-### Error Propagation
-
-```lambda
-// Checking for errors
-let result = safe_divide(10.0, 0.0);
-if (result is error) {
-    print("Error occurred:", result)
-} else {
-    print("Result:", result)
-}
-
-// Error handling in expressions
-let value = if (x == 0) error("Invalid input") else process(x);
-```
-
-### Common Error Patterns
-
-```lambda
-// Type mismatches
-5 + "hello"        // Error: cannot add int and string
-
-// Division by zero
-5 / 0              // Error: division by zero
-
-// Index out of bounds
-[1, 2, 3][5]       // Returns null (not an error)
-```
+> **Full documentation**: See **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** for the complete guide — error types, `raise`, `?` operator, destructuring, enforcement rules, error codes, and examples.
 
 ---
 
@@ -496,6 +471,7 @@ Concise syntax for complex operations:
 - **[Lambda_Type.md](Lambda_Type.md)** — Deep dive into the type system
 - **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** — All expressions and operators
 - **[Lambda_Func.md](Lambda_Func.md)** — Function features and patterns
+- **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** — Error types, propagation, and enforcement
 - **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** — All system functions
 
 For the latest updates and examples, refer to the test files in the `test/lambda/` directory.
