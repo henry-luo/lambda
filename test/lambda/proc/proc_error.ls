@@ -1,10 +1,10 @@
 // Test error handling in procedural context (pn functions)
 
 // ============================================
-// 1. Procedural function with T^. (any error)
+// 1. Procedural function with T^ (any error)
 // ============================================
 
-pn may_fail_proc(x) int^. {
+pn may_fail_proc(x) int^ {
     if (x < 0) {
         raise error("negative input")
     }
@@ -26,7 +26,7 @@ pn safe_divide(a, b) int^error {
 // 3. Procedural function with multiple raise paths
 // ============================================
 
-pn validate_range(x) int^. {
+pn validate_range(x) int^ {
     if (x < 0) {
         raise error("too small")
     }

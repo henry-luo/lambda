@@ -20,21 +20,25 @@ This document proposes a structured error handling system for Lambda, adopting a
 
 ```lambda
 // function that may return error of specific type
-fn divide(a: int, b: int) int^division_error
+fn divide(a: int, b: int) int ^ DivisionError
 
 // shorthand: function may return any error (unspecified error type)
-fn parse(s: string) int^.
+fn parse(s: string) int^
+
+// function may return one of multiple error types
+fn load(path: string) Config ^ ParseError | IOError
 
 // function that never returns error - must succeed
 fn add(a: int, b: int) int
 ```
 
 **Semantics:**
-- `T^E` — Returns `T` on success, error type `E` on failure
-- `T^.` — Returns `T` on success, any error on failure (error type inferred)
+- `T ^ E` — Returns `T` on success, error type `E` on failure
+- `T ^ E1 | E2` — Returns `T` on success, one of multiple error types on failure
+- `T^` — Returns `T` on success, any error on failure (shorthand for `T ^ error`)
 - `T` — Always returns `T`, function body cannot raise errors
 
-> **Note:** The `.` wildcard is used instead of bare `^` for the "any error" shorthand in return types to avoid grammar conflicts where `{...}` would be parsed as a `map_type`.
+> **Note:** The error type pattern after `^` is restricted to `error`, identifiers, or unions of these (e.g., `E1 | E2`). Complex type expressions like `map_type` are not allowed, which avoids grammar ambiguity with function bodies.
 
 ### 1b. Error Union Type in Parameters and Let Bindings
 
@@ -51,20 +55,20 @@ let result: int^ = may_fail(x)
 - Used in parameters to accept potentially-errored values
 - Used in let bindings to capture results that may be errors
 
-> **Note:** In parameters and let bindings, bare `T^` works because it's followed by `,`, `)`, or `=` which cannot start a type expression. Return types require `T^.` because `{body}` would otherwise be parsed as a map type.
+> **Note:** The `T^` syntax works uniformly in parameters, let bindings, and return types.
 
 ### 2. The `raise` Keyword
 
 Lambda introduces the `raise` keyword to explicitly return an error from a function:
 
 ```lambda
-fn divide(a: int, b: int) int^division_error =
+fn divide(a: int, b: int) int^DivisionError =
   if b == 0 then
     raise error("division by zero")
   else
     a / b
 
-fn safe_head(list: list[T]) T^empty_list_error =
+fn safe_head(list: list[T]) T^EmptyListError =
   match list with
   | [] -> raise error("list is empty")
   | [x, ..] -> x
@@ -209,7 +213,7 @@ type config_error : error = {
 Creating custom errors:
 
 ```lambda
-fn parse_int(s: string) int^parse_error =
+fn parse_int(s: string) int^ParseError =
   if not is_numeric(s) then
     raise parse_error({
       message: "invalid integer format",
@@ -327,13 +331,13 @@ The compiler must enforce:
 ### File Processing
 
 ```lambda
-fn process_file(path: string) processed_data^file_error =
+fn process_file(path: string) ProcessedData^FileError =
   let content = read_file(path)?
   let lines = split(content, "\n")
   let parsed = map(lines, parse_line)?
   aggregate(parsed)
 
-fn parse_line(line: string) line_data^parse_error =
+fn parse_line(line: string) LineData^ParseError =
   let parts = split(line, ",")
   if length(parts) < 3 then
     raise error("insufficient fields in line")
@@ -348,7 +352,7 @@ fn parse_line(line: string) line_data^parse_error =
 ### HTTP Client
 
 ```lambda
-fn fetch_user(id: int) user^network_error =
+fn fetch_user(id: int) User^NetworkError =
   let response = http_get("/users/" + str(id))?
   if response.status != 200 then
     raise network_error({
@@ -363,7 +367,7 @@ fn fetch_user(id: int) user^network_error =
 ### Config Loading with Error Wrapping
 
 ```lambda
-fn load_config(path: string) config^config_error =
+fn load_config(path: string) Config^ConfigError =
   let content^file_err = read_file(path)
   if file_err != null then
     raise error("failed to read config file", file_err)
@@ -398,7 +402,7 @@ This design maintains Lambda's pure functional character while providing robust,
 
 ## Open Questions
 
-1. Should `T^` (unspecified error) be allowed, or require explicit error types?
+1. ~~Should `T^` (unspecified error) be allowed, or require explicit error types?~~ **Resolved:** Yes, `T^` is allowed as shorthand for `T^error`
 2. How to handle errors in async/concurrent contexts?
 3. Should there be a `panic!` equivalent for unrecoverable errors?
 4. Error interop with C/FFI functions?
@@ -408,11 +412,21 @@ This design maintains Lambda's pure functional character while providing robust,
 ## Appendix A: Grammar Changes
 
 ```
-// return type with error
+// error type pattern (simple types only to avoid grammar conflicts)
+error_type_pattern
+  : 'error'                              // base error type
+  | identifier                           // custom error type
+  | error_type_pattern '|' error_type_pattern  // union of error types
+
+// return type with optional error
 return_type
-  : type
-  | type '^' type        // T^error_type
-  | type '^'             // T^ (any error)
+  : type                                 // T (no error)
+  | type '^'                             // T^ (any error)
+  | type '^' error_type_pattern          // T^E or T^E1|E2
+
+// error union type (for parameters and let bindings)
+error_union_type
+  : type '^'                             // T^ = T | error
 
 // raise statement
 raise_stmt
@@ -435,14 +449,14 @@ Several syntax options were considered for error return types:
 
 | Syntax | Example | Pros | Cons |
 |--------|---------|------|------|
-| `T^err` | `fn() int^parse_error` | Visually distinct, "raises" connotation | `^` used elsewhere? (exponent) |
+| `T^err` | `fn() int^ParseError` | Visually distinct, "raises" connotation | `^` used elsewhere? (exponent) |
 | `T#err` | `fn() int#parse_error` | Clear separator | `#` often means comment |
 | `T%err` | `fn() int%parse_error` | Unused in most languages | Resembles modulo operator |
 | `!T` | `fn() !int` | Zig-familiar, concise | Prefix loses error type, `!` means "not" |
 
-### Decision: `T^E` and `T@`
+### Decision: `T^E`
 
-**`T^E` was chosen** for Lambda for explicit error types because:
+**`T^E` was chosen** for Lambda because:
 
 1. **Semantic Meaning**: `^` visually suggests "raising" or "lifting" — matching the `raise` keyword
 2. **Readability**: Suffix notation keeps the primary return type prominent: `int^error` reads as "int that may raise error"
@@ -450,16 +464,16 @@ Several syntax options were considered for error return types:
 4. **Consistency**: Pairs naturally with destructuring `let a^b = ...`
 5. **Scanability**: Error type at the end mirrors how we read "returns X, or fails with Y"
 
-**`T@` was chosen** for "any error" shorthand because:
+**Bare `T^` for "any error"** works by restricting what follows `^`:
 
-1. **Grammar Compatibility**: Bare `T^` followed by `{` creates ambiguity with the `^` exponentiation operator, where the parser interprets `{...}` as a map operand
-2. **Visual Distinction**: `@` is visually distinct and unambiguous
-3. **Mnemonic**: `@` can be read as "at risk" — the function is "at risk" of returning an error
-4. **Unused Symbol**: `@` has no other meaning in Lambda's syntax
+1. **Grammar Solution**: By limiting error types to simple patterns (`error`, identifiers, or unions), we avoid ambiguity with `{...}` being parsed as a map type
+2. **Uniform Syntax**: `T^` works the same in parameters, let bindings, and return types
+3. **Union Support**: `T^E1 | E2` allows specifying multiple possible error types
 
 **Summary:**
-- `T^E` — explicit error type (e.g., `int^division_error`)
-- `T@` — any error type, inferred (e.g., `int@`)
+- `T^E` — explicit error type (e.g., `int^DivisionError`)
+- `T^E1 | E2` — union of error types (e.g., `int^ParseError | IOError`)
+- `T^` — any error type (shorthand for `T^error`)
 - `T` — no error possible
 
 ---
@@ -502,45 +516,58 @@ fn get_config_value(key: string) string =
 
 ---
 
-## Appendix D: Alternative "Any Error" Syntax Considered
+## Appendix D: Error Type Pattern Design
 
-During the design of the error return type syntax, several alternatives were considered for the "any error" shorthand (when the specific error type is not specified).
+The error type after `^` is restricted to a simple pattern to avoid grammar conflicts.
 
 ### The Problem
 
-The intuitive syntax `T^` (bare caret) cannot be used because Tree-sitter greedily parses `{ body }` as a `map_type` for the error field:
+If full type expressions were allowed after `^`, the parser would be ambiguous:
 
 ```lambda
-fn test() int^ { 42 }  // FAILS: { 42 } parsed as error type!
+fn test() int^{code: int} { 42 }  // Is {code: int} an error type or the body?
 ```
 
-### Alternatives Considered
+### Solution: Restricted Error Type Pattern
 
-| Syntax | Pros                                     | Cons                             | Decision     |
-| ------ | ---------------------------------------- | -------------------------------- | ------------ |
-| `T^`   | Most intuitive                           | Grammar conflict with `map_type` | ❌ Rejected   |
-| `T@`   | Clear terminator, "at risk" mnemonic     | Mixes character families         | ❌ Rejected   |
-| `T^*`  | Universal wildcard semantics             | Visually prominent               | ❌ Rejected   |
-| `T^^`  | Consistent character                     | No semantic meaning              | ❌ Rejected   |
-| `T^.`  | Minimal, consistent with string patterns | Subtle                           | ✅ **Chosen** |
-| `T^_`  | Minimal, "don't care" convention         | Visually prominent               | ❌ Rejected   |
+The `error_type_pattern` only allows:
+- `error` — the base error type
+- Identifiers — custom error type names
+- Unions — `E1 | E2 | E3` combinations
 
-### Rationale for `T^.`
-
-1. **Consistency**: The `.` already means "any character" in Lambda's string pattern syntax
-2. **Minimalism**: Single character, doesn't clutter the type signature
-3. **No ambiguity**: `.` cannot start a type expression, so no grammar conflicts
-4. **Semantic fit**: Wildcard meaning is established in pattern matching contexts
+This restriction ensures `{...}` is always parsed as the function body, not a map type.
 
 ### Examples
 
 ```lambda
-// Explicit error type
-fn divide(a, b) int^division_error { ... }
+// Base error type
+fn risky() int^error { ... }
 
-// Any error (wildcard)
-fn parse(s) int^. { ... }
+// Any error (shorthand)
+fn risky() int^ { ... }
+
+// Custom error type
+fn divide(a, b) int ^ DivisionError { ... }
+
+// Union of error types
+fn load(path) Config ^ ParseError | IOError { ... }
 
 // No error possible
 fn add(a, b) int { ... }
+```
+
+### What's NOT Allowed
+
+```lambda
+// Complex types after ^ are not allowed:
+fn bad() int^{code: int} { ... }     // ❌ map type not allowed
+fn bad() int^(A, B) { ... }          // ❌ list type not allowed  
+fn bad() int^[E] { ... }             // ❌ array type not allowed
+```
+
+For complex error types, define a named type first:
+
+```lambda
+type DetailedError = {code: int, message: string}
+fn good() int^DetailedError { ... }  // ✅ use identifier
 ```
