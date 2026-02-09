@@ -66,6 +66,8 @@ extern "C" {
 #define SYM_BREAK_STAM sym_break_stam
 #define SYM_CONTINUE_STAM sym_continue_stam
 #define SYM_RETURN_STAM sym_return_stam
+#define SYM_RAISE_STAM sym_raise_stam
+#define SYM_RAISE_EXPR sym_raise_expr
 #define SYM_VAR_STAM sym_var_stam
 #define SYM_ASSIGN_STAM sym_assign_stam
 
@@ -77,6 +79,7 @@ extern "C" {
 #define SYM_CONTENT_TYPE sym_content_type
 #define SYM_ELEMENT_TYPE sym_element_type
 #define SYM_FN_TYPE sym_fn_type
+#define SYM_RETURN_TYPE sym_return_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_TYPE_DEFINE sym_type_stam
@@ -211,6 +214,8 @@ typedef enum AstNodeType {
     AST_NODE_BREAK_STAM,    // break statement (procedural only)
     AST_NODE_CONTINUE_STAM, // continue statement (procedural only)
     AST_NODE_RETURN_STAM,   // return statement (procedural only)
+    AST_NODE_RAISE_STAM,    // raise statement (procedural only)
+    AST_NODE_RAISE_EXPR,    // raise expression (functional)
     AST_NODE_VAR_STAM,      // var statement (procedural only)
     AST_NODE_ASSIGN_STAM,   // assignment statement (procedural only)
     AST_NODE_PIPE_FILE_STAM, // pipe to file statement (procedural only): |> and |>>
@@ -399,6 +404,12 @@ typedef struct AstWhileNode : AstNode {
 typedef struct AstReturnNode : AstNode {
     AstNode *value;  // optional return value
 } AstReturnNode;
+
+// raise statement/expression - raises an error to the caller
+// Used for both AST_NODE_RAISE_STAM (procedural) and AST_NODE_RAISE_EXPR (functional)
+typedef struct AstRaiseNode : AstNode {
+    AstNode *value;  // error expression to raise (required)
+} AstRaiseNode;
 
 // assignment statement (procedural only)
 typedef struct AstAssignStamNode : AstNode {
