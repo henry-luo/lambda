@@ -236,7 +236,9 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     void* field_ptr = (char*)elmt->data + byte_offset - bsize;
     switch (type_id) {
     case LMD_TYPE_NULL:
-        *(void**)field_ptr = NULL;
+        // null value doesn't need to store anything - type_info says 1 byte
+        // just mark the slot with a zero byte for safety (matching map_put fix)
+        *(bool*)field_ptr = false;
         break;
     case LMD_TYPE_BOOL:
         *(bool*)field_ptr = value.bool_val;
@@ -875,7 +877,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
 /**
  * Load input from a Target (unified I/O target).
  * This function dispatches to appropriate handlers based on target scheme.
- * 
+ *
  * @param target - The Target to load from (URL or Path)
  * @param type - Optional type hint (json, xml, etc.)
  * @param flavor - Optional flavor hint (for markup variants)
@@ -886,9 +888,9 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         log_error("input_from_target: target is NULL");
         return NULL;
     }
-    
+
     log_debug("input_from_target: scheme=%d, type=%d", target->scheme, target->type);
-    
+
     // Check if target is a directory first (for local targets)
     if (target_is_dir(target)) {
         log_debug("input_from_target: directory detected, using directory listing");
@@ -900,12 +902,12 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         }
         return NULL;
     }
-    
+
     // For URL targets, use the existing URL-based dispatch
     if (target->type == TARGET_TYPE_URL && target->url) {
         Url* url = target->url;
         log_debug("input_from_target: URL target, href=%s", url->href ? url->href->chars : "null");
-        
+
         // Handle different URL schemes
         if (target->scheme == TARGET_SCHEME_FILE) {
             const char* pathname = url_get_pathname(url);
@@ -914,14 +916,14 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
                 pathname++; // Skip the leading '/' for Windows paths
             }
             #endif
-            
+
             log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
             char* source = read_text_file(pathname);
             if (!source) {
                 log_debug("input_from_target: failed to read file at path: %s", pathname ? pathname : "null");
                 return NULL;
             }
-            
+
             // Create a copy of the URL for the input (input_from_source doesn't own the URL)
             Url* url_copy = url_parse(url->href->chars);
             Input* input = input_from_source(source, url_copy, type, flavor);
@@ -955,7 +957,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
     else if (target->type == TARGET_TYPE_PATH && target->path) {
         Path* path = target->path;
         log_debug("input_from_target: Path target");
-        
+
         // Check scheme of the path
         PathScheme path_scheme = path_get_scheme(path);
         if (path_scheme == PATH_SCHEME_HTTP || path_scheme == PATH_SCHEME_HTTPS) {
@@ -968,14 +970,14 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             strbuf_free(url_buf);
             return input;
         }
-        
+
         // Local file path - convert to OS path
         StrBuf* path_buf = strbuf_new();
         path_to_os_path(path, path_buf);
         const char* pathname = path_buf->str;
-        
+
         // Directory case already handled by target_is_dir check above
-        
+
         log_debug("input_from_target: reading file from path: %s", pathname);
         char* source = read_text_file(pathname);
         if (!source) {
@@ -983,7 +985,7 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
             strbuf_free(path_buf);
             return NULL;
         }
-        
+
         // Create URL from file path for the input
         StrBuf* url_buf = strbuf_new();
         strbuf_append_str(url_buf, "file://");
@@ -993,14 +995,14 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
         strbuf_append_str(url_buf, pathname);
         Url* file_url = url_parse(url_buf->str);
         strbuf_free(url_buf);
-        
+
         Input* input = input_from_source(source, file_url, type, flavor);
         free(source);
         strbuf_free(path_buf);
         if (!input && file_url) url_destroy(file_url);
         return input;
     }
-    
+
     log_error("input_from_target: invalid target (type=%d)", target->type);
     return NULL;
 }

@@ -19,14 +19,14 @@ pn test() {
     var b: int = 1
     var temp: int = 0
     var i: int = 0
-    
+
     while (i < 3) {
         temp = a + b
         a = b
         b = temp
         i = i + 1
     }
-    
+
     return b   // Expected: 3, Actual: 4
 }
 ```
@@ -38,14 +38,14 @@ int32_t test() {
     int32_t b = 1;
     int32_t temp = 0;
     int32_t i = 0;
-    
+
     while (i < 3) {
         temp = a + b;
         a = b;
         b = temp;
         i = i + 1;
     }
-    
+
     return b;
 }
 ```
@@ -164,16 +164,91 @@ cd temp && cc -o test_while_3 test_while_3.c && ./test_while_3
 
 ### Status
 
-**Not Fixed** - This is a bug in the external MIR library, not in Lambda's transpiler. The generated C code is correct; MIR's JIT compilation produces wrong machine code.
+**Fixed (workaround applied)** — 2025-02-09
 
-### Potential Solutions
+The root cause is a **lost-copy bug in MIR's SSA destruction** at optimization levels ≥ 2. The transpiler now works around it by emitting `*(&_x)=value` instead of `_x=value` for native scalar assignments inside while loops, forcing MIR to use memory store/load operations.
 
-1. **Report to MIR maintainer** - File an issue with the MIR project
-2. **Downgrade optimization** - Use `--optimize=0` (but this breaks `run_main`)
-3. **Pattern detection** - Detect this pattern in transpiler and apply workaround automatically
-4. **Alternative JIT** - Consider LLVM or other JIT backends for complex code
+### Root Cause Analysis
+
+**The bug is in MIR's GVN + Copy Propagation + SSA destruction pipeline:**
+
+1. **SSA Construction**: MIR correctly builds SSA form with phi nodes:
+   ```
+   phi  b@1 = phi(b_init, b@2)
+   phi  a@1 = phi(a_init, a@2)
+   i_1 = a@1 + b@1        // temp = a + b
+   a@2 = b@1              // a = old b
+   b@2 = i_1              // b = temp
+   ```
+
+2. **GVN removes copies**: `temp@1 → i_1`, `b@2 → i_1`, `i@2 → i_2`
+
+3. **Copy Propagation**: `a@2 = b@1` → propagated into phi: `phi a@1 = phi(a_init, b@1)`
+
+4. **SSA Destruction (the bug)**: When lowering out of SSA, MIR emits phi-resolution copies:
+   ```
+   b = a + b           // b now = temp = a+b  (insn 27: b@1%0 = i_1)
+   a = b               // a = NEW b = a+b     (insn 29: a@1%0 = b@1%0) ← WRONG!
+   ```
+   Instruction 29 reads `b@1%0` **after** instruction 27 overwrote it. The SSA destruction
+   should have emitted these copies in the correct order or used a temporary to break the cycle.
+
+5. **Register Allocation compounds it**: After RA, `t2` (constant 1) shares a register with `a`,
+   further clobbering values.
+
+This is a classic **lost-copy problem** in SSA destruction — the phi-resolution copies form a cycle
+(`a → b → a`) and MIR fails to detect and break this cycle with a temporary.
+
+**Optimization levels affected**: 2 (adds CSE/GVN + CCP) and 3 (adds LICM + register renaming).
+
+### Applied Fix
+
+In `lambda/transpile.cpp`, the transpiler now uses `*(&_x)=value` for native scalar (int, int64,
+float, bool) variable assignments inside while loops. This forces MIR to emit memory store/load
+instructions which prevent the SSA optimizer from creating the problematic phi-copy cycle.
+
+**Generated C code before fix:**
+```c
+while (_i < 3) {
+    _temp = _a + _b;     // MIR optimizer mishandles this pattern
+    _a = _b;
+    _b = _temp;
+    _i = _i + 1;
+}
+```
+
+**Generated C code after fix:**
+```c
+while (_i < 3) {
+    *(&_temp) = _a + _b;   // memory write prevents SSA optimization bug
+    *(&_a) = _b;
+    *(&_b) = _temp;
+    *(&_i) = _i + 1;
+}
+```
+
+The `*(&x)` pattern is semantically identical to `x` but prevents MIR's optimizer from treating
+the variable as a pure SSA register, forcing correct memory-order semantics.
+
+**Files changed:**
+- `lambda/ast.hpp` — Added `while_depth` field to `Transpiler` struct
+- `lambda/transpile.cpp` — `transpile_while()` tracks depth; `transpile_assign_stam()` uses
+  `*(&_x)=` pattern for native types when `while_depth > 0`
+
+### Workaround Evaluation Summary
+
+| Approach | Works? | Overhead | Notes |
+|----------|--------|----------|-------|
+| `*(&x) = value` (applied) | ✅ | Negligible | Forces memory store, transparent to semantics |
+| Pointer variables (`int32_t *pa = &a`) | ✅ | Low | Requires extra declarations |
+| Algebraic swap (`b=a+b; a=b-a`) | ✅ | None | Only works for addition-based swaps |
+| Array-based (`vars[0], vars[1]`) | ✅ | Low | Forces memory access |
+| `volatile` keyword | ❌ | N/A | MIR ignores volatile |
+| Extra temp variable (`old_b`) | ❌ | N/A | Same SSA pattern, same bug |
+| Address escape (unused `&x`) | ❌ | N/A | Optimizer still promotes to register |
 
 ### Notes
 
 - The transpiler changes to add newlines before `while` and `return` statements were made during investigation but did not fix the issue (the formatting was not the cause)
 - The `-O0` flag causes a separate issue where `run_main` doesn't execute properly
+- Test files: `temp/test_while_3.ls`, `temp/test_while_comprehensive.ls`, `temp/test_mir_debug.c`, `temp/test_mir_workarounds.c`
