@@ -3106,14 +3106,35 @@ AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
     ts_tree_cursor_delete(&cursor);
 
     if (!ts_node_is_null(error_node)) {
-        // T^E - explicit error type
-        AstNode* error_type_expr = build_expr(tp, error_node);
-        if (error_type_expr && error_type_expr->type && error_type_expr->type->type_id == LMD_TYPE_TYPE) {
-            error_type = ((TypeType*)error_type_expr->type)->type;
+        // error_node is an error_type_pattern: 'error' | '.' | identifier
+        TSSymbol error_symbol = ts_node_symbol(error_node);
+        StrView error_str = ts_node_source(tp, error_node);
+        
+        if (error_symbol == SYM_ERROR_TYPE_PATTERN) {
+            // Get the actual child: 'error', '.', or identifier
+            TSNode child = ts_node_child(error_node, 0);
+            if (!ts_node_is_null(child)) {
+                error_symbol = ts_node_symbol(child);
+                error_str = ts_node_source(tp, child);
+            }
+        }
+        
+        // Check what kind of error type pattern we have
+        if (strview_equal(&error_str, "error")) {
+            // 'error' keyword - use base error type
+            error_type = &TYPE_ERROR;
+        } else if (error_symbol == sym_identifier) {
+            // Named error type - look it up
+            AstNode* error_type_expr = build_expr(tp, error_node);
+            if (error_type_expr && error_type_expr->type && error_type_expr->type->type_id == LMD_TYPE_TYPE) {
+                error_type = ((TypeType*)error_type_expr->type)->type;
+            } else {
+                log_error("Error: invalid error type '%.*s' - not a valid type",
+                    (int)error_str.length, error_str.str);
+                error_type = &TYPE_ERROR;
+            }
         } else {
-            StrView error_str = ts_node_source(tp, error_node);
-            log_error("Error: invalid error type '%.*s' - not a valid type",
-                (int)error_str.length, error_str.str);
+            // Fallback - treat as generic error
             error_type = &TYPE_ERROR;
         }
         can_raise = true;

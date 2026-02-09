@@ -1149,6 +1149,26 @@
     }
   },
   {
+    "type": "error_type_pattern",
+    "named": true,
+    "fields": {
+      "type": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "error",
+            "named": false
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "error_union_type",
     "named": true,
     "fields": {
@@ -3487,19 +3507,7 @@
         "required": false,
         "types": [
           {
-            "type": "binary_type",
-            "named": true
-          },
-          {
-            "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "primary_type",
-            "named": true
-          },
-          {
-            "type": "type_occurrence",
+            "type": "error_type_pattern",
             "named": true
           }
         ]
@@ -4211,11 +4219,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "t'",
@@ -4223,11 +4231,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

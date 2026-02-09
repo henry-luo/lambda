@@ -890,25 +890,29 @@ module.exports = grammar({
     ),
 
     // Error union type: T^ means T | error
-    // Used in parameters and let bindings to accept values that may be errors
-    // Note: In return types, use T^. instead (to avoid grammar conflicts)
+    // Used in parameters, let bindings, and return types
     // Use lower precedence than fn_type to avoid conflict with fn_type's return type
     error_union_type: $ => prec.left(-1, seq(
       field('ok', $._type_expr),
       '^'
     )),
 
-    // Return type with optional error type: T or T^E or T^.
-    // T^E means function returns T on success, E on error
-    // T^. means function may return any error (error type inferred)
-    // Use '^.' instead of bare '^' to avoid conflict with map_type consuming function body
+    // Simple error type pattern for return types
+    // Allows: error, identifier, or union of these (E1 | E2)
+    // This restriction avoids ambiguity with map_type in fn bodies: T^ { ... }
+    error_type_pattern: $ => seq(
+      field('type', choice('error', $.identifier)),
+      repeat(seq('|', field('type', choice('error', $.identifier))))
+    ),
+
+    // Return type with optional error type: T or T^ or T^E
+    // T^ means function may return any error (shorthand for T | error)
+    // T^E means function returns T on success, E on error (E must be simple)
     return_type: $ => prec.right(seq(
       field('ok', $._type_expr),
-      optional(choice(
-        // T^E - explicit error type
-        seq('^', field('error', $._type_expr)),
-        // T^. - any error (wildcard, like . in string patterns)
-        seq('^', '.')
+      optional(seq(
+        '^',
+        optional(field('error', $.error_type_pattern))
       ))
     )),
 
