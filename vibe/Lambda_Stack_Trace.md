@@ -8,7 +8,7 @@
 
 This document details the implementation of Lambda's runtime stack trace feature. Stack traces show the call chain that led to an error, essential for debugging.
 
-**Related Document**: See [Lambda_Error_Handling.md](Lambda_Error_Handling.md) for the complete error handling system design.
+**Related Document**: See [Lambda_Error_Code.md](Lambda_Error_Code.md) for the complete error handling system design.
 
 ---
 
