@@ -34,7 +34,24 @@ fn add(a: int, b: int) int
 - `T^.` — Returns `T` on success, any error on failure (error type inferred)
 - `T` — Always returns `T`, function body cannot raise errors
 
-> **Note:** The `.` wildcard is used instead of bare `^` for the "any error" shorthand to avoid grammar conflicts where `{...}` would be parsed as a `map_type`. The `.` is consistent with Lambda's string pattern syntax where `.` means "any character".
+> **Note:** The `.` wildcard is used instead of bare `^` for the "any error" shorthand in return types to avoid grammar conflicts where `{...}` would be parsed as a `map_type`.
+
+### 1b. Error Union Type in Parameters and Let Bindings
+
+```lambda
+// parameter that accepts T or error
+fn process(input: int^) int { ... }
+
+// let binding that may hold T or error  
+let result: int^ = may_fail(x)
+```
+
+**Semantics:**
+- `T^` — Type that is either `T` or `error` (shorthand for `T | error`)
+- Used in parameters to accept potentially-errored values
+- Used in let bindings to capture results that may be errors
+
+> **Note:** In parameters and let bindings, bare `T^` works because it's followed by `,`, `)`, or `=` which cannot start a type expression. Return types require `T^.` because `{body}` would otherwise be parsed as a map type.
 
 ### 2. The `raise` Keyword
 

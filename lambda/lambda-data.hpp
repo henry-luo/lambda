@@ -383,6 +383,7 @@ typedef struct TypeParam : Type {
     struct TypeParam* next;
     bool is_optional;           // whether parameter is optional (? marker or default value)
     struct AstNode* default_value;  // default value expression (NULL if none)
+    Type* full_type;            // for complex types (TypeBinary etc), points to full type; NULL for simple types
 } TypeParam;
 
 typedef struct TypeFunc : Type {
