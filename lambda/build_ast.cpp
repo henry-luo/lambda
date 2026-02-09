@@ -206,6 +206,37 @@ bool types_compatible(Type* arg_type, Type* param_type) {
     if (arg_type->type_id == LMD_TYPE_ANY) return true;  // any arg can pass to typed param (runtime check)
     if (arg_type->type_id == param_type->type_id) return true;
 
+    // Handle union types (e.g., T | error from T^ syntax)
+    // If param is a union type, check if arg matches either side
+    // For TypeParam with complex types, use full_type if available
+    Type* actual_param = param_type;
+    if (param_type->type_id == LMD_TYPE_TYPE_BINARY) {
+        // Check if this is a TypeParam with full_type pointer
+        TypeParam* tp = (TypeParam*)param_type;
+        if (tp->full_type && tp->full_type->type_id == LMD_TYPE_TYPE_BINARY) {
+            actual_param = tp->full_type;
+        }
+    }
+    
+    if (actual_param->type_id == LMD_TYPE_TYPE_BINARY) {
+        TypeBinary* union_type = (TypeBinary*)actual_param;
+        if (union_type->op == OPERATOR_UNION) {
+            // unwrap TypeType if present
+            Type* left = union_type->left;
+            if (left && left->type_id == LMD_TYPE_TYPE) {
+                left = ((TypeType*)left)->type;
+            }
+            Type* right = union_type->right;
+            if (right && right->type_id == LMD_TYPE_TYPE) {
+                right = ((TypeType*)right)->type;
+            }
+            // arg matches if compatible with either side of the union
+            if (types_compatible(arg_type, left) || types_compatible(arg_type, right)) {
+                return true;
+            }
+        }
+    }
+
     // Numeric coercion: int → int64, int → float, int64 → float
     if (param_type->type_id == LMD_TYPE_FLOAT) {
         if (arg_type->type_id == LMD_TYPE_INT ||
@@ -2904,6 +2935,48 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     return NULL;
 }
 
+// Build error union type: T^ (shorthand for T | error) for params and let bindings
+AstNode* build_error_union_type(Transpiler* tp, TSNode node) {
+    log_debug("build error union type (T^)");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
+    ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeBinary* type = (TypeBinary*)alloc_type(tp->pool, LMD_TYPE_TYPE_BINARY, sizeof(TypeBinary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    // Get the "ok" field - the success type
+    TSNode ok_node = ts_node_child_by_field_id(node, field_ok);
+    if (ts_node_is_null(ok_node)) {
+        log_error("Error: error_union_type missing ok type");
+        return NULL;
+    }
+
+    ast_node->left = build_expr(tp, ok_node);
+    if (!ast_node->left) {
+        log_error("Error: failed to parse ok type in error_union_type");
+        return NULL;
+    }
+
+    // Create a node for error type (right side of union)
+    AstPrimaryNode* error_node = (AstPrimaryNode*)alloc_ast_node(tp,
+        AST_NODE_PRIMARY, node, sizeof(AstPrimaryNode));
+    error_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ((TypeType*)error_node->type)->type = &TYPE_ERROR;
+    ast_node->right = (AstNode*)error_node;
+
+    ast_node->op = OPERATOR_UNION;
+    ast_node->op_str = {"|", 1};  // synthetic operator
+
+    type->left = ast_node->left->type;
+    type->right = error_node->type;
+    type->op = OPERATOR_UNION;
+    arraylist_append(tp->type_list, ast_node->type);
+    type->type_index = tp->type_list->length - 1;
+
+    log_debug("error_union_type created: T | error");
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary type");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
@@ -3857,7 +3930,15 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
         if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
             TypeType* type_type = (TypeType*)type_expr->type;
             if (type_type->type) {
+                // Copy base Type fields
                 *(Type*)param_type = *type_type->type;
+                // For complex types (TypeBinary), store pointer to full type
+                if (type_type->type->type_id == LMD_TYPE_TYPE_BINARY) {
+                    param_type->full_type = type_type->type;
+                    log_debug("parameter has union type, storing full_type pointer");
+                } else {
+                    param_type->full_type = NULL;
+                }
             }
         } else {
             // invalid type annotation - log error but continue with ANY type
@@ -3869,6 +3950,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     }
     else {
         *(Type*)param_type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
+        param_type->full_type = NULL;
     }
 
     if (!is_type) { push_name(tp, ast_node, NULL); }
@@ -4374,6 +4456,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_type(tp, expr_node);
     case SYM_BINARY_TYPE:
         return build_binary_type(tp, expr_node);
+    case SYM_ERROR_UNION_TYPE:
+        return build_error_union_type(tp, expr_node);
     case SYM_TYPE_OCCURRENCE:
         return build_occurrence_type(tp, expr_node);
     case SYM_RETURN_TYPE:
