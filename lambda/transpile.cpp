@@ -434,6 +434,10 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
     case AST_NODE_RETURN_STAM:
         pre_define_closure_envs(tp, ((AstReturnNode*)node)->value);
         break;
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR:
+        pre_define_closure_envs(tp, ((AstRaiseNode*)node)->value);
+        break;
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM: {
         AstNode* decl = ((AstLetNode*)node)->declare;
         while (decl) {
@@ -816,6 +820,13 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     if (entry_node && (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_PROC)) {
                         AstFuncNode* fn_node = (AstFuncNode*)entry_node;
                         TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+                        // If function can raise errors, it returns Item - no boxing needed
+                        if (fn_type && fn_type->can_raise) {
+                            log_debug("transpile_box_item: function '%.*s' can_raise, returns Item - no boxing",
+                                (int)fn_node->name->len, fn_node->name->chars);
+                            transpile_expr(tp, item);
+                            break;
+                        }
                         if (fn_type && fn_type->returned && fn_type->returned->type_id != LMD_TYPE_ANY) {
                             // function has a typed return - need to box it appropriately
                             TypeId ret_type_id = fn_type->returned->type_id;
@@ -2334,6 +2345,21 @@ void transpile_return(Transpiler* tp, AstReturnNode *return_node) {
     strbuf_append_char(tp->code_buf, ';');
 }
 
+// raise statement - returns an error value from function
+// For now, raise expr simply returns expr (the error value)
+// Future: validate expr is error type, set error metadata
+void transpile_raise(Transpiler* tp, AstRaiseNode *raise_node) {
+    log_debug("transpile raise stam");
+    strbuf_append_str(tp->code_buf, "\nreturn ");
+    if (raise_node->value) {
+        transpile_box_item(tp, raise_node->value);
+    } else {
+        // raise with no value - return generic error
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+    }
+    strbuf_append_char(tp->code_buf, ';');
+}
+
 // pipe-to-file statement (procedural only): |> and |>>
 void transpile_pipe_file_stam(Transpiler* tp, AstBinaryNode *pipe_node) {
     log_debug("transpile pipe file stam");
@@ -2547,6 +2573,9 @@ void transpile_proc_statements(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_RETURN_STAM) {
             transpile_return(tp, (AstReturnNode*)item);
         }
+        else if (item->node_type == AST_NODE_RAISE_STAM) {
+            transpile_raise(tp, (AstRaiseNode*)item);
+        }
         else if (item->node_type == AST_NODE_ASSIGN_STAM) {
             transpile_assign_stam(tp, (AstAssignStamNode*)item);
         }
@@ -2616,6 +2645,9 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         }
         else if (item->node_type == AST_NODE_RETURN_STAM) {
             transpile_return(tp, (AstReturnNode*)item);
+        }
+        else if (item->node_type == AST_NODE_RAISE_STAM) {
+            transpile_raise(tp, (AstRaiseNode*)item);
         }
         else if (item->node_type == AST_NODE_ASSIGN_STAM) {
             transpile_assign_stam(tp, (AstAssignStamNode*)item);
@@ -3702,13 +3734,14 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
 // Emit a forward declaration for a function (just signature, no body)
 void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
+    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
 
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
-    if (is_closure) {
+    // functions that can raise errors must also return Item
+    if (is_closure || fn_type->can_raise) {
         strbuf_append_str(tp->code_buf, "Item");
     } else {
-        TypeFunc* fn_type = (TypeFunc*)fn_node->type;
         Type *ret_type = fn_type->returned ? fn_type->returned : (fn_node->body ? fn_node->body->type : &TYPE_ANY);
         if (!ret_type) {
             ret_type = &TYPE_ANY;
@@ -3742,7 +3775,6 @@ void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
         has_params = true;
     }
 
-    TypeFunc* fn_type = (TypeFunc*)fn_node->type;
     if (fn_type && fn_type->is_variadic) {
         if (has_params) strbuf_append_str(tp->code_buf, ",");
         strbuf_append_str(tp->code_buf, "List* _vargs");
@@ -3761,14 +3793,18 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     strbuf_append_char(tp->code_buf, '\n');
     // closures must return Item to be compatible with fn_call*
+    // Functions that can raise errors must also return Item (since they return either value or error)
     Type *ret_type = ((TypeFunc*)fn_node->type)->returned;
+    TypeFunc* fn_type_check = (TypeFunc*)fn_node->type;
     if (!ret_type && fn_node->body) {
         ret_type = fn_node->body->type;
     }
     if (!ret_type) {
         ret_type = &TYPE_ANY;
     }
-    if (is_closure) {
+    if (is_closure || fn_type_check->can_raise) {
+        // Functions that can raise errors must return Item
+        // (since they can return either the success value or an error)
         strbuf_append_str(tp->code_buf, "Item");
     } else {
         write_type(tp->code_buf, ret_type);
@@ -3879,11 +3915,15 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         strbuf_append_str(tp->code_buf, " return ");
         transpile_proc_content(tp, (AstListNode*)fn_node->body);
         strbuf_append_str(tp->code_buf, ";\n}\n");
+    } else if (fn_node->body->node_type == AST_NODE_RAISE_STAM) {
+        // raise statement already generates return, don't add another
+        transpile_raise(tp, (AstRaiseNode*)fn_node->body);
+        strbuf_append_str(tp->code_buf, "\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");
         // Check if we need to box the return value
-        // Box if: (1) it's a closure, OR (2) return type is Item but body type is a scalar
-        bool needs_boxing = is_closure;
+        // Box if: (1) it's a closure, OR (2) can_raise is true, OR (3) return type is Item but body type is a scalar
+        bool needs_boxing = is_closure || fn_type_check->can_raise;
         if (!needs_boxing && ret_type->type_id == LMD_TYPE_ANY && fn_node->body->type) {
             TypeId body_type_id = fn_node->body->type->type_id;
             // Box scalar types when returning as Item
@@ -4192,6 +4232,18 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_RETURN_STAM:
         transpile_return(tp, (AstReturnNode*)expr_node);
         break;
+    case AST_NODE_RAISE_STAM:
+        transpile_raise(tp, (AstRaiseNode*)expr_node);
+        break;
+    case AST_NODE_RAISE_EXPR:
+        // raise as expression - evaluates to the error value (for use in if-then-else, etc.)
+        // Unlike raise_stam which returns from function, raise_expr just evaluates to the error value
+        if (((AstRaiseNode*)expr_node)->value) {
+            transpile_box_item(tp, ((AstRaiseNode*)expr_node)->value);
+        } else {
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
+        }
+        break;
     case AST_NODE_VAR_STAM:
         transpile_let_stam(tp, (AstLetNode*)expr_node, false);  // reuse let transpiler
         break;
@@ -4446,6 +4498,14 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         AstReturnNode* ret_node = (AstReturnNode*)node;
         if (ret_node->value) {
             define_ast_node(tp, ret_node->value);
+        }
+        break;
+    }
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR: {
+        AstRaiseNode* raise_node = (AstRaiseNode*)node;
+        if (raise_node->value) {
+            define_ast_node(tp, raise_node->value);
         }
         break;
     }

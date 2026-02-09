@@ -387,7 +387,8 @@ typedef struct TypeParam : Type {
 
 typedef struct TypeFunc : Type {
     TypeParam* param;
-    Type* returned;
+    Type* returned;         // return type on success
+    Type* error_type;       // error type (NULL if function cannot raise errors)
     int param_count;
     int required_param_count;   // count of required (non-optional) parameters
     int type_index;
@@ -395,6 +396,7 @@ typedef struct TypeFunc : Type {
     bool is_public;
     bool is_proc;
     bool is_variadic;           // function accepts variadic args (...)
+    bool can_raise;             // true if function may raise errors (T^ or T^E)
 } TypeFunc;
 
 typedef struct TypeSysFunc : Type {

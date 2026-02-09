@@ -359,6 +359,7 @@ module.exports = grammar({
       $.break_stam,
       $.continue_stam,
       $.return_stam,
+      $.raise_stam,
       $.var_stam,
       $.assign_stam,
       seq($._content_expr, choice(linebreak, ';')),
@@ -452,6 +453,7 @@ module.exports = grammar({
       $.if_expr,
       $.for_expr,
       $.fn_expr,
+      $.raise_expr,
     ),
 
     // Expression without pipe operators (|, where) - used in for loop iteration expression
@@ -463,7 +465,13 @@ module.exports = grammar({
       $.if_expr,
       $.for_expr,
       $.fn_expr,
+      $.raise_expr,
     ),
+
+    // raise expression - raises an error in functional context
+    raise_expr: $ => prec.right(seq(
+      'raise', field('value', $._expression)
+    )),
 
     // Binary expression without pipe operators
     binary_expr_no_pipe: $ => choice(
@@ -592,8 +600,8 @@ module.exports = grammar({
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       field('kind', choice('fn','pn')), field('name', $.identifier),
       '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')',
-      // return type
-      optional(field('type', $._type_expr)),
+      // return type with optional error type: T or T^E or T^
+      optional(field('type', $.return_type)),
       '{', field('body', $.content), '}',
     ),
 
@@ -602,8 +610,8 @@ module.exports = grammar({
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier),
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-      // return type
-      optional(field('type', $._type_expr)),
+      // return type with optional error type: T or T^E or T^
+      optional(field('type', $.return_type)),
       '=>', field('body', $._expression)
     ),
 
@@ -611,15 +619,15 @@ module.exports = grammar({
     fn_expr: $ => choice(
       seq('fn',
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-        // return type
-        optional(field('type', $._type_expr)),
+        // return type with optional error type: T or T^E or T^
+        optional(field('type', $.return_type)),
         '{', field('body', $.content), '}'
       ),
       // use prec.right so the expression body is consumed greedily
       prec.right(seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-        // return type
-        optional(field('type', $._type_expr)),
+        // return type with optional error type: T or T^E or T^
+        optional(field('type', $.return_type)),
         '=>', field('body', $._expression)
       )),
     ),
@@ -776,6 +784,14 @@ module.exports = grammar({
       optional(';')
     )),
 
+    // raise statement (procedural only) - raises an error to caller
+    // use prec.right to prefer consuming expression when present
+    raise_stam: $ => prec.right(seq(
+      'raise',
+      field('value', $._expression),
+      optional(';')
+    )),
+
     // var statement for mutable variables (procedural only)
     var_stam: $ => seq(
       'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
@@ -871,6 +887,20 @@ module.exports = grammar({
       $.type_occurrence,
       $.binary_type,
     ),
+
+    // Return type with optional error type: T or T^E or T^.
+    // T^E means function returns T on success, E on error
+    // T^. means function may return any error (error type inferred)
+    // Use '^.' instead of bare '^' to avoid conflict with map_type consuming function body
+    return_type: $ => prec.right(seq(
+      field('ok', $._type_expr),
+      optional(choice(
+        // T^E - explicit error type
+        seq('^', field('error', $._type_expr)),
+        // T^. - any error (wildcard, like . in string patterns)
+        seq('^', '.')
+      ))
+    )),
 
     type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
 
