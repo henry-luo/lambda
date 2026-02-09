@@ -28,116 +28,117 @@ AstNode* build_current_index(Transpiler* tp, TSNode node);
 // first_param_type: expected type of first param for method calls (LMD_TYPE_ANY for any type)
 SysFuncInfo sys_funcs[] = {
     // type/conversion functions - all method-eligible
-    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY},
+    // {fn, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type, can_raise}
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false},
     // datetime functions - date/time with 1 arg are method-eligible
-    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME},
-    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME},
-    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY},  // no args
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME, false},
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false, true, LMD_TYPE_DTIME, false},
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false, false, LMD_TYPE_ANY, false},  // no args
     // collection functions
-    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY},  // variable args, not method-eligible
-    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // slice(obj, start, end) -> obj.slice(start, end)
-    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // variable args, not method-eligible
+    {SYSFUNC_SLICE, "slice", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // slice(obj, start, end) -> obj.slice(start, end)
+    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false, true, LMD_TYPE_ANY, false},
     // min/max - 1-arg is method-eligible, 2-arg is not (no clear "self")
-    {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},
-    {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // min(a,b) - no clear receiver
-    {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},
-    {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // max(a,b) - no clear receiver
+    {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // min(a,b) - no clear receiver
+    {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // max(a,b) - no clear receiver
     // aggregation functions - all method-eligible on collections
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // math functions - method-eligible on numbers
-    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    // I/O functions
-    {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // not method-eligible
-    {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},
-    {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
-    {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY},
-    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY},  // not method-eligible
+    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    // I/O functions - can_raise=true for functions that may fail
+    {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true},   // input(path) -> any^
+    {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, true},   // input(path, format) -> any^
+    {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY, false},  // not method-eligible
     // string functions - method-eligible on strings
-    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
-    {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING},
-    {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
-    {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_STRING, false, false, true, LMD_TYPE_ANY},  // arr.str_join(sep)
-    {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, false, true, LMD_TYPE_STRING},
+    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_NORMALIZE2, "normalize", 2, &TYPE_STRING, false, true, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_CONTAINS, "contains", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_STARTS_WITH, "starts_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_ENDS_WITH, "ends_with", 2, &TYPE_BOOL, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_INDEX_OF, "index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_LAST_INDEX_OF, "last_index_of", 2, &TYPE_INT64, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_TRIM, "trim", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_TRIM_START, "trim_start", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false},  // arr.str_join(sep)
+    {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
     // vector/array functions - method-eligible on arrays
-    {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_CUMPROD, "cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY},  // fill(n, val) - n is count, not self
-    {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // a.dot(b)
-    {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_PROD, "prod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CUMSUM, "cumsum", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CUMPROD, "cumprod", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ARGMIN, "argmin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_ARGMAX, "argmax", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},  // fill(n, val) - n is count, not self
+    {SYSFUNC_DOT, "dot", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.dot(b)
+    {SYSFUNC_NORM, "norm", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // statistical functions - method-eligible on collections
-    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_MEAN, "mean", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_MEDIAN, "median", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_VARIANCE, "variance", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_DEVIATION, "deviation", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // element-wise math functions - method-eligible on numbers/arrays
-    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
+    {SYSFUNC_SQRT, "sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG, "log", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_LOG10, "log10", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_EXP, "exp", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SIN, "sin", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_COS, "cos", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_TAN, "tan", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     // vector manipulation functions - method-eligible on collections
-    {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},
-    {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY},  // arr.sort(comparator)
-    {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},
-    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // a.concat(b)
-    {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // arr.take(n)
-    {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // arr.drop(n)
-    {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // a.zip(b)
-    {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},  // range(s,e,step) - constructor, not method
-    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY},  // arr.quantile(p)
+    {SYSFUNC_REVERSE, "reverse", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SORT, "sort", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SORT2, "sort", 2, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false},  // arr.sort(comparator)
+    {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.concat(b)
+    {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.take(n)
+    {SYSFUNC_DROP, "drop", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.drop(n)
+    {SYSFUNC_ZIP, "zip", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // a.zip(b)
+    {SYSFUNC_RANGE3, "range", 3, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},  // range(s,e,step) - constructor, not method
+    {SYSFUNC_QUANTILE, "quantile", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // arr.quantile(p)
     // variadic parameter access - not method-eligible
-    {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},
-    {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY},
+    {SYSFUNC_VARG0, "varg", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
+    {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},
     // procedural functions - not method-eligible (side effects)
-    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},  // legacy global fetch (deprecated)
-    {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, trg) -> bytes_written/error
-    {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},   // output(data, trg, options) - options map with format, mode, atomic
-    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY},
-    // io module functions - procedural (is_proc=true), supports local and remote targets
-    {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY},
-    {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},  // io.fetch(target) - overload 1 arg
-    {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY},  // io.fetch(target, options) - overload 2 args
-    {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY},  // exists(path) -> bool (pure read-only)
+    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false},
+    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false, false, LMD_TYPE_ANY, false},
+    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false},
+    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true},   // fetch may fail (deprecated)
+    {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},  // output(data, trg) -> any^ (bytes written or error)
+    {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},  // output(data, trg, options) -> any^
+    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true},        // cmd(command, args) -> any^ (output or error)
+    // io module functions - procedural (is_proc=true), all can_raise=true for I/O errors
+    {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},     // io_copy(src, dst) -> null^
+    {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},     // io_move(src, dst) -> null^
+    {SYSPROC_IO_DELETE, "io_delete", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true}, // io_delete(path) -> null^
+    {SYSPROC_IO_MKDIR, "io_mkdir", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},   // io_mkdir(path) -> null^
+    {SYSPROC_IO_TOUCH, "io_touch", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},   // io_touch(path) -> null^
+    {SYSPROC_IO_SYMLINK, "io_symlink", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true}, // io_symlink(target, link) -> null^
+    {SYSPROC_IO_CHMOD, "io_chmod", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},   // io_chmod(path, mode) -> null^
+    {SYSPROC_IO_RENAME, "io_rename", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true}, // io_rename(old, new) -> null^
+    {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},     // io_fetch(target) -> any^
+    {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},     // io_fetch(target, options) -> any^
+    {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false},     // exists(path) -> bool (never fails)
 };
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
@@ -1076,7 +1077,13 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         fn_node->fn_info = sys_func_info;
         fn_node->type = sys_func_info->return_type;
         ast_node->function = (AstNode*)fn_node;
-        ast_node->type = fn_node->type;
+        // if sys function can raise errors, result type is Item (union of success and error)
+        if (sys_func_info->can_raise) {
+            ast_node->can_raise = true;
+            ast_node->type = &TYPE_ANY;
+        } else {
+            ast_node->type = fn_node->type;
+        }
 
         // For method calls, prepend the object as the first argument
         if (is_method_call && method_object) {
@@ -1102,6 +1109,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             }
             // If function can raise errors, result type is Item (union of success and error)
             if (func_type->can_raise) {
+                ast_node->can_raise = true;
                 ast_node->type = &TYPE_ANY;
             } else {
                 ast_node->type = func_type->returned;
@@ -1167,7 +1175,23 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
-    log_debug("end building call expr type: %p, %d, is_const:%d", ast_node->type, ast_node->type->type_id, ast_node->type->is_const);
+    // check for '?' propagation operator on the call
+    TSNode propagate_node = ts_node_child_by_field_id(call_node, FIELD_PROPAGATE);
+    if (!ts_node_is_null(propagate_node)) {
+        ast_node->propagate = true;
+        log_debug("call has '?' propagation operator");
+        // '?' is only valid on can_raise calls
+        if (!ast_node->can_raise) {
+            const char* fn_name = is_method_call ? method_name.str : func_name.str;
+            int fn_name_len = is_method_call ? (int)method_name.length : (int)func_name.length;
+            record_semantic_error(tp, call_node, ERR_SEMANTIC_ERROR,
+                "'?' used on '%.*s' which does not return errors",
+                fn_name_len, fn_name);
+        }
+    }
+
+    log_debug("end building call expr type: %p, %d, is_const:%d, can_raise:%d, propagate:%d",
+        ast_node->type, ast_node->type->type_id, ast_node->type->is_const, ast_node->can_raise, ast_node->propagate);
     return (AstNode*)ast_node;
 }
 
@@ -2351,6 +2375,16 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
+    // check for error destructuring: let a^err = expr
+    TSNode error_name_node = ts_node_child_by_field_id(asn_node, FIELD_ERROR);
+    if (!ts_node_is_null(error_name_node)) {
+        int err_start = ts_node_start_byte(error_name_node);
+        StrView err_view = { .str = tp->source + err_start, .length = ts_node_end_byte(error_name_node) - err_start };
+        ast_node->error_name = name_pool_create_strview(tp->name_pool, err_view);
+        log_debug("error destructuring: %.*s^%.*s", (int)name_view.length, name_view.str,
+            (int)err_view.length, err_view.str);
+    }
+
     // check if the variable name is a reserved type keyword
     if (!is_type_definition && is_type_keyword(name_view)) {
         int line = ts_node_start_point(name).row + 1;
@@ -2408,8 +2442,38 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
         }
     }
 
+    // enforce error handling: if RHS is a can_raise call without '?', must use error destructuring
+    if (!is_type_definition && ast_node->as) {
+        // unwrap primary wrapper to find the actual call
+        AstNode* value = ast_node->as;
+        if (value->node_type == AST_NODE_PRIMARY) {
+            value = ((AstPrimaryNode*)value)->expr;
+        }
+        if (value && value->node_type == AST_NODE_CALL_EXPR) {
+            AstCallNode* call = (AstCallNode*)value;
+            if (call->can_raise && !call->propagate && !ast_node->error_name) {
+                record_semantic_error(tp, asn_node, ERR_UNHANDLED_ERROR,
+                    "error from '%.*s' must be handled: use 'let %.*s^err = %.*s(...)' or '%.*s(...)?'",
+                    (int)ast_node->name->len, ast_node->name->chars,
+                    (int)ast_node->name->len, ast_node->name->chars,
+                    (int)ast_node->name->len, ast_node->name->chars,
+                    (int)ast_node->name->len, ast_node->name->chars);
+            }
+        }
+    }
+
     // push the name to the name stack
     push_name(tp, ast_node, NULL);
+
+    // also push the error name if error destructuring is used
+    if (ast_node->error_name) {
+        AstNamedNode* err_var = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+        err_var->name = ast_node->error_name;
+        err_var->type = &TYPE_ANY;  // error variable is Item type
+        err_var->as = nullptr;
+        push_name(tp, err_var, NULL);
+    }
+
     return (AstNode*)ast_node;
 }
 
@@ -4335,6 +4399,30 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
             }
         } else {
             item = build_expr(tp, child);
+
+            // enforce error handling: bare can_raise call without '?' is an error
+            if (item) {
+                AstNode* check = item;
+                if (check->node_type == AST_NODE_PRIMARY) {
+                    check = ((AstPrimaryNode*)check)->expr;
+                }
+                if (check && check->node_type == AST_NODE_CALL_EXPR) {
+                    AstCallNode* call = (AstCallNode*)check;
+                    if (call->can_raise && !call->propagate) {
+                        // get function name for error message
+                        const char* fn_name = "function";
+                        int fn_name_len = 8;
+                        if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
+                            AstSysFuncNode* sys_fn = (AstSysFuncNode*)call->function;
+                            fn_name = sys_fn->fn_info->name;
+                            fn_name_len = (int)strlen(fn_name);
+                        }
+                        record_semantic_error(tp, child, ERR_UNHANDLED_ERROR,
+                            "error from '%.*s' must be handled: use '%.*s(...)?' to propagate or 'let result^err = %.*s(...)' to capture",
+                            fn_name_len, fn_name, fn_name_len, fn_name, fn_name_len, fn_name);
+                    }
+                }
+            }
         }
 
         if (item) {

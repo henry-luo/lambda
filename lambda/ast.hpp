@@ -152,6 +152,8 @@ extern "C" {
 #define FIELD_KEY field_key
 #define FIELD_COUNT field_count
 #define FIELD_EXPR field_expr
+#define FIELD_ERROR field_error
+#define FIELD_PROPAGATE field_propagate
 
 // Symbols for for-expression clauses
 #define SYM_FOR_LET_CLAUSE sym_for_let_clause
@@ -270,6 +272,8 @@ typedef struct AstCallNode : AstNode {
     AstNode *function;
     AstNode *argument;
     bool pipe_inject;  // true if this call has an injected first arg from pipe context
+    bool propagate;    // true if '?' postfix was used (error propagation)
+    bool can_raise;    // true if the callee can return errors (from SysFuncInfo or TypeFunc)
 } AstCallNode;
 
 // Path segment info for AstPathNode
@@ -300,6 +304,7 @@ typedef struct SysFuncInfo {
     bool is_overloaded;
     bool is_method_eligible;    // can be called as obj.method() style
     TypeId first_param_type;    // expected type of first param (LMD_TYPE_ANY for any)
+    bool can_raise;             // function may return error (T^ return type)
 } SysFuncInfo;
 
 typedef struct AstSysFuncNode : AstNode {
@@ -331,6 +336,7 @@ typedef AstBinaryNode AstPipeNode;
 typedef struct AstNamedNode : AstNode {
     String* name;               // Changed from StrView to String* (from name pool)
     AstNode *as;
+    String* error_name;         // for error destructuring: let a^err = expr (NULL if not used)
 } AstNamedNode;
 
 // for AST_NODE_LOOP - extended with index variable and named flag
@@ -549,6 +555,9 @@ typedef struct Transpiler : Script {
     // When > 0, native variable assignments use *(&x)=v pattern to prevent
     // MIR optimizer from mishandling SSA destruction of swap patterns
     int while_depth;
+
+    // unique counter for temporary variables (e.g., error propagation temps)
+    int temp_var_counter;
 } Transpiler;
 
 // Helper to check if arg_type is compatible with param_type

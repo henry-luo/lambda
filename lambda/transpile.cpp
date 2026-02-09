@@ -1517,6 +1517,35 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         return;
     }
 
+    // set assignment name context for closure naming
+    String* prev_assign_name = tp->current_assign_name;
+    tp->current_assign_name = asn_node->name;
+
+    // error destructuring: let name^err_name = expr
+    if (asn_node->error_name) {
+        int tmp_id = tp->temp_var_counter++;
+        // emit temp variable for the full result (may be value or error)
+        strbuf_append_format(tp->code_buf, "\n Item _et%d=", tmp_id);
+        transpile_expr(tp, asn_node->as);
+        strbuf_append_char(tp->code_buf, ';');
+
+        // emit value variable: null if error, value otherwise
+        strbuf_append_str(tp->code_buf, "\n ");
+        if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+        write_var_name(tp->code_buf, asn_node, NULL);
+        strbuf_append_format(tp->code_buf, "=(item_type_id(_et%d)==LMD_TYPE_ERROR)?ITEM_NULL:_et%d;", tmp_id, tmp_id);
+
+        // emit error variable: error if error, null otherwise
+        strbuf_append_str(tp->code_buf, "\n ");
+        if (!is_global) { strbuf_append_str(tp->code_buf, "Item "); }
+        strbuf_append_str(tp->code_buf, "_");
+        strbuf_append_str_n(tp->code_buf, asn_node->error_name->chars, asn_node->error_name->len);
+        strbuf_append_format(tp->code_buf, "=(item_type_id(_et%d)==LMD_TYPE_ERROR)?_et%d:ITEM_NULL;", tmp_id, tmp_id);
+
+        tp->current_assign_name = prev_assign_name;
+        return;
+    }
+
     // declare the variable type
     Type *var_type = asn_node->type;
     strbuf_append_str(tp->code_buf, "\n ");
@@ -1526,10 +1555,6 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     }
     write_var_name(tp->code_buf, asn_node, NULL);
     strbuf_append_char(tp->code_buf, '=');
-
-    // set assignment name context for closure naming
-    String* prev_assign_name = tp->current_assign_name;
-    tp->current_assign_name = asn_node->name;
 
     transpile_expr(tp, asn_node->as);
 
@@ -3077,6 +3102,13 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         return;
     }
 
+    // '?' propagation: emit opening wrapper before the call
+    int prop_id = -1;
+    if (call_node->propagate) {
+        prop_id = tp->temp_var_counter;  // will be incremented at the end
+        strbuf_append_format(tp->code_buf, "({Item _ep%d=", prop_id);
+    }
+
     // TCO: Check if this is a tail-recursive call that should be transformed to goto
     if (is_tco_tail_call(tp, call_node)) {
         transpile_tail_call(tp, call_node, tp->tco_func);
@@ -3493,6 +3525,14 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     // Close the i2it() wrapper for unboxed INT calls (but not inside unboxed body)
     if (use_unboxed && unboxed_return_type == LMD_TYPE_INT && !tp->in_unboxed_body) {
         strbuf_append_char(tp->code_buf, ')');
+    }
+
+    // '?' propagation: wrap call result in error check
+    if (call_node->propagate) {
+        // use unique counter for temp variable to avoid name collisions
+        int prop_id = tp->temp_var_counter++;
+        // close the statement expression: check error, return if error, else yield value
+        strbuf_append_format(tp->code_buf, "; if(item_type_id(_ep%d)==LMD_TYPE_ERROR) return _ep%d; _ep%d;})", prop_id, prop_id, prop_id);
     }
 }
 

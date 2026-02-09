@@ -489,8 +489,9 @@ static bool get_map_bool_field(Map* map, const char* field_name, bool default_va
     return default_val;
 }
 
-// 3-parameter wrapper: output(source, target, options) - with options map
-// Options map supports:
+// 3-parameter wrapper: output(source, target, options) - with options map, symbol, or string
+// If 3rd arg is a symbol or string, it is treated as the output format.
+// If 3rd arg is a map, it supports:
 //   format: symbol - output format ('json, 'yaml, 'xml, 'html, 'markdown, 'text, 'mark, etc.)
 //   mode: symbol - 'write or 'append (default: 'write)
 //   atomic: bool - write to temp file first, then rename (default: false)
@@ -515,8 +516,14 @@ Item pn_output3(Item source, Item target_item, Item options_item) {
         
         // extract atomic option
         atomic = get_map_bool_field(options, "atomic", false);
+    } else if (options_type == LMD_TYPE_SYMBOL || options_type == LMD_TYPE_STRING) {
+        // treat symbol or string as the format
+        String* fmt = options_item.get_string();
+        if (fmt && fmt->len > 0) {
+            format_str = fmt->chars;
+        }
     } else if (options_type != LMD_TYPE_NULL) {
-        log_error("pn_output3: options must be a map or null, got type %s", get_type_name(options_type));
+        log_error("pn_output3: options must be a map, symbol, string, or null, got type %s", get_type_name(options_type));
         return ItemError;
     }
     
