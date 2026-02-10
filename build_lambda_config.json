@@ -1480,6 +1480,20 @@
                         "icon": "\ud83d\udd04"
                     },
                     {
+                        "source": "test_yaml_suite_gtest.cpp",
+                        "name": "YAML Test Suite Conformance",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_yaml_suite_gtest.exe",
+                        "icon": "\ud83d\udcdc"
+                    },
+                    {
                         "source": "test_wpt_html_parser_gtest.cpp",
                         "name": "WPT HTML Parser Tests",
                         "dependencies": [
