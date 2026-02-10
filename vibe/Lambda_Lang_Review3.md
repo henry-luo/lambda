@@ -42,40 +42,17 @@ In `fn` functions, the last expression being the return value keeps code terse a
 
 ## Language Design Suggestions
 
-### 1. `else if` Chains in `pn` Functions
-**Problem**: `else if` causes a parse error in `pn` functions. You must use separate `if` blocks with compound conditions or nested `if/else`.
+### 1. Null Coalescing Operator
+**Suggestion**: A null coalescing operator (`??`) would be useful for providing defaults.
 
 ```lambda
-// ❌ Parse error in pn
-if (a) { ... }
-else if (b) { ... }
-else { ... }
-
-// ✅ Workaround — separate if blocks
-if (a) { ... }
-if (not a and b) { ... }
-if (not a and not b) { ... }
-```
-
-This is probably the single most impactful missing feature. Multi-branch conditional logic is extremely common, and the workaround adds redundancy and error risk. Every `pn` function with branching logic suffers from this.
-
-### 2. Null Safety / Null Coalescing
-**Problem**: `null ++ "text"` silently produces `"nulltext"` instead of raising an error or returning `"text"`. There's no null coalescing operator.
-
-```lambda
-// Current: silent null-to-string coercion
-let x = null
-x ++ " world"  // → "null world" (surprising!)
-
-// Suggested: null coalescing operator
+// Suggested
 let name = user.name ?? "anonymous"
-
-// Or at minimum: null ++ string should → error or → "world"
 ```
 
-This caused a subtle bug where string concatenation produced `"null"` prefixes. A `??` operator (or treating null concatenation as an error) would prevent this class of bugs entirely.
+Note: `null ++ "text"` was previously producing `"nulltext"`, but this has been **fixed** — it now correctly returns `"text"` (the non-null operand).
 
-### 3. Raw Strings / Multi-line Literals
+### 2. Raw Strings / Multi-line Literals
 For generating code (Lua, JSON, etc.), having raw string literals that don't process escape sequences would be helpful:
 
 ```lambda
@@ -91,33 +68,7 @@ let code = """
 
 ## System Function Suggestions
 
-### 1. Fix `split()` with Space Delimiter
-**Problem**: `split(str, " ")` returns the unsplit string. This is a critical utility function that doesn't work with the most common delimiter.
-
-```lambda
-// ❌ Broken
-split("hello world", " ")  // → ["hello world"] (unsplit!)
-
-// Workaround: manual character-by-character splitting
-// (Had to write a 20-line pn function to split on spaces)
-```
-
-This should be the highest-priority fix. String splitting on whitespace is one of the most common operations in any text processing language.
-
-### 2. Fix `starts_with()` / `ends_with()`
-**Problem**: `starts_with("test_strbuf_gtest.cpp", "test/")` returns `true` — it appears to match the prefix `"test"` while ignoring the `/` or doing an off-by-one comparison.
-
-```lambda
-// ❌ Buggy
-starts_with("test_strbuf_gtest.cpp", "test/")  // → true (wrong!)
-
-// ✅ Workaround
-slice(str, 0, 5) == "test/"  // manual prefix check
-```
-
-Similarly, `ends_with` has reliability issues. These are fundamental string operations that must work correctly. The workaround using `slice` is verbose and error-prone (hardcoded lengths).
-
-### 3. Directory Listing
+### 1. Directory Listing
 **Problem**: `input("dir", "dir")` returns items with `raw_pointer` types that can't be used. There's no reliable way to enumerate files in a directory from Lambda.
 
 ```lambda
@@ -131,7 +82,7 @@ let files = input("some/dir", "dir")
 
 A working `glob(pattern)` or `ls(path)` function that returns a list of path strings would eliminate the need for external helper scripts.
 
-### 4. Shell Command Execution in JIT Mode
+### 2. Shell Command Execution in JIT Mode
 **Problem**: `cmd()` / `sys.cmd()` doesn't work when running in JIT mode (`./lambda.exe run script.ls`). This severely limits scripting capabilities.
 
 ```lambda
@@ -143,7 +94,7 @@ let result = cmd("ls -la")
 
 For a scripting language targeting data processing and automation, shell integration is essential. Being able to call external tools and capture output is a baseline expectation.
 
-### 5. Additional String Utilities
+### 3. Additional String Utilities
 
 | Function | Description | Priority |
 |----------|-------------|----------|
@@ -158,7 +109,7 @@ For a scripting language targeting data processing and automation, shell integra
 
 Some of these may exist but weren't discoverable through the documentation. If they exist, improving discoverability (e.g., a comprehensive string functions reference) would help.
 
-### 6. Array/List Utilities
+### 4. Array/List Utilities
 
 | Function | Description | Priority |
 |----------|-------------|----------|
@@ -168,7 +119,7 @@ Some of these may exist but weren't discoverable through the documentation. If t
 | `find(list, predicate)` | Find first matching element | Medium |
 | `group_by(list, key_fn)` | Group elements by key | Medium |
 
-### 7. `arr_merge` Stability
+### 5. `arr_merge` Stability
 **Problem**: `arr_merge` with nested comprehensions or complex expressions causes malloc crashes. Had to replace with iterative `arr_push` loops.
 
 ```lambda
@@ -185,13 +136,21 @@ pn arr_push(arr, item) {
 
 ## Bugs Encountered (Summary)
 
+### Fixed During This Session ✅
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| `else if` parse error in `pn` | Grammar rule `if_stam` didn't allow `else if_stam` | Added `else if_stam` alternative in Tree-sitter grammar |
+| `starts_with` / `ends_with` false positives in `if` conditions | Return type was `Item` (64-bit); `b2it(false)` has non-zero type-tag bits, so transpiler's C `if` condition always evaluated truthy | Changed return type from `Item` to `Bool` (`uint8_t`) |
+| `split(str, " ")` returned unsplit string | `list_push` was merging adjacent string items | `disable_string_merging` flag added to `fn_split` |
+| `null ++ string` → `"nulltext"` | `fn_join` didn't check for null operands | Added null checks — returns the non-null operand |
+
+After these fixes, all workaround code in the premake generator was replaced with direct calls to the fixed builtins. The script was simplified by ~60 lines while remaining byte-identical in output.
+
+### Still Open
+
 | Bug | Severity | Workaround |
 |-----|----------|------------|
-| `starts_with` false positives | 🔴 High | `slice(s, 0, n) == prefix` |
-| `ends_with` unreliable | 🔴 High | `slice(s, len-n, len) == suffix` |
-| `split(str, " ")` broken | 🔴 High | Manual char-by-char split function |
-| `null ++ string` → `"nulltext"` | 🟡 Medium | Guard against null before concatenation |
-| `else if` parse error in `pn` | 🔴 High | Separate `if` blocks with compound conditions |
 | `arr_merge` malloc crash | 🟡 Medium | Iterative `arr_push` loop |
 | `cmd()` broken in JIT mode | 🔴 High | External helper scripts |
 | `input("dir", "dir")` raw pointers | 🔴 High | Python helper to generate JSON |
@@ -202,14 +161,16 @@ pn arr_push(arr, item) {
 
 Lambda has a strong and opinionated design foundation. The functional-first approach with pipes, pattern matching, and the `fn`/`pn` split is genuinely pleasant to work with. The input/format pipeline for structured data is a standout feature — being able to read JSON, transform it functionally, and output Lua (or any format) in a single script is powerful.
 
-The language *feels* right for its intended purpose (data processing and document transformation). The pain points are primarily in:
+The language *feels* right for its intended purpose (data processing and document transformation). During this session, several critical bugs were fixed — `else if` chains now work in `pn` functions, `split(str, " ")` works correctly, and `starts_with`/`ends_with` return proper booleans in conditions. These fixes eliminated ~60 lines of workaround code from the premake generator.
 
-1. **Core string operations** — `split`, `starts_with`, `ends_with` being unreliable undermines confidence in the standard library
-2. **Control flow gap** — `else if` in `pn` functions is fundamental, and its absence creates friction in every non-trivial branching logic
-3. **JIT mode limitations** — `cmd()` and directory listing not working in JIT mode forces awkward workarounds with external scripts
+The remaining pain points are:
 
-Fixing the string operations and adding `else if` support would dramatically improve the day-to-day experience. The language has excellent bones — these are fit-and-finish issues, not architectural problems.
+1. **JIT mode limitations** — `cmd()` and directory listing not working in JIT mode forces awkward workarounds with external scripts
+2. **Null coalescing** — a `??` operator would be a natural addition for providing defaults
+3. **Standard library gaps** — `trim`, `replace`, `index_of`, and other common string/collection utilities would reduce boilerplate
+
+The language has excellent bones, and the bugs fixed in this session bring it significantly closer to production-ready for scripting tasks.
 
 ### Scale of the Test
 
-The premake generator project was a meaningful stress test: ~1150 lines of Lambda producing 10,258 lines of Lua output, processing a config file with 42 external libraries, 6 test suites, and 108 test entries. Achieving byte-identical output with the Python reference validated that Lambda can handle real-world code generation tasks, despite the workarounds needed.
+The premake generator project was a meaningful stress test: ~1150 lines of Lambda producing 10,258 lines of Lua output, processing a config file with 42 external libraries, 6 test suites, and 108 test entries. Achieving byte-identical output with the Python reference validated that Lambda can handle real-world code generation tasks. After the bug fixes in this session, the script uses idiomatic Lambda throughout — `else if` chains, `starts_with`/`ends_with`/`split` builtins — with no workarounds remaining for the fixed issues.
