@@ -19,8 +19,8 @@ extern void lambda_stack_overflow_error(const char* func_name);
 extern Item path_resolve_for_iteration(Path* path);
 extern Bool fn_exists(Item path);
 
-// Symbol creation function (implemented in lambda-eval-num.cpp)
-// Note: Must use Item type to match declaration in lambda.h
+// Symbol creation functions (implemented in lambda-eval-num.cpp)
+extern Symbol* fn_symbol(Item item);
 extern Item fn_symbol2(Item name, Item url);
 
 // Shared runtime context pointer - all JIT modules import this
@@ -216,6 +216,7 @@ func_obj_t func_list[] = {
     {"const_type", (fn_ptr) const_type},
     {"const_pattern", (fn_ptr) const_pattern},
     {"fn_string", (fn_ptr) fn_string},
+    {"fn_symbol1", (fn_ptr) fn_symbol},
     {"fn_symbol2", (fn_ptr) fn_symbol2},
     {"fn_type", (fn_ptr) fn_type},
     {"fn_input1", (fn_ptr) fn_input1},
