@@ -38,7 +38,8 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false},
-    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, true, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_SYMBOL2, "symbol", 2, &TYPE_SYMBOL, false, true, false, LMD_TYPE_ANY, false},  // symbol(name, url) - namespaced
     // datetime functions - overloaded with arg count suffix
     {SYSFUNC_DATETIME0, "datetime", 0, &TYPE_DTIME, false, true, false, LMD_TYPE_ANY, false},  // datetime() - current
     {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, true, true, LMD_TYPE_ANY, false},    // datetime(str) - parse

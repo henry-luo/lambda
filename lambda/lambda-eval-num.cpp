@@ -2182,26 +2182,26 @@ Item fn_binary(Item item) {
     }
 }
 
-Item fn_symbol(Item item) {
+extern "C" Symbol* fn_symbol(Item item) {
     // Convert item to symbol type
     if (item._type_id == LMD_TYPE_SYMBOL) {
-        return item;  // Already a symbol
+        return item.get_symbol();  // Already a symbol
     }
     else if (item._type_id == LMD_TYPE_STRING) {
         // Convert string to symbol
         String* str = item.get_string();
         if (!str) {
             log_debug("Cannot convert null string to symbol");
-            return ItemError;
+            return NULL;
         }
 
         Symbol* sym = heap_create_symbol(str->chars, str->len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
-            return ItemError;
+            return NULL;
         }
 
-        return (Item) { .item = y2it(sym) };
+        return sym;
     }
     else if (item._type_id == LMD_TYPE_INT) {
         // Convert int to symbol
@@ -2209,16 +2209,16 @@ Item fn_symbol(Item item) {
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)item.get_int56());
         if (len < 0 || len >= (int)sizeof(buf)) {
             log_debug("Failed to convert int to symbol");
-            return ItemError;
+            return NULL;
         }
 
         Symbol* sym = heap_create_symbol(buf, len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
-            return ItemError;
+            return NULL;
         }
 
-        return (Item) { .item = y2it(sym) };
+        return sym;
     }
     else if (item._type_id == LMD_TYPE_INT64) {
         // Convert int64 to symbol
@@ -2227,16 +2227,16 @@ Item fn_symbol(Item item) {
         int len = snprintf(buf, sizeof(buf), "%" PRId64, val);
         if (len < 0 || len >= (int)sizeof(buf)) {
             log_debug("Failed to convert int64 to symbol");
-            return ItemError;
+            return NULL;
         }
 
         Symbol* sym = heap_create_symbol(buf, len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
-            return ItemError;
+            return NULL;
         }
 
-        return (Item) { .item = y2it(sym) };
+        return sym;
     }
     else if (item._type_id == LMD_TYPE_FLOAT) {
         // Convert float to symbol
@@ -2245,20 +2245,20 @@ Item fn_symbol(Item item) {
         int len = snprintf(buf, sizeof(buf), "%.17g", val);
         if (len < 0 || len >= (int)sizeof(buf)) {
             log_debug("Failed to convert float to symbol");
-            return ItemError;
+            return NULL;
         }
 
         Symbol* sym = heap_create_symbol(buf, len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
-            return ItemError;
+            return NULL;
         }
 
-        return (Item) { .item = y2it(sym) };
+        return sym;
     }
     else {
         log_debug("Cannot convert type %d to symbol", item._type_id);
-        return ItemError;
+        return NULL;
     }
 }
 
