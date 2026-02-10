@@ -227,22 +227,71 @@ Item fn_join(Item left, Item right) {
         String *result = fn_strcat(left_str, right_str);
         return {.item = y2it(result)};
     }
-    // todo: support binary concat
-    else if (left_type == LMD_TYPE_LIST && right_type == LMD_TYPE_LIST) {
-        List *left_list = left.list;  List *right_list = right.list;
-        int total_len = left_list->length + right_list->length, total_extra = left_list->extra + right_list->extra;
-        List *result_list = (List *)heap_calloc(sizeof(List) + sizeof(Item)*(total_len + total_extra), LMD_TYPE_LIST);
-        result_list->type_id = LMD_TYPE_LIST;
-        result_list->length = total_len;  result_list->extra = total_extra;
-        result_list->items = (Item*)(result_list + 1);
-        // copy the items
-        memcpy(result_list->items, left_list->items, sizeof(Item)*left_list->length);
-        memcpy(result_list->items + left_list->length, right_list->items, sizeof(Item)*right_list->length);
-        // need to handle extra and ref_cnt
-        return {.item = l2it(result_list)};
+    // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat)
+    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_LIST) {
+        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_LIST)) {
+            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
+                type_info[left_type].name, type_info[right_type].name);
+            return ItemError;
+        }
+        // same-type optimization: direct memcpy of native items
+        if (left_type == right_type) {
+            if (left_type == LMD_TYPE_ARRAY_INT) {
+                ArrayInt *la = left.array_int, *ra = right.array_int;
+                int64_t total = la->length + ra->length;
+                ArrayInt *result = (ArrayInt *)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
+                result->type_id = LMD_TYPE_ARRAY_INT;
+                result->length = total;  result->capacity = total;
+                result->items = (int64_t*)malloc(total * sizeof(int64_t));
+                memcpy(result->items, la->items, sizeof(int64_t)*la->length);
+                memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
+                return {.array_int = result};
+            }
+            else if (left_type == LMD_TYPE_ARRAY_INT64) {
+                ArrayInt64 *la = left.array_int64, *ra = right.array_int64;
+                int64_t total = la->length + ra->length;
+                ArrayInt64 *result = (ArrayInt64 *)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
+                result->type_id = LMD_TYPE_ARRAY_INT64;
+                result->length = total;  result->capacity = total;
+                result->items = (int64_t*)malloc(total * sizeof(int64_t));
+                memcpy(result->items, la->items, sizeof(int64_t)*la->length);
+                memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
+                return {.array_int64 = result};
+            }
+            else if (left_type == LMD_TYPE_ARRAY_FLOAT) {
+                ArrayFloat *la = left.array_float, *ra = right.array_float;
+                int64_t total = la->length + ra->length;
+                ArrayFloat *result = (ArrayFloat *)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+                result->type_id = LMD_TYPE_ARRAY_FLOAT;
+                result->length = total;  result->capacity = total;
+                result->items = (double*)malloc(total * sizeof(double));
+                memcpy(result->items, la->items, sizeof(double)*la->length);
+                memcpy(result->items + la->length, ra->items, sizeof(double)*ra->length);
+                return {.array_float = result};
+            }
+            // LMD_TYPE_ARRAY or LMD_TYPE_LIST: both use Item* items (same struct layout)
+            Array *la = left.array, *ra = right.array;
+            int64_t total_len = la->length + ra->length;
+            int64_t total_extra = la->extra + ra->extra;
+            Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
+            result->type_id = left_type;
+            result->length = total_len;  result->extra = total_extra;
+            result->items = (Item*)(result + 1);
+            memcpy(result->items, la->items, sizeof(Item)*la->length);
+            memcpy(result->items + la->length, ra->items, sizeof(Item)*ra->length);
+            return {.array = result};
+        }
+        // different types: produce generic Array, convert typed elements to Items
+        int64_t left_len = fn_len(left), right_len = fn_len(right);
+        int64_t total_len = left_len + right_len;
+        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*total_len, LMD_TYPE_ARRAY);
+        result->type_id = LMD_TYPE_ARRAY;
+        result->length = total_len;  result->extra = 0;
+        result->items = (Item*)(result + 1);
+        for (int64_t i = 0; i < left_len; i++)  result->items[i] = item_at(left, i);
+        for (int64_t i = 0; i < right_len; i++) result->items[left_len + i] = item_at(right, i);
+        return {.array = result};
     }
-    // else if (left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
-    // }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
             type_info[left_type].name, type_info[right_type].name);
