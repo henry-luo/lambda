@@ -17,7 +17,7 @@
 #include <stdbool.h>
 #include <sys/stat.h>
 
-#include "lambda.h"
+#include "lambda-data.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
@@ -32,8 +32,10 @@
 
 // Forward declaration - only needed for item_to_target()
 #ifndef SIMPLE_SCHEMA_PARSER
-extern TypeId item_type_id(Item item);
+extern "C" TypeId item_type_id(Item item);
 #endif
+
+extern "C" {
 
 /**
  * Get the current working directory as a file:// URL.
@@ -169,7 +171,8 @@ static uint64_t target_compute_hash(Target* target) {
  * In C, Item is uint64_t; in C++, Item is a struct with .item field.
  */
 Target* item_to_target(uint64_t item, Url* cwd) {
-    TypeId type_id = item_type_id((Item)item);
+    Item it; it.item = item;
+    TypeId type_id = item_type_id(it);
 
     Target* target = (Target*)calloc(1, sizeof(Target));
     if (!target) {
@@ -511,3 +514,5 @@ bool target_equal(Target* a, Target* b) {
     if (!a || !b) return false;      // one NULL, one not
     return a->url_hash == b->url_hash;
 }
+
+} // extern "C"
