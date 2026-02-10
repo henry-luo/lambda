@@ -237,9 +237,12 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         }
     } else if (item.isSymbol()) {
         // Format symbols as strings (they represent identifiers/keywords in CSS)
-        String* str = item.asSymbol();
-        if (str) {
-            format_string(ctx, str);
+        Symbol* sym = item.asSymbol();
+        if (sym) {
+            // Format symbol chars as a JSON string
+            ctx.write_char('"');
+            stringbuf_append_str_n(ctx.output(), sym->chars, sym->len);
+            ctx.write_char('"');
         } else {
             ctx.write_text("null");
         }

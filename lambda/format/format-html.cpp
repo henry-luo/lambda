@@ -438,7 +438,7 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
     else if (item.isSymbol()) {
         // Symbol items represent HTML entities like &copy;, &mdash;, etc.
         // Format them back as entity references for proper roundtrip
-        String* sym = item.asSymbol();
+        Symbol* sym = item.asSymbol();
         if (sym && sym->chars) {
             stringbuf_append_char(ctx.output(), '&');
             stringbuf_append_format(ctx.output(), "%.*s", (int)sym->len, sym->chars);

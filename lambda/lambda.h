@@ -170,7 +170,14 @@ typedef struct String {
 #define STRING_STRUCT_DEFINED
 #endif
 
-typedef String Symbol;  // Symbol is just a String
+typedef struct Target Target;  // forward declaration for Symbol.ns
+
+typedef struct Symbol {
+    uint32_t len:22;    // symbol name length, up to 4MB
+    uint32_t ref_cnt:10;  // ref_cnt, up to 1024 refs
+    Target* ns;         // namespace target (NULL for unqualified symbols)
+    char chars[];       // symbol name characters
+} Symbol;
 typedef String Binary;  // Binary is just a String
 
 // Array and List struct defintions needed for for-loop
@@ -412,6 +419,7 @@ typedef enum {
 typedef struct Target {
     TargetScheme scheme;        // scheme type (file, http, https, sys, etc.)
     TargetType type;            // source type (url or path)
+    uint64_t url_hash;          // hash of normalized URL for fast equality comparison
     const char* original;       // original input string (for relative path preservation)
     union {
         Url* url;               // parsed URL (when type == TARGET_TYPE_URL)
@@ -454,6 +462,26 @@ bool target_exists(Target* target);
 
 // target_free: Free target and its contents
 void target_free(Target* target);
+
+// target_equal: Check if two targets refer to the same resource (by URL hash)
+bool target_equal(Target* a, Target* b);
+
+// Name - a qualified name with optional namespace
+// Pool-managed (no refcount). Used for element tag names and map field names.
+typedef struct Name {
+    String* name;       // local name (interned via name_pool)
+    Target* ns;         // namespace target (NULL for unqualified names)
+} Name;
+
+// name_equal: Check if two names are equal (by local name pointer and namespace hash)
+static inline bool name_equal(const Name* a, const Name* b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->name != b->name) return false;  // interned strings: pointer equality
+    if (a->ns == b->ns) return true;       // same namespace pointer (or both NULL)
+    if (!a->ns || !b->ns) return false;    // one has ns, one doesn't
+    return target_equal(a->ns, b->ns);
+}
 
 // Path resolution for iteration (returns list for dirs, content for files)
 Item path_resolve_for_iteration(Path* path);                      // Resolve path for iteration
@@ -760,4 +788,3 @@ typedef struct Context {
     Item pn_io_fetch2(Item target, Item options);
 
 #endif
-
