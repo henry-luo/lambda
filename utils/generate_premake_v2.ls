@@ -482,8 +482,8 @@ pn arr_push(arr, item) {
 // prefix relative path with ../../ for premake build directory
 pn make_build_path(p) {
     if (len(p) == 0) { return p }
-    if (slice(p, 0, 1) == "/") { return p }
-    if (slice(p, 0, 4) == "-Wl,") { return p }
+    if (starts_with(p, "/")) { return p }
+    if (starts_with(p, "-Wl,")) { return p }
     return "../../" ++ p
 }
 
@@ -569,9 +569,7 @@ pn build_external_libs(config, platform) {
                 lib: lib.lib or "",
                 link: link_val
             })
-        }
-        // if found, we need to update it - rebuild array
-        if (found) {
+        } else {
             var new_result = []
             j = 0
             while (j < len(result)) {
@@ -845,23 +843,11 @@ pn reorder_input_files(source_files) {
     var i = 0
     while (i < len(source_files)) {
         var f = source_files[i]
-        // use slice to check extension since ends_with may have issues with JSON strings
-        var flen = len(f)
-        var last2 = ""
-        if (flen >= 2) {
-            last2 = slice(f, flen - 2, flen)
-        }
-        var last4 = ""
-        if (flen >= 4) {
-            last4 = slice(f, flen - 4, flen)
-        }
-        if (last4 == ".cpp") {
+        if (ends_with(f, ".cpp")) {
             cpp_files = arr_push(cpp_files, f)
-        }
-        if (last4 != ".cpp" and last2 == ".c") {
+        } else if (ends_with(f, ".c")) {
             c_files = arr_push(c_files, f)
-        }
-        if (last4 != ".cpp" and last2 != ".c") {
+        } else {
             cpp_files = arr_push(cpp_files, f)
         }
         i = i + 1
@@ -883,19 +869,7 @@ pn build_test_sources(test_entry) {
     var result = []
     var source = test_entry.source or ""
     if (source != "") {
-        // manually check for "test/" prefix
-        var has_prefix = false
-        if (len(source) > 5) {
-            if (slice(source, 0, 5) == "test/") {
-                has_prefix = true
-            }
-        }
-        var src_path = ""
-        if (has_prefix) {
-            src_path = source
-        } else {
-            src_path = "test/" ++ source
-        }
+        var src_path = if (starts_with(source, "test/")) source else "test/" ++ source
         result = arr_push(result, src_path)
     }
     var add_srcs = test_entry.additional_sources or []
@@ -955,43 +929,14 @@ pn has_dependency(test_entry, dep_name) {
 // split special_flags string into array of flags
 pn build_extra_flags(flags_str) {
     if (flags_str == null or flags_str == "") { return [] }
-    // manual split by space — find space positions and extract substrings
-    var result = []
-    var start = 0
-    var i = 0
-    while (i < len(flags_str)) {
-        if (slice(flags_str, i, i + 1) == " ") {
-            if (i > start) {
-                result = arr_push(result, slice(flags_str, start, i))
-            }
-            start = i + 1
-        }
-        i = i + 1
-    }
-    // last token
-    if (start < len(flags_str)) {
-        result = arr_push(result, slice(flags_str, start, len(flags_str)))
-    }
-    return result
+    return split(flags_str, " ")
 }
 
 // check if test source file exists
 pn test_source_exists(test_entry) {
     var source = test_entry.source or ""
     if (source == "") { return false }
-    // manually check for "test/" prefix (starts_with may have a bug with "test/")
-    var has_test_prefix = false
-    if (len(source) > 5) {
-        if (slice(source, 0, 5) == "test/") {
-            has_test_prefix = true
-        }
-    }
-    var path = ""
-    if (has_test_prefix) {
-        path = source
-    } else {
-        path = "test/" ++ source
-    }
+    var path = if (starts_with(source, "test/")) source else "test/" ++ source
     return exists(path)
 }
 
