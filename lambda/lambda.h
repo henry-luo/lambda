@@ -747,6 +747,7 @@ typedef struct Context {
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
+    Symbol* fn_symbol1(Item item);  // convert to symbol
     Item fn_symbol2(Item name, Item url);  // create namespaced symbol
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
