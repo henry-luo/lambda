@@ -444,3 +444,141 @@ TEST_F(DateTimeTest, PrecisionAwareFormatting) {
     // Test NULL DateTime validation
     EXPECT_FALSE(datetime_is_valid(nullptr)) << "NULL DateTime should be invalid";
 }
+
+// Test: datetime_weekday() calculation
+TEST_F(DateTimeTest, WeekdayCalculation) {
+    DateTime dt = {0};
+
+    // Saturday, 2025-04-26
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 4);
+    dt.day = 26;
+    EXPECT_EQ(datetime_weekday(&dt), 6) << "2025-04-26 should be Saturday (6)";
+
+    // Monday, 2024-01-01
+    DATETIME_SET_YEAR_MONTH(&dt, 2024, 1);
+    dt.day = 1;
+    EXPECT_EQ(datetime_weekday(&dt), 1) << "2024-01-01 should be Monday (1)";
+
+    // Sunday, 2000-01-02
+    DATETIME_SET_YEAR_MONTH(&dt, 2000, 1);
+    dt.day = 2;
+    EXPECT_EQ(datetime_weekday(&dt), 0) << "2000-01-02 should be Sunday (0)";
+}
+
+// Test: datetime_yearday() calculation
+TEST_F(DateTimeTest, YeardayCalculation) {
+    DateTime dt = {0};
+
+    // Jan 1
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 1);
+    dt.day = 1;
+    EXPECT_EQ(datetime_yearday(&dt), 1) << "Jan 1 should be yearday 1";
+
+    // Dec 31 (non-leap year)
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 12);
+    dt.day = 31;
+    EXPECT_EQ(datetime_yearday(&dt), 365) << "Dec 31 (non-leap) should be yearday 365";
+
+    // Dec 31 (leap year)
+    DATETIME_SET_YEAR_MONTH(&dt, 2024, 12);
+    dt.day = 31;
+    EXPECT_EQ(datetime_yearday(&dt), 366) << "Dec 31 (leap) should be yearday 366";
+}
+
+// Test: datetime_quarter() calculation
+TEST_F(DateTimeTest, QuarterCalculation) {
+    DateTime dt = {0};
+
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 1);
+    EXPECT_EQ(datetime_quarter(&dt), 1) << "January is Q1";
+
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 4);
+    EXPECT_EQ(datetime_quarter(&dt), 2) << "April is Q2";
+
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 7);
+    EXPECT_EQ(datetime_quarter(&dt), 3) << "July is Q3";
+
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 10);
+    EXPECT_EQ(datetime_quarter(&dt), 4) << "October is Q4";
+}
+
+// Test: unix millisecond round-trip
+TEST_F(DateTimeTest, UnixTimestampMs) {
+    DateTime dt = {0};
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 4);
+    dt.day = 26;
+    dt.hour = 10;
+    dt.minute = 30;
+    dt.second = 45;
+    dt.millisecond = 123;
+    dt.precision = DATETIME_PRECISION_DATE_TIME;
+    DATETIME_SET_TZ_OFFSET(&dt, 0);
+
+    int64_t ms = datetime_to_unix_ms(&dt);
+    EXPECT_GT(ms, 0) << "Unix ms should be positive for 2025";
+
+    DateTime* restored = datetime_from_unix_ms(pool, ms);
+    ASSERT_NE(restored, nullptr);
+    EXPECT_EQ(DATETIME_GET_YEAR(restored), 2025);
+    EXPECT_EQ(DATETIME_GET_MONTH(restored), 4);
+    EXPECT_EQ(restored->day, 26);
+    EXPECT_EQ(restored->hour, 10);
+    EXPECT_EQ(restored->minute, 30);
+    EXPECT_EQ(restored->second, 45);
+    EXPECT_EQ(restored->millisecond, 123);
+}
+
+// Test: datetime_format_pattern()
+TEST_F(DateTimeTest, FormatPattern) {
+    DateTime dt = {0};
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 4);
+    dt.day = 26;
+    dt.hour = 14;
+    dt.minute = 5;
+    dt.second = 9;
+    dt.millisecond = 123;
+    dt.precision = DATETIME_PRECISION_DATE_TIME;
+
+    StrBuf* buf = strbuf_new();
+
+    // Test YYYY-MM-DD
+    datetime_format_pattern(buf, &dt, "YYYY-MM-DD");
+    EXPECT_STREQ(buf->str, "2025-04-26");
+
+    // Test YYYY/MM/DD HH:mm:ss
+    strbuf_reset(buf);
+    datetime_format_pattern(buf, &dt, "YYYY/MM/DD HH:mm:ss");
+    EXPECT_STREQ(buf->str, "2025/04/26 14:05:09");
+
+    // Test with milliseconds
+    strbuf_reset(buf);
+    datetime_format_pattern(buf, &dt, "HH:mm:ss.SSS");
+    EXPECT_STREQ(buf->str, "14:05:09.123");
+
+    strbuf_free(buf);
+}
+
+// Test: datetime_is_leap_year_dt() and datetime_days_in_month_dt()
+TEST_F(DateTimeTest, LeapYearAndDaysInMonth) {
+    DateTime dt = {0};
+
+    // Leap year
+    DATETIME_SET_YEAR_MONTH(&dt, 2024, 2);
+    EXPECT_TRUE(datetime_is_leap_year_dt(&dt));
+    EXPECT_EQ(datetime_days_in_month_dt(&dt), 29);
+
+    // Non-leap year
+    DATETIME_SET_YEAR_MONTH(&dt, 2025, 2);
+    EXPECT_FALSE(datetime_is_leap_year_dt(&dt));
+    EXPECT_EQ(datetime_days_in_month_dt(&dt), 28);
+
+    // Century non-leap
+    DATETIME_SET_YEAR_MONTH(&dt, 1900, 2);
+    EXPECT_FALSE(datetime_is_leap_year_dt(&dt));
+    EXPECT_EQ(datetime_days_in_month_dt(&dt), 28);
+
+    // Century leap (400 rule)
+    DATETIME_SET_YEAR_MONTH(&dt, 2000, 2);
+    EXPECT_TRUE(datetime_is_leap_year_dt(&dt));
+    EXPECT_EQ(datetime_days_in_month_dt(&dt), 29);
+}

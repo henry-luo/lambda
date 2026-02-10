@@ -1266,6 +1266,16 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
             continue;
         }
 
+        // Skip display:none elements - they don't participate in layout or rendering
+        if (child->is_element()) {
+            DomElement* elmt = (DomElement*)child;
+            if (elmt->display.outer == CSS_VALUE_NONE) {
+                log_debug("JSON: Skipping display:none element %s", child->node_name());
+                child = child->next();
+                continue;
+            }
+        }
+
         // Skip pseudo-elements (::before, ::after, ::marker) - these are rendering artifacts not part of DOM
         const char* tag = child->node_name();
         if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0 || strcmp(tag, "::marker") == 0)) {

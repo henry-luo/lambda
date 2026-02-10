@@ -1,6 +1,8 @@
 #include "format.h"
 #include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/datetime.h"
+#include "../../lib/strbuf.h"
 #include "../mark_reader.hpp"
 
 // Forward declarations using MarkReader API with JsonContext
@@ -250,6 +252,15 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
     } else if (item.isElement()) {
         ElementReader elem = item.asElement();
         format_element_reader_with_indent(ctx, elem, indent);
+    } else if (item.isDatetime()) {
+        // format datetime as ISO 8601 string in JSON
+        DateTime dt = item.asDatetime();
+        StrBuf* buf = strbuf_new();
+        datetime_format_iso8601(buf, &dt);
+        stringbuf_append_char(ctx.output(), '"');
+        stringbuf_append_str_n(ctx.output(), buf->str, buf->length);
+        stringbuf_append_char(ctx.output(), '"');
+        strbuf_free(buf);
     } else {
         // Unknown type
         ctx.write_text("null");

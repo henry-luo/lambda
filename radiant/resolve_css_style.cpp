@@ -2961,6 +2961,50 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // margin-inline: sets both margin-left and margin-right (logical property for inline axis)
+        // NOTE: For LTR writing mode, inline-start=left, inline-end=right
+        case CSS_PROPERTY_MARGIN_INLINE: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            float margin_value = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE, value);
+            if (specificity >= span->bound->margin.left_specificity) {
+                span->bound->margin.left = margin_value;
+                span->bound->margin.left_specificity = specificity;
+                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+            }
+            if (specificity >= span->bound->margin.right_specificity) {
+                span->bound->margin.right = margin_value;
+                span->bound->margin.right_specificity = specificity;
+                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+            }
+            break;
+        }
+        case CSS_PROPERTY_MARGIN_INLINE_START: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            // For LTR, inline-start = left
+            if (specificity >= span->bound->margin.left_specificity) {
+                span->bound->margin.left = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE_START, value);
+                span->bound->margin.left_specificity = specificity;
+                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+            }
+            break;
+        }
+        case CSS_PROPERTY_MARGIN_INLINE_END: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            // For LTR, inline-end = right
+            if (specificity >= span->bound->margin.right_specificity) {
+                span->bound->margin.right = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_INLINE_END, value);
+                span->bound->margin.right_specificity = specificity;
+                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+            }
+            break;
+        }
+
         case CSS_PROPERTY_PADDING_TOP: {
             log_debug("[CSS] Processing padding-top property");
             if (!span->bound) {
