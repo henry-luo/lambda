@@ -313,6 +313,8 @@ typedef enum SysFunc {
     SYSFUNC_TRIM,
     SYSFUNC_TRIM_START,
     SYSFUNC_TRIM_END,
+    SYSFUNC_LOWER,
+    SYSFUNC_UPPER,
     SYSFUNC_SPLIT,
     SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
     SYSFUNC_REPLACE,

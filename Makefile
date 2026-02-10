@@ -1649,11 +1649,7 @@ generate-premake:
 clean-premake:
 	@echo "Cleaning Premake5 build artifacts..."
 	@rm -rf build/premake
-	@rm -f premake5.lua
-	@rm -f $(PREMAKE_FILE)
-	@rm -f premake5.linux.lua
-	@rm -f premake5.win.lua
-	@rm -f premake5-linux.lua
+	@rm -f premake5.lua premake5.*.lua
 	@rm -f *.make
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
@@ -1664,7 +1660,7 @@ build-lambda-input:
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
-	cd build/premake && premake5 gmake --file=../../premake5.lua
+	cd build/premake && premake5 gmake --file=../../premake5.mac.lua
 	@echo "Building lambda-input DLLs with $(JOBS) parallel jobs..."
 	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(JOBS)
 	@echo "✅ lambda-input DLLs built successfully!"
@@ -1674,7 +1670,7 @@ build-test: build-lambda-input
 	@echo "Building configurations..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
-	cd build/premake && premake5 gmake --file=../../premake5.lua && $(MAKE) config=debug_native -j$(JOBS)
+	cd build/premake && premake5 gmake --file=../../premake5.mac.lua && $(MAKE) config=debug_native -j$(JOBS)
 
 # Capture browser layout references using Puppeteer
 # Usage:
