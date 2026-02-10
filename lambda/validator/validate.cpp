@@ -2,16 +2,16 @@
 #include "../mark_reader.hpp"  // MarkReader API for type-safe traversal
 #include "../re2_wrapper.hpp"  // for pattern_full_match
 
-// Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors, 
+// Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors,
 // init_validation_session) are now in validate_helpers.cpp
 
 ValidationResult* validate_against_pattern_type(SchemaValidator* validator, ConstItem item, TypePattern* pattern) {
     log_debug("[VALIDATOR] Validating pattern: is_symbol=%d, item type=%d", pattern->is_symbol, item.type_id());
     ValidationResult* result = create_validation_result(validator->get_pool());
-    
+
     // Use ItemReader for type-safe access
     ItemReader item_reader(item);
-    
+
     // Pattern validates strings (or symbols if pattern->is_symbol)
     if (pattern->is_symbol) {
         if (!item_reader.isSymbol()) {
@@ -24,12 +24,22 @@ ValidationResult* validate_against_pattern_type(SchemaValidator* validator, Cons
             return result;
         }
     }
-    
-    // Get the string value
-    String* str = pattern->is_symbol ? item_reader.asSymbol() : item_reader.asString();
-    
+
+    // Get the string/symbol value
+    const char* chars;
+    uint32_t len;
+    if (pattern->is_symbol) {
+        Symbol* sym = item_reader.asSymbol();
+        chars = sym ? sym->chars : nullptr;
+        len = sym ? sym->len : 0;
+    } else {
+        String* s = item_reader.asString();
+        chars = s ? s->chars : nullptr;
+        len = s ? s->len : 0;
+    }
+
     // Use existing pattern_full_match from re2_wrapper
-    if (pattern_full_match(pattern, str)) {
+    if (chars && pattern_full_match_chars(pattern, chars, len)) {
         result->valid = true;
     } else {
         char error_msg[512];
@@ -37,20 +47,20 @@ ValidationResult* validate_against_pattern_type(SchemaValidator* validator, Cons
         int pattern_len = pattern->source ? (int)pattern->source->len : 9;
         snprintf(error_msg, sizeof(error_msg),
             "String '%.*s' does not match pattern '%.*s'",
-            (int)str->len, str->chars,
+            (int)len, chars ? chars : "",
             pattern_len, pattern_source);
         add_validation_error(result, create_validation_error(
-            VALID_ERROR_PATTERN_MISMATCH, error_msg, 
+            VALID_ERROR_PATTERN_MISMATCH, error_msg,
             validator->get_current_path(), validator->get_pool()));
     }
-    
+
     return result;
 }
 
 ValidationResult* validate_against_primitive_type(SchemaValidator* validator, ConstItem item, Type* type) {
     log_debug("[VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id());
     ValidationResult* result = create_validation_result(validator->get_pool());
-    
+
     if (type->type_id == item.type_id()) {
         result->valid = true;
     } else {
@@ -76,7 +86,7 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
 
     // Unwrap nested TypeType wrappers
     base_type = unwrap_type(base_type);
-    
+
     if (!base_type) {
         log_error("[VALIDATOR] Base type is null after unwrapping");
         result->valid = false;
@@ -109,14 +119,14 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         }
         return result;
     }
-    
+
     // Handle compound types
     // Note: Must check for generic types (TYPE_MAP, TYPE_ELMT, TYPE_ARRAY) which are
     // simple Type structs, not TypeMap/TypeElmt/TypeArray. Casting them would read garbage.
     extern Type TYPE_MAP;
     extern Type TYPE_ELMT;
     extern TypeArray TYPE_ARRAY;
-    
+
     if (base_type->type_id == LMD_TYPE_MAP) {
         if (base_type == &TYPE_MAP) {
             // Generic map type - just check if item is a map
@@ -155,7 +165,7 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         }
         return validate_against_array_type(validator, item, (TypeArray*)base_type);
     }
-    
+
     // Direct type match
     if (base_type->type_id == item.type_id()) {
         result->valid = true;
@@ -318,7 +328,7 @@ ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstIte
                 // Field exists and is not null - validate its value
                 log_debug("[VALIDATOR] Validating map field '%s'", field_name);
                 ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);
-                
+
                 if (field_result && !field_result->valid) {
                     merge_errors(result, field_result, validator);
                 }
@@ -429,7 +439,7 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
 
     // Use RAII for depth tracking
     DepthScope depth_scope(validator);
-    
+
     log_debug("[VALIDATOR] Validating type_id=%d against item type_id=%d", type->type_id, item.type_id());
 
     ValidationResult* result = nullptr;
@@ -442,12 +452,12 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         case LMD_TYPE_NULL:
             result = validate_against_primitive_type(validator, item, type);
             break;
-            
+
         case LMD_TYPE_ARRAY:
         case LMD_TYPE_LIST:
             result = validate_against_array_type(validator, item, (TypeArray*)type);
             break;
-            
+
         case LMD_TYPE_MAP: {
             extern Type TYPE_MAP;
             if (type == &TYPE_MAP) {
@@ -463,7 +473,7 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
             }
             break;
         }
-        
+
         case LMD_TYPE_ELEMENT: {
             extern Type TYPE_ELMT;
             if (type == &TYPE_ELMT) {
@@ -479,26 +489,26 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
             }
             break;
         }
-        
+
         case LMD_TYPE_TYPE:
             result = validate_against_base_type(validator, item, (TypeType*)type);
             break;
-            
+
         case LMD_TYPE_TYPE_UNARY:
             // TypeUnary passed directly - delegate to occurrence validation
             result = validate_occurrence_type(validator, item, (TypeUnary*)type);
             break;
-            
+
         case LMD_TYPE_TYPE_BINARY:
             // TypeBinary passed directly - delegate to binary type validation
             result = validate_binary_type(validator, item, (TypeBinary*)type);
             break;
-        
+
         case LMD_TYPE_PATTERN:
             // Pattern type - validate string/symbol against regex pattern
             result = validate_against_pattern_type(validator, item, (TypePattern*)type);
             break;
-            
+
         default:
             result = create_validation_result(validator->get_pool());
             add_constraint_error_fmt(result, validator, "Unsupported type for validation: %d", type->type_id);

@@ -85,21 +85,27 @@ String* MarkBuilder::createNameFromStrView(StrView name) {
 }
 
 //------------------------------------------------------------------------------
-// Symbol Creation Methods (use name_pool for short symbols)
+// Symbol Creation Methods (arena-allocated Symbol structs)
 //------------------------------------------------------------------------------
 
-String* MarkBuilder::createSymbol(const char* symbol) {
+Symbol* MarkBuilder::createSymbol(const char* symbol) {
     if (!symbol) return nullptr;
     return createSymbol(symbol, strlen(symbol));
 }
 
-String* MarkBuilder::createSymbol(const char* symbol, size_t len) {
+Symbol* MarkBuilder::createSymbol(const char* symbol, size_t len) {
     if (!symbol || len == 0) return nullptr;
-    return name_pool_create_symbol_len(name_pool_, symbol, len);
+    Symbol* sym = (Symbol*)arena_alloc(arena_, sizeof(Symbol) + len + 1);
+    sym->len = len;
+    sym->ref_cnt = 1;
+    sym->ns = nullptr;
+    memcpy(sym->chars, symbol, len);
+    sym->chars[len] = '\0';
+    return sym;
 }
 
-String* MarkBuilder::createSymbolFromStrView(StrView symbol) {
-    return name_pool_create_symbol_strview(name_pool_, symbol);
+Symbol* MarkBuilder::createSymbolFromStrView(StrView symbol) {
+    return createSymbol(symbol.str, symbol.length);
 }
 
 //------------------------------------------------------------------------------
@@ -137,11 +143,13 @@ String* MarkBuilder::emptyString() {
 //------------------------------------------------------------------------------
 
 Item MarkBuilder::createNameItem(const char* name) {
-    return (Item){.item = y2it(createName(name))};  // use symbol encoding for names
+    Symbol* sym = createSymbol(name);  // create proper Symbol for correct memory layout
+    if (!sym) return createNull();
+    return (Item){.item = y2it(sym)};
 }
 
 Item MarkBuilder::createSymbolItem(const char* symbol) {
-    String* sym = createSymbol(symbol);
+    Symbol* sym = createSymbol(symbol);
     // Empty symbol maps to null (createSymbol returns nullptr for empty)
     if (!sym) return createNull();
     return (Item){.item = y2it(sym)};
@@ -672,9 +680,10 @@ bool MarkBuilder::is_in_arena(Item item) const {
         Symbol* sym = item.get_symbol();
         if (!sym) return true;
 
-        // Check if in NamePool chain (includes parent pools)
-        String* pooled = name_pool_lookup_string(name_pool_, sym);
-        if (pooled == sym) return true;  // Found in name pool chain
+        // Check if in NamePool chain by chars (Symbol is no longer String)
+        StrView sv = {.str = sym->chars, .length = sym->len};
+        String* pooled = name_pool_lookup_strview(name_pool_, sv);
+        if (pooled && pooled->len == sym->len && memcmp(pooled->chars, sym->chars, sym->len) == 0) return true;
 
         // Check arena ownership
         return is_pointer_in_arena_chain(sym);

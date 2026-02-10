@@ -199,6 +199,7 @@ func_obj_t func_list[] = {
     {"heap_calloc", (fn_ptr) heap_calloc},
     {"heap_create_name", (fn_ptr) heap_create_name},
     {"heap_strcpy", (fn_ptr) heap_strcpy},  // for creating runtime strings
+    {"target_equal", (fn_ptr) target_equal},
     {"fn_call", (fn_ptr) fn_call},
     {"fn_call0", (fn_ptr) fn_call0},
     {"fn_call1", (fn_ptr) fn_call1},

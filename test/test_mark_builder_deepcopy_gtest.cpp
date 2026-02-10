@@ -187,18 +187,18 @@ TEST_F(MarkBuilderDeepCopyTest, CopySymbol) {
     // Create symbol in input1
     Item sym_item = builder1.createSymbolItem("mySymbol");
 
-    // Symbols use NamePool, so they might be shared
-    String* sym = sym_item.get_symbol();
+    // Symbols use arena allocation
+    Symbol* sym = sym_item.get_symbol();
     EXPECT_NE(sym, nullptr);
 
-    // Copy to same input - should use same pooled symbol
+    // Copy to same input - should create new symbol
     Item copied_same = builder1.deep_copy(sym_item);
-    String* copied_sym = copied_same.get_symbol();
+    Symbol* copied_sym = copied_same.get_symbol();
     EXPECT_STREQ(copied_sym->chars, "mySymbol");
 
     // Copy to different input
     Item copied_diff = builder2.deep_copy(sym_item);
-    String* copied_sym2 = copied_diff.get_symbol();
+    Symbol* copied_sym2 = copied_diff.get_symbol();
     EXPECT_STREQ(copied_sym2->chars, "mySymbol");
 }
 

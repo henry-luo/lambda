@@ -31,7 +31,7 @@ static inline String* create_string(MarkupParser* parser, const char* text) {
 }
 
 // Helper: Create symbol from parser
-static inline String* create_symbol(MarkupParser* parser, const char* text) {
+static inline Symbol* create_symbol(MarkupParser* parser, const char* text) {
     return parser->builder.createSymbol(text);
 }
 
@@ -381,7 +381,7 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
     }
 
     // Create Symbol with the shortcode name
-    String* symbol_str = create_symbol(parser, shortcode_name);
+    Symbol* symbol_str = create_symbol(parser, shortcode_name);
     free(shortcode_name);
 
     if (!symbol_str) {
