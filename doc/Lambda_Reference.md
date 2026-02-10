@@ -84,7 +84,7 @@ if (x > 5) {
 
 - Whitespace is generally ignored except in strings
 - Line breaks can separate statements
-- Semicolons (`;`) are used to terminate statements but are often optional
+- Semicolons (`;`) are used to terminate statements but are optional when there's line break
 
 ---
 
