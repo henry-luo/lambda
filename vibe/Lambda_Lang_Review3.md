@@ -150,15 +150,13 @@ pn arr_push(arr, item) {
 | `split(str, " ")` returned unsplit string | `list_push` was merging adjacent string items | `disable_string_merging` flag added to `fn_split` |
 | `null ++ string` → `"nulltext"` | `fn_join` didn't check for null operands | Added null checks — returns the non-null operand |
 | `cmd()` not returning errors on failure | Non-zero exit code was ignored; empty output returned null; trailing newline not trimmed | Check exit code, return empty string for no output, strip trailing newlines; added 1-arg `cmd(command)` overload |
-| `input("dir", "dir")` returned unusable raw pointers | `fn_string` and `fn_member` had no `LMD_TYPE_PATH` handling | Added `case LMD_TYPE_PATH` to `fn_string`; extended `fn_member` with path metadata properties (name, path, extension, size, is_dir, modified, etc.) |
+| `arr_merge` / `arr ++ arr` crash | `fn_join` only handled `List ++ List`; `Array ++ Array` and typed arrays (`ArrayInt`, `ArrayFloat`, `ArrayInt64`) were not implemented — the Array case was commented out | Implemented full array merge in `fn_join`: same-type merges use direct `memcpy`; cross-type merges convert to generic `Array` via `item_at`. Now supports all combinations: `Array`, `List`, `ArrayInt`, `ArrayInt64`, `ArrayFloat` |
 
 After these fixes, all workaround code in the premake generator was replaced with direct calls to the fixed builtins. The script was simplified by ~60 lines while remaining byte-identical in output.
 
 ### Still Open
 
-| Bug                                | Severity  | Workaround                     |
-| ---------------------------------- | --------- | ------------------------------ |
-| `arr_merge` malloc crash           | 🟡 Medium | Iterative `arr_push` loop      |
+No remaining bugs from this session — all issues have been fixed. ✅
 
 ---
 
