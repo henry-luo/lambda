@@ -634,16 +634,23 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // CRITICAL: Check if this is a flex/grid container that already calculated its dimensions
     bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
     bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
-    // Only grid containers explicitly calculate width post-layout (in layout_grid_multipass.cpp)
-    // Flex containers handle shrink-to-fit within their algorithm
+    // Flex/grid containers calculate their own width via shrink-to-fit in layout_flex_content/
+    // layout_grid_content. Trust the flex-calculated width if the container has children or
+    // border/padding (the flex algorithm handles both cases now that layout_block_content
+    // dispatches to flex even for empty containers).
+    bool has_flex_calculated_width = is_flex_container && block->width > 0 &&
+        (block->first_child != nullptr || (block->bound && (
+            block->bound->padding.left + block->bound->padding.right +
+            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0)
+        ) > 0));
     bool has_grid_calculated_width = is_grid_container && block->width > 0;
 
     // Width is auto-sized when no explicit width AND neither left+right constraints
     if (!(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
-        // Don't override grid calculated width with flow-based auto-sizing
-        if (has_grid_calculated_width) {
-            log_debug("auto-sizing width: SKIPPED - grid container already has calculated width %.1f",
-                      block->width);
+        // Don't override flex/grid calculated width with flow-based auto-sizing
+        if (has_flex_calculated_width || has_grid_calculated_width) {
+            log_debug("auto-sizing width: SKIPPED - %s container already has calculated width %.1f",
+                      is_flex_container ? "flex" : "grid", block->width);
         } else {
             // Note: max_width already includes left border + left padding from setup_inline
             // So we only need to add right padding and right border
