@@ -30,8 +30,14 @@
 #include <unistd.h>
 #endif
 
-// Forward declaration - only needed for item_to_target()
-#ifndef SIMPLE_SCHEMA_PARSER
+// item_type_id - needed for item_to_target()
+#ifdef SIMPLE_SCHEMA_PARSER
+// Provide local implementation when lambda-eval.cpp is not linked
+static inline TypeId local_item_type_id(Item item) {
+    return item.type_id();
+}
+#define item_type_id local_item_type_id
+#else
 extern "C" TypeId item_type_id(Item item);
 #endif
 
@@ -155,8 +161,6 @@ static uint64_t target_compute_hash(Target* target) {
     return hash;
 }
 
-// item_to_target requires item_type_id which is not available in SIMPLE_SCHEMA_PARSER builds
-#ifndef SIMPLE_SCHEMA_PARSER
 /**
  * Convert an Item to a Target.
  *
@@ -264,7 +268,6 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         return NULL;
     }
 }
-#endif  // SIMPLE_SCHEMA_PARSER
 
 /**
  * Convert Target to local OS file path.
