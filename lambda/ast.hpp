@@ -93,6 +93,9 @@ extern "C" {
 // #define SYM_SYS_FUNC sym_sys_func
 #define SYM_IMPORT_MODULE sym_import_module
 
+// Namespace declaration symbols
+#define SYM_NAMESPACE_DECL sym_namespace_decl
+
 // String/Symbol Pattern symbols
 #define SYM_STRING_PATTERN sym_string_pattern
 #define SYM_SYMBOL_PATTERN sym_symbol_pattern
@@ -136,6 +139,7 @@ extern "C" {
 #define FIELD_VALUE field_value
 #define FIELD_VARIADIC field_variadic
 #define FIELD_TARGET field_target
+#define FIELD_PREFIX field_prefix
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index
 #define FIELD_SEGMENT field_segment
@@ -525,6 +529,13 @@ struct Script : Input {
 typedef struct Runtime Runtime;
 struct LambdaError;  // forward declaration
 
+// Namespace entry for tracking namespace declarations
+typedef struct NamespaceEntry {
+    String* prefix;            // namespace prefix (e.g., "svg", "xlink")
+    Target* target;            // resolved namespace target (URL or path)
+    struct NamespaceEntry* next;
+} NamespaceEntry;
+
 typedef struct Transpiler : Script {
     TSParser* parser;
     StrBuf* code_buf;
@@ -534,6 +545,9 @@ typedef struct Transpiler : Script {
     int error_count;           // accumulated error count
     int max_errors;            // threshold (default: 10)
     ArrayList* errors;         // list of LambdaError* (structured errors)
+
+    // Namespace declarations (file-local)
+    NamespaceEntry* namespaces;  // linked list of declared namespaces
 
     // Closure transpilation context
     AstFuncNode* current_closure;  // non-null when transpiling inside a closure body

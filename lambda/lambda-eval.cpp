@@ -791,12 +791,20 @@ Bool fn_eq(Item a_item, Item b_item) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         return (datetime_compare(&dt_a, &dt_b) == 0) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
-        a_item._type_id == LMD_TYPE_BINARY) {
+    else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_BINARY) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
         uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
         bool result = (len_a == len_b && strncmp(chars_a, chars_b, len_a) == 0);
         return result ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_SYMBOL) {
+        // for symbols, also compare namespace
+        Symbol* sym_a = (Symbol*)a_item.symbol_ptr;
+        Symbol* sym_b = (Symbol*)b_item.symbol_ptr;
+        if (sym_a->len != sym_b->len) return BOOL_FALSE;
+        if (strncmp(sym_a->chars, sym_b->chars, sym_a->len) != 0) return BOOL_FALSE;
+        // compare namespaces - both NULL or same URL
+        return target_equal(sym_a->ns, sym_b->ns) ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
     return BOOL_ERROR;

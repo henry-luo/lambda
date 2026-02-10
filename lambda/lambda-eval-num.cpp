@@ -2262,6 +2262,67 @@ Item fn_symbol(Item item) {
     }
 }
 
+// symbol(name, url) - create a namespaced symbol
+// name: string or symbol - the local name
+// url: string or symbol - the namespace URL
+// fn_symbol2 - create namespaced symbol from name and URL
+// Note: Must be declared in lambda.h for MIR C2MIR to know the signature
+extern "C" Item fn_symbol2(Item name_item, Item url_item) {
+    log_debug("fn_symbol2: name_type=%d, url_type=%d", name_item._type_id, url_item._type_id);
+
+    // extract name string
+    const char* name_str = nullptr;
+    size_t name_len = 0;
+
+    if (name_item._type_id == LMD_TYPE_STRING) {
+        String* str = name_item.get_string();
+        if (!str) {
+            log_error("fn_symbol2: null name string");
+            return ItemError;
+        }
+        name_str = str->chars;
+        name_len = str->len;
+    }
+    else if (name_item._type_id == LMD_TYPE_SYMBOL) {
+        Symbol* sym = name_item.get_symbol();
+        if (!sym) {
+            log_error("fn_symbol2: null name symbol");
+            return ItemError;
+        }
+        name_str = sym->chars;
+        name_len = sym->len;
+    }
+    else {
+        log_error("fn_symbol2: name must be string or symbol, got type %d", name_item._type_id);
+        return ItemError;
+    }
+
+    // convert url to Target
+    Target* ns_target = item_to_target(url_item.item, nullptr);
+    if (!ns_target) {
+        log_error("fn_symbol2: failed to convert url to Target");
+        return ItemError;
+    }
+
+    // create namespaced symbol
+    Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + name_len + 1, LMD_TYPE_SYMBOL);
+    if (!sym) {
+        log_error("fn_symbol2: failed to allocate symbol");
+        target_free(ns_target);
+        return ItemError;
+    }
+
+    sym->len = name_len;
+    sym->ref_cnt = 1;
+    sym->ns = ns_target;
+    memcpy(sym->chars, name_str, name_len);
+    sym->chars[name_len] = '\0';
+
+    log_debug("fn_symbol2: created namespaced symbol '%.*s' with namespace", (int)name_len, name_str);
+
+    return (Item) { .item = y2it(sym) };
+}
+
 Item fn_float(Item item) {
     // Convert item to float type
     if (item._type_id == LMD_TYPE_FLOAT) {
