@@ -69,18 +69,24 @@ let code = """
 ## System Function Suggestions
 
 ### 1. Directory Listing
-**Problem**: `input("dir", "dir")` returns items with `raw_pointer` types that can't be used. There's no reliable way to enumerate files in a directory from Lambda.
+`input("dir", "dir")` now works correctly. Path items support `string()` conversion and metadata property access:
 
 ```lambda
-// ❌ Returns unusable raw_pointers
-let files = input("some/dir", "dir")
-
-// ✅ Workaround: external Python helper script
-// Had to write enumerate_sources.py to generate a JSON file,
-// then read that JSON from Lambda
+// ✅ Directory listing works — returns list of Path items
+var entries^err = input("some/dir", "dir")
+for e in entries {
+    print(e.name)         // leaf filename: "file.txt"
+    print(e.path)         // OS path: "./some/dir/file.txt"
+    print(e.extension)    // file extension: "txt"
+    print(e.is_dir)       // boolean
+    print(e.size)         // file size in bytes (int64)
+    print(e.modified)     // datetime
+    print(e.scheme)       // "file", "rel", etc.
+    print(string(e))      // Lambda path notation
+}
 ```
 
-A working `glob(pattern)` or `ls(path)` function that returns a list of path strings would eliminate the need for external helper scripts.
+**Root cause**: `fn_string` and `fn_member` didn't handle `LMD_TYPE_PATH`. Path items were stored correctly but had no runtime accessors. Fixed by adding `case LMD_TYPE_PATH` to `fn_string` (using `path_to_string`) and extending `fn_member` with property access for `name`, `path`, `extension`, `scheme`, `depth`, `size`, `modified`, `is_dir`, `is_link`, and `mode`.
 
 ### 2. Shell Command Execution in JIT Mode
 `cmd()` works in JIT mode — the initial confusion was that it requires error handling (`var result^err = cmd(...)` or `cmd(...)?`) since commands can fail. After fixing three bugs (non-zero exit code not returned as error, uninitialized variable on empty output, trailing newline not trimmed), it now works correctly:
@@ -144,15 +150,15 @@ pn arr_push(arr, item) {
 | `split(str, " ")` returned unsplit string | `list_push` was merging adjacent string items | `disable_string_merging` flag added to `fn_split` |
 | `null ++ string` → `"nulltext"` | `fn_join` didn't check for null operands | Added null checks — returns the non-null operand |
 | `cmd()` not returning errors on failure | Non-zero exit code was ignored; empty output returned null; trailing newline not trimmed | Check exit code, return empty string for no output, strip trailing newlines; added 1-arg `cmd(command)` overload |
+| `input("dir", "dir")` returned unusable raw pointers | `fn_string` and `fn_member` had no `LMD_TYPE_PATH` handling | Added `case LMD_TYPE_PATH` to `fn_string`; extended `fn_member` with path metadata properties (name, path, extension, size, is_dir, modified, etc.) |
 
 After these fixes, all workaround code in the premake generator was replaced with direct calls to the fixed builtins. The script was simplified by ~60 lines while remaining byte-identical in output.
 
 ### Still Open
 
-| Bug | Severity | Workaround |
-|-----|----------|------------|
-| `arr_merge` malloc crash | 🟡 Medium | Iterative `arr_push` loop |
-| `input("dir", "dir")` raw pointers | 🔴 High | Python helper to generate JSON |
+| Bug                                | Severity  | Workaround                     |
+| ---------------------------------- | --------- | ------------------------------ |
+| `arr_merge` malloc crash           | 🟡 Medium | Iterative `arr_push` loop      |
 
 ---
 
@@ -160,13 +166,12 @@ After these fixes, all workaround code in the premake generator was replaced wit
 
 Lambda has a strong and opinionated design foundation. The functional-first approach with pipes, pattern matching, and the `fn`/`pn` split is genuinely pleasant to work with. The input/format pipeline for structured data is a standout feature — being able to read JSON, transform it functionally, and output Lua (or any format) in a single script is powerful.
 
-The language *feels* right for its intended purpose (data processing and document transformation). During this session, several critical bugs were fixed — `else if` chains now work in `pn` functions, `split(str, " ")` works correctly, `starts_with`/`ends_with` return proper booleans in conditions, and `cmd()` now properly handles errors, trailing newlines, and supports a 1-arg form. These fixes eliminated ~60 lines of workaround code from the premake generator.
+The language *feels* right for its intended purpose (data processing and document transformation). During this session, several critical bugs were fixed — `else if` chains now work in `pn` functions, `split(str, " ")` works correctly, `starts_with`/`ends_with` return proper booleans in conditions, `cmd()` now properly handles errors, trailing newlines, and supports a 1-arg form, and `input("dir", "dir")` now returns usable Path items with full metadata access. These fixes eliminated ~60 lines of workaround code from the premake generator.
 
 The remaining pain points are:
 
-1. **Directory listing** — `input("dir", "dir")` returns unusable raw pointers, requiring external Python helpers
-2. **Null coalescing** — a `??` operator would be a natural addition for providing defaults
-3. **Standard library gaps** — `pad_left`, `replace_all`, `enumerate`, and other common utilities would reduce boilerplate
+1. **Null coalescing** — a `??` operator would be a natural addition for providing defaults
+2. **Standard library gaps** — `pad_left`, `replace_all`, `enumerate`, and other common utilities would reduce boilerplate
 
 The language has excellent bones, and the bugs fixed in this session bring it significantly closer to production-ready for scripting tasks.
 
