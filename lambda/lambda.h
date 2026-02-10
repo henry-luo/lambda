@@ -740,7 +740,8 @@ typedef struct Context {
 
     // procedural functions
     Item pn_print(Item item);
-    Item pn_cmd(Item cmd, Item args);
+    Item pn_cmd1(Item cmd);
+    Item pn_cmd2(Item cmd, Item args);
     Item pn_fetch(Item url, Item options);
     Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
     Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
