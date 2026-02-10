@@ -357,6 +357,7 @@ typedef enum SysFunc {
     SYSPROC_OUTPUT2,         // output(source, target) - writes data to target, returns bytes
     SYSPROC_OUTPUT3,         // output(source, target, options) - with options map
     SYSPROC_CMD,
+    SYSPROC_CMD1,            // cmd(command) - no args version
     // io module functions (unified I/O - supports local and remote targets)
     SYSPROC_IO_COPY,
     SYSPROC_IO_MOVE,
