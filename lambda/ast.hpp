@@ -140,6 +140,7 @@ extern "C" {
 #define FIELD_VARIADIC field_variadic
 #define FIELD_TARGET field_target
 #define FIELD_PREFIX field_prefix
+#define FIELD_URI field_uri
 #define FIELD_PATTERN field_pattern
 #define FIELD_INDEX field_index
 #define FIELD_SEGMENT field_segment

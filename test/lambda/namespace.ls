@@ -127,3 +127,23 @@ let s2 = 'interned'
 (s1 == s2)
 let s3 = 'different'
 (s1 == s3)
+// =============================================
+// Section 10: Namespace member access (e.ns.attr)
+// =============================================
+"23. e.ns.attr member expression"
+let elem = <svg.rect svg.width: 100, svg.height: 50>
+elem.svg.width
+elem.svg.height
+
+"24. ns.value becomes qualified symbol"
+svg.rect
+svg.circle
+xlink.href
+
+"25. compare qualified symbols"
+// svg.rect has namespace target, 'svg.rect' does not
+// so they are not equal (different namespace identity)
+(svg.rect == svg.rect)
+(svg.rect == svg.circle)
+// but string representation is the same
+(string(svg.rect) == "svg.rect")
