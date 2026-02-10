@@ -17,12 +17,12 @@ extern "C" void path_load_metadata(Path* path);
 // Uses the new path_resolve_for_iteration which handles directories and files properly
 static Item resolve_path_content(Path* path) {
     if (!path) return ItemNull;
-    
+
     // Check if already resolved
     if (path->result != 0) {
         return {.item = path->result};
     }
-    
+
     // Use the new path resolution which handles:
     // - Directories: returns list of child paths
     // - Files: returns parsed content
@@ -465,7 +465,7 @@ Item map_get(Map* map, Item key) {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = key.get_string()->chars;
+        key_str = (char*)key.get_chars();
     } else {
         log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;  // only string or symbol keys are supported
@@ -509,7 +509,7 @@ Item elmt_get(Element* elmt, Item key) {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = key.get_string()->chars;
+        key_str = (char*)key.get_chars();
     } else {
         return ItemNull;  // only string or symbol keys are supported
     }
@@ -543,13 +543,17 @@ Item item_at(Item data, int index) {
         return list_get(data.element, index);
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
-        String *str = data.get_string();
-        if (index < 0 || index >= str->len) { return ItemNull; }
+        const char* chars = data.get_chars();
+        uint32_t len = data.get_len();
+        if (index < 0 || (uint32_t)index >= len) { return ItemNull; }
         // return a single character string
-        char buf[2] = {str->chars[index], '\0'};
+        char buf[2] = {chars[index], '\0'};
+        if (type_id == LMD_TYPE_SYMBOL) {
+            Symbol* ch_sym = heap_create_symbol(buf, 1);
+            return {.item = y2it(ch_sym)};
+        }
         String *ch_str = heap_strcpy(buf, 1);
-        if (type_id == LMD_TYPE_SYMBOL) return {.item = y2it(ch_str)};
-        else return {.item = s2it(ch_str)};
+        return {.item = s2it(ch_str)};
     }
     case LMD_TYPE_PATH: {
         // Lazy evaluation: resolve path content and delegate to it
@@ -569,7 +573,7 @@ Item item_attr(Item data, const char* key) {
     switch (type_id) {
     case LMD_TYPE_DTIME: {
         // datetime member properties - delegate to fn_member for consistency
-        Item key_item = {.item = y2it(heap_create_name(key))};
+        Item key_item = {.item = s2it(heap_create_name(key))};
         return fn_member(data, key_item);
     }
     case LMD_TYPE_MAP: {
@@ -585,7 +589,7 @@ Item item_attr(Item data, const char* key) {
     case LMD_TYPE_PATH: {
         Path* path = data.path;
         if (!path) return ItemNull;
-        
+
         // First, try to resolve the path and access the attribute from resolved content
         // This is needed for sys.* paths which resolve to Maps
         if (path->result == 0) {
@@ -600,14 +604,14 @@ Item item_attr(Item data, const char* key) {
                 return item_attr(resolved, key);
             }
         }
-        
+
         // path.name - returns the leaf segment name as a string
         if (strcmp(key, "name") == 0) {
             if (!path->name) return ItemNull;
             String* name_str = heap_strcpy((char*)path->name, strlen(path->name));
             return (Item){.item = s2it(name_str)};
         }
-        
+
         // Metadata-based properties - require loading metadata first
         if (strcmp(key, "is_dir") == 0 || strcmp(key, "is_file") == 0 || strcmp(key, "is_link") == 0 ||
             strcmp(key, "size") == 0 || strcmp(key, "modified") == 0) {
@@ -615,7 +619,7 @@ Item item_attr(Item data, const char* key) {
             if (!(path->flags & PATH_FLAG_META_LOADED)) {
                 path_load_metadata(path);
             }
-            
+
             PathMeta* meta = path->meta;
             if (!meta) {
                 // Path doesn't exist or couldn't be stat'd
@@ -623,7 +627,7 @@ Item item_attr(Item data, const char* key) {
                 if (strcmp(key, "modified") == 0) return ItemNull;  // null for unknown
                 return (Item){.item = b2it(false)};  // false for boolean flags
             }
-            
+
             if (strcmp(key, "is_dir") == 0) {
                 return (Item){.item = b2it((meta->flags & PATH_META_IS_DIR) != 0)};
             }
@@ -640,7 +644,7 @@ Item item_attr(Item data, const char* key) {
                 return push_k(meta->modified);  // DateTime
             }
         }
-        
+
         // Unknown property
         log_debug("item_attr: unknown path property '%s'", key);
         return ItemNull;
@@ -655,7 +659,7 @@ Item item_attr(Item data, const char* key) {
 ArrayList* item_keys(Item data) {
     if (!data.item) { return NULL; }
     TypeId type_id = get_type_id(data);
-    
+
     // Handle Path: resolve first, then get keys from resolved content
     if (type_id == LMD_TYPE_PATH) {
         Path* path = data.path;
@@ -669,7 +673,7 @@ ArrayList* item_keys(Item data) {
         data = {.item = path->result};
         type_id = get_type_id(data);
     }
-    
+
     switch (type_id) {
     case LMD_TYPE_MAP: {
         Map* map = data.map;

@@ -98,7 +98,7 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "String*");
         break;
     case LMD_TYPE_SYMBOL:
-        strbuf_append_str(code_buf, "String*");
+        strbuf_append_str(code_buf, "Symbol*");
         break;
 
     case LMD_TYPE_RANGE:
@@ -290,7 +290,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 break;
             }
             case LMD_TYPE_SYMBOL: {
-                String *symbol = *(String**)data;
+                Symbol *symbol = *(Symbol**)data;
                 if (symbol && symbol->chars) {
                     strbuf_append_format(strbuf, "'%s'", symbol->chars);
                 } else {
@@ -375,8 +375,8 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         }
         break;
     case LMD_TYPE_SYMBOL:
-        if (titem->string && titem->string->chars) {
-            strbuf_append_str(strbuf, titem->string->chars);
+        if (titem->symbol && titem->symbol->chars) {
+            strbuf_append_str(strbuf, titem->symbol->chars);
         } else {
             strbuf_append_str(strbuf, "");
         }
@@ -464,17 +464,17 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        String *string = item.get_string();
-        if (string && string->chars) {
+        Symbol *symbol = item.get_symbol();
+        if (symbol && symbol->chars) {
             // Safety check: validate string length before assertion
-            size_t actual_len = strlen(string->chars);
-            if (actual_len != string->len) {
-                log_warn("WARNING: Symbol length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
+            size_t actual_len = strlen(symbol->chars);
+            if (actual_len != symbol->len) {
+                log_warn("WARNING: Symbol length mismatch. Expected: %u, Actual: %zu\n", symbol->len, actual_len);
                 // Use the actual length to prevent crashes
-                strbuf_append_format(strbuf, "'%.*s'", (int)actual_len, string->chars);
+                strbuf_append_format(strbuf, "'%.*s'", (int)actual_len, symbol->chars);
             } else {
-                assert(strlen(string->chars) == string->len && "asserting symbol length");
-                strbuf_append_format(strbuf, "'%s'", string->chars);
+                assert(strlen(symbol->chars) == symbol->len && "asserting symbol length");
+                strbuf_append_format(strbuf, "'%s'", symbol->chars);
             }
         } else {
             strbuf_append_str(strbuf, "''");
@@ -777,10 +777,16 @@ void print_const(Script *script, Type* type) {
         strbuf_free(strbuf);
         break;
     }
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
+    case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
         String* string = (String*)data;
         log_debug("[const@%d, %s, %p, '%.*s']", const_type->const_index,
             type_name, string, (int)string->len, string->chars);
+        break;
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol* symbol = (Symbol*)data;
+        log_debug("[const@%d, %s, %p, '%.*s']", const_type->const_index,
+            type_name, symbol, (int)symbol->len, symbol->chars);
         break;
     }
     case LMD_TYPE_DECIMAL: {

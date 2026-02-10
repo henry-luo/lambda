@@ -1259,7 +1259,7 @@ static void format_item_reader(MarkdownContext& ctx, const ItemReader& item) {
     }
     else if (item.isSymbol()) {
         // Symbol items - these are emoji shortcodes (e.g., "smile" for :smile:)
-        String* sym = item.asSymbol();
+        Symbol* sym = item.asSymbol();
         if (sym && sym->chars) {
             // Output as :shortcode: format for markdown emoji
             ctx.write_char(':');

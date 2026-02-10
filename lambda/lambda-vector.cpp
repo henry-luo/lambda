@@ -17,7 +17,7 @@ Item push_l(int64_t val);
 
 // check if type is a scalar numeric type
 static inline bool is_scalar_numeric(TypeId type) {
-    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || 
+    return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
            type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL;
 }
 
@@ -111,7 +111,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
 
     TypeId scalar_type = get_type_id(scalar);
     double scalar_val = item_to_double(scalar);
-    
+
     if (std::isnan(scalar_val)) {
         log_error("vec_scalar_op: non-numeric scalar type %s", get_type_name(scalar_type));
         return ItemError;
@@ -131,7 +131,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
                 case 0: result->items[i] = scalar_first ? sval + elem : elem + sval; break;
                 case 1: result->items[i] = scalar_first ? sval - elem : elem - sval; break;
                 case 2: result->items[i] = scalar_first ? sval * elem : elem * sval; break;
-                case 4: result->items[i] = scalar_first ? (elem != 0 ? sval % elem : 0) 
+                case 4: result->items[i] = scalar_first ? (elem != 0 ? sval % elem : 0)
                                                         : (sval != 0 ? elem % sval : 0); break;
                 default: result->items[i] = elem; break;
             }
@@ -171,23 +171,23 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     bool return_array = is_array_type(vec_type);
     Array* arr_result = return_array ? array() : nullptr;
     List* list_result = return_array ? nullptr : list();
-    
+
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(vec, i);
         TypeId elem_type = get_type_id(elem);
-        
+
         if (!is_scalar_numeric(elem_type)) {
             // non-numeric element: produce ERROR, continue
             if (return_array) array_push(arr_result, ItemError);
             else list_push(list_result, ItemError);
             continue;
         }
-        
+
         double elem_val = item_to_double(elem);
         double a = scalar_first ? scalar_val : elem_val;
         double b = scalar_first ? elem_val : scalar_val;
         double res;
-        
+
         switch (op) {
             case 0: res = a + b; break;
             case 1: res = a - b; break;
@@ -197,16 +197,16 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
             case 5: res = pow(a, b); break;
             default: res = NAN; break;
         }
-        
+
         // try to preserve integer type if possible
         Item res_item;
-        if (scalar_type != LMD_TYPE_FLOAT && elem_type != LMD_TYPE_FLOAT && 
+        if (scalar_type != LMD_TYPE_FLOAT && elem_type != LMD_TYPE_FLOAT &&
             op != 3 && op != 5 && res == (int64_t)res) {
             res_item = { .item = i2it((int64_t)res) };
         } else {
             res_item = push_d(res);
         }
-        
+
         if (return_array) array_push(arr_result, res_item);
         else list_push(list_result, res_item);
     }
@@ -222,9 +222,9 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     int64_t len_b = vector_length(vec_b);
     TypeId type_a = get_type_id(vec_a);
     TypeId type_b = get_type_id(vec_b);
-    
+
     if (len_a < 0 || len_b < 0) return ItemError;
-    
+
     // empty vectors - preserve array type if either was array
     if (len_a == 0 || len_b == 0) {
         if (is_array_type(type_a) || is_array_type(type_b)) {
@@ -232,7 +232,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         }
         return { .list = list() };
     }
-    
+
     // single-element broadcasting
     if (len_a == 1 && len_b > 1) {
         Item scalar = vector_get(vec_a, 0);
@@ -242,18 +242,18 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         Item scalar = vector_get(vec_b, 0);
         return vec_scalar_op(vec_a, scalar, op, false);
     }
-    
+
     // size mismatch
     if (len_a != len_b) {
         log_error("vector size mismatch: %ld vs %ld", len_a, len_b);
         return ItemError;
     }
-    
+
     int64_t len = len_a;
     bool use_float = needs_float_result(type_a, type_b) || op == 3;
-    
+
     // fast path: both ArrayInt64
-    if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64 && 
+    if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64 &&
         !use_float && op != 3 && op != 5) {
         ArrayInt64* a = vec_a.array_int64;
         ArrayInt64* b = vec_b.array_int64;
@@ -269,7 +269,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         }
         return { .array_int64 = result };
     }
-    
+
     // fast path: both ArrayFloat or need float result
     if ((type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) ||
         (is_homogeneous_array(type_a) && is_homogeneous_array(type_b) && use_float)) {
@@ -289,29 +289,29 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         }
         return { .array_float = result };
     }
-    
+
     // heterogeneous: element-wise with ERROR for non-numeric
     // preserve array type if either input was array
     bool return_array = is_array_type(type_a) || is_array_type(type_b);
     Array* arr_result = return_array ? array() : nullptr;
     List* list_result = return_array ? nullptr : list();
-    
+
     for (int64_t i = 0; i < len; i++) {
         Item elem_a = vector_get(vec_a, i);
         Item elem_b = vector_get(vec_b, i);
         TypeId ta = get_type_id(elem_a);
         TypeId tb = get_type_id(elem_b);
-        
+
         if (!is_scalar_numeric(ta) || !is_scalar_numeric(tb)) {
             if (return_array) array_push(arr_result, ItemError);
             else list_push(list_result, ItemError);
             continue;
         }
-        
+
         double a = item_to_double(elem_a);
         double b = item_to_double(elem_b);
         double res;
-        
+
         switch (op) {
             case 0: res = a + b; break;
             case 1: res = a - b; break;
@@ -321,15 +321,15 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
             case 5: res = pow(a, b); break;
             default: res = NAN; break;
         }
-        
+
         Item res_item;
-        if (ta != LMD_TYPE_FLOAT && tb != LMD_TYPE_FLOAT && 
+        if (ta != LMD_TYPE_FLOAT && tb != LMD_TYPE_FLOAT &&
             op != 3 && op != 5 && res == (int64_t)res) {
             res_item = { .item = i2it((int64_t)res) };
         } else {
             res_item = push_d(res);
         }
-        
+
         if (return_array) array_push(arr_result, res_item);
         else list_push(list_result, res_item);
     }
@@ -344,7 +344,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
 Item vec_add(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    
+
     if (is_scalar_numeric(ta) && is_vector_type(tb)) {
         return vec_scalar_op(b, a, 0, true);
     }
@@ -360,7 +360,7 @@ Item vec_add(Item a, Item b) {
 Item vec_sub(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    
+
     if (is_scalar_numeric(ta) && is_vector_type(tb)) {
         return vec_scalar_op(b, a, 1, true);
     }
@@ -376,7 +376,7 @@ Item vec_sub(Item a, Item b) {
 Item vec_mul(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    
+
     if (is_scalar_numeric(ta) && is_vector_type(tb)) {
         return vec_scalar_op(b, a, 2, true);
     }
@@ -392,7 +392,7 @@ Item vec_mul(Item a, Item b) {
 Item vec_div(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    
+
     if (is_scalar_numeric(ta) && is_vector_type(tb)) {
         return vec_scalar_op(b, a, 3, true);
     }
@@ -408,7 +408,7 @@ Item vec_div(Item a, Item b) {
 Item vec_mod(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    
+
     if (is_scalar_numeric(ta) && is_vector_type(tb)) {
         return vec_scalar_op(b, a, 4, true);
     }
@@ -424,7 +424,7 @@ Item vec_mod(Item a, Item b) {
 Item vec_pow(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
-    
+
     if (is_scalar_numeric(ta) && is_vector_type(tb)) {
         return vec_scalar_op(b, a, 5, true);
     }
@@ -445,7 +445,7 @@ Item vec_pow(Item a, Item b) {
 Item fn_prod(Item item) {
     TypeId type = get_type_id(item);
     log_debug("fn_prod: type=%d", type);
-    
+
     if (type == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr = item.array_int;
         if (arr->length == 0) return { .item = i2it(1) };
@@ -500,7 +500,7 @@ Item fn_prod(Item item) {
         }
         return push_l(prod);
     }
-    
+
     log_error("fn_prod: unsupported type %s", get_type_name(type));
     return ItemError;
 }
@@ -513,9 +513,9 @@ Item fn_cumsum(Item item) {
         List* result = list();
         return { .list = result };
     }
-    
+
     TypeId type = get_type_id(item);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         ArrayInt64* result = array_int64_new(len);
@@ -562,9 +562,9 @@ Item fn_cumprod(Item item) {
         List* result = list();
         return { .list = result };
     }
-    
+
     TypeId type = get_type_id(item);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         ArrayInt64* result = array_int64_new(len);
@@ -606,10 +606,10 @@ Item fn_cumprod(Item item) {
 Item fn_argmin(Item item) {
     int64_t len = vector_length(item);
     if (len <= 0) return ItemError;
-    
+
     int64_t min_idx = 0;
     double min_val = item_to_double(vector_get(item, 0));
-    
+
     for (int64_t i = 1; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (!std::isnan(val) && (std::isnan(min_val) || val < min_val)) {
@@ -617,7 +617,7 @@ Item fn_argmin(Item item) {
             min_idx = i;
         }
     }
-    
+
     return { .item = i2it(min_idx) };
 }
 
@@ -625,10 +625,10 @@ Item fn_argmin(Item item) {
 Item fn_argmax(Item item) {
     int64_t len = vector_length(item);
     if (len <= 0) return ItemError;
-    
+
     int64_t max_idx = 0;
     double max_val = item_to_double(vector_get(item, 0));
-    
+
     for (int64_t i = 1; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (!std::isnan(val) && (std::isnan(max_val) || val > max_val)) {
@@ -636,7 +636,7 @@ Item fn_argmax(Item item) {
             max_idx = i;
         }
     }
-    
+
     return { .item = i2it(max_idx) };
 }
 
@@ -646,11 +646,11 @@ Item fn_fill(Item n_item, Item value) {
         log_error("fn_fill: first argument must be integer");
         return ItemError;
     }
-    
-    int64_t n = (get_type_id(n_item) == LMD_TYPE_INT) 
-                ? n_item.get_int56() 
+
+    int64_t n = (get_type_id(n_item) == LMD_TYPE_INT)
+                ? n_item.get_int56()
                 : n_item.get_int64();
-    
+
     if (n < 0) {
         log_error("fn_fill: count must be non-negative");
         return ItemError;
@@ -659,9 +659,9 @@ Item fn_fill(Item n_item, Item value) {
         List* result = list();
         return { .list = result };
     }
-    
+
     TypeId val_type = get_type_id(value);
-    
+
     if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
         int64_t val = (val_type == LMD_TYPE_INT) ? value.get_int56() : value.get_int64();
         ArrayInt64* result = array_int64_new(n);
@@ -692,14 +692,14 @@ Item fn_fill(Item n_item, Item value) {
 Item fn_dot(Item a, Item b) {
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
-    
+
     if (len_a != len_b || len_a < 0) {
         log_error("fn_dot: vectors must have same length");
         return ItemError;
     }
-    
+
     if (len_a == 0) return push_d(0.0);
-    
+
     double sum = 0.0;
     for (int64_t i = 0; i < len_a; i++) {
         double va = item_to_double(vector_get(a, i));
@@ -710,7 +710,7 @@ Item fn_dot(Item a, Item b) {
         }
         sum += va * vb;
     }
-    
+
     return push_d(sum);
 }
 
@@ -719,7 +719,7 @@ Item fn_norm(Item item) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return push_d(0.0);
-    
+
     double sum_sq = 0.0;
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
@@ -729,7 +729,7 @@ Item fn_norm(Item item) {
         }
         sum_sq += val * val;
     }
-    
+
     return push_d(sqrt(sum_sq));
 }
 
@@ -749,7 +749,7 @@ Item fn_median(Item item) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
-    
+
     // Copy values to sortable array
     ArrayFloat* sorted = array_float_new(len);
     for (int64_t i = 0; i < len; i++) {
@@ -760,7 +760,7 @@ Item fn_median(Item item) {
         }
         sorted->items[i] = val;
     }
-    
+
     // Simple bubble sort (can optimize later)
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - i - 1; j++) {
@@ -771,7 +771,7 @@ Item fn_median(Item item) {
             }
         }
     }
-    
+
     if (len % 2 == 1) {
         return push_d(sorted->items[len / 2]);
     } else {
@@ -784,7 +784,7 @@ Item fn_variance(Item item) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
-    
+
     // Calculate mean
     double sum = 0.0;
     for (int64_t i = 0; i < len; i++) {
@@ -796,7 +796,7 @@ Item fn_variance(Item item) {
         sum += val;
     }
     double mean = sum / len;
-    
+
     // Calculate variance
     double var_sum = 0.0;
     for (int64_t i = 0; i < len; i++) {
@@ -804,7 +804,7 @@ Item fn_variance(Item item) {
         double diff = val - mean;
         var_sum += diff * diff;
     }
-    
+
     return push_d(var_sum / len);
 }
 
@@ -813,7 +813,7 @@ Item fn_deviation(Item item) {
     Item var_result = fn_variance(item);
     if (get_type_id(var_result) == LMD_TYPE_ERROR) return var_result;
     if (get_type_id(var_result) == LMD_TYPE_NULL) return var_result;
-    
+
     double variance = var_result.get_double();
     return push_d(sqrt(variance));
 }
@@ -823,13 +823,13 @@ Item fn_quantile(Item item, Item p_item) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
-    
+
     double p = item_to_double(p_item);
     if (std::isnan(p) || p < 0.0 || p > 1.0) {
         log_error("fn_quantile: p must be between 0 and 1");
         return ItemError;
     }
-    
+
     // Copy values to sortable array
     ArrayFloat* sorted = array_float_new(len);
     for (int64_t i = 0; i < len; i++) {
@@ -840,7 +840,7 @@ Item fn_quantile(Item item, Item p_item) {
         }
         sorted->items[i] = val;
     }
-    
+
     // Sort
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - i - 1; j++) {
@@ -851,16 +851,16 @@ Item fn_quantile(Item item, Item p_item) {
             }
         }
     }
-    
+
     // Linear interpolation method (same as NumPy's default)
     double idx = p * (len - 1);
     int64_t lo = (int64_t)floor(idx);
     int64_t hi = (int64_t)ceil(idx);
-    
+
     if (lo == hi || hi >= len) {
         return push_d(sorted->items[lo]);
     }
-    
+
     double frac = idx - lo;
     return push_d(sorted->items[lo] * (1.0 - frac) + sorted->items[hi] * frac);
 }
@@ -877,7 +877,7 @@ static Item vec_unary_math(Item item, double (*func)(double), const char* name) 
         ArrayFloat* result = array_float_new(0);
         return { .array_float = result };
     }
-    
+
     ArrayFloat* result = array_float_new(len);
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
@@ -906,20 +906,20 @@ static Item index_to_item(int64_t index) {
 // For maps: ~# is key (as string), ~ is value
 Item fn_pipe_map(Item collection, PipeMapFn transform) {
     TypeId type = get_type_id(collection);
-    
+
     // scalar case: apply transform directly
-    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST && 
+    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
         type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT) {
         return transform(collection, ItemNull);
     }
-    
+
     // map case: iterate over key-value pairs
     if (type == LMD_TYPE_MAP) {
         Map* mp = collection.map;
         List* result = list();
-        
+
         // use item_keys to get the list of keys
         ArrayList* keys = item_keys(collection);
         if (keys) {
@@ -934,12 +934,12 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
         }
         return { .list = result };
     }
-    
+
     // element case: iterate over children (content items, not attributes)
     if (type == LMD_TYPE_ELEMENT) {
         Element* elem = collection.element;
         List* result = list();
-        
+
         // element content starts at items[0] (attributes are in separate data struct)
         for (int64_t i = 0; i < elem->length; i++) {
             Item child = elem->items[i];
@@ -949,11 +949,11 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
         }
         return { .list = result };
     }
-    
+
     // collection case: iterate with index
     int64_t len = vector_length(collection);
     if (len < 0) return ItemError;
-    
+
     List* result = list();
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(collection, i);
@@ -967,9 +967,9 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
 // fn_pipe_where: filter elements where predicate is truthy
 Item fn_pipe_where(Item collection, PipeMapFn predicate) {
     TypeId type = get_type_id(collection);
-    
+
     // scalar case: return collection if truthy, else null
-    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST && 
+    if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_LIST &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
         type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
         type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT) {
@@ -979,12 +979,12 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         }
         return ItemNull;
     }
-    
+
     // map case: filter key-value pairs (return list of values that pass predicate)
     if (type == LMD_TYPE_MAP) {
         Map* mp = collection.map;
         List* result = list();
-        
+
         ArrayList* keys = item_keys(collection);
         if (keys) {
             for (int64_t i = 0; i < keys->length; i++) {
@@ -1000,12 +1000,12 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         }
         return { .list = result };
     }
-    
+
     // element case: filter children (content items, not attributes)
     if (type == LMD_TYPE_ELEMENT) {
         Element* elem = collection.element;
         List* result = list();
-        
+
         for (int64_t i = 0; i < elem->length; i++) {
             Item child = elem->items[i];
             Item idx = index_to_item(i);
@@ -1016,11 +1016,11 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
         }
         return { .list = result };
     }
-    
+
     // collection case
     int64_t len = vector_length(collection);
     if (len < 0) return ItemError;
-    
+
     List* result = list();
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(collection, i);
@@ -1036,11 +1036,11 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
 // fn_pipe_call: pass collection as first argument to a function
 // This handles the aggregate case where ~ is not used
 Item fn_pipe_call(Item collection, Item func_or_result) {
-    // If the right side is already evaluated (not using ~), 
+    // If the right side is already evaluated (not using ~),
     // we assume it's a function that should receive the collection
     // For now, we check if it's a callable
     TypeId type = get_type_id(func_or_result);
-    
+
     if (type == LMD_TYPE_FUNC) {
         // call function with collection as first argument
         Function* fn = func_or_result.function;
@@ -1049,7 +1049,7 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
         }
         return ItemError;
     }
-    
+
     // if right side is not a function, return it as-is
     // (the transform was already computed without ~)
     return func_or_result;
@@ -1141,14 +1141,14 @@ Item fn_sign(Item item) {
         int64_t s = (val > 0) ? 1 : (val < 0) ? -1 : 0;
         return { .item = i2it(s) };
     }
-    
+
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
         ArrayInt64* result = array_int64_new(0);
         return { .array_int64 = result };
     }
-    
+
     ArrayInt64* result = array_int64_new(len);
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
@@ -1173,9 +1173,9 @@ Item fn_reverse(Item item) {
         List* result = list();
         return { .list = result };
     }
-    
+
     TypeId type = get_type_id(item);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         ArrayInt64* result = array_int64_new(len);
@@ -1209,9 +1209,9 @@ Item fn_sort1(Item item) {
         List* result = list();
         return { .list = result };
     }
-    
+
     TypeId type = get_type_id(item);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         ArrayInt64* result = array_int64_new(len);
@@ -1270,7 +1270,7 @@ Item fn_sort2(Item item, Item dir_item) {
         List* result = list();
         return { .list = result };
     }
-    
+
     // Parse direction - default to ascending
     bool descending = false;
     TypeId dir_type = get_type_id(dir_item);
@@ -1280,14 +1280,14 @@ Item fn_sort2(Item item, Item dir_item) {
             descending = true;
         }
     } else if (dir_type == LMD_TYPE_SYMBOL) {
-        String* sym = dir_item.get_symbol();
+        Symbol* sym = dir_item.get_symbol();
         if (sym && (strcmp(sym->chars, "desc") == 0 || strcmp(sym->chars, "descending") == 0)) {
             descending = true;
         }
     }
-    
+
     TypeId type = get_type_id(item);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
         ArrayInt64* result = array_int64_new(len);
@@ -1350,12 +1350,12 @@ Item fn_unique(Item item) {
         List* result = list();
         return { .list = result };
     }
-    
+
     List* result = list();
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(item, i);
         double elem_val = item_to_double(elem);
-        
+
         // Check if already in result
         bool found = false;
         for (int64_t j = 0; j < result->length; j++) {
@@ -1376,12 +1376,12 @@ Item fn_unique(Item item) {
 Item fn_concat(Item a, Item b) {
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
-    
+
     if (len_a < 0 || len_b < 0) return ItemError;
-    
+
     TypeId type_a = get_type_id(a);
     TypeId type_b = get_type_id(b);
-    
+
     // If both are same homogeneous type, preserve it
     if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(len_a + len_b);
@@ -1408,19 +1408,19 @@ Item fn_concat(Item a, Item b) {
 Item fn_take(Item vec, Item n_item) {
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
-    
+
     TypeId n_type = get_type_id(n_item);
     if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
         log_error("fn_take: n must be integer");
         return ItemError;
     }
-    
+
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
     if (n < 0) n = 0;
     if (n > len) n = len;
-    
+
     TypeId type = get_type_id(vec);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(n);
         for (int64_t i = 0; i < n; i++) result->items[i] = vec.array_int64->items[i];
@@ -1442,20 +1442,20 @@ Item fn_take(Item vec, Item n_item) {
 Item fn_drop(Item vec, Item n_item) {
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
-    
+
     TypeId n_type = get_type_id(n_item);
     if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
         log_error("fn_drop: n must be integer");
         return ItemError;
     }
-    
+
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
     if (n < 0) n = 0;
     if (n > len) n = len;
-    
+
     int64_t new_len = len - n;
     TypeId type = get_type_id(vec);
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(new_len);
         for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_int64->items[n + i];
@@ -1477,15 +1477,15 @@ Item fn_drop(Item vec, Item n_item) {
 // Works for arrays, lists, and strings
 Item fn_slice(Item vec, Item start_item, Item end_item) {
     TypeId type = get_type_id(vec);
-    
+
     // Handle strings - delegate to fn_substring
     if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
         return fn_substring(vec, start_item, end_item);
     }
-    
+
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
-    
+
     TypeId start_type = get_type_id(start_item);
     TypeId end_type = get_type_id(end_item);
     if ((start_type != LMD_TYPE_INT && start_type != LMD_TYPE_INT64) ||
@@ -1493,21 +1493,21 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         log_error("fn_slice: start and end must be integers");
         return ItemError;
     }
-    
+
     int64_t start = (start_type == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
     int64_t end = (end_type == LMD_TYPE_INT) ? end_item.get_int56() : end_item.get_int64();
-    
+
     // Handle negative indices
     if (start < 0) start = len + start;
     if (end < 0) end = len + end;
-    
+
     // Clamp indices to valid range
     if (start < 0) start = 0;
     if (end > len) end = len;
     if (start > end) start = end;
-    
+
     int64_t new_len = end - start;
-    
+
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(new_len);
         for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_int64->items[start + i];
@@ -1529,11 +1529,11 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 Item fn_zip(Item a, Item b) {
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
-    
+
     if (len_a < 0 || len_b < 0) return ItemError;
-    
+
     int64_t len = (len_a < len_b) ? len_a : len_b;  // take shorter length
-    
+
     List* result = list();
     for (int64_t i = 0; i < len; i++) {
         List* pair = list();
@@ -1549,17 +1549,17 @@ Item fn_range3(Item start_item, Item end_item, Item step_item) {
     double start = item_to_double(start_item);
     double end = item_to_double(end_item);
     double step = item_to_double(step_item);
-    
+
     if (std::isnan(start) || std::isnan(end) || std::isnan(step)) {
         log_error("fn_range3: all arguments must be numeric");
         return ItemError;
     }
-    
+
     if (step == 0) {
         log_error("fn_range3: step cannot be zero");
         return ItemError;
     }
-    
+
     // Calculate number of elements
     int64_t n = 0;
     if (step > 0 && start < end) {
@@ -1567,16 +1567,16 @@ Item fn_range3(Item start_item, Item end_item, Item step_item) {
     } else if (step < 0 && start > end) {
         n = (int64_t)ceil((start - end) / (-step));
     }
-    
+
     if (n <= 0) {
         ArrayFloat* result = array_float_new(0);
         return { .array_float = result };
     }
-    
+
     ArrayFloat* result = array_float_new(n);
     for (int64_t i = 0; i < n; i++) {
         result->items[i] = start + i * step;
     }
-    
+
     return { .array_float = result };
 }
