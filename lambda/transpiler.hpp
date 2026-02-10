@@ -19,8 +19,8 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C c
 extern "C" String* heap_strcpy(char* src, int len);  // callable from C code (path.c)
 String* heap_create_name(const char* name, size_t len);
 String* heap_create_name(const char* name);
-String* heap_create_symbol(const char* symbol, size_t len);
-String* heap_create_symbol(const char* symbol);
+Symbol* heap_create_symbol(const char* symbol, size_t len);
+Symbol* heap_create_symbol(const char* symbol);
 void heap_destroy();
 void frame_start();
 void frame_end();

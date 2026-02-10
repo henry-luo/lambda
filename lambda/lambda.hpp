@@ -80,8 +80,23 @@ typedef struct Item {
     inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
     inline String* get_string() const { return (String*)this->string_ptr; }
-    inline String* get_symbol() const { return (String*)this->symbol_ptr; }
+    inline Symbol* get_symbol() const { return (Symbol*)this->symbol_ptr; }
     inline String* get_binary() const{ return (String*)this->binary_ptr; }
+
+    // get chars/len for string-like types (STRING, SYMBOL, BINARY)
+    // Symbol has the same leading layout: len, then chars (with ns in between)
+    inline const char* get_chars() const {
+        if (this->_type_id == LMD_TYPE_STRING || this->_type_id == LMD_TYPE_BINARY) {
+            return ((String*)this->string_ptr)->chars;
+        }
+        return ((Symbol*)this->symbol_ptr)->chars;
+    }
+    inline uint32_t get_len() const {
+        if (this->_type_id == LMD_TYPE_STRING || this->_type_id == LMD_TYPE_BINARY) {
+            return ((String*)this->string_ptr)->len;
+        }
+        return ((Symbol*)this->symbol_ptr)->len;
+    }
 
     // get int56 value sign-extended to int64
     inline int64_t get_int56() const {
