@@ -690,11 +690,11 @@ typedef struct Context {
     Item fn_normalize(Item str, Item type);
     Item fn_normalize1(Item str);           // normalize with default NFC
     Item fn_substring(Item str, Item start, Item end);
-    Item fn_contains(Item str, Item substr);
+    Bool fn_contains(Item str, Item substr);
     Item fn_join(Item a, Item b);
     // string functions
-    Item fn_starts_with(Item str, Item prefix);
-    Item fn_ends_with(Item str, Item suffix);
+    Bool fn_starts_with(Item str, Item prefix);
+    Bool fn_ends_with(Item str, Item suffix);
     int64_t fn_index_of(Item str, Item sub);
     int64_t fn_last_index_of(Item str, Item sub);
     Item fn_trim(Item str);
