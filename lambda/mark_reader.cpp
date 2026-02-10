@@ -111,6 +111,10 @@ bool ItemReader::isList() const {
     return cached_type_ == LMD_TYPE_LIST;
 }
 
+bool ItemReader::isDatetime() const {
+    return cached_type_ == LMD_TYPE_DTIME;
+}
+
 String* ItemReader::asString() const {
     if (isString()) { return item_.get_string(); }
     return nullptr;
@@ -150,6 +154,15 @@ bool ItemReader::asBool() const {
         return item_.bool_val;
     }
     return false;
+}
+
+DateTime ItemReader::asDatetime() const {
+    if (isDatetime()) {
+        return item_.get_datetime();
+    }
+    DateTime empty;
+    memset(&empty, 0, sizeof(DateTime));
+    return empty;
 }
 
 ElementReader ItemReader::asElement() const {

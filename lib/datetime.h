@@ -141,7 +141,20 @@ DateTime* datetime_to_local(Pool* pool, DateTime* dt);
 
 // Convert between DateTime and unix timestamp
 int64_t datetime_to_unix(DateTime* dt);
+int64_t datetime_to_unix_ms(DateTime* dt);
 DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp);
+DateTime* datetime_from_unix_ms(Pool* pool, int64_t unix_ms);
+
+// Calendar utility functions
+int datetime_weekday(DateTime* dt);          // 0=Sunday, 6=Saturday
+int datetime_yearday(DateTime* dt);          // 1-366
+int datetime_week_number(DateTime* dt);      // ISO week number 1-53
+int datetime_quarter(DateTime* dt);          // 1-4
+bool datetime_is_leap_year_dt(DateTime* dt); // check if datetime's year is a leap year
+int datetime_days_in_month_dt(DateTime* dt); // days in the datetime's month
+
+// Custom format pattern support
+void datetime_format_pattern(StrBuf* strbuf, DateTime* dt, const char* pattern);
 
 #ifdef __cplusplus
 }
