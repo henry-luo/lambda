@@ -2095,6 +2095,108 @@ Item fn_trim_end(Item str_item) {
     return {.item = s2it(result)};
 }
 
+// lower(str) - convert string to lowercase (ASCII only for now)
+Item fn_lower(Item str_item) {
+    TypeId str_type = get_type_id(str_item);
+
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_lower: argument must be a string or symbol");
+        return ItemError;
+    }
+
+    const char* chars = str_item.get_chars();
+    uint32_t len = str_item.get_len();
+    if (!chars || len == 0) {
+        return str_item;
+    }
+
+    // Check if any uppercase characters exist (optimization)
+    bool has_upper = false;
+    for (uint32_t i = 0; i < len; i++) {
+        if (chars[i] >= 'A' && chars[i] <= 'Z') {
+            has_upper = true;
+            break;
+        }
+    }
+    if (!has_upper) {
+        return str_item;  // already lowercase
+    }
+
+    if (str_type == LMD_TYPE_SYMBOL) {
+        // create new lowercase symbol - use stack buffer for small strings, malloc for large
+        char stack_buf[256];
+        char* lower_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)malloc(len + 1);
+        for (uint32_t i = 0; i < len; i++) {
+            char c = chars[i];
+            lower_chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
+        }
+        lower_chars[len] = '\0';
+        Symbol* sym = heap_create_symbol(lower_chars, len);
+        if (lower_chars != stack_buf) free(lower_chars);
+        return {.item = y2it(sym)};
+    }
+
+    String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    result->len = len;
+    for (uint32_t i = 0; i < len; i++) {
+        char c = chars[i];
+        result->chars[i] = (c >= 'A' && c <= 'Z') ? (c + 32) : c;
+    }
+    result->chars[len] = '\0';
+    return {.item = s2it(result)};
+}
+
+// upper(str) - convert string to uppercase (ASCII only for now)
+Item fn_upper(Item str_item) {
+    TypeId str_type = get_type_id(str_item);
+
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_upper: argument must be a string or symbol");
+        return ItemError;
+    }
+
+    const char* chars = str_item.get_chars();
+    uint32_t len = str_item.get_len();
+    if (!chars || len == 0) {
+        return str_item;
+    }
+
+    // Check if any lowercase characters exist (optimization)
+    bool has_lower = false;
+    for (uint32_t i = 0; i < len; i++) {
+        if (chars[i] >= 'a' && chars[i] <= 'z') {
+            has_lower = true;
+            break;
+        }
+    }
+    if (!has_lower) {
+        return str_item;  // already uppercase
+    }
+
+    if (str_type == LMD_TYPE_SYMBOL) {
+        // create new uppercase symbol - use stack buffer for small strings, malloc for large
+        char stack_buf[256];
+        char* upper_chars = (len < sizeof(stack_buf)) ? stack_buf : (char*)malloc(len + 1);
+        for (uint32_t i = 0; i < len; i++) {
+            char c = chars[i];
+            upper_chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+        }
+        upper_chars[len] = '\0';
+        Symbol* sym = heap_create_symbol(upper_chars, len);
+        if (upper_chars != stack_buf) free(upper_chars);
+        return {.item = y2it(sym)};
+    }
+
+    String* result = (String *)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    result->len = len;
+    for (uint32_t i = 0; i < len; i++) {
+        char c = chars[i];
+        result->chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+    }
+    result->chars[len] = '\0';
+    return {.item = s2it(result)};
+}
+
 // split(str, sep) - split string by separator, returns list of strings
 Item fn_split(Item str_item, Item sep_item) {
     TypeId str_type = get_type_id(str_item);
