@@ -812,13 +812,13 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
     return result;
 }
 
-ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
+ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, bool *is_found, Target* key_ns) {
     ShapeEntry *field = map_type->shape;
     while (field) {
         if (!field->name) { // nested map, skip
             Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
             bool nested_is_found;
-            ConstItem result = _map_get_const((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found);
+            ConstItem result = _map_get_const((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found, key_ns);
             if (nested_is_found) {
                 *is_found = true;
                 return result;
@@ -826,8 +826,12 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             field = field->next;
             continue;
         }
-        log_debug("_map_get_const compare field: %.*s", (int)field->name->length, field->name->str);
-        if (strncmp(field->name->str, key, field->name->length) == 0 && strlen(key) == field->name->length) {
+        log_debug("_map_get_const compare field: %.*s (ns:%p vs %p)",
+            (int)field->name->length, field->name->str, field->ns, key_ns);
+        // compare both name AND namespace
+        if (strncmp(field->name->str, key, field->name->length) == 0 &&
+            strlen(key) == field->name->length &&
+            target_equal(field->ns, key_ns)) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
@@ -839,7 +843,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
         field = field->next;
     }
     *is_found = false;
-    log_debug("_map_get_const: key %s not found", key);
+    log_debug("_map_get_const: key %s (ns:%p) not found", key, key_ns);
     return null_result;
 }
 
@@ -849,21 +853,29 @@ ConstItem Map::get(const Item key) const {
 
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = (char*)key.get_chars();
+    Target* key_ns = NULL;
+    if (key._type_id == LMD_TYPE_STRING) {
+        String* str = (String*)key.string_ptr;
+        key_str = str->chars;
+        // strings don't have namespace
+    } else if (key._type_id == LMD_TYPE_SYMBOL) {
+        Symbol* sym = (Symbol*)key.symbol_ptr;
+        key_str = sym->chars;
+        key_ns = sym->ns;
     } else {
         log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return null_result;  // only string or symbol keys are supported
     }
-    log_debug("map_get_const key: %s", key_str);
-    return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found);
+    log_debug("map_get_const key: %s (ns:%p)", key_str, key_ns);
+    return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found, key_ns);
 }
 
 ConstItem Map::get(const char* key_str) const {
     log_debug("map_get_const %p", this);
     if (!this || !key_str) { return null_result; }
     bool is_found;
-    return _map_get_const((TypeMap*)this->type, this->data, (char*)key_str, &is_found);
+    // unqualified string lookup - only matches keys with NULL namespace
+    return _map_get_const((TypeMap*)this->type, this->data, (char*)key_str, &is_found, NULL);
 }
 
 bool Map::has_field(const char* field_name) const {
@@ -904,18 +916,26 @@ ConstItem Element::get_attr(const Item key) const {
     if (!this || !key.item) { return null_result;}
     bool is_found;
     char *key_str = NULL;
-    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = (char*)key.get_chars();
+    Target* key_ns = NULL;
+    if (key._type_id == LMD_TYPE_STRING) {
+        String* str = (String*)key.string_ptr;
+        key_str = str->chars;
+        // strings don't have namespace
+    } else if (key._type_id == LMD_TYPE_SYMBOL) {
+        Symbol* sym = (Symbol*)key.symbol_ptr;
+        key_str = sym->chars;
+        key_ns = sym->ns;
     } else {
         return null_result;  // only string or symbol keys are supported
     }
-    return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found);
+    return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found, key_ns);
 }
 
 ConstItem Element::get_attr(const char* attr_name) const {
     if (!this || !attr_name) { return null_result;}
     bool is_found;
-    return _map_get_const((TypeMap*)this->type, this->data, attr_name, &is_found);
+    // unqualified string lookup - only matches attributes with NULL namespace
+    return _map_get_const((TypeMap*)this->type, this->data, attr_name, &is_found, NULL);
 }
 
 bool Element::has_attr(const char* attr_name) {

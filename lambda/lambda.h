@@ -597,13 +597,13 @@ typedef struct Context {
     Item push_k(DateTime dtval);
     Item push_c(int64_t cval);
 
-    #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
-    #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
-    #define const_c2it(index)    c2it((uint64_t)*(rt->consts + index))
-    #define const_s2it(index)    s2it((uint64_t)*(rt->consts + index))
-    #define const_y2it(index)    y2it((uint64_t)*(rt->consts + index))
-    #define const_k2it(index)    k2it((uint64_t)*(rt->consts + index))
-    #define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
+    #define const_d2it(index)    d2it(rt->consts[index])
+    #define const_l2it(index)    l2it(rt->consts[index])
+    #define const_c2it(index)    c2it(rt->consts[index])
+    #define const_s2it(index)    s2it(rt->consts[index])
+    #define const_y2it(index)    y2it(rt->consts[index])
+    #define const_k2it(index)    k2it(rt->consts[index])
+    #define const_x2it(index)    x2it(rt->consts[index])
 
     #define const_s(index)      ((String*)rt->consts[index])
     #define const_c(index)      ((Decimal*)rt->consts[index])
@@ -747,6 +747,7 @@ typedef struct Context {
     String* fn_format1(Item item);
     String* fn_format2(Item item, Item options);
     Item fn_error(Item message);  // raise a user-defined error
+    Item fn_symbol2(Item name, Item url);  // create namespaced symbol
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 

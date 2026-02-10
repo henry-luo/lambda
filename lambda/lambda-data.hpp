@@ -271,6 +271,7 @@ typedef enum SysFunc {
     SYSFUNC_STRING,
     //SYSFUNC_CHAR,
     SYSFUNC_SYMBOL,
+    SYSFUNC_SYMBOL2,    // symbol(name, url) - 2 args, create namespaced symbol
     SYSFUNC_BINARY,
     SYSFUNC_DATETIME,
     SYSFUNC_DATETIME0,  // datetime() - 0 args, current datetime
