@@ -679,7 +679,10 @@ module.exports = grammar({
 
     if_stam: $ => prec.right(seq(
       'if', field('cond', $._expression), '{', field('then', $.content), '}',
-      optional(seq('else', '{', field('else', $.content), '}')),
+      optional(choice(
+        seq('else', field('else', $.if_stam)),
+        seq('else', '{', field('else', $.content), '}'),
+      )),
     )),
 
     // Loop variable binding with optional index and 'in' or 'at' keyword

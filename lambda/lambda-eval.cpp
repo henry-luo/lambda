@@ -212,33 +212,88 @@ Item fn_join(Item left, Item right) {
     }
 
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
+        // null ++ string → string, string ++ null → string
+        if (left_type == LMD_TYPE_NULL) return right;
+        if (right_type == LMD_TYPE_NULL) return left;
         String *left_str = fn_string(left), *right_str = fn_string(right);
         String *result = fn_strcat(left_str, right_str);
         return {.item = s2it(result)};
     }
     else if (left_type == LMD_TYPE_SYMBOL || right_type == LMD_TYPE_SYMBOL) {
+        // null ++ symbol → symbol, symbol ++ null → symbol
+        if (left_type == LMD_TYPE_NULL) return right;
+        if (right_type == LMD_TYPE_NULL) return left;
         String *left_str = fn_string(left), *right_str = fn_string(right);
         String *result = fn_strcat(left_str, right_str);
         // Create a proper Symbol from the concatenated string
         Symbol* sym = heap_create_symbol(result->chars, result->len);
         return {.item = y2it(sym)};
     }
-    // todo: support binary concat
-    else if (left_type == LMD_TYPE_LIST && right_type == LMD_TYPE_LIST) {
-        List *left_list = left.list;  List *right_list = right.list;
-        int total_len = left_list->length + right_list->length, total_extra = left_list->extra + right_list->extra;
-        List *result_list = (List *)heap_calloc(sizeof(List) + sizeof(Item)*(total_len + total_extra), LMD_TYPE_LIST);
-        result_list->type_id = LMD_TYPE_LIST;
-        result_list->length = total_len;  result_list->extra = total_extra;
-        result_list->items = (Item*)(result_list + 1);
-        // copy the items
-        memcpy(result_list->items, left_list->items, sizeof(Item)*left_list->length);
-        memcpy(result_list->items + left_list->length, right_list->items, sizeof(Item)*right_list->length);
-        // need to handle extra and ref_cnt
-        return {.item = l2it(result_list)};
+    // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat)
+    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_LIST) {
+        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_LIST)) {
+            set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
+                type_info[left_type].name, type_info[right_type].name);
+            return ItemError;
+        }
+        // same-type optimization: direct memcpy of native items
+        if (left_type == right_type) {
+            if (left_type == LMD_TYPE_ARRAY_INT) {
+                ArrayInt *la = left.array_int, *ra = right.array_int;
+                int64_t total = la->length + ra->length;
+                ArrayInt *result = (ArrayInt *)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
+                result->type_id = LMD_TYPE_ARRAY_INT;
+                result->length = total;  result->capacity = total;
+                result->items = (int64_t*)malloc(total * sizeof(int64_t));
+                memcpy(result->items, la->items, sizeof(int64_t)*la->length);
+                memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
+                return {.array_int = result};
+            }
+            else if (left_type == LMD_TYPE_ARRAY_INT64) {
+                ArrayInt64 *la = left.array_int64, *ra = right.array_int64;
+                int64_t total = la->length + ra->length;
+                ArrayInt64 *result = (ArrayInt64 *)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
+                result->type_id = LMD_TYPE_ARRAY_INT64;
+                result->length = total;  result->capacity = total;
+                result->items = (int64_t*)malloc(total * sizeof(int64_t));
+                memcpy(result->items, la->items, sizeof(int64_t)*la->length);
+                memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
+                return {.array_int64 = result};
+            }
+            else if (left_type == LMD_TYPE_ARRAY_FLOAT) {
+                ArrayFloat *la = left.array_float, *ra = right.array_float;
+                int64_t total = la->length + ra->length;
+                ArrayFloat *result = (ArrayFloat *)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+                result->type_id = LMD_TYPE_ARRAY_FLOAT;
+                result->length = total;  result->capacity = total;
+                result->items = (double*)malloc(total * sizeof(double));
+                memcpy(result->items, la->items, sizeof(double)*la->length);
+                memcpy(result->items + la->length, ra->items, sizeof(double)*ra->length);
+                return {.array_float = result};
+            }
+            // LMD_TYPE_ARRAY or LMD_TYPE_LIST: both use Item* items (same struct layout)
+            Array *la = left.array, *ra = right.array;
+            int64_t total_len = la->length + ra->length;
+            int64_t total_extra = la->extra + ra->extra;
+            Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
+            result->type_id = left_type;
+            result->length = total_len;  result->extra = total_extra;
+            result->items = (Item*)(result + 1);
+            memcpy(result->items, la->items, sizeof(Item)*la->length);
+            memcpy(result->items + la->length, ra->items, sizeof(Item)*ra->length);
+            return {.array = result};
+        }
+        // different types: produce generic Array, convert typed elements to Items
+        int64_t left_len = fn_len(left), right_len = fn_len(right);
+        int64_t total_len = left_len + right_len;
+        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*total_len, LMD_TYPE_ARRAY);
+        result->type_id = LMD_TYPE_ARRAY;
+        result->length = total_len;  result->extra = 0;
+        result->items = (Item*)(result + 1);
+        for (int64_t i = 0; i < left_len; i++)  result->items[i] = item_at(left, i);
+        for (int64_t i = 0; i < right_len; i++) result->items[left_len + i] = item_at(right, i);
+        return {.array = result};
     }
-    // else if (left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
-    // }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
             type_info[left_type].name, type_info[right_type].name);
@@ -1097,6 +1152,15 @@ String* fn_string(Item itm) {
         strbuf_free(sb);
         return result;
     }
+    case LMD_TYPE_PATH: {
+        Path* path = (Path*)itm.item;
+        if (!path) return &STR_NULL;
+        StrBuf* sb = strbuf_new();
+        path_to_string(path, sb);
+        String* result = heap_strcpy(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
     case LMD_TYPE_ERROR:
         return NULL;
     default:
@@ -1427,6 +1491,56 @@ Item fn_member(Item item, Item key) {
                     return fn_member({.item = path->result}, key);
                 }
             }
+
+            // path metadata and structural property access
+            if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+                String* key_str = key.get_string();
+                if (key_str) {
+                    const char* k = key_str->chars;
+
+                    // structural properties (always available)
+                    if (strcmp(k, "name") == 0) {
+                        // return the leaf segment name (e.g. "file.txt")
+                        if (path->name) return {.item = s2it(heap_create_name(path->name))};
+                        return ItemNull;
+                    }
+                    if (strcmp(k, "path") == 0) {
+                        // return the full OS path string (e.g. "./lib/file.txt")
+                        StrBuf* sb = strbuf_new();
+                        path_to_os_path(path, sb);
+                        String* result = heap_strcpy(sb->str, sb->length);
+                        strbuf_free(sb);
+                        return {.item = s2it(result)};
+                    }
+                    if (strcmp(k, "extension") == 0) {
+                        // return file extension (e.g. "txt" from "file.txt")
+                        if (path->name) {
+                            const char* dot = strrchr(path->name, '.');
+                            if (dot && dot != path->name) {
+                                return {.item = s2it(heap_create_name(dot + 1))};
+                            }
+                        }
+                        return ItemNull;
+                    }
+                    if (strcmp(k, "scheme") == 0) {
+                        const char* scheme_name = path_get_scheme_name(path);
+                        if (scheme_name) return {.item = s2it(heap_create_name(scheme_name))};
+                        return ItemNull;
+                    }
+                    if (strcmp(k, "depth") == 0) {
+                        return {.item = i2it(path_depth(path))};
+                    }
+
+                    // metadata properties (require stat'd metadata)
+                    if (path->meta && (path->flags & PATH_FLAG_META_LOADED)) {
+                        if (strcmp(k, "size") == 0) return push_l(path->meta->size);
+                        if (strcmp(k, "modified") == 0) return push_k(path->meta->modified);
+                        if (strcmp(k, "is_dir") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_DIR) != 0)};
+                        if (strcmp(k, "is_link") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_LINK) != 0)};
+                        if (strcmp(k, "mode") == 0) return {.item = i2it(path->meta->mode)};
+                    }
+                }
+            }
         }
         return ItemNull;
     }
@@ -1650,51 +1764,56 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 }
 
 // contains system function - checks if a string contains a substring
-Item fn_contains(Item str_item, Item substr_item) {
+Bool fn_contains(Item str_item, Item substr_item) {
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: first argument must be a string");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     if (get_type_id(substr_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: second argument must be a string");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     String* str = str_item.get_string();
     String* substr = substr_item.get_string();
 
     if (!str || !substr) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     if (substr->len == 0) {
-        return {.item = b2it(true)}; // empty string is contained in any string
+        return BOOL_TRUE; // empty string is contained in any string
     }
 
     if (str->len == 0 || substr->len > str->len) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     // simple byte-based search for now - could be optimized with KMP or Boyer-Moore
     for (int i = 0; i <= str->len - substr->len; i++) {
         if (memcmp(str->chars + i, substr->chars, substr->len) == 0) {
-            return {.item = b2it(true)};
+            return BOOL_TRUE;
         }
     }
 
-    return {.item = b2it(false)};
+    return BOOL_FALSE;
 }
 
 // starts_with(str, prefix) - check if string starts with prefix
-Item fn_starts_with(Item str_item, Item prefix_item) {
+Bool fn_starts_with(Item str_item, Item prefix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId prefix_type = get_type_id(prefix_item);
+
+    // null prefix (empty string "") matches any string
+    if (prefix_type == LMD_TYPE_NULL) {
+        return BOOL_TRUE;
+    }
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (prefix_type != LMD_TYPE_STRING && prefix_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_starts_with: arguments must be strings or symbols");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     const char* str_chars = str_item.get_chars();
@@ -1703,30 +1822,34 @@ Item fn_starts_with(Item str_item, Item prefix_item) {
     uint32_t prefix_len = prefix_item.get_len();
 
     if (!str_chars || !prefix_chars) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     if (prefix_len == 0) {
-        return {.item = b2it(true)};  // empty prefix matches any string
+        return BOOL_TRUE;  // empty prefix matches any string
     }
 
     if (str_len < prefix_len) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
-    bool result = (memcmp(str_chars, prefix_chars, prefix_len) == 0);
-    return {.item = b2it(result)};
+    return (memcmp(str_chars, prefix_chars, prefix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // ends_with(str, suffix) - check if string ends with suffix
-Item fn_ends_with(Item str_item, Item suffix_item) {
+Bool fn_ends_with(Item str_item, Item suffix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId suffix_type = get_type_id(suffix_item);
+
+    // null suffix (empty string "") matches any string
+    if (suffix_type == LMD_TYPE_NULL) {
+        return BOOL_TRUE;
+    }
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (suffix_type != LMD_TYPE_STRING && suffix_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_ends_with: arguments must be strings or symbols");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     const char* str_chars = str_item.get_chars();
@@ -1735,20 +1858,19 @@ Item fn_ends_with(Item str_item, Item suffix_item) {
     uint32_t suffix_len = suffix_item.get_len();
 
     if (!str_chars || !suffix_chars) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     if (suffix_len == 0) {
-        return {.item = b2it(true)};  // empty suffix matches any string
+        return BOOL_TRUE;  // empty suffix matches any string
     }
 
     if (str_len < suffix_len) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     size_t offset = str_len - suffix_len;
-    bool result = (memcmp(str_chars + offset, suffix_chars, suffix_len) == 0);
-    return {.item = b2it(result)};
+    return (memcmp(str_chars + offset, suffix_chars, suffix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
@@ -1978,20 +2100,31 @@ Item fn_split(Item str_item, Item sep_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
 
+    // null separator (empty string "") means split into individual characters
+    bool null_sep = (sep_type == LMD_TYPE_NULL);
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
+        (!null_sep && sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_split: arguments must be strings or symbols");
         return ItemError;
     }
 
     const char* str_chars = str_item.get_chars();
     uint32_t str_len = str_item.get_len();
-    const char* sep_chars = sep_item.get_chars();
-    uint32_t sep_len = sep_item.get_len();
+    const char* sep_chars = null_sep ? nullptr : sep_item.get_chars();
+    uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
+
+    // disable string merging in list_push so split results stay separate
+    bool saved_merging = false;
+    if (context) {
+        saved_merging = context->disable_string_merging;
+        context->disable_string_merging = true;
+    }
 
     List* result = list();
 
     if (!str_chars || str_len == 0) {
+        if (context) { context->disable_string_merging = saved_merging; }
         return {.list = result};  // empty list for empty string
     }
 
@@ -2011,6 +2144,7 @@ Item fn_split(Item str_item, Item sep_item) {
             list_push(result, {.item = s2it(part)});
             p += char_len;
         }
+        if (context) { context->disable_string_merging = saved_merging; }
         return {.list = result};
     }
 
@@ -2046,6 +2180,7 @@ Item fn_split(Item str_item, Item sep_item) {
 
     list_push(result, {.item = s2it(part)});
 
+    if (context) { context->disable_string_merging = saved_merging; }
     return {.list = result};
 }
 
