@@ -1390,6 +1390,49 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             else {
                 log_debug("unknown display type");
             }
+        } else {
+            // Empty container (no children) - still need to run flex/grid layout
+            // for proper shrink-to-fit sizing (e.g., abs-pos flex with only border/padding)
+            if (block->display.inner == CSS_VALUE_FLEX) {
+                auto t_flex_start = high_resolution_clock::now();
+                log_debug("Setting up EMPTY flex container for %s", block->node_name());
+                layout_flex_content(lycon, block);
+                log_debug("Finished EMPTY flex container layout for %s", block->node_name());
+                g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
+
+                lycon->block.advance_y = block->height;
+                if (block->bound && block->bound->border) {
+                    lycon->block.advance_y -= block->bound->border->width.bottom;
+                }
+                if (block->bound) {
+                    lycon->block.advance_y -= block->bound->padding.bottom;
+                }
+                log_debug("FLEX EMPTY FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
+                    lycon->block.advance_y, block->height);
+
+                finalize_block_flow(lycon, block, block->display.outer);
+                return;
+            }
+            else if (block->display.inner == CSS_VALUE_GRID) {
+                auto t_grid_start = high_resolution_clock::now();
+                log_debug("Setting up EMPTY grid container for %s", block->node_name());
+                layout_grid_content(lycon, block);
+                log_debug("Finished EMPTY grid container layout for %s", block->node_name());
+                g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
+
+                lycon->block.advance_y = block->height;
+                if (block->bound && block->bound->border) {
+                    lycon->block.advance_y -= block->bound->border->width.bottom;
+                }
+                if (block->bound) {
+                    lycon->block.advance_y -= block->bound->padding.bottom;
+                }
+                log_debug("GRID EMPTY FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
+                    lycon->block.advance_y, block->height);
+
+                finalize_block_flow(lycon, block, block->display.outer);
+                return;
+            }
         }
 
         // Final line break after all content

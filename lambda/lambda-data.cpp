@@ -17,6 +17,8 @@ Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 Type TYPE_PATH = {.type_id = LMD_TYPE_PATH};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
+Type TYPE_DATE = {.type_id = LMD_TYPE_DTIME};   // sub-type: date-only datetime
+Type TYPE_TIME = {.type_id = LMD_TYPE_DTIME};   // sub-type: time-only datetime
 Type TYPE_LIST = {.type_id = LMD_TYPE_LIST};
 Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
 TypeArray TYPE_ARRAY;
@@ -54,6 +56,8 @@ TypeType LIT_TYPE_BINARY;
 TypeType LIT_TYPE_SYMBOL;
 TypeType LIT_TYPE_PATH;
 TypeType LIT_TYPE_DTIME;
+TypeType LIT_TYPE_DATE;
+TypeType LIT_TYPE_TIME;
 TypeType LIT_TYPE_LIST;
 TypeType LIT_TYPE_RANGE;
 TypeType LIT_TYPE_ARRAY;
@@ -96,6 +100,8 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_SYMBOL) = LIT_TYPE;  LIT_TYPE_SYMBOL.type = &TYPE_SYMBOL;
     *(Type*)(&LIT_TYPE_PATH) = LIT_TYPE;  LIT_TYPE_PATH.type = &TYPE_PATH;
     *(Type*)(&LIT_TYPE_DTIME) = LIT_TYPE;  LIT_TYPE_DTIME.type = &TYPE_DTIME;
+    *(Type*)(&LIT_TYPE_DATE) = LIT_TYPE;  LIT_TYPE_DATE.type = &TYPE_DATE;
+    *(Type*)(&LIT_TYPE_TIME) = LIT_TYPE;  LIT_TYPE_TIME.type = &TYPE_TIME;
     *(Type*)(&LIT_TYPE_LIST) = LIT_TYPE;  LIT_TYPE_LIST.type = &TYPE_LIST;
     *(Type*)(&LIT_TYPE_RANGE) = LIT_TYPE;  LIT_TYPE_RANGE.type = &TYPE_RANGE;
     *(Type*)(&LIT_TYPE_ARRAY) = LIT_TYPE;  LIT_TYPE_ARRAY.type = (Type*)&TYPE_ARRAY;

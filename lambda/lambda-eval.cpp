@@ -654,6 +654,19 @@ Bool fn_is(Item a, Item b) {
         return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
     case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:  case LMD_TYPE_NUMBER:
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
+    case LMD_TYPE_DTIME:
+        if (a_type_id != LMD_TYPE_DTIME) return BOOL_FALSE;
+        // sub-type checks: date and time are sub-types of datetime
+        if (type_b->type == &TYPE_DATE) {
+            DateTime dt = a.get_datetime();
+            return (dt.precision == DATETIME_PRECISION_DATE_ONLY || dt.precision == DATETIME_PRECISION_YEAR_ONLY)
+                ? BOOL_TRUE : BOOL_FALSE;
+        }
+        if (type_b->type == &TYPE_TIME) {
+            DateTime dt = a.get_datetime();
+            return (dt.precision == DATETIME_PRECISION_TIME_ONLY) ? BOOL_TRUE : BOOL_FALSE;
+        }
+        return BOOL_TRUE;  // is datetime (any precision matches)
     case LMD_TYPE_ARRAY: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
         if (type_b == &LIT_TYPE_ARRAY) {  // fast path
             log_debug("fast path array type check");
@@ -718,8 +731,7 @@ Bool fn_eq(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
-        // todo: do a normalized field comparison
-        return (dt_a.int64_val == dt_b.int64_val) ? BOOL_TRUE : BOOL_FALSE;
+        return (datetime_compare(&dt_a, &dt_b) == 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
@@ -774,8 +786,7 @@ Bool fn_lt(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
-        // todo: do a proper normalized field comparison
-        return dt_a.int64_val < dt_b.int64_val ? BOOL_TRUE : BOOL_FALSE;
+        return (datetime_compare(&dt_a, &dt_b) < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
@@ -825,8 +836,7 @@ Bool fn_gt(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
-        // todo: do a proper normalized field comparison
-        return dt_a.int64_val > dt_b.int64_val ? BOOL_TRUE : BOOL_FALSE;
+        return (datetime_compare(&dt_a, &dt_b) > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
@@ -1244,6 +1254,50 @@ extern "C" Item fn_input1(Item url) {
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
 
 String* fn_format2(Item item, Item type) {
+    // datetime formatting: format(dt) or format(dt, pattern)
+    TypeId item_type_id = get_type_id(item);
+    if (item_type_id == LMD_TYPE_DTIME) {
+        DateTime dt = item.get_datetime();
+        StrBuf* buf = strbuf_new();
+        TypeId type_id = get_type_id(type);
+
+        if (type_id == LMD_TYPE_NULL) {
+            // default: ISO 8601 format
+            datetime_format_lambda(buf, &dt);
+        }
+        else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+            String* pattern = type_id == LMD_TYPE_STRING ? type.get_string() : type.get_symbol();
+            // check for named format presets
+            if (strcmp(pattern->chars, "iso") == 0 || strcmp(pattern->chars, "iso8601") == 0) {
+                datetime_format_iso8601(buf, &dt);
+            }
+            else if (strcmp(pattern->chars, "date") == 0) {
+                // format date portion only: YYYY-MM-DD
+                datetime_format_pattern(buf, &dt, "YYYY-MM-DD");
+            }
+            else if (strcmp(pattern->chars, "time") == 0) {
+                // format time portion only: HH:mm:ss
+                datetime_format_pattern(buf, &dt, "HH:mm:ss");
+            }
+            else {
+                // custom pattern format
+                datetime_format_pattern(buf, &dt, pattern->chars);
+            }
+        }
+        else {
+            log_error("format: datetime format must be a string pattern, got type: %s", get_type_name(type_id));
+            datetime_format_lambda(buf, &dt);
+        }
+
+        size_t len = buf->length;
+        String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        result->len = len;
+        memcpy(result->chars, buf->str, len);
+        result->chars[len] = '\0';
+        strbuf_free(buf);
+        return result;
+    }
+
     TypeId type_id = get_type_id(type);
     String* type_str = NULL;
     String* flavor_str = NULL;
@@ -1372,6 +1426,58 @@ Item fn_member(Item item, Item key) {
         return ItemNull;  // null-safe: null.field returns null
     case LMD_TYPE_ERROR:
         return item;      // error propagation: error.field returns error
+    case LMD_TYPE_DTIME: {
+        // datetime member properties
+        DateTime dt = item.get_datetime();
+        String* key_str = (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL)
+            ? key.get_string() : nullptr;
+        if (!key_str) return ItemNull;
+        const char* k = key_str->chars;
+
+        // date properties
+        if (strcmp(k, "year") == 0)         return {.item = i2it(DATETIME_GET_YEAR(&dt))};
+        if (strcmp(k, "month") == 0)        return {.item = i2it(DATETIME_GET_MONTH(&dt))};
+        if (strcmp(k, "day") == 0)          return {.item = i2it(dt.day)};
+        if (strcmp(k, "weekday") == 0)      return {.item = i2it(datetime_weekday(&dt))};
+        if (strcmp(k, "yearday") == 0)      return {.item = i2it(datetime_yearday(&dt))};
+        if (strcmp(k, "week") == 0)         return {.item = i2it(datetime_week_number(&dt))};
+        if (strcmp(k, "quarter") == 0)      return {.item = i2it(datetime_quarter(&dt))};
+
+        // time properties
+        if (strcmp(k, "hour") == 0)         return {.item = i2it(dt.hour)};
+        if (strcmp(k, "minute") == 0)       return {.item = i2it(dt.minute)};
+        if (strcmp(k, "second") == 0)       return {.item = i2it(dt.second)};
+        if (strcmp(k, "millisecond") == 0)  return {.item = i2it(dt.millisecond)};
+
+        // timezone properties
+        if (strcmp(k, "timezone") == 0) {
+            if (!DATETIME_HAS_TIMEZONE(&dt)) return ItemNull;
+            return {.item = i2it(DATETIME_GET_TZ_OFFSET(&dt))};
+        }
+        if (strcmp(k, "utc_offset") == 0) {
+            if (!DATETIME_HAS_TIMEZONE(&dt)) return ItemNull;
+            int tz = DATETIME_GET_TZ_OFFSET(&dt);
+            char buf[8];
+            int h = abs(tz) / 60, m = abs(tz) % 60;
+            int len = snprintf(buf, sizeof(buf), "%c%02d:%02d", tz >= 0 ? '+' : '-', h, m);
+            String* sym = heap_create_name(buf);
+            return {.item = y2it(sym)};
+        }
+        if (strcmp(k, "is_utc") == 0) {
+            if (!DATETIME_HAS_TIMEZONE(&dt)) return {.item = b2it(false)};
+            return {.item = b2it(DATETIME_GET_TZ_OFFSET(&dt) == 0)};
+        }
+
+        // meta properties
+        if (strcmp(k, "unix") == 0)           return push_l(datetime_to_unix_ms(&dt));
+        if (strcmp(k, "is_date") == 0)        return {.item = b2it(dt.precision == DATETIME_PRECISION_DATE_ONLY || dt.precision == DATETIME_PRECISION_YEAR_ONLY)};
+        if (strcmp(k, "is_time") == 0)        return {.item = b2it(dt.precision == DATETIME_PRECISION_TIME_ONLY)};
+        if (strcmp(k, "is_leap_year") == 0)   return {.item = b2it(datetime_is_leap_year_dt(&dt))};
+        if (strcmp(k, "days_in_month") == 0)  return {.item = i2it(datetime_days_in_month_dt(&dt))};
+
+        log_debug("fn_member: unknown datetime property '%s'", k);
+        return ItemNull;
+    }
     case LMD_TYPE_MAP: {
         Map *map = item.map;
         return map_get(map, key);
@@ -2125,37 +2231,234 @@ Item fn_normalize1(Item str_item) {
     return fn_normalize(str_item, nfc_type);
 }
 
-// Static DateTime instance to avoid dynamic allocation issues
-static DateTime static_dt;
-static bool static_dt_initialized = false;
+// datetime() - creates current DateTime in UTC
+DateTime fn_datetime0() {
+    DateTime dt;
+    memset(&dt, 0, sizeof(DateTime));
 
-// DateTime system function - creates a current DateTime
-DateTime fn_datetime() {
-    // Use a static DateTime to avoid heap allocation issues - this is not roubust, not thread-safe
-    if (!static_dt_initialized) {
-        memset(&static_dt, 0, sizeof(DateTime));
-        static_dt_initialized = true;
-    }
-
-    // Get current time
+    // get current time
     time_t now = time(NULL);
     struct tm* tm_utc = gmtime(&now);
     if (tm_utc) {
-        // Set date and time from current UTC time
-        DATETIME_SET_YEAR_MONTH(&static_dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
-        static_dt.day = tm_utc->tm_mday;
-        static_dt.hour = tm_utc->tm_hour;
-        static_dt.minute = tm_utc->tm_min;
-        static_dt.second = tm_utc->tm_sec;
-        static_dt.millisecond = 0;
+        DATETIME_SET_YEAR_MONTH(&dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
+        dt.day = tm_utc->tm_mday;
+        dt.hour = tm_utc->tm_hour;
+        dt.minute = tm_utc->tm_min;
+        dt.second = tm_utc->tm_sec;
+        dt.millisecond = 0;
     }
 
-    // Set as UTC timezone
-    DATETIME_SET_TZ_OFFSET(&static_dt, 0);
-    static_dt.precision = DATETIME_PRECISION_DATE_TIME;
-    static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
+    // set as UTC timezone
+    DATETIME_SET_TZ_OFFSET(&dt, 0);
+    dt.precision = DATETIME_PRECISION_DATE_TIME;
+    dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
 
-    return static_dt;
+    return dt;
+}
+
+// datetime(str) - parse datetime from string
+DateTime fn_datetime1(Item arg) {
+    log_debug("fn_datetime1: parse from arg");
+    TypeId arg_type = get_type_id(arg);
+
+    if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+        String* str = arg_type == LMD_TYPE_STRING ? arg.get_string() : arg.get_symbol();
+        DateTime* parsed = datetime_parse_lambda(context->pool, str->chars);
+        if (parsed) {
+            DateTime dt = *parsed;
+            dt.precision = DATETIME_PRECISION_DATE_TIME;
+            return dt;
+        }
+        log_error("datetime: failed to parse string '%.*s'", (int)str->len, str->chars);
+    }
+    else if (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_INT64) {
+        // interpret as unix milliseconds
+        int64_t ms = arg_type == LMD_TYPE_INT ? (int64_t)arg.get_int56() : arg.get_int64();
+        DateTime* parsed = datetime_from_unix_ms(context->pool, ms);
+        if (parsed) {
+            DateTime dt = *parsed;
+            dt.precision = DATETIME_PRECISION_DATE_TIME;
+            return dt;
+        }
+    }
+    else if (arg_type == LMD_TYPE_DTIME) {
+        return arg.get_datetime();
+    }
+
+    DateTime err;
+    memset(&err, 0, sizeof(DateTime));
+    return err;
+}
+
+// date() - current date in UTC (date-only precision)
+DateTime fn_date0() {
+    DateTime dt = fn_datetime0();
+    dt.hour = 0;
+    dt.minute = 0;
+    dt.second = 0;
+    dt.millisecond = 0;
+    dt.precision = DATETIME_PRECISION_DATE_ONLY;
+    return dt;
+}
+
+// date(dt) - extract date portion from datetime
+DateTime fn_date1(Item arg) {
+    log_debug("fn_date1: extract date from arg");
+    TypeId arg_type = get_type_id(arg);
+
+    if (arg_type == LMD_TYPE_DTIME) {
+        DateTime dt = arg.get_datetime();
+        dt.hour = 0;
+        dt.minute = 0;
+        dt.second = 0;
+        dt.millisecond = 0;
+        dt.precision = DATETIME_PRECISION_DATE_ONLY;
+        return dt;
+    }
+    else if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+        String* str = arg_type == LMD_TYPE_STRING ? arg.get_string() : arg.get_symbol();
+        DateTime* parsed = datetime_parse_lambda(context->pool, str->chars);
+        if (parsed) {
+            DateTime dt = *parsed;
+            dt.hour = 0;
+            dt.minute = 0;
+            dt.second = 0;
+            dt.millisecond = 0;
+            dt.precision = DATETIME_PRECISION_DATE_ONLY;
+            return dt;
+        }
+        log_error("date: failed to parse string '%.*s'", (int)str->len, str->chars);
+    }
+
+    DateTime err;
+    memset(&err, 0, sizeof(DateTime));
+    return err;
+}
+
+// date(y, m, d) - construct date from year, month, day
+DateTime fn_date3(Item y, Item m, Item d) {
+    log_debug("fn_date3: construct date from y/m/d");
+    DateTime dt;
+    memset(&dt, 0, sizeof(DateTime));
+
+    int year = (int)(get_type_id(y) == LMD_TYPE_INT ? y.get_int56() : (get_type_id(y) == LMD_TYPE_INT64 ? (int)y.get_int64() : 0));
+    int month = (int)(get_type_id(m) == LMD_TYPE_INT ? m.get_int56() : (get_type_id(m) == LMD_TYPE_INT64 ? (int)m.get_int64() : 0));
+    int day_val = (int)(get_type_id(d) == LMD_TYPE_INT ? d.get_int56() : (get_type_id(d) == LMD_TYPE_INT64 ? (int)d.get_int64() : 0));
+
+    DATETIME_SET_YEAR_MONTH(&dt, year, month);
+    dt.day = day_val;
+    dt.precision = DATETIME_PRECISION_DATE_ONLY;
+
+    return dt;
+}
+
+// time() - current time in UTC (time-only precision)
+DateTime fn_time0() {
+    DateTime dt = fn_datetime0();
+    // keep hour/minute/second/millisecond, set default date to match parsed literals
+    DateTime result;
+    memset(&result, 0, sizeof(DateTime));
+    DATETIME_SET_YEAR_MONTH(&result, 1970, 1);
+    result.day = 1;
+    result.hour = dt.hour;
+    result.minute = dt.minute;
+    result.second = dt.second;
+    result.millisecond = dt.millisecond;
+    result.tz_offset_biased = dt.tz_offset_biased;
+    result.precision = DATETIME_PRECISION_TIME_ONLY;
+    result.format_hint = dt.format_hint;
+    return result;
+}
+
+// time(dt) - extract time portion from datetime
+DateTime fn_time1(Item arg) {
+    log_debug("fn_time1: extract time from arg");
+    TypeId arg_type = get_type_id(arg);
+
+    if (arg_type == LMD_TYPE_DTIME) {
+        DateTime src = arg.get_datetime();
+        DateTime dt;
+        memset(&dt, 0, sizeof(DateTime));
+        DATETIME_SET_YEAR_MONTH(&dt, 1970, 1);
+        dt.day = 1;
+        dt.hour = src.hour;
+        dt.minute = src.minute;
+        dt.second = src.second;
+        dt.millisecond = src.millisecond;
+        dt.tz_offset_biased = src.tz_offset_biased;
+        dt.precision = DATETIME_PRECISION_TIME_ONLY;
+        dt.format_hint = src.format_hint;
+        return dt;
+    }
+    else if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
+        String* str = arg_type == LMD_TYPE_STRING ? arg.get_string() : arg.get_symbol();
+        DateTime* parsed = datetime_parse_lambda(context->pool, str->chars);
+        if (parsed) {
+            DateTime dt;
+            memset(&dt, 0, sizeof(DateTime));
+            DATETIME_SET_YEAR_MONTH(&dt, 1970, 1);
+            dt.day = 1;
+            dt.hour = parsed->hour;
+            dt.minute = parsed->minute;
+            dt.second = parsed->second;
+            dt.millisecond = parsed->millisecond;
+            dt.tz_offset_biased = parsed->tz_offset_biased;
+            dt.precision = DATETIME_PRECISION_TIME_ONLY;
+            dt.format_hint = parsed->format_hint;
+            return dt;
+        }
+        log_error("time: failed to parse string '%.*s'", (int)str->len, str->chars);
+    }
+
+    DateTime err;
+    memset(&err, 0, sizeof(DateTime));
+    return err;
+}
+
+// time(h, m, s) - construct time from hour, minute, second
+DateTime fn_time3(Item h, Item m, Item s) {
+    log_debug("fn_time3: construct time from h/m/s");
+    DateTime dt;
+    memset(&dt, 0, sizeof(DateTime));
+
+    int hour_val = (int)(get_type_id(h) == LMD_TYPE_INT ? h.get_int56() : (get_type_id(h) == LMD_TYPE_INT64 ? (int)h.get_int64() : 0));
+    int minute_val = (int)(get_type_id(m) == LMD_TYPE_INT ? m.get_int56() : (get_type_id(m) == LMD_TYPE_INT64 ? (int)m.get_int64() : 0));
+    int second_val = (int)(get_type_id(s) == LMD_TYPE_INT ? s.get_int56() : (get_type_id(s) == LMD_TYPE_INT64 ? (int)s.get_int64() : 0));
+
+    // set default date values to match parsed time-only literals
+    DATETIME_SET_YEAR_MONTH(&dt, 1970, 1);
+    dt.day = 1;
+    dt.hour = hour_val;
+    dt.minute = minute_val;
+    dt.second = second_val;
+    dt.precision = DATETIME_PRECISION_TIME_ONLY;
+
+    return dt;
+}
+
+// justnow() - current datetime with millisecond precision
+DateTime fn_justnow() {
+    DateTime dt;
+    memset(&dt, 0, sizeof(DateTime));
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    struct tm* tm_utc = gmtime(&ts.tv_sec);
+    if (tm_utc) {
+        DATETIME_SET_YEAR_MONTH(&dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
+        dt.day = tm_utc->tm_mday;
+        dt.hour = tm_utc->tm_hour;
+        dt.minute = tm_utc->tm_min;
+        dt.second = tm_utc->tm_sec;
+        dt.millisecond = (int)(ts.tv_nsec / 1000000);
+    }
+
+    DATETIME_SET_TZ_OFFSET(&dt, 0);
+    dt.precision = DATETIME_PRECISION_DATE_TIME;
+    dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
+
+    return dt;
 }
 
 // Thread-local storage for current variadic arguments list

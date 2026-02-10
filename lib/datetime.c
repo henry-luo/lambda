@@ -806,3 +806,199 @@ DateTime* datetime_to_local(Pool* pool, DateTime* dt) {
     (void)pool; /* suppress unused warning */
     return dt;
 }
+/* Convert DateTime to unix timestamp in milliseconds */
+int64_t datetime_to_unix_ms(DateTime* dt) {
+    int64_t seconds = datetime_to_unix(dt);
+    return seconds * 1000 + (dt ? dt->millisecond : 0);
+}
+
+/* Create DateTime from unix timestamp in milliseconds */
+DateTime* datetime_from_unix_ms(Pool* pool, int64_t unix_ms) {
+    int64_t seconds = unix_ms / 1000;
+    int ms = (int)(unix_ms % 1000);
+    if (ms < 0) { ms += 1000; seconds--; } /* handle negative timestamps */
+    DateTime* dt = datetime_from_unix(pool, seconds);
+    if (dt) dt->millisecond = ms;
+    return dt;
+}
+
+/* Calculate day of week (0=Sunday, 6=Saturday) using Zeller-like algorithm */
+int datetime_weekday(DateTime* dt) {
+    if (!dt) return -1;
+    int year = DATETIME_GET_YEAR(dt);
+    int month = DATETIME_GET_MONTH(dt);
+    int day = dt->day;
+    if (day == 0) day = 1; /* default day for partial dates */
+
+    /* Tomohiko Sakamoto's algorithm */
+    static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (month < 3) year--;
+    int dow = (year + year/4 - year/100 + year/400 + t[month - 1] + day) % 7;
+    return dow; /* 0=Sunday, 1=Monday, ..., 6=Saturday */
+}
+
+/* Calculate day of year (1-366) */
+int datetime_yearday(DateTime* dt) {
+    if (!dt) return -1;
+    int year = DATETIME_GET_YEAR(dt);
+    int month = DATETIME_GET_MONTH(dt);
+    int day = dt->day;
+    if (day == 0) day = 1;
+
+    static const int cumulative_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+    if (month < 1 || month > 12) return -1;
+    int yday = cumulative_days[month - 1] + day;
+    if (is_leap_year(year) && month > 2) yday++;
+    return yday;
+}
+
+/* Calculate ISO week number (1-53) */
+int datetime_week_number(DateTime* dt) {
+    if (!dt) return -1;
+
+    /* ISO 8601: week starts on Monday, week 1 contains January 4th */
+    int yday = datetime_yearday(dt);
+    int wday = datetime_weekday(dt);
+    /* convert Sunday=0 to Monday=0 system: Mon=0, Tue=1, ..., Sun=6 */
+    int iso_wday = (wday + 6) % 7;
+
+    /* calculate the Thursday of this week's ISO year */
+    int thursday_yday = yday + (3 - iso_wday);
+    if (thursday_yday < 1) return 53; /* belongs to previous year's last week */
+    int year = DATETIME_GET_YEAR(dt);
+    int days_in_year = is_leap_year(year) ? 366 : 365;
+    if (thursday_yday > days_in_year) return 1; /* belongs to next year's week 1 */
+
+    return (thursday_yday - 1) / 7 + 1;
+}
+
+/* Calculate quarter (1-4) */
+int datetime_quarter(DateTime* dt) {
+    if (!dt) return -1;
+    int month = DATETIME_GET_MONTH(dt);
+    return (month - 1) / 3 + 1;
+}
+
+/* Check if the datetime's year is a leap year */
+bool datetime_is_leap_year_dt(DateTime* dt) {
+    if (!dt) return false;
+    return is_leap_year(DATETIME_GET_YEAR(dt));
+}
+
+/* Get number of days in the datetime's month */
+int datetime_days_in_month_dt(DateTime* dt) {
+    if (!dt) return -1;
+    return days_in_month(DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt));
+}
+
+/* Format datetime using a custom pattern string.
+ * Supported tokens:
+ *   YYYY - 4-digit year, YY - 2-digit year
+ *   MMMM - full month name, MMM - abbreviated month, MM - 2-digit month, M - month
+ *   DD - 2-digit day, D - day
+ *   dddd - full weekday, ddd - abbreviated weekday
+ *   hh - 2-digit 24h hour, h - hour, HH - 2-digit 12h hour
+ *   mm - 2-digit minute, ss - 2-digit second, SSS - 3-digit millisecond
+ *   A - AM/PM, Z - UTC offset (+05:30), ZZ - compact offset (+0530)
+ */
+void datetime_format_pattern(StrBuf* strbuf, DateTime* dt, const char* pattern) {
+    if (!strbuf || !dt || !pattern) return;
+
+    static const char* month_names[] = {
+        "", "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+    static const char* month_abbr[] = {
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    static const char* weekday_names[] = {
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+    };
+    static const char* weekday_abbr[] = {
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
+    };
+
+    int year = DATETIME_GET_YEAR(dt);
+    int month = DATETIME_GET_MONTH(dt);
+    int day = dt->day;
+    int hour24 = dt->hour;
+    int hour12 = hour24 % 12;
+    if (hour12 == 0) hour12 = 12;
+    int wday = datetime_weekday(dt);
+
+    const char* p = pattern;
+    while (*p) {
+        /* try matching multi-char tokens first */
+        if (strncmp(p, "YYYY", 4) == 0) {
+            strbuf_append_format(strbuf, "%04d", year);
+            p += 4;
+        } else if (strncmp(p, "YY", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", abs(year) % 100);
+            p += 2;
+        } else if (strncmp(p, "MMMM", 4) == 0) {
+            strbuf_append_str(strbuf, (month >= 1 && month <= 12) ? month_names[month] : "???");
+            p += 4;
+        } else if (strncmp(p, "MMM", 3) == 0) {
+            strbuf_append_str(strbuf, (month >= 1 && month <= 12) ? month_abbr[month] : "???");
+            p += 3;
+        } else if (strncmp(p, "MM", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", month);
+            p += 2;
+        } else if (*p == 'M' && *(p+1) != 'M') {
+            strbuf_append_format(strbuf, "%d", month);
+            p += 1;
+        } else if (strncmp(p, "DD", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", day);
+            p += 2;
+        } else if (*p == 'D' && *(p+1) != 'D') {
+            strbuf_append_format(strbuf, "%d", day);
+            p += 1;
+        } else if (strncmp(p, "dddd", 4) == 0) {
+            strbuf_append_str(strbuf, (wday >= 0 && wday <= 6) ? weekday_names[wday] : "???");
+            p += 4;
+        } else if (strncmp(p, "ddd", 3) == 0) {
+            strbuf_append_str(strbuf, (wday >= 0 && wday <= 6) ? weekday_abbr[wday] : "???");
+            p += 3;
+        } else if (strncmp(p, "HH", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", hour24);
+            p += 2;
+        } else if (strncmp(p, "hh", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", hour12);
+            p += 2;
+        } else if (*p == 'h' && *(p+1) != 'h') {
+            strbuf_append_format(strbuf, "%d", hour24);
+            p += 1;
+        } else if (strncmp(p, "mm", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", dt->minute);
+            p += 2;
+        } else if (strncmp(p, "SSS", 3) == 0) {
+            strbuf_append_format(strbuf, "%03d", dt->millisecond);
+            p += 3;
+        } else if (strncmp(p, "ss", 2) == 0) {
+            strbuf_append_format(strbuf, "%02d", dt->second);
+            p += 2;
+        } else if (*p == 'A') {
+            strbuf_append_str(strbuf, hour24 < 12 ? "AM" : "PM");
+            p += 1;
+        } else if (strncmp(p, "ZZ", 2) == 0) {
+            if (DATETIME_HAS_TIMEZONE(dt)) {
+                int tz = DATETIME_GET_TZ_OFFSET(dt);
+                int h = abs(tz) / 60, m = abs(tz) % 60;
+                strbuf_append_format(strbuf, "%c%02d%02d", tz >= 0 ? '+' : '-', h, m);
+            }
+            p += 2;
+        } else if (*p == 'Z' && *(p+1) != 'Z') {
+            if (DATETIME_HAS_TIMEZONE(dt)) {
+                int tz = DATETIME_GET_TZ_OFFSET(dt);
+                int h = abs(tz) / 60, m = abs(tz) % 60;
+                strbuf_append_format(strbuf, "%c%02d:%02d", tz >= 0 ? '+' : '-', h, m);
+            }
+            p += 1;
+        } else {
+            /* literal character */
+            strbuf_append_char(strbuf, *p);
+            p += 1;
+        }
+    }
+}

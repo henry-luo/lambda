@@ -2,6 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "../../lib/datetime.h"
 
 using namespace lambda;
 
@@ -214,8 +215,17 @@ static Item parse_datetime(InputContext& ctx, const char **mark) {
         (*mark)++; // skip closing quote
     }
 
-    String* datetime_str = stringbuf_to_string(sb);
-    return datetime_str ? (Item){.item = s2it(datetime_str)} : (Item){.item = ITEM_ERROR};
+    // parse the content as a datetime value
+    String* content_str = stringbuf_to_string(sb);
+    if (!content_str) return {.item = ITEM_ERROR};
+
+    DateTime* dt = datetime_parse_lambda(ctx.input()->pool, content_str->chars);
+    if (dt) {
+        return {.item = k2it(dt)};
+    }
+
+    // fallback: return as string if datetime parsing fails
+    return {.item = s2it(content_str)};
 }
 
 static Item parse_number(Input *input, const char **mark) {

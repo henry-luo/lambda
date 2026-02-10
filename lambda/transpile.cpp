@@ -2924,9 +2924,7 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
     // For system functions, box DateTime arguments
     if (is_sys_func && value->type->type_id == LMD_TYPE_DTIME) {
         log_debug("transpile_call_argument: BOXING DateTime for sys func");
-        strbuf_append_str(tp->code_buf, "k2it(");
-        transpile_expr(tp, value);
-        strbuf_append_str(tp->code_buf, ")");
+        transpile_box_item(tp, value);
     }
     // for optional params, always box to Item since function expects Item type
     else if (param_type && param_type->is_optional) {
@@ -3775,7 +3773,7 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
     else {
         strbuf_append_str(tp->code_buf, "fn_member(");
-        transpile_expr(tp, field_node->object);
+        transpile_box_item(tp, field_node->object);
     }
     strbuf_append_char(tp->code_buf, ',');
     if (field_node->field->node_type == AST_NODE_IDENT) {
@@ -4237,7 +4235,16 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
-    strbuf_append_format(tp->code_buf, "base_type(%d)", ((TypeType*)type_node->type)->type->type_id);
+    TypeType* type_type = (TypeType*)type_node->type;
+    // for datetime sub-types (date, time), we need to preserve the specific Type pointer
+    // since TYPE_DATE, TYPE_TIME, and TYPE_DTIME all share type_id = LMD_TYPE_DTIME
+    if (type_type->type == &TYPE_DATE || type_type->type == &TYPE_TIME) {
+        arraylist_append(tp->type_list, (void*)type_type);
+        int type_index = tp->type_list->length - 1;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", type_index);
+    } else {
+        strbuf_append_format(tp->code_buf, "base_type(%d)", type_type->type->type_id);
+    }
 }
 
 void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
