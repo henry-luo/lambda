@@ -267,8 +267,7 @@ String* it2s(Item itm) {
 const char* fn_to_cstr(Item itm) {
     TypeId type_id = itm._type_id;
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
-        String* str = itm.get_string();
-        return str ? str->chars : "";
+        return itm.get_chars();
     }
     // For non-string types in path segments, return empty string
     // The calling code should ensure the expression evaluates to a string
@@ -374,9 +373,14 @@ void array_set(Array* arr, int index, Item itm) {
         arr->extra++;
         break;
     }
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+    case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
         String *str = itm.get_string();
         str->ref_cnt++;
+        break;
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol *sym = itm.get_symbol();
+        sym->ref_cnt++;
         break;
     }
     default:
@@ -489,9 +493,14 @@ void list_push(List *list, Item item) {
     // Note: TYPE_ERROR will be stored as it is
     list->items[list->length++] = item;
     switch (item._type_id) {
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+    case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
         String *str = (String*)item.get_string();
         str->ref_cnt++;
+        break;
+    }
+    case LMD_TYPE_SYMBOL: {
+        Symbol *sym = item.get_symbol();
+        sym->ref_cnt++;
         break;
     }
     case LMD_TYPE_DECIMAL: {
@@ -617,10 +626,16 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(DateTime*)field_ptr = dtval;
                 break;
             }
-            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+            case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
                 String *str = item.get_string();
                 *(String**)field_ptr = str;
                 str->ref_cnt++;
+                break;
+            }
+            case LMD_TYPE_SYMBOL: {
+                Symbol *sym = item.get_symbol();
+                *(Symbol**)field_ptr = sym;
+                sym->ref_cnt++;
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
@@ -655,9 +670,14 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.double_val = item.get_double();  break;
                 case LMD_TYPE_DTIME:
                     titem.datetime_val = item.get_datetime();  break;
-                case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+                case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
                     String *str = item.get_string();
                     titem.string = str;  str->ref_cnt++;
+                    break;
+                }
+                case LMD_TYPE_SYMBOL: {
+                    Symbol *sym = item.get_symbol();
+                    titem.symbol = sym;  sym->ref_cnt++;
                     break;
                 }
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
@@ -729,7 +749,7 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_STRING:
         return {.item = s2it(titem->string)};
     case LMD_TYPE_SYMBOL:
-        return {.item = y2it(titem->string)};
+        return {.item = y2it(titem->symbol)};
     case LMD_TYPE_BINARY:
         return {.item = x2it(titem->string)};
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
@@ -768,7 +788,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result = {.item = s2it(*(String**)field_ptr)};
         break;
     case LMD_TYPE_SYMBOL:
-        result = {.item = y2it(*(String**)field_ptr)};
+        result = {.item = y2it(*(Symbol**)field_ptr)};
         break;
     case LMD_TYPE_BINARY:
         result = {.item = x2it(*(String**)field_ptr)};
@@ -830,7 +850,7 @@ ConstItem Map::get(const Item key) const {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = key.get_string()->chars;
+        key_str = (char*)key.get_chars();
     } else {
         log_error("map_get_const: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return null_result;  // only string or symbol keys are supported
@@ -885,7 +905,7 @@ ConstItem Element::get_attr(const Item key) const {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = key.get_string()->chars;
+        key_str = (char*)key.get_chars();
     } else {
         return null_result;  // only string or symbol keys are supported
     }

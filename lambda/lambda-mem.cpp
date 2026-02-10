@@ -61,18 +61,23 @@ String* heap_create_name(const char* name) {
     return heap_create_name(name, strlen(name));
 }
 
-// create a symbol string using runtime name_pool (pooled ONLY if length ≤ 32 chars)
-// use this for symbol literals ('mySymbol), short identifiers, enum-like values
-// long symbols (>32 chars) fall back to arena allocation (no pooling overhead)
-String* heap_create_symbol(const char* symbol, size_t len) {
-    if (!context || !context->name_pool) {
-        log_error("heap_create_symbol called with invalid context or name_pool");
+// create a symbol using heap allocation
+// Symbol is a separate struct from String with an ns (namespace) field
+Symbol* heap_create_symbol(const char* symbol, size_t len) {
+    if (!context || !symbol) {
+        log_error("heap_create_symbol called with invalid context or null symbol");
         return nullptr;
     }
-    return name_pool_create_symbol_len(context->name_pool, symbol, len);
+    Symbol* sym = (Symbol*)heap_alloc(sizeof(Symbol) + len + 1, LMD_TYPE_SYMBOL);
+    sym->len = len;
+    sym->ref_cnt = 1;
+    sym->ns = nullptr;
+    memcpy(sym->chars, symbol, len);
+    sym->chars[len] = '\0';
+    return sym;
 }
 
-String* heap_create_symbol(const char* symbol) {
+Symbol* heap_create_symbol(const char* symbol) {
     if (!symbol) return nullptr;
     return heap_create_symbol(symbol, strlen(symbol));
 }

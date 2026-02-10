@@ -20,33 +20,33 @@ static void convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
         log_error("convert_occurrence_to_regex: invalid op_str");
         return;
     }
-    
+
     const char* s = op_str->str;
     size_t len = op_str->length;
-    
+
     // Skip leading '[' and trailing ']'
     if (s[0] != '[' || s[len-1] != ']') {
         // Fallback: might be old {n} syntax or something else, append as-is
         strbuf_append_str_n(regex, s, len);
         return;
     }
-    
+
     // Parse content between [ and ]
     // Forms: "n", "n+", "n, m"
     strbuf_append_char(regex, '{');
-    
+
     size_t i = 1;  // skip '['
     // Parse first number
     while (i < len - 1 && (s[i] >= '0' && s[i] <= '9')) {
         strbuf_append_char(regex, s[i]);
         i++;
     }
-    
+
     // Skip whitespace
     while (i < len - 1 && (s[i] == ' ' || s[i] == '\t')) {
         i++;
     }
-    
+
     if (i >= len - 1) {
         // Just [n] -> {n}
         strbuf_append_char(regex, '}');
@@ -76,7 +76,7 @@ static void convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
 // Escape regex metacharacters in a literal string
 void escape_regex_literal(StrBuf* regex, String* str) {
     if (!str || !str->chars) return;
-    
+
     for (size_t i = 0; i < str->len; i++) {
         char c = str->chars[i];
         // RE2 metacharacters that need escaping
@@ -120,7 +120,7 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         log_error("compile_pattern_to_regex: null node");
         return;
     }
-    
+
     switch (node->node_type) {
     case AST_NODE_PRIMARY: {
         // String literal - escape and emit
@@ -136,18 +136,18 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         }
         break;
     }
-    
+
     case AST_NODE_PATTERN_CHAR_CLASS: {
         AstPatternCharClassNode* cc = (AstPatternCharClassNode*)node;
         compile_char_class(regex, cc->char_class);
         break;
     }
-    
+
     case AST_NODE_PATTERN_RANGE: {
         // "a" to "z" -> [a-z]
         AstPatternRangeNode* range = (AstPatternRangeNode*)node;
         strbuf_append_char(regex, '[');
-        
+
         // Extract start character
         if (range->start && range->start->type && range->start->type->type_id == LMD_TYPE_STRING) {
             TypeString* start_type = (TypeString*)range->start->type;
@@ -160,9 +160,9 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
                 strbuf_append_char(regex, c);
             }
         }
-        
+
         strbuf_append_char(regex, '-');
-        
+
         // Extract end character
         if (range->end && range->end->type && range->end->type->type_id == LMD_TYPE_STRING) {
             TypeString* end_type = (TypeString*)range->end->type;
@@ -174,11 +174,11 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
                 strbuf_append_char(regex, c);
             }
         }
-        
+
         strbuf_append_char(regex, ']');
         break;
     }
-    
+
     case AST_NODE_BINARY: {
         AstBinaryNode* bin = (AstBinaryNode*)node;
         if (bin->op == OPERATOR_UNION) {
@@ -217,7 +217,7 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         }
         break;
     }
-    
+
     case AST_NODE_UNARY: {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op == OPERATOR_OPTIONAL) {
@@ -256,7 +256,7 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         }
         break;
     }
-    
+
     case AST_NODE_PATTERN_SEQ: {
         // Pattern sequence - concatenate all patterns in sequence
         AstPatternSeqNode* seq = (AstPatternSeqNode*)node;
@@ -267,7 +267,7 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         }
         break;
     }
-    
+
     case AST_NODE_IDENT: {
         // Pattern reference - this should have been resolved during type checking
         // For now, log an error
@@ -276,7 +276,7 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
             (int)ident->name->len, ident->name->chars);
         break;
     }
-    
+
     default:
         log_error("compile_pattern_to_regex: unknown node type %d", node->node_type);
         break;
@@ -289,22 +289,22 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
         if (error_msg) *error_msg = "null pattern AST";
         return nullptr;
     }
-    
+
     // Build regex string
     StrBuf* regex = strbuf_new_cap(256);
     strbuf_append_str(regex, "^");  // anchor start for full match
     compile_pattern_to_regex(regex, pattern_ast);
     strbuf_append_str(regex, "$");  // anchor end
-    
+
     log_debug("Compiled pattern regex: %s", regex->str);
-    
+
     // Compile RE2
     re2::RE2::Options options;
     options.set_log_errors(false);
     // UTF8 is the default encoding
-    
+
     re2::RE2* re2 = new re2::RE2(regex->str, options);
-    
+
     if (!re2->ok()) {
         if (error_msg) {
             // Note: error() returns std::string, we need to copy it
@@ -316,19 +316,19 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
         strbuf_free(regex);
         return nullptr;
     }
-    
+
     // Allocate TypePattern
     TypePattern* pattern = (TypePattern*)pool_calloc(pool, sizeof(TypePattern));
     pattern->type_id = LMD_TYPE_PATTERN;
     pattern->is_symbol = is_symbol;
     pattern->re2 = re2;
     pattern->pattern_index = -1;  // Will be set when registered
-    
+
     // Store source pattern for debugging
     pattern->source = (String*)pool_calloc(pool, sizeof(String) + regex->length + 1);
     pattern->source->len = regex->length;
     memcpy(pattern->source->chars, regex->str, regex->length + 1);
-    
+
     strbuf_free(regex);
     return pattern;
 }
@@ -338,8 +338,17 @@ bool pattern_full_match(TypePattern* pattern, String* str) {
     if (!pattern || !pattern->re2 || !str) {
         return false;
     }
-    
+
     re2::StringPiece input(str->chars, str->len);
+    return re2::RE2::FullMatch(input, *pattern->re2);
+}
+
+bool pattern_full_match_chars(TypePattern* pattern, const char* chars, size_t len) {
+    if (!pattern || !pattern->re2 || !chars) {
+        return false;
+    }
+
+    re2::StringPiece input(chars, len);
     return re2::RE2::FullMatch(input, *pattern->re2);
 }
 
@@ -348,7 +357,7 @@ bool pattern_partial_match(TypePattern* pattern, String* str) {
     if (!pattern || !pattern->re2 || !str) {
         return false;
     }
-    
+
     re2::StringPiece input(str->chars, str->len);
     return re2::RE2::PartialMatch(input, *pattern->re2);
 }

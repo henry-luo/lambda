@@ -152,8 +152,8 @@ TEST_F(NamePoolTest, MarkBuilderIntegration) {
     EXPECT_EQ(name1, name2);  // Should be pooled
 
     // Test createSymbol
-    String* sym1 = builder.createSymbol("short");
-    String* sym2 = builder.createSymbol("short");
+    Symbol* sym1 = builder.createSymbol("short");
+    Symbol* sym2 = builder.createSymbol("short");
     EXPECT_EQ(sym1, sym2);  // Should be pooled
 
     // Test createString

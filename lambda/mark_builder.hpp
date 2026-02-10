@@ -83,16 +83,16 @@ public:
     String* createNameFromStrView(StrView name);
 
     // ============================================================================
-    // Symbol Creation Methods (use name_pool for short symbols ≤32 chars)
+    // Symbol Creation Methods (arena-allocated Symbol structs)
     // ============================================================================
 
     /**
-     * Create a symbol string
-     * Uses name_pool for symbols ≤32 chars, otherwise allocates from pool
+     * Create a symbol
+     * Allocates Symbol struct from arena with ns = NULL
      */
-    String* createSymbol(const char* symbol);
-    String* createSymbol(const char* symbol, size_t len);
-    String* createSymbolFromStrView(StrView symbol);
+    Symbol* createSymbol(const char* symbol);
+    Symbol* createSymbol(const char* symbol, size_t len);
+    Symbol* createSymbolFromStrView(StrView symbol);
 
     // ============================================================================
     // String Creation Methods (arena-allocates strings, NO pooling)
@@ -210,7 +210,7 @@ public:
     Item createType(TypeId type_id, bool is_literal = false, bool is_const = false);
 
     Item createMetaType(TypeId type_id);
-    
+
     // ============================================================================
     // Configuration Methods
     // ============================================================================
@@ -237,14 +237,14 @@ public:
 
     /**
      * Deep copy an Item to this builder's Input arena
-     * 
+     *
      * Performs smart ownership checking:
      * - If item data is already in this Input's arena chain, returns original (no copy)
      * - If item data is in parent Input's arena chain, returns original (no copy)
      * - If item data is external, performs deep recursive copy
-     * 
+     *
      * This enables efficient cross-Input data sharing while ensuring memory safety.
-     * 
+     *
      * @param item The item to potentially copy
      * @return Original item if already owned, or a deep copy if external
      */
@@ -252,10 +252,10 @@ public:
 
     /**
      * Check if an Item's data is in this Input's arena chain
-     * 
+     *
      * Traverses the parent chain: current Input -> parent -> parent -> ...
      * Returns true if all pointer data is owned by an arena in the chain.
-     * 
+     *
      * @param item The item to check
      * @return true if item data is in arena chain, false if external
      */
@@ -265,7 +265,7 @@ private:
     /**
      * Check if a pointer is owned by this Input's arena chain
      * Traverses: current arena -> parent Input's arena -> parent's parent -> ...
-     * 
+     *
      * @param ptr Pointer to check
      * @return true if ptr is in arena chain, false otherwise
      */
@@ -621,7 +621,7 @@ public:
  * MEMORY MODEL: Stack-allocated value type
  * - Automatically destroyed when scope ends
  * - List is allocated from pool with dynamic resizing
- * 
+ *
  * DIFFERENCE from ArrayBuilder:
  * - List uses list_push() which flattens nested lists and skips nulls
  * - Array uses array_append() which preserves nested arrays and nulls

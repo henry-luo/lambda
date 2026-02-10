@@ -430,7 +430,7 @@ static void append_inline_math(TexNode* hlist, const ElementReader& elem, LaTeXC
     // Check if this is display math - either by element tag or by child element
     const char* elem_tag = elem.tagName();
     bool is_display = tag_eq(elem_tag, "display_math") || tag_eq(elem_tag, "displaymath");
-    
+
     // Also check children for nested display_math (legacy structure)
     if (!is_display) {
         auto check_iter = elem.children();
@@ -520,7 +520,7 @@ static TexNode* convert_inline_item(const ItemReader& item, LaTeXContext& ctx, P
         }
     } else if (item.isSymbol()) {
         // Handle symbols like parbreak, space commands, etc.
-        String* sym_str = item.asSymbol();
+        Symbol* sym_str = item.asSymbol();
         const char* sym = sym_str ? sym_str->chars : nullptr;
         if (sym) {
             if (tag_eq(sym, "parbreak")) {
@@ -753,7 +753,7 @@ TexNode* break_latex_paragraph(TexNode* hlist, LaTeXContext& ctx) {
 // Returns a VList containing all content (text paragraphs + display math blocks)
 TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
     fprintf(stderr, "[DEBUG] convert_latex_paragraph: processing paragraph with display math splitting\n");
-    
+
     VListContext vctx(ctx.doc_ctx.arena, ctx.doc_ctx.fonts);
     init_vlist_context(vctx, ctx.doc_ctx.text_width);
     begin_vlist(vctx);
@@ -767,7 +767,7 @@ TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
     while (iter.next(&child)) {
         bool is_display = false;
         ElementReader child_elem;
-        
+
         if (child.isElement()) {
             child_elem = child.asElement();
             const char* tag = child_elem.tagName();
@@ -775,7 +775,7 @@ TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
                 is_display = true;
             }
         }
-        
+
         if (is_display) {
             // Flush current inline content as a paragraph first
             if (has_inline_content && current_hlist->first_child) {
@@ -789,7 +789,7 @@ TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
                 current_hlist = make_hlist(ctx.doc_ctx.arena);
                 has_inline_content = false;
             }
-            
+
             // Add the display math block - flatten if it's a VList to enable page breaks
             TexNode* display = convert_latex_display_math(child_elem, ctx);
             if (display) {
@@ -830,7 +830,7 @@ TexNode* convert_latex_paragraph(const ElementReader& elem, LaTeXContext& ctx) {
     }
 
     pool_destroy(pool);
-    
+
     TexNode* result = end_vlist(vctx);
     if (result && !result->first_child) {
         return nullptr;  // Empty paragraph
@@ -1331,7 +1331,7 @@ struct TabularItem {
     TabularItemType type;
 };
 
-static void collect_tabular_content(const ElementReader& elem, 
+static void collect_tabular_content(const ElementReader& elem,
                                      ArrayList* items,  // ArrayList of TabularItem*
                                      bool* found_col_spec,
                                      char** col_spec_out,
@@ -1416,7 +1416,7 @@ static void collect_tabular_content(const ElementReader& elem,
             }
         } else if (child.isSymbol()) {
             // Check for alignment_tab symbol
-            String* sym_str = child.asSymbol();
+            Symbol* sym_str = child.asSymbol();
             const char* sym = sym_str ? sym_str->chars : nullptr;
             if (sym && tag_eq(sym, "alignment_tab")) {
                 TabularItem* item = (TabularItem*)arena_alloc(arena, sizeof(TabularItem));
@@ -1436,7 +1436,7 @@ TexNode* convert_latex_tabular(const ElementReader& elem, LaTeXContext& ctx) {
     ArrayList* items = arraylist_new(32);
     bool found_col_spec = false;
     char* col_spec = nullptr;
-    
+
     collect_tabular_content(elem, items, &found_col_spec, &col_spec, arena);
 
     TabularColSpec spec = parse_tabular_colspec(col_spec, arena);
@@ -1465,7 +1465,7 @@ TexNode* convert_latex_tabular(const ElementReader& elem, LaTeXContext& ctx) {
 
     for (int i = 0; i < items->length; i++) {
         TabularItem* tci = (TabularItem*)items->data[i];
-        
+
         if (tci->type == TABULAR_HLINE) {
             // Emit current row if not empty, then draw hline
             if (current_row->first_child) {
@@ -1953,7 +1953,7 @@ TexNode* typeset_latex_document(const ElementReader& latex_root, LaTeXContext& c
                     child_node->prev_sibling = nullptr;
                     child_node->next_sibling = nullptr;
                     child_node->parent = nullptr;
-                    
+
                     // If this child is also a VList, flatten it recursively
                     if (child_node->node_class == NodeClass::VList && child_node->first_child) {
                         fprintf(stderr, "[DEBUG] typeset_latex_document: recursively flattening nested VList\n");
