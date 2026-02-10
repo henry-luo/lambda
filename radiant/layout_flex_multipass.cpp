@@ -727,9 +727,14 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                     }
                 }
 
-                // Center the item
-                if (item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO && item->bound->margin.right_type == CSS_VALUE_AUTO) {
-                    // Center horizontally
+                // Center the item — ONLY in cross axis
+                // Main-axis auto margins are already handled by main_axis_alignment_positioning
+                // which correctly distributes free space among ALL items' auto margins.
+                // Re-centering main axis here would ignore other items and produce wrong positions.
+                bool is_horizontal = is_main_axis_horizontal(flex_layout);
+
+                if (!is_horizontal && item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO && item->bound->margin.right_type == CSS_VALUE_AUTO) {
+                    // Cross-axis centering for column flex (horizontal is cross axis)
                     int center_x = (container_width - item->width) / 2;
                     if (flex_container->bound) {
                         center_x += flex_container->bound->padding.left;
@@ -738,11 +743,11 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                         }
                     }
                     item->x = center_x;
-                    log_debug("Centered item horizontally at x=%d", center_x);
+                    log_debug("Centered item horizontally at x=%d (cross-axis for column flex)", center_x);
                 }
 
-                if (item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO && item->bound->margin.bottom_type == CSS_VALUE_AUTO) {
-                    // Center vertically
+                if (is_horizontal && item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO && item->bound->margin.bottom_type == CSS_VALUE_AUTO) {
+                    // Cross-axis centering for row flex (vertical is cross axis)
                     int center_y = (container_height - item->height) / 2;
                     if (flex_container->bound) {
                         center_y += flex_container->bound->padding.top;
@@ -751,7 +756,7 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                         }
                     }
                     item->y = center_y;
-                    log_debug("Centered item vertically at y=%d", center_y);
+                    log_debug("Centered item vertically at y=%d (cross-axis for row flex)", center_y);
                 }
             }
         }
