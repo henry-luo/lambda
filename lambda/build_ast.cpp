@@ -223,7 +223,7 @@ bool types_compatible(Type* arg_type, Type* param_type) {
             actual_param = tp->full_type;
         }
     }
-    
+
     if (actual_param->type_id == LMD_TYPE_TYPE_BINARY) {
         TypeBinary* union_type = (TypeBinary*)actual_param;
         if (union_type->op == OPERATOR_UNION) {
@@ -1378,12 +1378,23 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
     if (!has_escape) {
         // No escapes - simple copy
-        str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
+        if (symbol == SYM_SYMBOL) {
+            // Allocate as Symbol (has ns field between ref_cnt and chars)
+            Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + content_len + 1);
+            sym->ns = NULL;
+            memcpy(sym->chars, content_start, content_len);
+            sym->chars[content_len] = '\0';
+            sym->len = content_len;
+            sym->ref_cnt = 1;
+            str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
+        } else {
+            str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
+            memcpy(str->chars, content_start, content_len);
+            str->chars[content_len] = '\0';
+            str->len = content_len;
+            str->ref_cnt = 1;
+        }
         str_type->string = str;
-        memcpy(str->chars, content_start, content_len);
-        str->chars[content_len] = '\0';
-        str->len = content_len;
-        str->ref_cnt = 1;
     }
     else {
         // Has escape sequences - process them
@@ -1568,6 +1579,18 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         if (str->len == 0) {
             log_debug("build_lit_string: empty string after escape processing, returning null type");
             return &LIT_NULL;
+        }
+
+        // For symbols, re-allocate as Symbol struct (different layout from String)
+        if (symbol == SYM_SYMBOL) {
+            int slen = str->len;
+            Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + slen + 1);
+            sym->ns = NULL;
+            memcpy(sym->chars, str->chars, slen);
+            sym->chars[slen] = '\0';
+            sym->len = slen;
+            sym->ref_cnt = 1;
+            str = (String*)sym;  // store as String* in TypeString
         }
         str_type->string = str;
     }
@@ -3178,7 +3201,7 @@ AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
         // error_node is an error_type_pattern: 'error' | '.' | identifier
         TSSymbol error_symbol = ts_node_symbol(error_node);
         StrView error_str = ts_node_source(tp, error_node);
-        
+
         if (error_symbol == SYM_ERROR_TYPE_PATTERN) {
             // Get the actual child: 'error', '.', or identifier
             TSNode child = ts_node_child(error_node, 0);
@@ -3187,7 +3210,7 @@ AstNode* build_return_type(Transpiler* tp, TSNode return_type_node) {
                 error_str = ts_node_source(tp, child);
             }
         }
-        
+
         // Check what kind of error type pattern we have
         if (strview_equal(&error_str, "error")) {
             // 'error' keyword - use base error type

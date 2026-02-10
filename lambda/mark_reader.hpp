@@ -138,7 +138,7 @@ public:
 
     // Safe type conversion (returns default-constructed on mismatch)
     String* asString() const;
-    String* asSymbol() const;  // Returns the symbol's String* representation
+    Symbol* asSymbol() const;  // Returns the Symbol* pointer
     int64_t asInt() const;
     int32_t asInt32() const;
     double asFloat() const;

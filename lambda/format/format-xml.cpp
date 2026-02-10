@@ -304,7 +304,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                     }
                 } else if (child.isSymbol()) {
                     // Symbol items (named entities) - output as &name;
-                    String* sym = child.asSymbol();
+                    Symbol* sym = child.asSymbol();
                     if (sym && sym->chars) {
                         stringbuf_append_char(ctx.output(), '&');
                         stringbuf_append_str(ctx.output(), sym->chars);

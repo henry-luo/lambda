@@ -317,7 +317,7 @@ TEST_F(ItemReaderSymbolTest, IsSymbolMethod) {
 
     // Create a Symbol item and test isSymbol()
     MarkBuilder builder(input);
-    String* sym = builder.createSymbol("test_symbol");
+    Symbol* sym = builder.createSymbol("test_symbol");
     ASSERT_NE(sym, nullptr);
 
     Item sym_item = {.item = y2it(sym)};
@@ -333,13 +333,13 @@ TEST_F(ItemReaderSymbolTest, AsSymbolMethod) {
 
     // Create a Symbol and retrieve it with asSymbol()
     MarkBuilder builder(input);
-    String* sym = builder.createSymbol("hello");
+    Symbol* sym = builder.createSymbol("hello");
     ASSERT_NE(sym, nullptr);
 
     Item sym_item = {.item = y2it(sym)};
     ItemReader reader(sym_item.to_const());
 
-    String* retrieved = reader.asSymbol();
+    Symbol* retrieved = reader.asSymbol();
     ASSERT_NE(retrieved, nullptr);
     EXPECT_STREQ(retrieved->chars, "hello");
 }
