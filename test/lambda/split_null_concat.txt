@@ -1,0 +1,7 @@
+"===== split tests =====split on comma:abcsplit on space:helloworldfoosplit on double colon:abcsplit no match:hellosplit on dash:onetwothree===== split space - verify element count =====parts in 'a b c':"
+3
+"parts in 'hello':"
+1
+"parts in 'one two three four':"
+4
+"===== split and rejoin roundtrip =====roundtrip comma:a,b,croundtrip space:hello worldroundtrip double colon:x::y::z===== null concatenation tests =====null ++ string: worldstring ++ null:hello ===== null in fn concat =====safe_concat(null, text):textsafe_concat(text, null):textsafe_concat(hello, world):hello world===== ALL TESTS DONE ====="
