@@ -1,0 +1,27 @@
+"===== starts_with tests =====basic prefix match:"
+true
+"prefix no match:"
+false
+"prefix longer than string:"
+false
+"exact match:"
+true
+"with slash - should not match:"
+false
+"with slash - should match:"
+true
+"single char prefix:"
+true
+"===== ends_with tests =====basic suffix match:"
+true
+"suffix no match:"
+false
+"extension .cpp:"
+true
+"extension .c:"
+true
+".c should not match .cpp:"
+false
+"exact match:"
+true
+"===== starts_with in if-condition =====test/ on test_foo.cpp:notest/ on test/foo.cpp:yessrc/ on src/main.cpp:yessrc/ on lib/main.cpp:no===== ends_with in if-condition =====.cpp on main.cpp:yes.cpp on main.c:no.c on main.c:yes.c on main.cpp:no===== contains in if-condition =====world in hello world:yesxyz in hello world:no===== ALL TESTS DONE ====="
