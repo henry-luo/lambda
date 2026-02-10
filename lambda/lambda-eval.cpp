@@ -1093,6 +1093,15 @@ String* fn_string(Item itm) {
         strbuf_free(sb);
         return result;
     }
+    case LMD_TYPE_PATH: {
+        Path* path = (Path*)itm.item;
+        if (!path) return &STR_NULL;
+        StrBuf* sb = strbuf_new();
+        path_to_string(path, sb);
+        String* result = heap_strcpy(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
     case LMD_TYPE_ERROR:
         return NULL;
     default:
@@ -1421,6 +1430,56 @@ Item fn_member(Item item, Item key) {
                 if (path->result != 0) {
                     // Recurse with resolved content
                     return fn_member({.item = path->result}, key);
+                }
+            }
+
+            // path metadata and structural property access
+            if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
+                String* key_str = key.get_string();
+                if (key_str) {
+                    const char* k = key_str->chars;
+
+                    // structural properties (always available)
+                    if (strcmp(k, "name") == 0) {
+                        // return the leaf segment name (e.g. "file.txt")
+                        if (path->name) return {.item = s2it(heap_create_name(path->name))};
+                        return ItemNull;
+                    }
+                    if (strcmp(k, "path") == 0) {
+                        // return the full OS path string (e.g. "./lib/file.txt")
+                        StrBuf* sb = strbuf_new();
+                        path_to_os_path(path, sb);
+                        String* result = heap_strcpy(sb->str, sb->length);
+                        strbuf_free(sb);
+                        return {.item = s2it(result)};
+                    }
+                    if (strcmp(k, "extension") == 0) {
+                        // return file extension (e.g. "txt" from "file.txt")
+                        if (path->name) {
+                            const char* dot = strrchr(path->name, '.');
+                            if (dot && dot != path->name) {
+                                return {.item = s2it(heap_create_name(dot + 1))};
+                            }
+                        }
+                        return ItemNull;
+                    }
+                    if (strcmp(k, "scheme") == 0) {
+                        const char* scheme_name = path_get_scheme_name(path);
+                        if (scheme_name) return {.item = s2it(heap_create_name(scheme_name))};
+                        return ItemNull;
+                    }
+                    if (strcmp(k, "depth") == 0) {
+                        return {.item = i2it(path_depth(path))};
+                    }
+
+                    // metadata properties (require stat'd metadata)
+                    if (path->meta && (path->flags & PATH_FLAG_META_LOADED)) {
+                        if (strcmp(k, "size") == 0) return push_l(path->meta->size);
+                        if (strcmp(k, "modified") == 0) return push_k(path->meta->modified);
+                        if (strcmp(k, "is_dir") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_DIR) != 0)};
+                        if (strcmp(k, "is_link") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_LINK) != 0)};
+                        if (strcmp(k, "mode") == 0) return {.item = i2it(path->meta->mode)};
+                    }
                 }
             }
         }
