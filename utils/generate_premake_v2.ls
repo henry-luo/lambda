@@ -6,7 +6,7 @@
 // to work around comprehension-based array building memory issues.
 // fn functions do string formatting only.
 //
-// Prerequisites: python3 utils/enumerate_sources.py (generates temp/source_files.json)
+// Source enumeration: Uses input(dir, "dir") to enumerate source files directly.
 
 // ============================================================
 // === Core String Utilities ===
@@ -942,6 +942,83 @@ pn test_source_exists(test_entry) {
 
 
 // ============================================================
+// === Source File Enumeration ===
+// ============================================================
+
+// Enumerate .c and .cpp files in a single directory
+// Returns files in glob order: .c files first, then .cpp files
+pn enumerate_dir(dir_path) {
+    var entries^err = input(dir_path, "dir")
+    if (err) { return [] }
+    var c_files = []
+    var cpp_files = []
+    var i = 0
+    while (i < len(entries)) {
+        let e = entries[i]
+        let ext = e.extension or ""
+        let name = e.name or ""
+        if (ext == "c") {
+            c_files = arr_push(c_files, dir_path ++ "/" ++ name)
+        } else if (ext == "cpp") {
+            cpp_files = arr_push(cpp_files, dir_path ++ "/" ++ name)
+        }
+        i = i + 1
+    }
+    // combine: c first, then cpp (matching Python glob order)
+    i = 0
+    while (i < len(cpp_files)) {
+        c_files = arr_push(c_files, cpp_files[i])
+        i = i + 1
+    }
+    return c_files
+}
+
+// Enumerate all source files from config source_dirs, applying exclusions
+pn enumerate_sources(config, platform) {
+    var source_dirs = config.source_dirs or []
+    var excludes = config.exclude_source_files or []
+
+    // add platform-specific exclusions
+    var plats = config.platforms or {}
+    var plat = if (platform == "macos") plats.macos or {}
+               else if (platform == "linux") plats.linux or {}
+               else plats.windows or {}
+    var plat_excludes = plat.exclude_source_files or []
+    var j = 0
+    while (j < len(plat_excludes)) {
+        excludes = arr_push(excludes, plat_excludes[j])
+        j = j + 1
+    }
+
+    // start with explicit source_files from config
+    var all_files = config.source_files or []
+
+    // enumerate each source directory
+    var i = 0
+    while (i < len(source_dirs)) {
+        var dir_files = enumerate_dir(source_dirs[i])
+        var k = 0
+        while (k < len(dir_files)) {
+            all_files = arr_push(all_files, dir_files[k])
+            k = k + 1
+        }
+        i = i + 1
+    }
+
+    // filter out excluded files
+    var result = []
+    i = 0
+    while (i < len(all_files)) {
+        if (not arr_contains(excludes, all_files[i])) {
+            result = arr_push(result, all_files[i])
+        }
+        i = i + 1
+    }
+
+    return result
+}
+
+// ============================================================
 // === Main Entry Point ===
 // ============================================================
 
@@ -981,9 +1058,9 @@ pn main() {
     var input_dyn_links = build_input_dyn_links(config, ext_libs)
     print("  input_dyn_links: " ++ string(input_dyn_links))
 
-    // Load enumerated source files for main exe
-    var src_cache^src_err = input("temp/source_files.json", "json")
-    var exe_files = if (src_err != null) [] else (src_cache.source_files or [])
+    // Enumerate source files for main exe (using input(dir, "dir"))
+    print("Enumerating source files...")
+    var exe_files = enumerate_sources(config, platform)
     print("  exe_files: " ++ string(len(exe_files)))
 
     var exe_static_paths = build_exe_static_paths(config, platform, ext_libs)
