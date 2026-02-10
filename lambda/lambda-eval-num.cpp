@@ -132,14 +132,14 @@ static Item vector_get(Item item, int64_t index) {
 Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
-    
+
     // vector operations: scalar+vector, vector+scalar, or vector+vector
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_add(item_a, item_b);
     }
-    
+
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -274,14 +274,14 @@ Item fn_add(Item item_a, Item item_b) {
 
 Item fn_mul(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-    
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mul(item_a, item_b);
     }
-    
+
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -405,14 +405,14 @@ Item fn_mul(Item item_a, Item item_b) {
 
 Item fn_sub(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-    
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_sub(item_a, item_b);
     }
-    
+
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -530,14 +530,14 @@ Item fn_sub(Item item_a, Item item_b) {
 
 Item fn_div(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-    
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_div(item_a, item_b);
     }
-    
+
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t b = item_b.get_int56();
         if (b == 0) {
@@ -781,17 +781,17 @@ Item fn_pow(Item item_a, Item item_b) {
         log_error("fn_pow: item_b has invalid/corrupt pointer value: 0x%llx", (unsigned long long)ptr_b);
         return ItemError;
     }
-    
+
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_pow called with types: %d and %d", type_a, type_b);
-    
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_pow(item_a, item_b);
     }
-    
+
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         // For now, convert decimals to double for power operations
         // This is a limitation of libmpdec - it doesn't have general power operations
@@ -900,14 +900,14 @@ Item fn_pow(Item item_a, Item item_b) {
 
 Item fn_mod(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
-    
+
     // vector operations
     if ((IS_SCALAR_NUMERIC(type_a) && IS_VECTOR_TYPE(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_SCALAR_NUMERIC(type_b)) ||
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mod(item_a, item_b);
     }
-    
+
     // Handle decimal types first
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         mpd_t* val_a = convert_to_decimal(item_a, context->decimal_ctx);
@@ -1010,7 +1010,7 @@ Item fn_abs(Item item) {
         double val = item.get_double();
         return push_d(fabs(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
@@ -1055,7 +1055,7 @@ Item fn_round(Item item) {
         double val = item.get_double();
         return push_d(round(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
@@ -1097,7 +1097,7 @@ Item fn_floor(Item item) {
         double val = item.get_double();
         return push_d(floor(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
@@ -1139,7 +1139,7 @@ Item fn_ceil(Item item) {
         double val = item.get_double();
         return push_d(ceil(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 || 
+    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
              type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_LIST || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
@@ -1787,29 +1787,30 @@ Item fn_pos(Item item) {
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number
-        String* str = item.get_string();
-        if (!str || str->len == 0) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars || len == 0) {
             log_error("unary + error: empty string/symbol");
             return ItemError;
         }
 
         // Try to parse as integer first
         char* endptr;
-        int64_t long_val = strtol(str->chars, &endptr, 10);
+        int64_t long_val = strtol(chars, &endptr, 10);
 
         // If entire string was consumed and no overflow, it's an integer
-        if (*endptr == '\0' && endptr == str->chars + str->len) {
+        if (*endptr == '\0' && endptr == chars + len) {
             return (Item) { .item = i2it(long_val) };
         }
 
         // Try to parse as float
-        double double_val = strtod(str->chars, &endptr);
-        if (*endptr == '\0' && endptr == str->chars + str->len) {
+        double double_val = strtod(chars, &endptr);
+        if (*endptr == '\0' && endptr == chars + len) {
             return push_d(double_val);
         }
 
         // Not a valid number
-        log_error("unary + error: cannot convert '%.*s' to number", (int)str->len, str->chars);
+        log_error("unary + error: cannot convert '%.*s' to number", (int)len, chars);
         return ItemError;
     }
     else {
@@ -1841,29 +1842,30 @@ Item fn_neg(Item item) {
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
-        String* str = item.get_string();
-        if (!str || str->len == 0) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars || len == 0) {
             log_debug("unary - error: empty string/symbol");
             return ItemError;
         }
 
         // Try to parse as integer first
         char* endptr;
-        int64_t long_val = strtol(str->chars, &endptr, 10);
+        int64_t long_val = strtol(chars, &endptr, 10);
 
         // If entire string was consumed and no overflow, it's an integer
-        if (*endptr == '\0' && endptr == str->chars + str->len) {
+        if (*endptr == '\0' && endptr == chars + len) {
             return (Item) { .item = i2it(-long_val) };
         }
 
         // Try to parse as float
-        double double_val = strtod(str->chars, &endptr);
-        if (*endptr == '\0' && endptr == str->chars + str->len) {
+        double double_val = strtod(chars, &endptr);
+        if (*endptr == '\0' && endptr == chars + len) {
             return push_d(-double_val);
         }
 
         // Not a valid number
-        log_debug("unary - error: cannot convert '%.*s' to number", (int)str->len, str->chars);
+        log_debug("unary - error: cannot convert '%.*s' to number", (int)len, chars);
         return ItemError;
     }
     else {
@@ -1899,16 +1901,17 @@ Item fn_int(Item item) {
         return item;  // keep it as it is
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
-        String* str = item.get_string();
-        if (!str || str->len == 0) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars || len == 0) {
             return ItemError;
         }
         char* endptr;
         // try to parse as int32 first
         errno = 0;  // clear errno before calling strtoll
-        int32_t val = strtol(str->chars, &endptr, 10);
-        if (endptr == str->chars) {
-            log_debug("Cannot convert string '%s' to int", str->chars);
+        int32_t val = strtol(chars, &endptr, 10);
+        if (endptr == chars) {
+            log_debug("Cannot convert string '%s' to int", chars);
             return ItemError;
         }
         // check for overflow - if errno is set or we couldn't parse the full string
@@ -1919,13 +1922,13 @@ Item fn_int(Item item) {
                 log_debug("Failed to allocate decimal for string conversion");
                 return ItemError;
             }
-            mpd_set_string(dec_val, str->chars, context->decimal_ctx);
+            mpd_set_string(dec_val, chars, context->decimal_ctx);
             if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-                log_debug("Cannot convert string '%s' to decimal", str->chars);
+                log_debug("Cannot convert string '%s' to decimal", chars);
                 mpd_del(dec_val);
                 return ItemError;
             }
-            log_debug("promote string to decimal: %s", str->chars);
+            log_debug("promote string to decimal: %s", chars);
             return push_decimal(dec_val);
         }
         return (Item) { .item = i2it(val) };
@@ -1979,20 +1982,21 @@ int64_t fn_int64(Item item) {
         return val;
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
-        String* str = item.get_string();
-        if (!str || str->len == 0) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars || len == 0) {
             return 0;
         }
         char* endptr;
-        log_debug("convert string/symbol to int64: %s", str->chars);
+        log_debug("convert string/symbol to int64: %s", chars);
         errno = 0;  // clear errno before calling strtoll
-        int64_t val = strtoll(str->chars, &endptr, 10);
-        if (endptr == str->chars) {
-            log_debug("Cannot convert string '%s' to int64", str->chars);
+        int64_t val = strtoll(chars, &endptr, 10);
+        if (endptr == chars) {
+            log_debug("Cannot convert string '%s' to int64", chars);
             return INT64_ERROR;
         }
         if (errno == ERANGE) {
-            log_debug("String value '%s' out of int64 range", str->chars);
+            log_debug("String value '%s' out of int64 range", chars);
             return INT64_ERROR;
         }
         log_debug("converted string to int64: %" PRId64, val);
@@ -2041,8 +2045,9 @@ Item fn_decimal(Item item) {
         return push_decimal(dec_val);
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
-        String* str = item.get_string();
-        if (!str || str->len == 0) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars || len == 0) {
             log_debug("Cannot convert empty string/symbol to decimal");
             return ItemError;
         }
@@ -2054,20 +2059,20 @@ Item fn_decimal(Item item) {
         }
 
         // Create null-terminated string for mpd_set_string
-        char* null_term_str = (char*)malloc(str->len + 1);
+        char* null_term_str = (char*)malloc(len + 1);
         if (!null_term_str) {
             mpd_del(dec_val);
             log_debug("Failed to allocate string buffer");
             return ItemError;
         }
-        memcpy(null_term_str, str->chars, str->len);
-        null_term_str[str->len] = '\0';
+        memcpy(null_term_str, chars, len);
+        null_term_str[len] = '\0';
 
         mpd_set_string(dec_val, null_term_str, context->decimal_ctx);
         free(null_term_str);
 
         if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-            log_debug("Cannot convert string '%.*s' to decimal", (int)str->len, str->chars);
+            log_debug("Cannot convert string '%.*s' to decimal", (int)len, chars);
             mpd_del(dec_val);
             return ItemError;
         }
@@ -2087,21 +2092,22 @@ Item fn_binary(Item item) {
     }
     else if (item._type_id == LMD_TYPE_SYMBOL) {
         // Convert symbol to string
-        String* sym = item.get_string();
-        if (!sym) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars) {
             log_debug("Cannot convert null symbol to binary");
             return ItemError;
         }
 
-        String* str = (String*)heap_alloc(sizeof(String) + sym->len + 1, LMD_TYPE_STRING);
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
         if (!str) {
             log_debug("Failed to allocate string for binary conversion");
             return ItemError;
         }
 
-        str->len = sym->len;
-        memcpy(str->chars, sym->chars, sym->len);
-        str->chars[sym->len] = '\0';
+        str->len = len;
+        memcpy(str->chars, chars, len);
+        str->chars[len] = '\0';
 
         return (Item) { .item = s2it(str) };
     }
@@ -2189,15 +2195,11 @@ Item fn_symbol(Item item) {
             return ItemError;
         }
 
-        String* sym = (String*)heap_alloc(sizeof(String) + str->len + 1, LMD_TYPE_SYMBOL);
+        Symbol* sym = heap_create_symbol(str->chars, str->len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
             return ItemError;
         }
-
-        sym->len = str->len;
-        memcpy(sym->chars, str->chars, str->len);
-        sym->chars[sym->len] = '\0';
 
         return (Item) { .item = y2it(sym) };
     }
@@ -2210,15 +2212,11 @@ Item fn_symbol(Item item) {
             return ItemError;
         }
 
-        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        Symbol* sym = heap_create_symbol(buf, len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
             return ItemError;
         }
-
-        sym->len = len;
-        memcpy(sym->chars, buf, len);
-        sym->chars[len] = '\0';
 
         return (Item) { .item = y2it(sym) };
     }
@@ -2232,15 +2230,11 @@ Item fn_symbol(Item item) {
             return ItemError;
         }
 
-        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        Symbol* sym = heap_create_symbol(buf, len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
             return ItemError;
         }
-
-        sym->len = len;
-        memcpy(sym->chars, buf, len);
-        sym->chars[len] = '\0';
 
         return (Item) { .item = y2it(sym) };
     }
@@ -2254,15 +2248,11 @@ Item fn_symbol(Item item) {
             return ItemError;
         }
 
-        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        Symbol* sym = heap_create_symbol(buf, len);
         if (!sym) {
             log_debug("Failed to allocate symbol");
             return ItemError;
         }
-
-        sym->len = len;
-        memcpy(sym->chars, buf, len);
-        sym->chars[len] = '\0';
 
         return (Item) { .item = y2it(sym) };
     }
@@ -2326,20 +2316,21 @@ Item fn_float(Item item) {
         return (Item) { .item = d2it(val) };
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
-        String* str = item.get_string();
-        if (!str || str->len == 0) {
+        const char* chars = item.get_chars();
+        uint32_t len = item.get_len();
+        if (!chars || len == 0) {
             log_debug("Empty string/symbol cannot be converted to float");
             return ItemError;
         }
 
         // Create a null-terminated copy of the string
-        char* buf = (char*)malloc(str->len + 1);
+        char* buf = (char*)malloc(len + 1);
         if (!buf) {
             log_debug("Failed to allocate buffer for string conversion");
             return ItemError;
         }
-        memcpy(buf, str->chars, str->len);
-        buf[str->len] = '\0';
+        memcpy(buf, chars, len);
+        buf[len] = '\0';
 
         // Remove any commas from the string
         char* p = buf;
@@ -2358,7 +2349,7 @@ Item fn_float(Item item) {
         free(buf);
 
         if (errno != 0 || *endptr != '\0') {
-            log_debug("Cannot convert string to float: %.*s", (int)str->len, str->chars);
+            log_debug("Cannot convert string to float: %.*s", (int)len, chars);
             return ItemError;
         }
 

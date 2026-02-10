@@ -496,7 +496,9 @@ static Item parse_value(InputContext& ctx, const char **mark) {
             return {.item = s2it(parse_string(ctx, mark))};
         case '\'':
             {
-                String* sym = parse_symbol(ctx, mark);
+                String* str = parse_symbol(ctx, mark);
+                // Create proper Symbol from the parsed string (different memory layout)
+                Symbol* sym = str ? ctx.builder.createSymbol(str->chars, str->len) : nullptr;
                 return {.item = y2it(sym)};
             }
         case 'b':
@@ -567,7 +569,9 @@ static Item parse_value(InputContext& ctx, const char **mark) {
                 UNQUOTED_IDENTIFIER:
                 // Parse as identifier/symbol
                 String* id = parse_unquoted_identifier(ctx, mark);
-                return id ? (Item){.item = y2it(id)} : (Item){.item = ITEM_ERROR};
+                if (!id) return {.item = ITEM_ERROR};
+                Symbol* sym = ctx.builder.createSymbol(id->chars, id->len);
+                return sym ? (Item){.item = y2it(sym)} : (Item){.item = ITEM_ERROR};
             }
             return {.item = ITEM_ERROR};
     }
