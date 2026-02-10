@@ -2634,6 +2634,25 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
     log_debug("build key string");
     TSSymbol symbol = ts_node_symbol(key_node);
     switch (symbol) {
+    case sym_attr_name: {
+        // attr_name contains the actual name node (ns_identifier, string, symbol, or identifier)
+        TSNode name_child = ts_node_child_by_field_id(key_node, field_name);
+        if (!ts_node_is_null(name_child)) {
+            return build_key_string(tp, name_child);
+        }
+        // No name field means it's a simple name - get first named child
+        TSNode first_child = ts_node_named_child(key_node, 0);
+        if (!ts_node_is_null(first_child)) {
+            return build_key_string(tp, first_child);
+        }
+        return (StrView) { .str = NULL, .length = 0 };
+    }
+    case sym_ns_identifier: {
+        // ns.name - return the full text including namespace
+        int start_byte = ts_node_start_byte(key_node);
+        int end_byte = ts_node_end_byte(key_node);
+        return (StrView) { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+    }
         // todo: handle string and symbol escape
     case SYM_SYMBOL:  case SYM_STRING: {
         int start_byte = ts_node_start_byte(key_node) + 1; // skip the first quote
@@ -3397,6 +3416,22 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             StrView name = ts_node_source(tp, child);
             String* pooled_name = name_pool_create_strview(tp->name_pool, name);
             // Convert pooled String* to StrView for TypeElmt
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
+        }
+        else if (symbol == sym_ns_identifier) {  // namespaced element name (ns.name)
+            int start_byte = ts_node_start_byte(child);
+            int end_byte = ts_node_end_byte(child);
+            StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
+        }
+        else if (symbol == SYM_SYMBOL) {  // element name as symbol 'name'
+            int start_byte = ts_node_start_byte(child) + 1; // skip leading quote
+            int end_byte = ts_node_end_byte(child) - 1; // skip trailing quote
+            StrView name = { .str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte) };
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
             type->name.str = pooled_name->chars;
             type->name.length = pooled_name->len;
         }
@@ -5029,6 +5064,10 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         case SYM_IMPORT_MODULE:
             // import module
             ast = build_module_import(tp, child);
+            break;
+        case sym_namespace_decl:
+            // namespace declaration - currently just skip (namespaces are resolved at runtime)
+            log_debug("namespace declaration found");
             break;
         case SYM_CONTENT:
             ast = build_content(tp, child, true, true);

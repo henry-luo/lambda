@@ -69,7 +69,7 @@ function binary_expr($, in_attr, exclude_pipe = false) {
       ['where', 'pipe'],  // same precedence as | for left-to-right chaining
       // Pipe-to-file operators (procedural only) - lower precedence than | and where
       ['|>', 'pipe_file'],
-      ['|>>', 'pipe_file'],  
+      ['|>>', 'pipe_file'],
     ]),
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
@@ -421,13 +421,28 @@ module.exports = grammar({
       $.fn_expr,
     ),
 
+    // Attribute name with optional namespace prefix: name or ns.name
+    attr_name: $ => choice(
+      $.ns_identifier,
+      $.string,
+      $.symbol,
+      $.identifier,
+    ),
+
     attr: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)), // string accepted for JSON compatibility
+      field('name', $.attr_name),
       ':', field('as', $._attr_expr)
     ),
 
+    // Namespaced identifier: ns.name (no spaces around dot)
+    ns_identifier: $ => seq(
+      field('ns', $.identifier),
+      token.immediate('.'),
+      field('name', $.identifier),
+    ),
+
     element: $ => seq('<',
-      choice($.symbol, $.identifier), // string not accepted for element name
+      choice($.ns_identifier, $.symbol, $.identifier),
       choice(
         seq(choice($.attr, $.map),
           repeat(seq(',', choice($.attr, $.map))),
@@ -527,13 +542,13 @@ module.exports = grammar({
 
     // Path root: / for absolute file paths
     path_root: _ => '/',
-    
+
     // Path self: . for relative paths (current directory)
     path_self: _ => '.',
-    
+
     // Path parent: .. for parent directory
     path_parent: _ => '..',
-    
+
     // Path expression: /, ., or .. optionally followed by a field
     // This allows /etc, .test, ..parent, /, ., .. as path expressions
     path_expr: $ => prec.right(seq(
@@ -960,8 +975,22 @@ module.exports = grammar({
           field('module', choice($.absolute_name, $.relative_name, $.symbol)))
     ),
 
-    _import_stam: $ => seq(
-      'import', $.import_module, repeat(seq(',', $.import_module)),
+    _import_stam: $ => choice(
+      seq('import', $.import_module, repeat(seq(',', $.import_module))),
+      $.namespace_decl,
+    ),
+
+    // Namespace declaration: namespace ns1 : 'url', ns2 : "url", ns3: path, ...;
+    namespace_decl: $ => seq(
+      'namespace',
+      $.namespace_binding,
+      repeat(seq(',', $.namespace_binding)),
+    ),
+
+    namespace_binding: $ => seq(
+      field('prefix', $.identifier),
+      ':',
+      field('uri', choice($.string, $.symbol, $.identifier)),
     ),
 
     // ==================== String/Symbol Pattern Definitions ====================

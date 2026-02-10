@@ -1,0 +1,78 @@
+"1. namespaced element tags"
+<svg.rect>
+<svg.circle>
+"2. namespaced attributes"
+<svg.rect svg.width: 100, svg.height: 50>
+<image xlink.href: "#id">
+"3. mixed namespaced and regular"
+<svg.rect id: "myRect", svg.width: 100>
+"4. symbol literals"
+'hello'
+'world'
+'multi-word-symbol'
+"5. symbol equality"
+true
+false
+true
+"6. symbol type checks"
+symbol
+true
+false
+false
+"7. concatenation preserves symbol type"
+'hello'
+'foo-bar'
+"8. symbol length"
+5
+1
+"9. symbol ordering"
+true
+true
+true
+"10. starts_with / ends_with"
+true
+true
+"11. index_of"
+5
+4
+"12. replace"
+'hello_world'
+"13. symbol array"
+['hello', 'world', 'test']
+true
+"14. map with symbol values"
+{
+  tag: 'div',
+  ns: 'html'
+}
+"15. type distinction"
+true
+true
+false
+false
+"16. basic elements"
+<div>
+<span>
+"17. element with attributes"
+<div class: "main">
+<span id: "test", class: "bold">
+"18. element with content"
+<p
+  "Hello world">
+<div
+  "text"
+  123>
+"19. nested elements"
+<ul
+  <li
+    "item1">
+  <li
+    "item2">>
+"20. symbol as function param/return"
+'svg-rect'
+'html-div'
+"21. symbol in conditional"
+["dark mode"]
+"22. symbol interning"
+true
+false
