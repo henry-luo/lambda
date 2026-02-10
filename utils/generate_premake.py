@@ -611,12 +611,9 @@ class PremakeGenerator:
                 lib_name = lib.get('name', '')
                 link_type = lib.get('link', 'static')
 
-                # Skip external libraries and inline libraries for now
+                # Skip external libraries
                 if link_type in ['dynamic', 'static'] and 'sources' not in lib:
                     continue
-
-                if link_type == 'inline' and 'sources' in lib:
-                    self._generate_inline_library(lib)
 
     def _generate_lib_project(self, lib_project: Dict[str, Any]) -> None:
         """Generate a static library project from lib_project configuration"""
@@ -739,57 +736,6 @@ class PremakeGenerator:
             '    '
         ])
 
-    def _generate_inline_library(self, lib: Dict[str, Any]) -> None:
-        """Generate a static library project for inline libraries"""
-        lib_name = lib['name']
-        sources = lib.get('sources', [])
-        source_files = lib.get('source_files', [])
-
-        if not sources and not source_files:
-            return
-
-        self.premake_content.extend([
-            f'project "{lib_name}"',
-            '    kind "StaticLib"',
-            '    language "C"',
-            '    targetdir "build/lib"',
-            '    objdir "build/obj/%{prj.name}"',
-            '    ',
-        ])
-
-        # Add source files
-        all_sources = sources + source_files
-        if all_sources:
-            self.premake_content.append('    files {')
-            for source in all_sources:
-                self.premake_content.append(f'        "{source}",')
-            self.premake_content.append('    }')
-            self.premake_content.append('    ')
-
-        # Add include directories
-        if 'include' in lib:
-            self.premake_content.extend([
-                '    includedirs {',
-                f'        "{lib["include"]}",',
-                '    }',
-                '    '
-            ])
-
-        # Add special build options
-        base_compiler, _ = self._get_compiler_info()
-        build_opts = self._get_build_options(base_compiler)
-
-        self.premake_content.extend([
-            '    buildoptions {',
-        ])
-        for opt in build_opts:
-            self.premake_content.append(f'        "{opt}",')
-        self.premake_content.extend([
-            '    }',
-            '    ',
-            ''
-        ])
-
     def generate_complex_libraries(self) -> None:
         """Generate complex library projects and executable targets"""
         targets = self.config.get('targets', [])
@@ -799,9 +745,6 @@ class PremakeGenerator:
             # Handle library targets
             if lib_name in ['lambda-runtime-full', 'lambda-input-full', 'lambda-lib']:
                 self._generate_complex_library(lib)
-            # Handle executable targets
-            elif lib.get('output'):  # If target has an output field, treat it as an executable
-                self._generate_target_executable(lib)
 
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
@@ -1253,265 +1196,6 @@ class PremakeGenerator:
                 '    -- Automatically added C++ standard library',
                 '    links {',
                 f'        "{cpp_stdlib}",',
-                '    }',
-                '    '
-            ])
-
-        self.premake_content.append('')
-
-    def _generate_target_executable(self, target: Dict[str, Any]) -> None:
-        """Generate an executable target like radiant"""
-        target_name = target.get('name', '')
-        output_file = target.get('output', f"{target_name}.exe")
-        description = target.get('description', f"{target_name} executable")
-        source_files = target.get('source_files', [])
-        libraries = target.get('libraries', [])
-        warnings = target.get('warnings', [])
-        flags = target.get('flags', [])
-
-        # Remove .exe extension for project name (used for premake project naming)
-        project_name = output_file.replace('.exe', '')
-        # Keep the full output filename for targetname (preserves .exe extension as specified in config)
-        target_filename = output_file  # Use full output file name including .exe
-
-        print(f"DEBUG: Generating executable target: {target_name} -> {output_file}")
-
-        # Get language info from the target configuration
-        language, standard, needs_cpp_stdlib = self._get_language_info(target)
-
-        # Get target directory - default to project root for executables
-        target_dir = target.get('target_dir', '.')
-
-        self.premake_content.extend([
-            f'project "{project_name}"',
-            '    kind "ConsoleApp"',
-            f'    language "{language}"',
-            f'    targetname "{target_filename}"',
-            f'    targetdir "{target_dir}"',
-            f'    objdir "build/obj/%{{prj.name}}"',
-            f'    -- {description}',
-            '    ',
-        ])
-
-        # Add source files
-        if source_files:
-            self.premake_content.append('    files {')
-            for source_file in source_files:
-                self.premake_content.append(f'        "{source_file}",')
-            self.premake_content.extend([
-                '    }',
-                '    '
-            ])
-
-        # Add libraries and include paths
-        # Collect include paths and group libraries by type
-        include_paths = []
-        static_libs = []
-        dynamic_libs = []
-        framework_libs = []
-        system_libs = []
-
-        # First, add direct includes from target configuration
-        target_includes = target.get('includes', [])
-        include_paths.extend(target_includes)
-
-        if libraries:
-            for lib in libraries:
-                if isinstance(lib, dict):
-                    lib_name = lib.get('name', '')
-                    lib_path = lib.get('lib', '')
-                    include_path = lib.get('include', '')
-                    link_type = lib.get('link', 'static')
-
-                    # Add include path if specified
-                    if include_path and include_path not in include_paths:
-                        # Handle multiple include paths separated by spaces (like SDL2)
-                        if ' -I' in include_path:
-                            paths = include_path.split(' -I')
-                            include_paths.append(paths[0])  # First path
-                            for path in paths[1:]:
-                                if path.strip():
-                                    include_paths.append(path.strip())
-                        else:
-                            include_paths.append(include_path)
-
-                    # Categorize library for linking
-                    if lib_path.startswith('-framework'):
-                        framework_libs.append(lib_path)
-                    elif link_type == 'dynamic':
-                        if lib_path.startswith('-l'):
-                            system_libs.append(lib_path[2:])  # Remove -l prefix
-                        else:
-                            dynamic_libs.append(lib_name)
-                    else:
-                        # For static libraries, use the full path if provided or if it's a .a file
-                        if lib_path and (lib_path.startswith('/') or lib_path.endswith('.a')):
-                            # Add ../../ prefix for relative paths to make them consistent with build directory
-                            if not lib_path.startswith('/'):
-                                lib_path = f"../../{lib_path}"
-                            static_libs.append(lib_path)  # Use full path for absolute paths and .a files
-                        else:
-                            static_libs.append(lib_name)  # Use name for relative paths
-                elif isinstance(lib, str):
-                    # Look up library definition by name
-                    if lib in self.external_libraries:
-                        lib_info = self.external_libraries[lib]
-                        lib_path = lib_info.get('lib', '')
-                        include_path = lib_info.get('include', '')
-                        link_type = lib_info.get('link', 'static')
-
-                        # Add include path if specified
-                        if include_path and include_path not in include_paths:
-                            include_paths.append(include_path)
-
-                        # Categorize library for linking
-                        if lib_path.startswith('-framework'):
-                            framework_libs.append(lib_path)
-                        elif link_type == 'dynamic':
-                            if lib_path.startswith('-l'):
-                                system_libs.append(lib_path[2:])  # Remove -l prefix
-                            else:
-                                dynamic_libs.append(lib)
-                        else:
-                            # For static libraries, use the full path if provided or if it's a .a file
-                            if lib_path and (lib_path.startswith('/') or lib_path.endswith('.a')):
-                                # Add ../../ prefix for relative paths to make them consistent with build directory
-                                if not lib_path.startswith('/'):
-                                    lib_path = f"../../{lib_path}"
-                                static_libs.append(lib_path)  # Use full path for absolute paths and .a files
-                            else:
-                                static_libs.append(lib)  # Use name for relative paths
-                    else:
-                        # Library not found in definitions, assume it's a static library name
-                        static_libs.append(lib)
-
-        # Process include paths (moved outside libraries check so it works with direct includes too)
-        # Add include paths starting with consolidated includes
-        all_include_paths = []
-
-        # Add consolidated global and platform-specific includes first
-        consolidated_includes = self._get_consolidated_includes()
-        all_include_paths.extend(consolidated_includes)
-
-        # Add default project paths
-        all_include_paths.extend(['.', 'lib'])
-
-        # Add target-specific includes and library includes
-        all_include_paths.extend(include_paths)
-
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_include_paths = []
-        for path in all_include_paths:
-            if path and path not in seen:
-                unique_include_paths.append(path)
-                seen.add(path)
-
-        if unique_include_paths:
-            self.premake_content.append('    includedirs {')
-            for include_path in unique_include_paths:
-                self.premake_content.append(f'        "{include_path}",')
-            self.premake_content.extend([
-                '    }',
-                '    '
-            ])
-
-        # Add library directories
-        lib_dirs = target.get('lib_dirs', [])
-        if lib_dirs:
-            self.premake_content.append('    libdirs {')
-            for lib_dir in lib_dirs:
-                self.premake_content.append(f'        "{lib_dir}",')
-            self.premake_content.extend([
-                '    }',
-                '    '
-            ])
-
-        # Add library references (only if there are libraries)
-        if libraries:
-            # Separate static libs into full paths and names
-            static_lib_names = [lib for lib in static_libs if not lib.startswith('/') and not lib.endswith('.a')]
-            static_lib_paths = [lib for lib in static_libs if lib.startswith('/') or lib.endswith('.a')]
-
-            if static_lib_names or dynamic_libs:
-                self.premake_content.append('    links {')
-                for lib in static_lib_names + dynamic_libs:
-                    self.premake_content.append(f'        "{lib}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
-
-            # Add static library paths to linkoptions
-            if static_lib_paths:
-                self.premake_content.append('    linkoptions {')
-                for lib_path in static_lib_paths:
-                    self.premake_content.append(f'        "{lib_path}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
-
-            # Add system libraries
-            if system_libs:
-                self.premake_content.append('    links {')
-                for lib in system_libs:
-                    self.premake_content.append(f'        "{lib}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
-
-            # Automatically add C++ standard library for C++ projects
-            if needs_cpp_stdlib and not self.use_windows_config:
-                # Add C++ standard library based on platform
-                cpp_stdlib = 'c++' if self.use_macos_config else 'stdc++'
-                self.premake_content.extend([
-                    '    -- Automatically added C++ standard library',
-                    '    links {',
-                    f'        "{cpp_stdlib}",',
-                    '    }',
-                    '    '
-                ])
-
-            # Add framework libraries (macOS) - cleaned up duplication
-            if framework_libs:
-                self.premake_content.append('    linkoptions {')
-                for framework in framework_libs:
-                    self.premake_content.append(f'        "{framework}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
-
-        # Add warnings
-        if warnings:
-            self.premake_content.append('    disablewarnings {')
-            for warning in warnings:
-                self.premake_content.append(f'        "{warning}",')
-            self.premake_content.extend([
-                '    }',
-                '    '
-            ])
-
-        # Add flags
-        if flags:
-            self.premake_content.append('    buildoptions {')
-            for flag in flags:
-                formatted_flag = flag if flag.startswith('-') else f'-{flag}'
-                self.premake_content.append(f'        "{formatted_flag}",')
-            self.premake_content.extend([
-                '    }',
-                '    '
-            ])
-
-        # Add defines
-        defines = target.get('defines', [])
-        if defines:
-            self.premake_content.append('    defines {')
-            for define in defines:
-                self.premake_content.append(f'        "{define}",')
-            self.premake_content.extend([
                 '    }',
                 '    '
             ])
@@ -1970,38 +1654,6 @@ class PremakeGenerator:
                     continue
 
                 self._generate_single_test(test_name, test_file_path, dependencies, test_special_flags, cpp_flags, libraries, defines, additional_files, additional_sources, binary_name)
-        else:
-            # Old format: parallel arrays (for backward compatibility)
-            sources = suite.get('sources', [])
-            binaries = suite.get('binaries', [])
-            library_deps = suite.get('library_dependencies', [])
-
-            # Generate individual test executables
-            for i, source in enumerate(sources):
-                if i < len(binaries):
-                    binary_name = binaries[i].replace('.exe', '')
-                    dependencies = library_deps[i] if i < len(library_deps) else []
-
-                    # Avoid subdirectory structure by flattening test names
-                    # Extract just the filename from binary path to prevent double prefixes
-                    import os
-                    binary_basename = os.path.basename(binary_name)
-                    test_name = binary_basename.replace('/', '_')
-                    if test_name.startswith('test_'):
-                        test_name = test_name[5:]  # Remove 'test_' prefix only
-                    test_name = f"test_{test_name}"
-
-                    # Determine correct file path - use relative paths from project root
-                    if source.startswith("test/"):
-                        test_file_path = source
-                    else:
-                        test_file_path = f"test/{source}"
-
-                    # Ensure path exists before adding to project
-                    actual_path = source if source.startswith("test/") else f"test/{source}"
-                    full_path = os.path.join(os.getcwd(), actual_path)
-                    if not os.path.exists(full_path):
-                        print(f"Warning: Test file not found: {actual_path}")
 
     def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str],
                              special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None, additional_sources: List[str] = None, target_name: str = None) -> None:
@@ -2973,52 +2625,6 @@ class PremakeGenerator:
             ''
         ])
 
-    def _create_premake_symlink(self, platform_specific_file: str) -> None:
-        """Create symbolic link from premake5.lua to platform-specific file"""
-        import os
-
-        # Only create symlink if this is a platform-specific file
-        if platform_specific_file == "premake5.lua":
-            print("DEBUG: Output file is already premake5.lua, no symlink needed")
-            return
-
-        # Check if the platform-specific file contains known platform identifiers
-        platform_indicators = ['mac', 'lin', 'win']
-        if not any(indicator in platform_specific_file.lower() for indicator in platform_indicators):
-            print(f"DEBUG: {platform_specific_file} doesn't appear to be platform-specific, no symlink needed")
-            return
-
-        symlink_path = "premake5.lua"
-
-        try:
-            # Remove existing symlink or file if it exists
-            if os.path.exists(symlink_path) or os.path.islink(symlink_path):
-                print(f"DEBUG: Removing existing {symlink_path}")
-                os.remove(symlink_path)
-
-            # Create symbolic link
-            # Use relative path to avoid absolute path dependencies
-            relative_target = os.path.basename(platform_specific_file)
-
-            if os.name == 'nt':  # Windows
-                # Windows requires admin privileges for symlinks, use copy instead
-                import shutil
-                print(f"DEBUG: Windows detected, copying {relative_target} to {symlink_path}")
-                shutil.copy2(platform_specific_file, symlink_path)
-                print(f"Created copy: {symlink_path} -> {relative_target}")
-            else:  # Unix-like (macOS, Linux)
-                print(f"DEBUG: Creating symbolic link: {symlink_path} -> {relative_target}")
-                os.symlink(relative_target, symlink_path)
-                print(f"Created symbolic link: {symlink_path} -> {relative_target}")
-
-        except OSError as e:
-            print(f"Warning: Could not create {symlink_path}: {e}")
-            print(f"   You may need to manually create the link:")
-            if os.name == 'nt':
-                print(f"   copy {platform_specific_file} {symlink_path}")
-            else:
-                print(f"   ln -sf {platform_specific_file} {symlink_path}")
-
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
         print(f"DEBUG: Starting premake file generation, output_path={output_path}")
@@ -3073,9 +2679,6 @@ class PremakeGenerator:
                 f.write(content_str)
                 print(f"DEBUG: Successfully wrote {len(content_str)} characters to {output_path}")
             print(f"Generated {platform_name} premake file: {output_path}")
-
-            # Create symbolic link to premake5.lua if this is a platform-specific file
-            self._create_premake_symlink(output_path)
 
         except IOError as e:
             print(f"Error writing {output_path}: {e}")
