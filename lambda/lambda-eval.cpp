@@ -212,11 +212,17 @@ Item fn_join(Item left, Item right) {
     }
 
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
+        // null ++ string → string, string ++ null → string
+        if (left_type == LMD_TYPE_NULL) return right;
+        if (right_type == LMD_TYPE_NULL) return left;
         String *left_str = fn_string(left), *right_str = fn_string(right);
         String *result = fn_strcat(left_str, right_str);
         return {.item = s2it(result)};
     }
     else if (left_type == LMD_TYPE_SYMBOL || right_type == LMD_TYPE_SYMBOL) {
+        // null ++ symbol → symbol, symbol ++ null → symbol
+        if (left_type == LMD_TYPE_NULL) return right;
+        if (right_type == LMD_TYPE_NULL) return left;
         String *left_str = fn_string(left), *right_str = fn_string(right);
         String *result = fn_strcat(left_str, right_str);
         return {.item = y2it(result)};
@@ -1642,101 +1648,109 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 }
 
 // contains system function - checks if a string contains a substring
-Item fn_contains(Item str_item, Item substr_item) {
+Bool fn_contains(Item str_item, Item substr_item) {
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: first argument must be a string");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     if (get_type_id(substr_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: second argument must be a string");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     String* str = str_item.get_string();
     String* substr = substr_item.get_string();
 
     if (!str || !substr) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     if (substr->len == 0) {
-        return {.item = b2it(true)}; // empty string is contained in any string
+        return BOOL_TRUE; // empty string is contained in any string
     }
 
     if (str->len == 0 || substr->len > str->len) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     // simple byte-based search for now - could be optimized with KMP or Boyer-Moore
     for (int i = 0; i <= str->len - substr->len; i++) {
         if (memcmp(str->chars + i, substr->chars, substr->len) == 0) {
-            return {.item = b2it(true)};
+            return BOOL_TRUE;
         }
     }
 
-    return {.item = b2it(false)};
+    return BOOL_FALSE;
 }
 
 // starts_with(str, prefix) - check if string starts with prefix
-Item fn_starts_with(Item str_item, Item prefix_item) {
+Bool fn_starts_with(Item str_item, Item prefix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId prefix_type = get_type_id(prefix_item);
+
+    // null prefix (empty string "") matches any string
+    if (prefix_type == LMD_TYPE_NULL) {
+        return BOOL_TRUE;
+    }
     
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (prefix_type != LMD_TYPE_STRING && prefix_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_starts_with: arguments must be strings or symbols");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     String* str = str_item.get_string();
     String* prefix = prefix_item.get_string();
 
     if (!str || !prefix) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     if (prefix->len == 0) {
-        return {.item = b2it(true)};  // empty prefix matches any string
+        return BOOL_TRUE;  // empty prefix matches any string
     }
 
     if (str->len < prefix->len) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
-    bool result = (memcmp(str->chars, prefix->chars, prefix->len) == 0);
-    return {.item = b2it(result)};
+    return (memcmp(str->chars, prefix->chars, prefix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // ends_with(str, suffix) - check if string ends with suffix
-Item fn_ends_with(Item str_item, Item suffix_item) {
+Bool fn_ends_with(Item str_item, Item suffix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId suffix_type = get_type_id(suffix_item);
+
+    // null suffix (empty string "") matches any string
+    if (suffix_type == LMD_TYPE_NULL) {
+        return BOOL_TRUE;
+    }
     
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (suffix_type != LMD_TYPE_STRING && suffix_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_ends_with: arguments must be strings or symbols");
-        return ItemError;
+        return BOOL_ERROR;
     }
 
     String* str = str_item.get_string();
     String* suffix = suffix_item.get_string();
 
     if (!str || !suffix) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     if (suffix->len == 0) {
-        return {.item = b2it(true)};  // empty suffix matches any string
+        return BOOL_TRUE;  // empty suffix matches any string
     }
 
     if (str->len < suffix->len) {
-        return {.item = b2it(false)};
+        return BOOL_FALSE;
     }
 
     size_t offset = str->len - suffix->len;
-    bool result = (memcmp(str->chars + offset, suffix->chars, suffix->len) == 0);
-    return {.item = b2it(result)};
+    return (memcmp(str->chars + offset, suffix->chars, suffix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
@@ -1958,19 +1972,30 @@ Item fn_trim_end(Item str_item) {
 Item fn_split(Item str_item, Item sep_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
+
+    // null separator (empty string "") means split into individual characters
+    bool null_sep = (sep_type == LMD_TYPE_NULL);
     
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
-        (sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
+        (!null_sep && sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_split: arguments must be strings or symbols");
         return ItemError;
     }
 
     String* str = str_item.get_string();
-    String* sep = sep_item.get_string();
+    String* sep = null_sep ? nullptr : sep_item.get_string();
+
+    // disable string merging in list_push so split results stay separate
+    bool saved_merging = false;
+    if (context) {
+        saved_merging = context->disable_string_merging;
+        context->disable_string_merging = true;
+    }
 
     List* result = list();
 
     if (!str || str->len == 0) {
+        if (context) { context->disable_string_merging = saved_merging; }
         return {.list = result};  // empty list for empty string
     }
 
@@ -1990,6 +2015,7 @@ Item fn_split(Item str_item, Item sep_item) {
             list_push(result, {.item = s2it(part)});
             p += char_len;
         }
+        if (context) { context->disable_string_merging = saved_merging; }
         return {.list = result};
     }
 
@@ -2025,6 +2051,7 @@ Item fn_split(Item str_item, Item sep_item) {
     
     list_push(result, {.item = s2it(part)});
 
+    if (context) { context->disable_string_merging = saved_merging; }
     return {.list = result};
 }
 
