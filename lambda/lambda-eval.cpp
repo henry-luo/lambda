@@ -51,30 +51,30 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
  */
 static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     if (!context) return;
-    
+
     char message[1024];
     va_list args;
     va_start(args, format);
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
-    
+
     // create error with current source location
     SourceLocation loc = {0};
     if (context->current_file) {
         loc.file = context->current_file;
     }
-    
+
     LambdaError* error = err_create(code, message, &loc);
-    
+
     // capture native stack trace via FP walking
     error->stack_trace = err_capture_stack_trace(context->debug_info, 32);
-    
+
     // store in context
     if (context->last_error) {
         err_free(context->last_error);
     }
     context->last_error = error;
-    
+
     log_error("runtime error [%d]: %s", code, message);
 }
 
@@ -84,20 +84,20 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
  */
 extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message) {
     if (!context) return;
-    
+
     SourceLocation loc = {0};
     if (context->current_file) {
         loc.file = context->current_file;
     }
-    
+
     LambdaError* error = err_create(code, message, &loc);
     // Skip stack trace capture - may be called in low-stack conditions
-    
+
     if (context->last_error) {
         err_free(context->last_error);
     }
     context->last_error = error;
-    
+
     log_error("runtime error [%d]: %s", code, message);
 }
 
@@ -189,7 +189,7 @@ Item fn_join(Item left, Item right) {
         }
         else if (right_type == LMD_TYPE_SYMBOL) {
             // path ++ symbol: add symbol name as new segment
-            String* right_sym = right.get_symbol();
+            Symbol* right_sym = right.get_symbol();
             Path* result = path_extend(pool, left_path, right_sym->chars);
             return {.path = result};
         }
@@ -225,7 +225,9 @@ Item fn_join(Item left, Item right) {
         if (right_type == LMD_TYPE_NULL) return left;
         String *left_str = fn_string(left), *right_str = fn_string(right);
         String *result = fn_strcat(left_str, right_str);
-        return {.item = y2it(result)};
+        // Create a proper Symbol from the concatenated string
+        Symbol* sym = heap_create_symbol(result->chars, result->len);
+        return {.item = y2it(sym)};
     }
     // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat)
     else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_LIST) {
@@ -473,7 +475,7 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
 // We need to check if this is a valid pointer to a Function struct
 static inline bool is_valid_function(Function* fn) {
     if (!fn) return false;
-    
+
     // Check if this looks like a tagged Item value rather than a real pointer
     // Tagged Items have the type_id in the high byte (bits 56-63)
     // Valid heap pointers have the high byte as 0 on most platforms
@@ -483,14 +485,14 @@ static inline bool is_valid_function(Function* fn) {
         // This is a tagged value (like ItemError), not a valid pointer
         return false;
     }
-    
+
     // Reject small values that can't be valid heap pointers
     // Typical heap addresses are well above 4KB (first page is reserved)
     // On most systems, valid heap addresses are > 0x10000
     if (val < 0x10000) {
         return false;
     }
-    
+
     // Now safe to dereference - check that type_id matches Function
     TypeId type_id = *(TypeId*)fn;
     return type_id == LMD_TYPE_FUNC;
@@ -511,7 +513,7 @@ Item fn_call(Function* fn, List* args) {
     int arg_count = args ? (int)args->length : 0;
     void* env = fn->closure_env;
     log_debug("fn_call: arity=%d, arg_count=%d, env=%p", fn->arity, arg_count, env);
-    
+
     // For closures, env is passed as first argument
     if (env) {
         switch (arg_count) {
@@ -528,7 +530,7 @@ Item fn_call(Function* fn, List* args) {
                 return ItemError;
         }
     }
-    
+
     // Non-closure dispatch
     switch (arg_count) {
         case 0: return ((Item(*)())fn->ptr)();
@@ -615,7 +617,7 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
 Bool fn_is(Item a, Item b) {
     log_debug("fn_is");
     TypeId b_type_id = get_type_id(b);
-    
+
     // Handle pattern matching: "str" is pattern
     if (b_type_id == LMD_TYPE_PATTERN) {
         TypeId a_type_id = get_type_id(a);
@@ -624,20 +626,21 @@ Bool fn_is(Item a, Item b) {
             return BOOL_ERROR;
         }
         TypePattern* pattern = (TypePattern*)b.type;  // pattern is stored as Type*
-        String* str = a_type_id == LMD_TYPE_STRING ? a.get_string() : a.get_symbol();
-        log_debug("fn_is pattern matching: str=%.*s", (int)str->len, str->chars);
-        return pattern_full_match(pattern, str) ? BOOL_TRUE : BOOL_FALSE;
+        const char* chars = a.get_chars();
+        uint32_t len = a.get_len();
+        log_debug("fn_is pattern matching: str=%.*s", (int)len, chars);
+        return pattern_full_match_chars(pattern, chars, len) ? BOOL_TRUE : BOOL_FALSE;
     }
-    
+
     if (b_type_id != LMD_TYPE_TYPE && b_type_id != LMD_TYPE_TYPE_UNARY && b_type_id != LMD_TYPE_TYPE_BINARY) {
         log_error("2nd argument must be a type or pattern, got type: %s", get_type_name(b_type_id));
         return BOOL_ERROR;
     }
-    
+
     // If b is a TypeUnary directly (type_id = LMD_TYPE_TYPE_UNARY), handle it directly
     if (b_type_id == LMD_TYPE_TYPE_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)b.type;
-        log_debug("fn_is: TypeUnary (direct), op=%d, min=%d, max=%d", 
+        log_debug("fn_is: TypeUnary (direct), op=%d, min=%d, max=%d",
                   type_unary->op, type_unary->min_count, type_unary->max_count);
         // Use full type validation for occurrence types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), (Type*)type_unary);
@@ -649,7 +652,7 @@ Bool fn_is(Item a, Item b) {
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
-    
+
     // If b is a TypeBinary directly (type_id = LMD_TYPE_TYPE_BINARY), handle it via validator
     if (b_type_id == LMD_TYPE_TYPE_BINARY) {
         TypeBinary* type_binary = (TypeBinary*)b.type;
@@ -664,16 +667,16 @@ Bool fn_is(Item a, Item b) {
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
-    
+
     TypeType *type_b = (TypeType *)b.type;
     TypeId a_type_id = get_type_id(a);
-    
+
     // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
     // TypeUnary has a distinct type_id = LMD_TYPE_TYPE_UNARY
     log_debug("fn_is: checking inner type, type_b->type->type_id=%d", type_b->type->type_id);
     if (type_b->type->type_id == LMD_TYPE_TYPE_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)type_b->type;
-        log_debug("fn_is: TypeUnary detected, op=%d (REPEAT=%d, OPTIONAL=%d)", 
+        log_debug("fn_is: TypeUnary detected, op=%d (REPEAT=%d, OPTIONAL=%d)",
                   type_unary->op, OPERATOR_REPEAT, OPERATOR_OPTIONAL);
         // Use full type validation for occurrence types
         log_debug("fn_is: TypeUnary occurrence operator detected, using validator");
@@ -686,7 +689,7 @@ Bool fn_is(Item a, Item b) {
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
-    
+
     // Check if inner type is TypeBinary (union/intersection: |, &, \)
     // TypeBinary has a distinct type_id = LMD_TYPE_TYPE_BINARY
     if (type_b->type->type_id == LMD_TYPE_TYPE_BINARY) {
@@ -702,7 +705,7 @@ Bool fn_is(Item a, Item b) {
         }
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
-    
+
     log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
@@ -790,8 +793,9 @@ Bool fn_eq(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
-        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
-        bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
+        const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
+        uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
+        bool result = (len_a == len_b && strncmp(chars_a, chars_b, len_a) == 0);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
@@ -845,8 +849,8 @@ Bool fn_lt(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
-        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
-        bool result = strcmp(str_a->chars, str_b->chars) < 0;
+        const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
+        bool result = strcmp(chars_a, chars_b) < 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
@@ -895,8 +899,8 @@ Bool fn_gt(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
-        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
-        bool result = strcmp(str_a->chars, str_b->chars) > 0;
+        const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
+        bool result = strcmp(chars_a, chars_b) > 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type: %s", get_type_name(a_item._type_id));
@@ -1022,8 +1026,14 @@ String* fn_string(Item itm) {
         return &STR_NULL;
     case LMD_TYPE_BOOL:
         return itm.bool_val ? &STR_TRUE : &STR_FALSE;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
+    case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:
         return itm.get_string();
+    case LMD_TYPE_SYMBOL: {
+        // Symbol has different layout than String; create a String from symbol chars
+        Symbol* sym = itm.get_symbol();
+        if (!sym) return &STR_NULL;
+        return heap_strcpy(sym->chars, sym->len);
+    }
     case LMD_TYPE_DTIME: {
         DateTime *dt = (DateTime*)itm.datetime_ptr;
         if (dt) {
@@ -1222,14 +1232,14 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
 
 Item fn_input2(Item target_item, Item type) {
     String *type_str = NULL, *flavor_str = NULL;
-    
+
     // Validate target type: must be string, symbol, or path
     TypeId target_type_id = get_type_id(target_item);
     if (target_type_id != LMD_TYPE_STRING && target_type_id != LMD_TYPE_SYMBOL && target_type_id != LMD_TYPE_PATH) {
         log_debug("input target must be a string, symbol, or path, got type: %s", get_type_name(target_type_id));
         return ItemNull;  // todo: push error
     }
-    
+
     // Convert target Item to Target struct
     Url* cwd = context ? (Url*)context->cwd : NULL;
     Target* target = item_to_target(target_item.item, cwd);
@@ -1237,7 +1247,7 @@ Item fn_input2(Item target_item, Item type) {
         log_error("fn_input2: failed to convert item to target");
         return ItemNull;
     }
-    
+
     log_debug("fn_input2: target scheme=%d, type=%d", target->scheme, target->type);
 
     TypeId type_id = get_type_id(type);
@@ -1247,7 +1257,7 @@ Item fn_input2(Item target_item, Item type) {
     }
     else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         // Legacy behavior: type is a simple string/symbol
-        type_str = type.get_string();
+        type_str = fn_string(type);
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("input type is a map");
@@ -1262,7 +1272,7 @@ Item fn_input2(Item target_item, Item type) {
         } else {
             TypeId type_value_type = get_type_id(input_type);
             if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
-                type_str = input_type.get_string();
+                type_str = fn_string(input_type);
             }
             else {
         log_debug("input type must be a string or symbol, got type: %s", get_type_name(type_value_type));
@@ -1278,7 +1288,7 @@ Item fn_input2(Item target_item, Item type) {
         } else {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
-                flavor_str = input_flavor.get_string();
+                flavor_str = fn_string(input_flavor);
             }
             else {
                 log_debug("input flavor must be a string or symbol, got type: %s", get_type_name(flavor_value_type));
@@ -1301,11 +1311,11 @@ Item fn_input2(Item target_item, Item type) {
     }
 
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    
+
     // Use the new target-based input function
     Input *input = input_from_target(target, type_str, flavor_str);
     target_free(target);
-    
+
     // todo: input should be cached in context
     return (input && input->root.item) ? input->root : ItemNull;
 }
@@ -1330,22 +1340,22 @@ String* fn_format2(Item item, Item type) {
             datetime_format_lambda(buf, &dt);
         }
         else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
-            String* pattern = type_id == LMD_TYPE_STRING ? type.get_string() : type.get_symbol();
+            const char* pattern_chars = type.get_chars();
             // check for named format presets
-            if (strcmp(pattern->chars, "iso") == 0 || strcmp(pattern->chars, "iso8601") == 0) {
+            if (strcmp(pattern_chars, "iso") == 0 || strcmp(pattern_chars, "iso8601") == 0) {
                 datetime_format_iso8601(buf, &dt);
             }
-            else if (strcmp(pattern->chars, "date") == 0) {
+            else if (strcmp(pattern_chars, "date") == 0) {
                 // format date portion only: YYYY-MM-DD
                 datetime_format_pattern(buf, &dt, "YYYY-MM-DD");
             }
-            else if (strcmp(pattern->chars, "time") == 0) {
+            else if (strcmp(pattern_chars, "time") == 0) {
                 // format time portion only: HH:mm:ss
                 datetime_format_pattern(buf, &dt, "HH:mm:ss");
             }
             else {
                 // custom pattern format
-                datetime_format_pattern(buf, &dt, pattern->chars);
+                datetime_format_pattern(buf, &dt, pattern_chars);
             }
         }
         else {
@@ -1371,7 +1381,7 @@ String* fn_format2(Item item, Item type) {
     }
     else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         // Legacy behavior: type is a simple string or symbol
-        type_str = type.get_string();
+        type_str = fn_string(type);
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("format type is a map");
@@ -1386,7 +1396,7 @@ String* fn_format2(Item item, Item type) {
         } else {
             TypeId type_value_type = get_type_id(format_type);
             if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
-                type_str = format_type.get_string();
+                type_str = fn_string(format_type);
             }
             else {
                 log_debug("format type must be a string or symbol, got type: %s", get_type_name(type_value_type));
@@ -1402,7 +1412,7 @@ String* fn_format2(Item item, Item type) {
         } else {
             TypeId flavor_value_type = get_type_id(format_flavor);
             if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
-                flavor_str = format_flavor.get_string();
+                flavor_str = fn_string(format_flavor);
             }
             else {
                 log_debug("format flavor must be a string or symbol, got type: %s", get_type_name(flavor_value_type));
@@ -1465,7 +1475,7 @@ Item fn_index(Item item, Item index_item) {
 
 Item fn_member(Item item, Item key) {
     TypeId type_id = get_type_id(item);
-    
+
     // For paths (like sys.os), resolve the path content first
     if (type_id == LMD_TYPE_PATH) {
         Path* path = item.path;
@@ -1534,7 +1544,7 @@ Item fn_member(Item item, Item key) {
         }
         return ItemNull;
     }
-    
+
     switch (type_id) {
     case LMD_TYPE_NULL:
         return ItemNull;  // null-safe: null.field returns null
@@ -1543,10 +1553,8 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_DTIME: {
         // datetime member properties
         DateTime dt = item.get_datetime();
-        String* key_str = (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL)
-            ? key.get_string() : nullptr;
-        if (!key_str) return ItemNull;
-        const char* k = key_str->chars;
+        const char* k = key.get_chars();
+        if (!k) return ItemNull;
 
         // date properties
         if (strcmp(k, "year") == 0)         return {.item = i2it(DATETIME_GET_YEAR(&dt))};
@@ -1574,7 +1582,7 @@ Item fn_member(Item item, Item key) {
             char buf[8];
             int h = abs(tz) / 60, m = abs(tz) % 60;
             int len = snprintf(buf, sizeof(buf), "%c%02d:%02d", tz >= 0 ? '+' : '-', h, m);
-            String* sym = heap_create_name(buf);
+            Symbol* sym = heap_create_symbol(buf, len);
             return {.item = y2it(sym)};
         }
         if (strcmp(k, "is_utc") == 0) {
@@ -1603,8 +1611,8 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_LIST: {
         // Handle built-in properties for List type
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-            String *key_str = key.get_string();
-            if (key_str && strcmp(key_str->chars, "length") == 0) {
+            const char* k = key.get_chars();
+            if (k && strcmp(k, "length") == 0) {
                 List *list = item.list;
                 return {.item = i2it(list->length)};
             }
@@ -1653,8 +1661,8 @@ int64_t fn_len(Item item) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         // returns the length of the string
         // todo: binary length
-        String *str = item.get_string();  // todo:: should return char length
-        size = str ? utf8_char_count(str->chars) : 0;
+        const char* chars = item.get_chars();
+        size = chars ? utf8_char_count(chars) : 0;
         break;
     }
     case LMD_TYPE_PATH: {
@@ -1801,29 +1809,31 @@ Bool fn_starts_with(Item str_item, Item prefix_item) {
     if (prefix_type == LMD_TYPE_NULL) {
         return BOOL_TRUE;
     }
-    
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (prefix_type != LMD_TYPE_STRING && prefix_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_starts_with: arguments must be strings or symbols");
         return BOOL_ERROR;
     }
 
-    String* str = str_item.get_string();
-    String* prefix = prefix_item.get_string();
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* prefix_chars = prefix_item.get_chars();
+    uint32_t prefix_len = prefix_item.get_len();
 
-    if (!str || !prefix) {
+    if (!str_chars || !prefix_chars) {
         return BOOL_FALSE;
     }
 
-    if (prefix->len == 0) {
+    if (prefix_len == 0) {
         return BOOL_TRUE;  // empty prefix matches any string
     }
 
-    if (str->len < prefix->len) {
+    if (str_len < prefix_len) {
         return BOOL_FALSE;
     }
 
-    return (memcmp(str->chars, prefix->chars, prefix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
+    return (memcmp(str_chars, prefix_chars, prefix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // ends_with(str, suffix) - check if string ends with suffix
@@ -1835,63 +1845,67 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
     if (suffix_type == LMD_TYPE_NULL) {
         return BOOL_TRUE;
     }
-    
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (suffix_type != LMD_TYPE_STRING && suffix_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_ends_with: arguments must be strings or symbols");
         return BOOL_ERROR;
     }
 
-    String* str = str_item.get_string();
-    String* suffix = suffix_item.get_string();
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* suffix_chars = suffix_item.get_chars();
+    uint32_t suffix_len = suffix_item.get_len();
 
-    if (!str || !suffix) {
+    if (!str_chars || !suffix_chars) {
         return BOOL_FALSE;
     }
 
-    if (suffix->len == 0) {
+    if (suffix_len == 0) {
         return BOOL_TRUE;  // empty suffix matches any string
     }
 
-    if (str->len < suffix->len) {
+    if (str_len < suffix_len) {
         return BOOL_FALSE;
     }
 
-    size_t offset = str->len - suffix->len;
-    return (memcmp(str->chars + offset, suffix->chars, suffix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
+    size_t offset = str_len - suffix_len;
+    return (memcmp(str_chars + offset, suffix_chars, suffix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
 int64_t fn_index_of(Item str_item, Item sub_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sub_type = get_type_id(sub_item);
-    
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_index_of: arguments must be strings or symbols");
         return -1;
     }
 
-    String* str = str_item.get_string();
-    String* sub = sub_item.get_string();
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* sub_chars = sub_item.get_chars();
+    uint32_t sub_len = sub_item.get_len();
 
-    if (!str || !sub) {
+    if (!str_chars || !sub_chars) {
         return -1;
     }
 
-    if (sub->len == 0) {
+    if (sub_len == 0) {
         return 0;  // empty substring is at position 0
     }
 
-    if (str->len < sub->len) {
+    if (str_len < sub_len) {
         return -1;
     }
 
     // byte-based search, then convert byte offset to char offset
-    for (size_t i = 0; i <= str->len - sub->len; i++) {
-        if (memcmp(str->chars + i, sub->chars, sub->len) == 0) {
+    for (size_t i = 0; i <= str_len - sub_len; i++) {
+        if (memcmp(str_chars + i, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
-            int64_t char_index = utf8_char_count_n(str->chars, i);
+            int64_t char_index = utf8_char_count_n(str_chars, i);
             return char_index;
         }
     }
@@ -1903,36 +1917,38 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
 int64_t fn_last_index_of(Item str_item, Item sub_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId sub_type = get_type_id(sub_item);
-    
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_last_index_of: arguments must be strings or symbols");
         return -1;
     }
 
-    String* str = str_item.get_string();
-    String* sub = sub_item.get_string();
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* sub_chars = sub_item.get_chars();
+    uint32_t sub_len = sub_item.get_len();
 
-    if (!str || !sub) {
+    if (!str_chars || !sub_chars) {
         return -1;
     }
 
-    if (sub->len == 0) {
+    if (sub_len == 0) {
         // empty substring is at the end
-        int64_t char_len = utf8_char_count(str->chars);
+        int64_t char_len = utf8_char_count(str_chars);
         return char_len;
     }
 
-    if (str->len < sub->len) {
+    if (str_len < sub_len) {
         return -1;
     }
 
     // search from end to beginning
-    for (size_t i = str->len - sub->len + 1; i > 0; i--) {
+    for (size_t i = str_len - sub_len + 1; i > 0; i--) {
         size_t pos = i - 1;
-        if (memcmp(str->chars + pos, sub->chars, sub->len) == 0) {
+        if (memcmp(str_chars + pos, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
-            int64_t char_index = utf8_char_count_n(str->chars, pos);
+            int64_t char_index = utf8_char_count_n(str_chars, pos);
             return char_index;
         }
     }
@@ -1948,26 +1964,27 @@ static inline bool is_ascii_whitespace(unsigned char c) {
 // trim(str) - remove leading and trailing whitespace
 Item fn_trim(Item str_item) {
     TypeId str_type = get_type_id(str_item);
-    
+
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_trim: argument must be a string or symbol");
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    if (!str || str->len == 0) {
+    const char* chars = str_item.get_chars();
+    uint32_t len = str_item.get_len();
+    if (!chars || len == 0) {
         return str_item;
     }
 
     // find start (skip leading whitespace)
     size_t start = 0;
-    while (start < str->len && is_ascii_whitespace((unsigned char)str->chars[start])) {
+    while (start < len && is_ascii_whitespace((unsigned char)chars[start])) {
         start++;
     }
 
     // find end (skip trailing whitespace)
-    size_t end = str->len;
-    while (end > start && is_ascii_whitespace((unsigned char)str->chars[end - 1])) {
+    size_t end = len;
+    while (end > start && is_ascii_whitespace((unsigned char)chars[end - 1])) {
         end--;
     }
 
@@ -1984,12 +2001,12 @@ Item fn_trim(Item str_item) {
 
     size_t result_len = end - start;
     if (str_type == LMD_TYPE_SYMBOL) {
-        return {.item = y2it(heap_create_symbol(str->chars + start, result_len))};
+        return {.item = y2it(heap_create_symbol(chars + start, result_len))};
     }
-    
+
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
-    memcpy(result->chars, str->chars + start, result_len);
+    memcpy(result->chars, chars + start, result_len);
     result->chars[result_len] = '\0';
     return {.item = s2it(result)};
 }
@@ -1997,20 +2014,21 @@ Item fn_trim(Item str_item) {
 // trim_start(str) - remove leading whitespace
 Item fn_trim_start(Item str_item) {
     TypeId str_type = get_type_id(str_item);
-    
+
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_trim_start: argument must be a string or symbol");
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    if (!str || str->len == 0) {
+    const char* chars = str_item.get_chars();
+    uint32_t len = str_item.get_len();
+    if (!chars || len == 0) {
         return str_item;
     }
 
     // find start (skip leading whitespace)
     size_t start = 0;
-    while (start < str->len && is_ascii_whitespace((unsigned char)str->chars[start])) {
+    while (start < len && is_ascii_whitespace((unsigned char)chars[start])) {
         start++;
     }
 
@@ -2018,14 +2036,14 @@ Item fn_trim_start(Item str_item) {
         return str_item;  // no leading whitespace
     }
 
-    size_t result_len = str->len - start;
+    size_t result_len = len - start;
     if (str_type == LMD_TYPE_SYMBOL) {
-        return {.item = y2it(heap_create_symbol(str->chars + start, result_len))};
+        return {.item = y2it(heap_create_symbol(chars + start, result_len))};
     }
-    
+
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
-    memcpy(result->chars, str->chars + start, result_len);
+    memcpy(result->chars, chars + start, result_len);
     result->chars[result_len] = '\0';
     return {.item = s2it(result)};
 }
@@ -2033,24 +2051,25 @@ Item fn_trim_start(Item str_item) {
 // trim_end(str) - remove trailing whitespace
 Item fn_trim_end(Item str_item) {
     TypeId str_type = get_type_id(str_item);
-    
+
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
         log_debug("fn_trim_end: argument must be a string or symbol");
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    if (!str || str->len == 0) {
+    const char* chars = str_item.get_chars();
+    uint32_t slen = str_item.get_len();
+    if (!chars || slen == 0) {
         return str_item;
     }
 
     // find end (skip trailing whitespace)
-    size_t end = str->len;
-    while (end > 0 && is_ascii_whitespace((unsigned char)str->chars[end - 1])) {
+    size_t end = slen;
+    while (end > 0 && is_ascii_whitespace((unsigned char)chars[end - 1])) {
         end--;
     }
 
-    if (end == str->len) {
+    if (end == slen) {
         return str_item;  // no trailing whitespace
     }
 
@@ -2066,12 +2085,12 @@ Item fn_trim_end(Item str_item) {
     }
 
     if (str_type == LMD_TYPE_SYMBOL) {
-        return {.item = y2it(heap_create_symbol(str->chars, end))};
+        return {.item = y2it(heap_create_symbol(chars, end))};
     }
-    
+
     String* result = (String *)heap_alloc(sizeof(String) + end + 1, LMD_TYPE_STRING);
     result->len = end;
-    memcpy(result->chars, str->chars, end);
+    memcpy(result->chars, chars, end);
     result->chars[end] = '\0';
     return {.item = s2it(result)};
 }
@@ -2083,15 +2102,17 @@ Item fn_split(Item str_item, Item sep_item) {
 
     // null separator (empty string "") means split into individual characters
     bool null_sep = (sep_type == LMD_TYPE_NULL);
-    
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (!null_sep && sep_type != LMD_TYPE_STRING && sep_type != LMD_TYPE_SYMBOL)) {
         log_debug("fn_split: arguments must be strings or symbols");
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    String* sep = null_sep ? nullptr : sep_item.get_string();
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* sep_chars = null_sep ? nullptr : sep_item.get_chars();
+    uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
 
     // disable string merging in list_push so split results stay separate
     bool saved_merging = false;
@@ -2102,24 +2123,24 @@ Item fn_split(Item str_item, Item sep_item) {
 
     List* result = list();
 
-    if (!str || str->len == 0) {
+    if (!str_chars || str_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
         return {.list = result};  // empty list for empty string
     }
 
-    if (!sep || sep->len == 0) {
+    if (!sep_chars || sep_len == 0) {
         // split into individual characters
-        const char* p = str->chars;
-        const char* end = str->chars + str->len;
+        const char* p = str_chars;
+        const char* end = str_chars + str_len;
         while (p < end) {
             int char_len = utf8_char_len(*p);
             if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
-            
+
             String* part = (String *)heap_alloc(sizeof(String) + char_len + 1, LMD_TYPE_STRING);
             part->len = char_len;
             memcpy(part->chars, p, char_len);
             part->chars[char_len] = '\0';
-            
+
             list_push(result, {.item = s2it(part)});
             p += char_len;
         }
@@ -2128,35 +2149,35 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     // split by separator
-    const char* start = str->chars;
-    const char* end = str->chars + str->len;
+    const char* start = str_chars;
+    const char* end = str_chars + str_len;
     const char* p = start;
-    
-    while (p <= end - sep->len) {
-        if (memcmp(p, sep->chars, sep->len) == 0) {
+
+    while (p <= end - sep_len) {
+        if (memcmp(p, sep_chars, sep_len) == 0) {
             // found separator
             size_t part_len = p - start;
             String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
             part->len = part_len;
             memcpy(part->chars, start, part_len);
             part->chars[part_len] = '\0';
-            
+
             list_push(result, {.item = s2it(part)});
-            
-            p += sep->len;
+
+            p += sep_len;
             start = p;
         } else {
             p++;
         }
     }
-    
+
     // add the last part
     size_t part_len = end - start;
     String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
     part->len = part_len;
     memcpy(part->chars, start, part_len);
     part->chars[part_len] = '\0';
-    
+
     list_push(result, {.item = s2it(part)});
 
     if (context) { context->disable_string_merging = saved_merging; }
@@ -2167,19 +2188,19 @@ Item fn_split(Item str_item, Item sep_item) {
 Item fn_str_join(Item list_item, Item sep_item) {
     TypeId list_type = get_type_id(list_item);
     TypeId sep_type = get_type_id(sep_item);
-    
+
     if (list_type != LMD_TYPE_LIST && list_type != LMD_TYPE_ARRAY) {
         log_debug("fn_str_join: first argument must be a list or array");
         return ItemError;
     }
-    
+
     // allow null/empty separator - treat as empty string
-    String* sep = nullptr;
+    const char* sep_chars = nullptr;
     size_t sep_len = 0;
-    
+
     if (sep_type == LMD_TYPE_STRING || sep_type == LMD_TYPE_SYMBOL) {
-        sep = sep_item.get_string();
-        sep_len = sep ? sep->len : 0;
+        sep_chars = sep_item.get_chars();
+        sep_len = sep_chars ? sep_item.get_len() : 0;
     } else if (sep_type != LMD_TYPE_NULL) {
         log_debug("fn_str_join: separator must be a string, symbol, or null");
         return ItemError;
@@ -2188,7 +2209,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
     // calculate total length
     size_t total_len = 0;
     int64_t count = 0;
-    
+
     if (list_type == LMD_TYPE_LIST) {
         List* lst = list_item.list;
         count = lst->length;
@@ -2196,8 +2217,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
             Item item = lst->items[i];
             TypeId item_type = get_type_id(item);
             if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
-                String* s = item.get_string();
-                if (s) total_len += s->len;
+                total_len += item.get_len();
             }
         }
     } else {
@@ -2207,8 +2227,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
             Item item = arr->items[i];
             TypeId item_type = get_type_id(item);
             if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
-                String* s = item.get_string();
-                if (s) total_len += s->len;
+                total_len += item.get_len();
             }
         }
     }
@@ -2220,24 +2239,25 @@ Item fn_str_join(Item list_item, Item sep_item) {
     // allocate result
     String* result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
     result->len = total_len;
-    
+
     // build result
     char* p = result->chars;
-    
+
     if (list_type == LMD_TYPE_LIST) {
         List* lst = list_item.list;
         for (int64_t i = 0; i < count; i++) {
             if (i > 0 && sep_len > 0) {
-                memcpy(p, sep->chars, sep_len);
+                memcpy(p, sep_chars, sep_len);
                 p += sep_len;
             }
             Item item = lst->items[i];
             TypeId item_type = get_type_id(item);
             if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
-                String* s = item.get_string();
-                if (s && s->len > 0) {
-                    memcpy(p, s->chars, s->len);
-                    p += s->len;
+                const char* s_chars = item.get_chars();
+                uint32_t s_len = item.get_len();
+                if (s_chars && s_len > 0) {
+                    memcpy(p, s_chars, s_len);
+                    p += s_len;
                 }
             }
         }
@@ -2245,21 +2265,22 @@ Item fn_str_join(Item list_item, Item sep_item) {
         Array* arr = list_item.array;
         for (int64_t i = 0; i < count; i++) {
             if (i > 0 && sep_len > 0) {
-                memcpy(p, sep->chars, sep_len);
+                memcpy(p, sep_chars, sep_len);
                 p += sep_len;
             }
             Item item = arr->items[i];
             TypeId item_type = get_type_id(item);
             if (item_type == LMD_TYPE_STRING || item_type == LMD_TYPE_SYMBOL) {
-                String* s = item.get_string();
-                if (s && s->len > 0) {
-                    memcpy(p, s->chars, s->len);
-                    p += s->len;
+                const char* s_chars = item.get_chars();
+                uint32_t s_len = item.get_len();
+                if (s_chars && s_len > 0) {
+                    memcpy(p, s_chars, s_len);
+                    p += s_len;
                 }
             }
         }
     }
-    
+
     result->chars[total_len] = '\0';
     return {.item = s2it(result)};
 }
@@ -2269,7 +2290,7 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId old_type = get_type_id(old_item);
     TypeId new_type = get_type_id(new_item);
-    
+
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (old_type != LMD_TYPE_STRING && old_type != LMD_TYPE_SYMBOL) ||
         (new_type != LMD_TYPE_STRING && new_type != LMD_TYPE_SYMBOL)) {
@@ -2277,26 +2298,29 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
         return ItemError;
     }
 
-    String* str = str_item.get_string();
-    String* old_str = old_item.get_string();
-    String* new_str = new_item.get_string();
+    const char* str_chars = str_item.get_chars();
+    uint32_t str_len = str_item.get_len();
+    const char* old_chars = old_item.get_chars();
+    uint32_t old_len = old_item.get_len();
+    const char* new_chars = new_item.get_chars();
+    uint32_t new_len_val = new_item.get_len();
 
-    if (!str || str->len == 0) {
+    if (!str_chars || str_len == 0) {
         return str_item;
     }
 
-    if (!old_str || old_str->len == 0) {
+    if (!old_chars || old_len == 0) {
         return str_item;  // nothing to replace
     }
 
     // count occurrences
     int count = 0;
-    const char* p = str->chars;
-    const char* end = str->chars + str->len;
-    while (p <= end - old_str->len) {
-        if (memcmp(p, old_str->chars, old_str->len) == 0) {
+    const char* p = str_chars;
+    const char* end = str_chars + str_len;
+    while (p <= end - old_len) {
+        if (memcmp(p, old_chars, old_len) == 0) {
             count++;
-            p += old_str->len;
+            p += old_len;
         } else {
             p++;
         }
@@ -2307,21 +2331,21 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
     }
 
     // calculate new length
-    size_t new_str_len = new_str ? new_str->len : 0;
-    size_t new_len = str->len + count * (new_str_len - old_str->len);
+    size_t new_str_len = new_chars ? new_len_val : 0;
+    size_t new_len = str_len + count * (new_str_len - old_len);
 
     // allocate result - preserve type
     if (str_type == LMD_TYPE_SYMBOL) {
         char* buf = (char*)pool_alloc(context->pool, new_len + 1);
         char* dest = buf;
-        p = str->chars;
-        while (p <= end - old_str->len) {
-            if (memcmp(p, old_str->chars, old_str->len) == 0) {
+        p = str_chars;
+        while (p <= end - old_len) {
+            if (memcmp(p, old_chars, old_len) == 0) {
                 if (new_str_len > 0) {
-                    memcpy(dest, new_str->chars, new_str_len);
+                    memcpy(dest, new_chars, new_str_len);
                     dest += new_str_len;
                 }
-                p += old_str->len;
+                p += old_len;
             } else {
                 *dest++ = *p++;
             }
@@ -2336,17 +2360,17 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
 
     String* result = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
     result->len = new_len;
-    
+
     // build result
     char* dest = result->chars;
-    p = str->chars;
-    while (p <= end - old_str->len) {
-        if (memcmp(p, old_str->chars, old_str->len) == 0) {
+    p = str_chars;
+    while (p <= end - old_len) {
+        if (memcmp(p, old_chars, old_len) == 0) {
             if (new_str_len > 0) {
-                memcpy(dest, new_str->chars, new_str_len);
+                memcpy(dest, new_chars, new_str_len);
                 dest += new_str_len;
             }
-            p += old_str->len;
+            p += old_len;
         } else {
             *dest++ = *p++;
         }
@@ -2356,7 +2380,7 @@ Item fn_replace(Item str_item, Item old_item, Item new_item) {
         *dest++ = *p++;
     }
     result->chars[new_len] = '\0';
-    
+
     return {.item = s2it(result)};
 }
 
@@ -2397,14 +2421,15 @@ DateTime fn_datetime1(Item arg) {
     TypeId arg_type = get_type_id(arg);
 
     if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
-        String* str = arg_type == LMD_TYPE_STRING ? arg.get_string() : arg.get_symbol();
-        DateTime* parsed = datetime_parse_lambda(context->pool, str->chars);
+        const char* chars = arg.get_chars();
+        uint32_t len = arg.get_len();
+        DateTime* parsed = datetime_parse_lambda(context->pool, chars);
         if (parsed) {
             DateTime dt = *parsed;
             dt.precision = DATETIME_PRECISION_DATE_TIME;
             return dt;
         }
-        log_error("datetime: failed to parse string '%.*s'", (int)str->len, str->chars);
+        log_error("datetime: failed to parse string '%.*s'", (int)len, chars);
     }
     else if (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_INT64) {
         // interpret as unix milliseconds
@@ -2451,8 +2476,9 @@ DateTime fn_date1(Item arg) {
         return dt;
     }
     else if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
-        String* str = arg_type == LMD_TYPE_STRING ? arg.get_string() : arg.get_symbol();
-        DateTime* parsed = datetime_parse_lambda(context->pool, str->chars);
+        const char* chars = arg.get_chars();
+        uint32_t len = arg.get_len();
+        DateTime* parsed = datetime_parse_lambda(context->pool, chars);
         if (parsed) {
             DateTime dt = *parsed;
             dt.hour = 0;
@@ -2462,7 +2488,7 @@ DateTime fn_date1(Item arg) {
             dt.precision = DATETIME_PRECISION_DATE_ONLY;
             return dt;
         }
-        log_error("date: failed to parse string '%.*s'", (int)str->len, str->chars);
+        log_error("date: failed to parse string '%.*s'", (int)len, chars);
     }
 
     DateTime err;
@@ -2526,8 +2552,8 @@ DateTime fn_time1(Item arg) {
         return dt;
     }
     else if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
-        String* str = arg_type == LMD_TYPE_STRING ? arg.get_string() : arg.get_symbol();
-        DateTime* parsed = datetime_parse_lambda(context->pool, str->chars);
+        const char* chars = arg.get_chars();
+        DateTime* parsed = datetime_parse_lambda(context->pool, chars);
         if (parsed) {
             DateTime dt;
             memset(&dt, 0, sizeof(DateTime));
@@ -2542,7 +2568,7 @@ DateTime fn_time1(Item arg) {
             dt.format_hint = parsed->format_hint;
             return dt;
         }
-        log_error("time: failed to parse string '%.*s'", (int)str->len, str->chars);
+        log_error("time: failed to parse string '%.*s'", (int)arg.get_len(), arg.get_chars());
     }
 
     DateTime err;

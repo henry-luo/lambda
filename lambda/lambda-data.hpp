@@ -131,6 +131,7 @@ typedef struct TypedItem {
         void* pointer;
         Decimal* decimal;
         String* string;
+        Symbol* symbol;
 
         // containers
         Container* container;
@@ -187,6 +188,7 @@ typedef struct ShapeEntry {
     Type* type;  // type of the field
     int64_t byte_offset;  // byte offset of the map field
     struct ShapeEntry* next;
+    Target* ns;  // namespace target (NULL for unqualified fields)
 } ShapeEntry;
 
 typedef struct TypeMap : Type {
@@ -198,8 +200,9 @@ typedef struct TypeMap : Type {
 } TypeMap;
 
 typedef struct TypeElmt : TypeMap {
-    StrView name;  // name of the element
+    StrView name;  // local name of the element
     int64_t content_length;  // no. of content items, needed for element type
+    Target* ns;  // namespace target (NULL for unqualified elements)
 } TypeElmt;
 
 typedef enum Operator {

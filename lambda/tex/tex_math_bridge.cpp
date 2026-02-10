@@ -1432,8 +1432,8 @@ static const char* get_map_string(Item item, const char* key) {
         return str ? str->chars : nullptr;
     }
     if (vtype == LMD_TYPE_SYMBOL) {
-        String* str = ((Item*)&val)->get_symbol();
-        return str ? str->chars : nullptr;
+        Symbol* sym = ((Item*)&val)->get_symbol();
+        return sym ? sym->chars : nullptr;
     }
     return nullptr;
 }

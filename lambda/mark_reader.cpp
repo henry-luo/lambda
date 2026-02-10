@@ -120,8 +120,8 @@ String* ItemReader::asString() const {
     return nullptr;
 }
 
-String* ItemReader::asSymbol() const {
-    if (isSymbol()) { return item_.get_string(); }
+Symbol* ItemReader::asSymbol() const {
+    if (isSymbol()) { return item_.get_symbol(); }
     return nullptr;
 }
 
@@ -188,10 +188,9 @@ ArrayReader ItemReader::asArray() const {
 
 const char* ItemReader::cstring() const {
     String* str = asString();
-    if (!str) {
-        str = asSymbol();  // Also check for symbol type
-    }
-    return str ? str->chars : nullptr;
+    if (str) return str->chars;
+    Symbol* sym = asSymbol();
+    return sym ? sym->chars : nullptr;
 }
 
 // ==============================================================================
