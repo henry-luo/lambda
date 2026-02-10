@@ -239,7 +239,8 @@ func_obj_t func_list[] = {
     {"fn_varg1", (fn_ptr) fn_varg1},
     // procedures
     {"pn_print", (fn_ptr) pn_print},
-    {"pn_cmd", (fn_ptr) pn_cmd},
+    {"pn_cmd1", (fn_ptr) pn_cmd1},
+    {"pn_cmd2", (fn_ptr) pn_cmd2},
     {"pn_fetch", (fn_ptr) pn_fetch},
     {"pn_output2", (fn_ptr) pn_output2},
     {"pn_output3", (fn_ptr) pn_output3},

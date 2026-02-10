@@ -131,7 +131,8 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true},   // fetch may fail (deprecated)
     {SYSPROC_OUTPUT2, "output", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},  // output(data, trg) -> any^ (bytes written or error)
     {SYSPROC_OUTPUT3, "output", 3, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},  // output(data, trg, options) -> any^
-    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true},        // cmd(command, args) -> any^ (output or error)
+    {SYSPROC_CMD1, "cmd", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},       // cmd(command) -> any^ (output or error)
+    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},        // cmd(command, args) -> any^ (output or error)
     // io module functions - procedural (is_proc=true), all can_raise=true for I/O errors
     {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},     // io_copy(src, dst) -> null^
     {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true},     // io_move(src, dst) -> null^

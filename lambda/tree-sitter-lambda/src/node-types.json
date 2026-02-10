@@ -2139,6 +2139,10 @@
           {
             "type": "content",
             "named": true
+          },
+          {
+            "type": "if_stam",
+            "named": true
           }
         ]
       },

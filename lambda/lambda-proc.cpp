@@ -796,7 +796,13 @@ String* format_cmd_args(String* cmd, Item args) {
     return result;
 }
 
-Item pn_cmd(Item cmd, Item args) {
+Item pn_cmd2(Item cmd, Item args);
+
+Item pn_cmd1(Item cmd) {
+    return pn_cmd2(cmd, ItemNull);
+}
+
+Item pn_cmd2(Item cmd, Item args) {
     log_debug("pn_cmd called");
     if (get_type_id(cmd) != LMD_TYPE_STRING) {
         log_debug("pn_cmd: command must be a string");
@@ -849,19 +855,31 @@ Item pn_cmd(Item cmd, Item args) {
     log_debug("pn_cmd: command completed with exit code: %d", actual_exit_code);
 
     // Create result string from captured output
-    String* result_str;  Item result;
+    String* result_str = NULL;
+    Item result;
     if (output_buf->length > 0) {
-        result_str = heap_strcpy(output_buf->str, output_buf->length);
+        // trim trailing newline from command output
+        size_t len = output_buf->length;
+        while (len > 0 && (output_buf->str[len - 1] == '\n' || output_buf->str[len - 1] == '\r')) {
+            len--;
+        }
+        result_str = heap_strcpy(output_buf->str, len);
         result = {.item = s2it(result_str)};
     } else {
-        // Return empty string if no output
-        result = ItemNull;
+        // return empty string for no output
+        result_str = heap_strcpy("", 0);
+        result = {.item = s2it(result_str)};
     }
-    log_debug("pn_cmd: command output length: %s", result_str->chars);
 
     strbuf_free(output_buf);
-    // For now, return the stdout output as a string
-    // TODO: Could return a map with {stdout: string, exit_code: int} for more info
+
+    // non-zero exit code means the command failed — return error
+    if (actual_exit_code != 0) {
+        log_debug("pn_cmd: command failed with exit code %d", actual_exit_code);
+        return ItemError;
+    }
+
+    log_debug("pn_cmd: command output: %s", result_str->chars);
     return result;
 }
 

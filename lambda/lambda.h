@@ -718,11 +718,11 @@ typedef struct Context {
     Item fn_normalize(Item str, Item type);
     Item fn_normalize1(Item str);           // normalize with default NFC
     Item fn_substring(Item str, Item start, Item end);
-    Item fn_contains(Item str, Item substr);
+    Bool fn_contains(Item str, Item substr);
     Item fn_join(Item a, Item b);
     // string functions
-    Item fn_starts_with(Item str, Item prefix);
-    Item fn_ends_with(Item str, Item suffix);
+    Bool fn_starts_with(Item str, Item prefix);
+    Bool fn_ends_with(Item str, Item suffix);
     int64_t fn_index_of(Item str, Item sub);
     int64_t fn_last_index_of(Item str, Item sub);
     Item fn_trim(Item str);
@@ -768,7 +768,8 @@ typedef struct Context {
 
     // procedural functions
     Item pn_print(Item item);
-    Item pn_cmd(Item cmd, Item args);
+    Item pn_cmd1(Item cmd);
+    Item pn_cmd2(Item cmd, Item args);
     Item pn_fetch(Item url, Item options);
     Item pn_output2(Item source, Item target);            // output(data, trg) - writes data to target, returns bytes written
     Item pn_output3(Item source, Item target, Item options);  // output(data, trg, options) - options: map {format, mode, atomic}, symbol/string (format), or null
