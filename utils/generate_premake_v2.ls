@@ -471,12 +471,10 @@ fn gen_test_input_full(proj_name, sources, full_includes, link_names, lib_paths,
 // === Procedural Data Computation ===
 // ============================================================
 
-// safe array push - handles empty array correctly
+// array push - append item to array using ++ operator
 pn arr_push(arr, item) {
-    if (len(arr) == 0) {
-        return [item]
-    }
-    return [for (x in arr) x, item]
+    var result = arr ++ [item]
+    return result
 }
 
 // prefix relative path with ../../ for premake build directory
@@ -853,12 +851,7 @@ pn reorder_input_files(source_files) {
         i = i + 1
     }
     // combine: cpp first, then c
-    i = 0
-    while (i < len(c_files)) {
-        cpp_files = arr_push(cpp_files, c_files[i])
-        i = i + 1
-    }
-    return cpp_files
+    return cpp_files ++ c_files
 }
 
 // ============================================================
@@ -965,12 +958,7 @@ pn enumerate_dir(dir_path) {
         i = i + 1
     }
     // combine: c first, then cpp (matching Python glob order)
-    i = 0
-    while (i < len(cpp_files)) {
-        c_files = arr_push(c_files, cpp_files[i])
-        i = i + 1
-    }
-    return c_files
+    return c_files ++ cpp_files
 }
 
 // Enumerate all source files from config source_dirs, applying exclusions
@@ -984,11 +972,7 @@ pn enumerate_sources(config, platform) {
                else if (platform == "linux") plats.linux or {}
                else plats.windows or {}
     var plat_excludes = plat.exclude_source_files or []
-    var j = 0
-    while (j < len(plat_excludes)) {
-        excludes = arr_push(excludes, plat_excludes[j])
-        j = j + 1
-    }
+    excludes = excludes ++ plat_excludes
 
     // start with explicit source_files from config
     var all_files = config.source_files or []
@@ -997,11 +981,7 @@ pn enumerate_sources(config, platform) {
     var i = 0
     while (i < len(source_dirs)) {
         var dir_files = enumerate_dir(source_dirs[i])
-        var k = 0
-        while (k < len(dir_files)) {
-            all_files = arr_push(all_files, dir_files[k])
-            k = k + 1
-        }
+        all_files = all_files ++ dir_files
         i = i + 1
     }
 
@@ -1146,12 +1126,7 @@ pn main() {
             var test_flags = t.special_flags or special_flags
             var extra = build_extra_flags(test_flags)
             // build combined buildoptions
-            var all_opts = ["-pedantic", "-fdiagnostics-color=auto", "-fno-omit-frame-pointer"]
-            var j = 0
-            while (j < len(extra)) {
-                all_opts = arr_push(all_opts, extra[j])
-                j = j + 1
-            }
+            var all_opts = ["-pedantic", "-fdiagnostics-color=auto", "-fno-omit-frame-pointer"] ++ extra
 
             if (is_input) {
                 out = out ++ gen_test_input_full(proj_name, sources, full_includes, link_names, lib_paths, defs, all_opts, platform)
