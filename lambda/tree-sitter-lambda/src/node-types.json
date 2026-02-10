@@ -309,6 +309,10 @@
         "required": true,
         "types": [
           {
+            "type": "attr_name",
+            "named": true
+          },
+          {
             "type": "identifier",
             "named": true
           },
@@ -322,6 +326,33 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "attr_name",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "ns_identifier",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1080,6 +1111,10 @@
         {
           "type": "import_module",
           "named": true
+        },
+        {
+          "type": "namespace_decl",
+          "named": true
         }
       ]
     }
@@ -1106,6 +1141,10 @@
         },
         {
           "type": "map",
+          "named": true
+        },
+        {
+          "type": "ns_identifier",
           "named": true
         },
         {
@@ -2680,6 +2719,81 @@
     }
   },
   {
+    "type": "namespace_binding",
+    "named": true,
+    "fields": {
+      "prefix": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "uri": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "namespace_decl",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "namespace_binding",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "ns_identifier",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "ns": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "null",
     "named": true,
     "fields": {}
@@ -4047,11 +4161,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "desc",
@@ -4087,11 +4201,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -4170,6 +4284,10 @@
     "named": false
   },
   {
+    "type": "namespace",
+    "named": false
+  },
+  {
     "type": "nan",
     "named": true
   },
@@ -4243,11 +4361,11 @@
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "t'",
