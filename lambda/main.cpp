@@ -635,8 +635,26 @@ int exec_convert(int argc, char* argv[]) {
         StrBuf* full_doc_output = NULL;  // For full document mode
 
         // Use the existing format functions based on target format
+        bool is_yaml_input = from_format && (strcmp(from_format, "yaml") == 0 || strcmp(from_format, "yml") == 0);
         if (strcmp(to_format, "json") == 0) {
-            formatted_output = format_json(input->pool, input->root);
+            // empty YAML document (comments-only, whitespace-only, etc.)
+            if (is_yaml_input && input->doc_count == 0 && get_type_id(input->root) == LMD_TYPE_NULL) {
+                full_doc_output = strbuf_new_cap(1);
+                // output empty string
+            }
+            // multi-doc YAML: output each document as separate JSON
+            else if (input->doc_count > 1 && get_type_id(input->root) == LMD_TYPE_ARRAY) {
+                full_doc_output = strbuf_new_cap(256);
+                Array* arr = (Array*)(input->root.item & 0x00FFFFFFFFFFFFFFULL);
+                int count = arr->length;
+                for (int i = 0; i < count; i++) {
+                    if (i > 0) strbuf_append_char(full_doc_output, '\n');
+                    String* doc_json = format_json(input->pool, arr->items[i]);
+                    if (doc_json) strbuf_append_str(full_doc_output, doc_json->chars);
+                }
+            } else {
+                formatted_output = format_json(input->pool, input->root);
+            }
         } else if (strcmp(to_format, "xml") == 0) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {

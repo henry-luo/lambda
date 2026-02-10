@@ -40,8 +40,31 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
 
         add_indent(ctx, indent + 1);
 
-        // Format the key (always quoted in JSON)
-        stringbuf_append_format(ctx.output(), "\"%s\":", key);
+        // Format the key (always quoted in JSON, with proper escaping)
+        ctx.write_char('"');
+        for (const char* kp = key; *kp; kp++) {
+            char kc = *kp;
+            switch (kc) {
+            case '"':  ctx.write_text("\\\""); break;
+            case '\\': ctx.write_text("\\\\"); break;
+            case '\b': ctx.write_text("\\b"); break;
+            case '\f': ctx.write_text("\\f"); break;
+            case '\n': ctx.write_text("\\n"); break;
+            case '\r': ctx.write_text("\\r"); break;
+            case '\t': ctx.write_text("\\t"); break;
+            default:
+                if ((unsigned char)kc < 0x20) {
+                    char hex_buf[7];
+                    snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", (unsigned char)kc);
+                    stringbuf_append_str(ctx.output(), hex_buf);
+                } else {
+                    ctx.write_char(kc);
+                }
+                break;
+            }
+        }
+        ctx.write_char('"');
+        ctx.write_char(':');
 
         // Format the value
         format_item_reader_with_indent(ctx, value, indent + 1);
@@ -74,9 +97,6 @@ static void format_string(JsonContext& ctx, String* str) {
         case '\\':
             ctx.write_text("\\\\");
             break;
-        case '/':
-            ctx.write_text("\\/");
-            break;
         case '\b':
             ctx.write_text("\\b");
             break;
@@ -93,7 +113,7 @@ static void format_string(JsonContext& ctx, String* str) {
             ctx.write_text("\\t");
             break;
         default:
-            if (c < 0x20) {
+            if ((unsigned char)c < 0x20) {
                 // Control characters - encode as \uXXXX
                 char hex_buf[7];
                 snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", (unsigned char)c);
