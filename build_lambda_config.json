@@ -294,7 +294,7 @@
                 "lambda/shape_pool.cpp",
                 "lambda/shape_builder.cpp",
                 "lambda/lambda-data.cpp",
-                "lambda/target.c",
+                "lambda/target.cpp",
                 "lambda/lambda-decimal.cpp",
                 "lambda/lambda-error.cpp",
                 "lambda/build_ast.cpp",
@@ -1352,6 +1352,20 @@
                         ],
                         "binary": "test_name_pool_gtest.exe",
                         "icon": "\ud83d\udd24"
+                    },
+                    {
+                        "source": "test_namespace_gtest.cpp",
+                        "name": "Namespace Infrastructure Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_namespace_gtest.exe",
+                        "icon": "\ud83c\udf10"
                     },
                     {
                         "source": "test_path_gtest.cpp",
