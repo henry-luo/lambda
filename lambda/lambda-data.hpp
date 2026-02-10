@@ -506,6 +506,7 @@ typedef struct Input {
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)
     char* xml_stylesheet_href;  // href from <?xml-stylesheet?> processing instruction (nullable)
+    int doc_count;              // number of YAML documents (0 or 1 = single doc, >1 = multi-doc array)
     // StringBuf* sb;
 
     // member functions

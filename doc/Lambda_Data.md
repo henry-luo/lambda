@@ -37,30 +37,31 @@ Lambda Script has a rich type system with both primitive and composite types:
 
 ### Primitive Types
 
-| Type       | Description                 | Example           |
-| ---------- | --------------------------- | ----------------- |
-| `null`     | Null/void value             | `null`            |
-| `bool`     | Boolean values              | `true`, `false`   |
-| `int`      | 56-bit signed integers      | `42`, `-123`      |
-| `float`    | 64-bit floating point       | `3.14`, `1.5e-10` |
-| `decimal`  | Arbitrary precision decimal | `123.456n`        |
-| `string`   | UTF-8 text strings          | `"hello"`         |
-| `symbol`   | Interned identifiers        | `'symbol`         |
-| `binary`   | Binary data                 | `b'\xDEADBEEF'`   |
-| `datetime` | Date and time values        | `t'2025-01-01'`   |
+| Type       | Description                 | Example               |
+| ---------- | --------------------------- | --------------------- |
+| `null`     | Null/void value             | `null`                |
+| `bool`     | Boolean values              | `true`, `false`       |
+| `int`      | 56-bit signed integers      | `42`, `-123`          |
+| `float`    | 64-bit floating point       | `3.14`, `1.5e-10`     |
+| `decimal`  | Arbitrary precision decimal | `123.456n`,`456.789N` |
+| `string`   | UTF-8 text strings          | `"hello"`             |
+| `symbol`   | Interned identifiers        | `'symbol'`            |
+| `binary`   | Binary data                 | `b'\xDEADBEEF'`       |
+| `datetime` | Date and time values        | `t'2025-01-01'`       |
 
 ### Composite Types
 
-| Type | Description | Example |
-|------|-------------|---------|
-| `list` | Immutable ordered sequences | `(1, 2, 3)` |
-| `array` | Mutable ordered collections | `[1, 2, 3]` |
-| `map` | Key-value mappings | `{key: "value"}` |
-| `element` | Structured markup elements | `<tag attr: value; content>` |
-| `range` | Numeric ranges | `1 to 10` |
-| `function` | Function values | `(x) => x + 1` |
-| `type` | Type descriptors | `int`, `string` |
-| `path` | File paths and URLs | `/etc.hosts`, `https.api.example.com` |
+| Type       | Description                 | Example                                 |
+| ---------- | --------------------------- | --------------------------------------- |
+| `list`     | Immutable ordered sequences | `(1, 2, 3)`                             |
+| `array`    | Mutable ordered collections | `[1, 2, 3]`                             |
+| `map`      | Key-value mappings          | `{key: "value"}`                        |
+| `element`  | Structured markup elements  | `<tag attr: value; content>`            |
+| `range`    | Numeric ranges              | `1 to 10`                               |
+| `path`     | File paths and URLs         | `/etc.hosts`, `https.'api.example.com'` |
+| `function` | Functions                   | `(x) => x + 1`                          |
+| `type`     | Type descriptors            | `int`, `string`                         |
+
 
 ### Special Types
 
@@ -446,8 +447,6 @@ Immutable ordered sequences (tuples):
 let lst = (1, 2, 3);
 lst[0]    // First element: 1
 lst[1]    // Second element: 2
-lst[-1]   // Last element: 3
-lst[-2]   // Second to last: 2
 ```
 
 #### List Operations
@@ -493,11 +492,7 @@ arr[-2]    // 20 (second to last)
 
 ```lambda
 let arr = [0, 1, 2, 3, 4, 5];
-arr[1:4]      // [1, 2, 3] — elements 1 to 3
-arr[:3]       // [0, 1, 2] — first 3 elements
-arr[3:]       // [3, 4, 5] — from index 3 to end
-arr[::2]      // [0, 2, 4] — every other element
-arr[::-1]     // [5, 4, 3, 2, 1, 0] — reversed
+arr[1 to 4]      // [1, 2, 3, 4] — elements 1 to 4
 ```
 
 #### Array Operations
@@ -520,7 +515,7 @@ Key-value mappings with structural typing:
 {name: "Alice", age: 30, active: true}
 
 // Mixed key types
-{"string_key": 1, symbol_key: 2, 3: "number_key"}
+{"string_key": 1, symbol_key: 2}
 
 // Nested maps
 {
@@ -540,7 +535,7 @@ person.name      // "Charlie" — dot notation
 person["name"]   // "Charlie" — bracket notation
 person.age       // 25
 
-// Safe access (null if missing)
+// Safe key access, like JS optional chaining ?. (rerturn `null` if key missing)
 person.address   // null (key doesn't exist)
 ```
 
@@ -590,7 +585,7 @@ Structured markup elements with attributes and content, used for document proces
 let el = <div class: "main"; "content">;
 el.tag       // 'div
 el.class     // "main" (attribute access)
-el[0]        // "content" (content access)
+el[0]        // "content" (content/child access)
 ```
 
 ### Ranges
