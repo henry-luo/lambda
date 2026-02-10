@@ -728,6 +728,8 @@ typedef struct Context {
     Item fn_trim(Item str);
     Item fn_trim_start(Item str);
     Item fn_trim_end(Item str);
+    Item fn_lower(Item str);
+    Item fn_upper(Item str);
     Item fn_split(Item str, Item sep);
     Item fn_str_join(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
