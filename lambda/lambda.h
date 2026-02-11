@@ -188,9 +188,8 @@ struct Container {
         struct {
             uint8_t is_content:1;    // whether it is a content list, or value list
             uint8_t is_spreadable:1; // whether this array should be spread when added to collections
-            // uint8_t is_const:1;  // is a constant expr
-            // uint8_t is_pooled:1; // is allocated from a memory pool
-            uint8_t reserved:6;
+            uint8_t is_heap:1;       // whether allocated from runtime heap (vs arena for input docs)
+            uint8_t reserved:5;
         };
     };
     uint16_t ref_cnt;  // reference count
@@ -557,6 +556,7 @@ typedef struct _ArrayList ArrayList;
 typedef struct Context {
     Pool* pool;
     void** consts;
+    void* type_list;  // type definitions list (ArrayList* at runtime, void* for JIT access)
     Url* cwd;  // current working directory
     void* (*context_alloc)(int size, TypeId type_id);
     bool run_main; // whether to run main procedure on start

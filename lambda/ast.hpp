@@ -505,6 +505,7 @@ typedef struct MIR_context *MIR_context_t;
 struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
     int index;                  // index of the script in the runtime scripts list
+    bool is_main;               // true if this is the main entry-point script
     const char* source;
     TSTree* syntax_tree;
 
