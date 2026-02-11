@@ -498,7 +498,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         if (strcmp(block->node_name(), "html") == 0 || strcmp(block->node_name(), "body") == 0) {
             View* html_or_body = block;
             View* body_view = nullptr;
-            
+
             // For html, find body first; for body, use itself
             if (strcmp(block->node_name(), "html") == 0) {
                 View* child = ((ViewElement*)block)->first_placed_child();
@@ -512,7 +512,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             } else {
                 body_view = block;
             }
-            
+
             if (body_view) {
                 View* grandchild = ((ViewElement*)body_view)->first_placed_child();
                 while (grandchild) {
@@ -577,17 +577,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     DomDocument* doc = NULL;
     log_debug("layout iframe");
-    
+
     // Iframe recursion depth limit to prevent infinite loops (e.g., <iframe src="index.html">)
     // This is a thread-local variable shared with layout_flex_multipass.cpp
     // Keep this low since each HTTP download can take seconds
     const int MAX_IFRAME_DEPTH = 3;
-    
+
     if (iframe_depth >= MAX_IFRAME_DEPTH) {
         log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
         return;
     }
-    
+
     if (!(block->embed && block->embed->doc)) {
         // load iframe document
         const char *value = block->get_attribute("src");
@@ -600,10 +600,10 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             int iframe_width = block->width > 0 ? (int)block->width : lycon->ui_context->window_width;
             int iframe_height = block->height > 0 ? (int)block->height : lycon->ui_context->window_height;
             log_debug("load iframe doc src: %s (iframe viewport=%dx%d, depth=%d)", src->str, iframe_width, iframe_height, iframe_depth);
-            
+
             // Increment depth before loading
             iframe_depth++;
-            
+
             // Load iframe document - pixel_ratio from ui_context is still used internally
             doc = load_html_doc(lycon->ui_context->document->url, src->str,
                 iframe_width, iframe_height,
@@ -670,7 +670,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
  */
 void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     log_debug("layout inline SVG element");
-    
+
     // Get intrinsic size from SVG attributes
     Element* native_elem = static_cast<DomElement*>(block)->native_element;
     if (!native_elem) {
@@ -679,17 +679,17 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
         block->height = 150;
         return;
     }
-    
+
     SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(native_elem);
-    
+
     log_debug("SVG intrinsic: width=%.1f height=%.1f aspect=%.3f has_w=%d has_h=%d",
               intrinsic.width, intrinsic.height, intrinsic.aspect_ratio,
               intrinsic.has_intrinsic_width, intrinsic.has_intrinsic_height);
-    
+
     // Determine final dimensions considering CSS properties
     float width = lycon->block.given_width;
     float height = lycon->block.given_height;
-    
+
     if (width >= 0 && height >= 0) {
         // Both CSS dimensions specified - use them
         block->width = width;
@@ -720,7 +720,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
         } else {
             block->width = 300;  // HTML default
         }
-        
+
         if (intrinsic.has_intrinsic_height) {
             block->height = intrinsic.height;
         } else if (intrinsic.aspect_ratio > 0) {
@@ -729,7 +729,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
             block->height = 150;  // HTML default
         }
     }
-    
+
     // Add padding and border
     float padding_top = block->bound && block->bound->padding.top > 0 ? block->bound->padding.top : 0;
     float padding_bottom = block->bound && block->bound->padding.bottom > 0 ? block->bound->padding.bottom : 0;
@@ -739,12 +739,12 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
     float border_left = block->bound && block->bound->border ? block->bound->border->width.left : 0;
     float border_right = block->bound && block->bound->border ? block->bound->border->width.right : 0;
-    
+
     block->content_width = block->width;
     block->content_height = block->height;
     block->width += padding_left + padding_right + border_left + border_right;
     block->height += padding_top + padding_bottom + border_top + border_bottom;
-    
+
     log_debug("SVG layout result: content=%.1fx%.1f, total=%.1fx%.1f",
               block->content_width, block->content_height, block->width, block->height);
 }
@@ -1380,7 +1380,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     lycon->block.advance_y, block->height);
 
                 finalize_block_flow(lycon, block, block->display.outer);
-                
+
                 // WORKAROUND: Save table height to global - it gets corrupted after return
                 // This is a mysterious issue where the height field gets zeroed between
                 // the return statement and the caller's next instruction
@@ -2196,8 +2196,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 fit_content, block->width, available);
 
             // Update block width to shrink-to-fit size
-            // Add small epsilon to prevent text wrapping due to floating-point precision issues
-            block->width = fit_content + 0.1f;
+            // Round up to next 0.5px to prevent text wrapping due to floating-point precision issues
+            // while avoiding larger additions that prevent adjacent content from fitting
+            float rounded_width = ceilf(fit_content * 2.0f) / 2.0f;
+            block->width = rounded_width;
 
             // Also update content_width for child layout
             float new_content_width = block->width;
@@ -2746,7 +2748,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Always print block type for debugging
         bool is_table = (block->view_type == RDT_VIEW_TABLE);
         layout_block_content(lycon, block, &pa_block, &pa_line);
-        
+
         // WORKAROUND: Restore table height from global - it gets corrupted after return
         // This is a mysterious issue where the height field gets zeroed between
         // the return statement in layout_block_content and this point
