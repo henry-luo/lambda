@@ -18,13 +18,22 @@ true
 10
 30
 45
+123
 "Computed properties"
 6
 1
+17
 2
 true
 false
 29
+"Timezone offset"
+330
+-480
+0
+"Unix timestamp"
+0
+true
 "Precision checks"
 true
 true
@@ -40,6 +49,12 @@ false
 true
 true
 true
+"Extraction properties"
+t'2025-04-26'
+true
+t'10:30:45'
+true
+t'2025-04-26 05:30:00z'
 "Constructors"
 true
 true
@@ -52,3 +67,52 @@ true
 true
 true
 true
+"Leap year rules"
+true
+true
+false
+false
+false
+"Days in month"
+31
+28
+29
+30
+31
+"Year day boundaries"
+1
+365
+366
+60
+60
+"Week number"
+1
+1
+52
+53
+"Weekday verification"
+3
+4
+6
+4
+"Quarter boundaries"
+1
+1
+2
+3
+4
+4
+"Time boundaries"
+0
+23
+59
+59
+999
+"Year boundaries"
+1
+2999
+"Extraction preserves components"
+29
+2
+23
+59

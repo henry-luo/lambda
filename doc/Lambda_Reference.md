@@ -4,14 +4,12 @@
 
 1. [Introduction](#introduction)
 2. [Language Overview](#language-overview)
-3. [Syntax and Grammar](#syntax-and-grammar)
-4. [Documentation Guide](#documentation-guide)
-5. [Modules and Imports](#modules-and-imports)
-6. [I/O Module](#io-module)
-7. [Error Handling](#error-handling)
-8. [Memory Management](#memory-management)
-9. [Examples](#examples)
-10. [Language Philosophy](#language-philosophy-and-design-principles)
+3. [Documentation Guide](#documentation-guide)
+4. [Modules and Imports](#modules-and-imports)
+5. [I/O Module](#io-module)
+6. [Error Handling](#error-handling)
+7. [Examples](#examples)
+8. [Language Philosophy](#language-philosophy-and-design-principles)
 
 ---
 
@@ -50,44 +48,6 @@ Lambda Script is designed around functional programming principles with modern s
 
 ---
 
-## Syntax and Grammar
-
-### Comments
-
-```lambda
-// Single-line comment
-
-/*
-   Multi-line comment
-   can span multiple lines
-*/
-```
-
-### Basic Structure
-
-Lambda Script files contain expressions and statements:
-
-```lambda
-// Expressions (return values)
-42
-"hello world"
-[1, 2, 3]
-
-// Statements (declarations and control flow)
-let x = 10;
-if (x > 5) {
-    print("x is greater than 5")
-}
-```
-
-### Whitespace and Line Breaks
-
-- Whitespace is generally ignored except in strings
-- Line breaks can separate statements
-- Semicolons (`;`) are used to terminate statements but are optional when there's line break
-
----
-
 ## Documentation Guide
 
 The Lambda language documentation is organized into focused sub-documents for easier navigation and maintenance:
@@ -96,6 +56,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 
 | Document | Description |
 |----------|-------------|
+| **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, identifiers, names, symbols, namespaces |
 | **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, lists, maps, elements, ranges, and data composition expressions |
 | **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
 | **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, control flow, and operators |
@@ -276,7 +237,7 @@ Write data to files in procedural functions:
 pn export_data(data) {
     // Write (truncate)
     data |> "/tmp/output.json"
-    
+
     // Append
     {event: "saved"} |>> "/tmp/events.log"
 }
@@ -396,24 +357,24 @@ print("Fibonacci:", fibs)
 
 pn main() {
     print("Starting processing...")
-    
+
     // Load configuration
     let config = if exists(.config.json) {
         input(.config.json, 'json)
     } else {
         {default: true}
     }
-    
+
     // Process data
     var count = 0
     for item in config.items or [] {
         process_item(item)
         count = count + 1
     }
-    
+
     // Save results
     {processed: count, time: now()} |> "./output/summary.json"
-    
+
     print("Done! Processed", count, "items")
 }
 
@@ -467,6 +428,7 @@ Concise syntax for complex operations:
 
 ## Further Reading
 
+- **[Lambda_Syntax.md](Lambda_Syntax.md)** — Syntax fundamentals, names, symbols, and namespaces
 - **[Lambda_Data.md](Lambda_Data.md)** — Complete guide to literals and collections
 - **[Lambda_Type.md](Lambda_Type.md)** — Deep dive into the type system
 - **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** — All expressions and operators

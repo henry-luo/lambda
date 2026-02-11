@@ -76,3 +76,14 @@ false
 "22. symbol interning"
 true
 false
+"23. e.ns.attr member expression"
+100
+50
+"24. ns.value becomes qualified symbol"
+'svg.rect'
+'svg.circle'
+'xlink.href'
+"25. compare qualified symbols"
+true
+false
+true
