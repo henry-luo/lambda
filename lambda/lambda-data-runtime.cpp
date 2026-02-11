@@ -300,18 +300,26 @@ Array* array_spreadable() {
 }
 
 // finalize spreadable array - returns array as Item (no flattening)
+// returns spreadable null for empty arrays so they can be skipped when spreading
 Item array_end(Array* arr) {
     frame_end();
     log_debug("array_end: length=%ld, is_spreadable=%d", arr->length, arr->is_spreadable);
     if (arr->length == 0) {
-        return ItemNull;
+        // return spreadable null - will be skipped when added to collections
+        return {.item = ITEM_NULL_SPREADABLE};
     }
     return {.array = arr};
 }
 
 // push item to array, spreading if the item is a spreadable array
+// skips spreadable nulls (from empty for-expressions)
 void array_push_spread(Array* arr, Item item) {
     TypeId type_id = get_type_id(item);
+    // skip spreadable null (empty for-expression result)
+    if (item.item == ITEM_NULL_SPREADABLE) {
+        log_debug("array_push_spread: skipping spreadable null");
+        return;
+    }
     if (type_id == LMD_TYPE_ARRAY) {
         Array* inner = item.array;
         if (inner && inner->is_spreadable) {

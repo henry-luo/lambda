@@ -544,8 +544,14 @@ void list_push(List *list, Item item) {
 }
 
 // push item to list, spreading spreadable arrays inline
+// skips spreadable nulls (from empty for-expressions)
 void list_push_spread(List *list, Item item) {
     TypeId type_id = get_type_id(item);
+    // skip spreadable null (empty for-expression result)
+    if (item.item == ITEM_NULL_SPREADABLE) {
+        log_debug("list_push_spread: skipping spreadable null");
+        return;
+    }
     // check if this is a spreadable array
     if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
