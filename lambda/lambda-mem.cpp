@@ -30,6 +30,10 @@ void* heap_alloc(int size, TypeId type_id) {
 extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     void* ptr = heap_alloc(size, type_id);
     memset(ptr, 0, size);
+    // mark containers as heap-owned so free_container can distinguish from arena-owned
+    if (type_id >= LMD_TYPE_CONTAINER) {
+        ((Container*)ptr)->is_heap = 1;
+    }
     return ptr;
 }
 
@@ -202,7 +206,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
         if (!field->name) { // nested map
             Map *nested_map = *(Map**)field_ptr;
             log_debug("nested_map pointer: %p", nested_map);
-            if (nested_map) {
+            if (nested_map && nested_map->is_heap) {
                 log_debug("nested_map: data=%p, ref_cnt=%d, type=%p",
                           nested_map->data, nested_map->ref_cnt, nested_map->type);
                 // delink the nested map
@@ -227,8 +231,8 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
         }
         else if (LMD_TYPE_LIST <= field->type->type_id && field->type->type_id <= LMD_TYPE_ELEMENT) {
             Container *container = *(Container**)field_ptr;
-            if (container) {
-                // delink with the container
+            if (container && container->is_heap) {
+                // only manage heap-owned containers
                 if (container->ref_cnt > 0) container->ref_cnt--;
                 if (!container->ref_cnt) free_container(container, clear_entry);
             }
@@ -239,6 +243,8 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
 
 void free_container(Container* cont, bool clear_entry) {
     if (!cont) return;
+    // only free heap-owned containers; arena-owned ones are managed by arena lifecycle
+    if (!cont->is_heap) return;
     log_debug("free_container: cont=%p, clear_entry=%d", cont, clear_entry);
     log_debug("container details: type_id=%d, ref_cnt=%d", cont->type_id, cont->ref_cnt);
     assert(cont->ref_cnt == 0);
@@ -251,7 +257,7 @@ void free_container(Container* cont, bool clear_entry) {
             for (int j = 0; j < list->length; j++) {
                 free_item(list->items[j], clear_entry);
             }
-            if (list->items) free(list->items);
+            if (list->items && list->items != (Item*)(list + 1)) free(list->items);
             pool_free(context->heap->pool, cont);
         }
     }
@@ -265,7 +271,7 @@ void free_container(Container* cont, bool clear_entry) {
                 log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id(), arr->items[j].item);
                 free_item(arr->items[j], clear_entry);
             }
-            if (arr->items) {
+            if (arr->items && arr->items != (Item*)(arr + 1)) {
                 log_debug("freeing arr->items array: %p", arr->items);
                 free(arr->items);
             }
@@ -285,21 +291,21 @@ void free_container(Container* cont, bool clear_entry) {
     else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt *arr = (ArrayInt*)cont;
         if (!arr->ref_cnt) {
-            if (arr->items) free(arr->items);
+            if (arr->items && (void*)arr->items != (void*)(arr + 1)) free(arr->items);
             pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64 *arr = (ArrayInt64*)cont;
         if (!arr->ref_cnt) {
-            if (arr->items) free(arr->items);
+            if (arr->items && (void*)arr->items != (void*)(arr + 1)) free(arr->items);
             pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat *arr = (ArrayFloat*)cont;
         if (!arr->ref_cnt) {
-            if (arr->items) free(arr->items);
+            if (arr->items && (void*)arr->items != (void*)(arr + 1)) free(arr->items);
             pool_free(context->heap->pool, cont);
         }
     }
@@ -354,8 +360,8 @@ void free_item(Item item, bool clear_entry) {
     }
     else if (item._type_id == LMD_TYPE_RAW_POINTER) {
         Container* container = item.container;
-        if (container) {
-            // delink with the container
+        if (container && container->is_heap) {
+            // only manage heap-owned containers; arena-owned are managed by arena lifecycle
             if (container->ref_cnt > 0) container->ref_cnt--;
             if (!container->ref_cnt) free_container(container, clear_entry);
         }

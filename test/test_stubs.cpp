@@ -10,10 +10,11 @@
 __thread EvalContext* context = nullptr;
 
 // Stub implementation of load_script for test builds
-Script* load_script(Runtime* runtime, const char* script_path, const char* source) {
+Script* load_script(Runtime* runtime, const char* script_path, const char* source, bool is_import) {
     (void)runtime;
     (void)script_path;
     (void)source;
+    (void)is_import;
     return nullptr;
 }
 

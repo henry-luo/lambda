@@ -4426,6 +4426,8 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
+    // First member: constants pointer for this module
+    strbuf_append_str(tp->code_buf, "void** consts;\n");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) {
             node = ((AstListNode*)node)->item;
@@ -4783,6 +4785,52 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     // MIR import resolves to the address of _lambda_rt, so we declare it as Context*
     strbuf_append_str(tp->code_buf, "\nextern Context* _lambda_rt;\n");
     strbuf_append_str(tp->code_buf, "#define rt _lambda_rt\n");
+
+    // For imported modules, add module-local constants pointer and override const macros
+    // This allows each module to access its own const_list instead of the main script's
+    if (!tp->is_main) {
+        log_debug("Transpiling imported module - adding module-local constants");
+        strbuf_append_str(tp->code_buf, "\n// Module-local constants pointer\n");
+        strbuf_append_str(tp->code_buf, "static void** _mod_consts;\n");
+        strbuf_append_str(tp->code_buf, "void _init_mod_consts(void** consts) { _mod_consts = consts; }\n");
+        // Override const macros to use module-local constants
+        strbuf_append_str(tp->code_buf, "#undef const_d2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_l2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_c2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_s2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_y2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_k2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_x2it\n");
+        strbuf_append_str(tp->code_buf, "#undef const_s\n");
+        strbuf_append_str(tp->code_buf, "#undef const_c\n");
+        strbuf_append_str(tp->code_buf, "#undef const_k\n");
+        strbuf_append_str(tp->code_buf, "#define const_d2it(index)    d2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_l2it(index)    l2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_c2it(index)    c2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_s2it(index)    s2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_y2it(index)    y2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_k2it(index)    k2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_x2it(index)    x2it(_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_s(index)      ((String*)_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_c(index)      ((Decimal*)_mod_consts[index])\n");
+        strbuf_append_str(tp->code_buf, "#define const_k(index)      (*(DateTime*)_mod_consts[index])\n");
+
+        // Module-local type_list pointer and wrapper functions
+        // This allows each module to access its own type_list instead of the main script's
+        strbuf_append_str(tp->code_buf, "\n// Module-local type_list pointer\n");
+        strbuf_append_str(tp->code_buf, "static void* _mod_type_list;\n");
+        strbuf_append_str(tp->code_buf, "void _init_mod_types(void* tl) { _mod_type_list = tl; }\n");
+        // Define wrapper functions that swap rt->type_list to module's before calling real functions
+        strbuf_append_str(tp->code_buf, "static Map* _mod_map(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Map* r=map(ti); rt->type_list=sv; return r; }\n");
+        strbuf_append_str(tp->code_buf, "static Element* _mod_elmt(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Element* r=elmt(ti); rt->type_list=sv; return r; }\n");
+        strbuf_append_str(tp->code_buf, "static Type* _mod_const_type(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; Type* r=const_type(ti); rt->type_list=sv; return r; }\n");
+        strbuf_append_str(tp->code_buf, "static TypePattern* _mod_const_pattern(int ti) { void* sv=rt->type_list; rt->type_list=_mod_type_list; TypePattern* r=const_pattern(ti); rt->type_list=sv; return r; }\n");
+        // Redirect calls to use module-local wrappers
+        strbuf_append_str(tp->code_buf, "#define map(idx) _mod_map(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define elmt(idx) _mod_elmt(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define const_type(idx) _mod_const_type(idx)\n");
+        strbuf_append_str(tp->code_buf, "#define const_pattern(idx) _mod_const_pattern(idx)\n");
+    }
 
     // Pre-define all closure environment structs before any function definitions
     // This ensures structs are available when functions reference them

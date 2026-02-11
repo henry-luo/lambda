@@ -4742,7 +4742,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             // Skip module loading in simple schema parser mode
             ast_node->script = nullptr;
             #else
-            ast_node->script = load_script(tp->runtime, buf->str, NULL);
+            ast_node->script = load_script(tp->runtime, buf->str, NULL, true);  // is_import = true
             #endif
 
             strbuf_free(buf);
