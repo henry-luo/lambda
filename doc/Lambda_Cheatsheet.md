@@ -131,7 +131,7 @@ symbol("href", 'xlink_url') // Create namespaced symbol
 **Let Expressions:**
 ```lambda
 (let x = 5, x + 1, x * 2)      // Single binding
-(let a = 1, let b = 2, a + b)  // Multiple bindings
+(let a = 1, b = 2, a + b)      // Multiple bindings
 ```
 
 **Let Statements:**
@@ -216,11 +216,15 @@ if (x > 0) { "positive" }
 if (condition) { something() } else { otherThing() }
 ```
 
-**For Expressions:**
+**For Expressions:** (produce spreadable arrays)
 ```lambda
-for (x in [1, 2, 3]) x * 2     // Array iteration
-for (i in 1 to 5) i * i        // Range iteration
+for (x in [1, 2, 3]) x * 2     // [2, 4, 6]
+for (i in 1 to 5) i * i        // [1, 4, 9, 16, 25]
 for (x in data) if (x > 0) x else 0  // Conditional
+// Nested for-expressions flatten
+[for (i in 1 to 2) for (j in 1 to 2) i*j]  // [1,2,2,4]
+// Empty for produces spreadable null (skipped)
+[for (x in [] ) x]             // []
 ```
 
 **For Expression Clauses:** `let`, `where`, `order by`, `limit`, `offset`
