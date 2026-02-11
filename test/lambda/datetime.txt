@@ -18,13 +18,22 @@ true
 10
 30
 45
+123
 "Computed properties"
 6
 1
+17
 2
 true
 false
 29
+"Timezone offset"
+330
+-480
+0
+"Unix timestamp"
+0
+true
 "Precision checks"
 true
 true
@@ -40,6 +49,12 @@ false
 true
 true
 true
+"Extraction properties"
+t'2025-04-26'
+true
+t'10:30:45'
+true
+t'2025-04-26 05:30:00z'
 "Constructors"
 true
 true
