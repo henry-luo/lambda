@@ -100,3 +100,72 @@
 (format(t'2025-04-26', "YYYY/MM/DD") == "2025/04/26")
 (format(t'2025-04-26T10:30:45', "date") == "2025-04-26")
 (format(t'2025-04-26T10:30:45', "time") == "10:30:45")
+
+// ===== CORNER CASES =====
+
+// Leap year rules
+"Leap year rules"
+(t'2024-01-01'.is_leap_year)      // 2024 divisible by 4 → leap
+(t'2000-01-01'.is_leap_year)      // 2000 divisible by 400 → leap
+(t'1900-01-01'.is_leap_year)      // 1900 divisible by 100 but not 400 → not leap
+(t'2100-01-01'.is_leap_year)      // 2100 divisible by 100 but not 400 → not leap
+(t'2025-01-01'.is_leap_year)      // 2025 not divisible by 4 → not leap
+
+// Days in month - all months
+"Days in month"
+(t'2025-01-15'.days_in_month)     // January: 31
+(t'2025-02-15'.days_in_month)     // February (non-leap): 28
+(t'2024-02-15'.days_in_month)     // February (leap): 29
+(t'2025-04-15'.days_in_month)     // April: 30
+(t'2025-12-15'.days_in_month)     // December: 31
+
+// Year day boundary cases
+"Year day boundaries"
+(t'2025-01-01'.yearday)           // Jan 1 = day 1
+(t'2025-12-31'.yearday)           // Dec 31 non-leap = day 365
+(t'2024-12-31'.yearday)           // Dec 31 leap year = day 366
+(t'2024-02-29'.yearday)           // Feb 29 leap year = day 60
+(t'2025-03-01'.yearday)           // Mar 1 non-leap = day 60
+
+// Week number edge cases (ISO 8601)
+"Week number"
+(t'2025-01-01'.week)              // Jan 1, 2025 = week 1
+(t'2024-12-30'.week)              // Dec 30, 2024 = week 1 of 2025
+(t'2024-12-29'.week)              // Dec 29, 2024 = week 52
+(t'2020-12-31'.week)              // Dec 31, 2020 = week 53
+
+// Weekday verification (known dates)
+"Weekday verification"
+(t'2025-01-01'.weekday)           // Jan 1, 2025 = Wednesday = 3
+(t'2024-07-04'.weekday)           // July 4, 2024 = Thursday = 4
+(t'2000-01-01'.weekday)           // Jan 1, 2000 = Saturday = 6
+(t'1970-01-01'.weekday)           // Jan 1, 1970 (Unix epoch) = Thursday = 4
+
+// Quarter boundaries
+"Quarter boundaries"
+(t'2025-01-01'.quarter)           // Jan = Q1
+(t'2025-03-31'.quarter)           // Mar = Q1
+(t'2025-04-01'.quarter)           // Apr = Q2
+(t'2025-07-01'.quarter)           // Jul = Q3
+(t'2025-10-01'.quarter)           // Oct = Q4
+(t'2025-12-31'.quarter)           // Dec = Q4
+
+// Midnight and edge times
+"Time boundaries"
+(t'00:00:00'.hour)                // Midnight hour
+(t'23:59:59'.hour)                // Last hour
+(t'23:59:59'.minute)              // Last minute
+(t'23:59:59'.second)              // Last second
+(t'12:00:00.999'.millisecond)     // Max millisecond
+
+// Year boundaries
+"Year boundaries"
+(t'0001-01-01'.year)              // Year 1 AD
+(t'2999-12-31'.year)              // Far future (within range)
+
+// Extraction preserves components
+"Extraction preserves components"
+(t'2024-02-29T23:59:59'.date.day)     // Feb 29 preserved
+(t'2024-02-29T23:59:59'.date.month)   // Month preserved
+(t'2024-02-29T23:59:59'.time.hour)    // Hour preserved
+(t'2024-02-29T23:59:59'.time.second)  // Second preserved
