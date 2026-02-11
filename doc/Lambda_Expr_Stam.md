@@ -96,6 +96,27 @@ obj.maybeNull.field    // Returns null if maybeNull is null
 ```lambda
 -x                 // Negation
 +x                 // Positive (identity)
+*x                 // Spread (expand collection)
+```
+
+### Spread Operator
+
+The spread operator `*` expands a collection's items into the enclosing container:
+
+```lambda
+let a = [1, 2, 3]
+[0, *a, 4]             // [0, 1, 2, 3, 4] — items spread into array
+
+let b = (10, 20)
+(*a, *b)               // (1, 2, 3, 10, 20) — spread into list
+
+// Spread in function calls
+fn sum_all(...args) = args | reduce((a, b) => a + b, 0)
+sum_all(*[10, 20, 30])  // 60
+
+// Nested spreading
+let nested = [[1, 2], [3, 4]]
+[*nested[0], *nested[1]]  // [1, 2, 3, 4]
 ```
 
 ### Vector Arithmetic
@@ -597,7 +618,7 @@ From highest to lowest:
 | Precedence | Operators            | Description     |
 | ---------- | -------------------- | --------------- |
 | 1          | `()`, `[]`, `.`      | Primary         |
-| 2          | `-`, `+`, `not`      | Unary           |
+| 2          | `-`, `+`, `not`, `*` | Unary           |
 | 3          | `^`                  | Exponentiation  |
 | 4          | `*`, `/`, `div`, `%` | Multiplicative  |
 | 5          | `+`, `-`             | Additive        |
