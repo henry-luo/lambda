@@ -405,47 +405,189 @@ assert(result.byline == expected.byline);
 // utils/readability.ls
 
 /// Parse HTML and extract readable content
-/// Returns: {title, byline, content, text_content, length, excerpt, site_name, lang, published_time}
-pub fn parse(html: string, options?: {
-    debug?: bool,
-    max_elems_to_parse?: int,
-    nb_top_candidates?: int,
-    char_threshold?: int,
-    classes_to_preserve?: [string],
-    keep_classes?: bool,
-    disable_json_ld?: bool
-}) {...}
+/// Returns: {title, byline, content, textContent, length, excerpt, siteName, lang, dir, publishedTime}
+/// 
+/// Key: result.content is a NEW element tree, not a reference to input.
+/// The input document is never modified (pure functional approach).
+pub fn parse(html: string) {...}
+
+/// Parse file and extract readable content
+pub fn parse_file(file_path: path) {...}
+
+/// Parse and save to file (procedure - handles I/O)
+pub pn parse_and_save(html: string, output_path: path) {...}
+
+/// Parse file and save clean version (procedure - handles I/O)  
+pub pn parse_file_and_save(input_path: path, output_path: path) {...}
+
+/// Get clean HTML string from content
+pub fn to_html(html: string) string {...}
+
+/// Extract just the article content element
+pub fn extract_article(html: string) element? {...}
 
 /// Quick check if document is probably readable
-/// Returns: bool
 pub fn is_readable(html: string, options?: {
     min_content_length?: int,
     min_score?: int
-}) {...}
+}) bool {...}
 ```
 
 ### Usage Example
 
 ```lambda
-import readability: .utils.readability;
+import readability: .utils.readability
 
-// Simple usage
-let article = readability.parse(html_content);
-print(article.title);
-print(article.text_content);
+// Simple usage - get metadata and content
+let article = readability.parse(html_content)
+print(article.title)
+print(article.textContent)
 
-// With options
-let article = readability.parse(html_content, {
-    char_threshold: 200,
-    classes_to_preserve: ["highlight", "code"]
-});
+// Save extracted content to file
+readability.parse_and_save(html_content, @./readable.html)
+
+// Get HTML string for further processing
+let clean_html = readability.to_html(html_content)
+
+// Parse from file and save clean version
+readability.parse_file_and_save(@./messy.html, @./clean.html)
 
 // Check readability first
-if readability.is_readable(html_content) {
-    let article = readability.parse(html_content);
+if readability.is_readable(html_content, null, null) {
+    let article = readability.parse(html_content)
     // process...
 }
 ```
+
+### Functional Design Principles
+
+1. **No Input Mutation**: The input HTML document is never modified
+2. **New Output**: `result.content` is a new element tree, independent of input
+3. **Pure Functions**: All `fn` declarations are pure (no side effects)
+4. **Procedures for I/O**: `pn` declarations (like `parse_and_save`) handle file I/O
+5. **Clean Text Extraction**: `result.textContent` provides script/style-free text
+
+## Implementation Status (February 2026)
+
+**Status: ✅ WORKING IMPLEMENTATION**
+
+The readability module has been successfully implemented and tested.
+
+**Location:** `utils/readability.ls` (~878 lines)
+
+### Implemented API
+
+| Function | Return Type | Description |
+|----------|-------------|-------------|
+| `parse(file_path)` | `map^` | Extract readable content with all metadata |
+| `parse_doc(doc)` | `map` | Parse an already-loaded HTML element |
+| `parse_and_save(input, output)` | `map^` | Parse and save cleaned HTML to file |
+| `metadata(file_path)` | `map^` | Extract only metadata (faster than full parse) |
+| `title(file_path)` | `string^` | Extract just the article title |
+| `text(file_path)` | `string^` | Extract clean text content (no HTML) |
+| `lang(file_path)` | `string^` | Get document language |
+| `dir(file_path)` | `string^` | Get text direction (ltr/rtl) |
+| `extract_article(file_path)` | `element^` | Extract just the article element |
+| `is_readable(file_path, min_len, min_score)` | `bool^` | Check if document is readable |
+
+### Return Structure
+
+The `parse()` function returns:
+
+```lambda
+{
+    title: string?,         // Article title
+    byline: string?,        // Author info
+    dir: string?,           // Text direction (ltr/rtl)
+    content: element?,      // Extracted content element
+    textContent: string,    // Clean text without HTML
+    length: int,            // Text length
+    excerpt: string?,       // Article excerpt/summary
+    siteName: string?,      // Site name
+    lang: string?,          // Language code
+    publishedTime: string?  // Publication timestamp
+}
+```
+
+### Usage Examples
+
+```lambda
+// IMPORTANT: Use non-aliased imports (aliased imports have a runtime bug)
+import .utils.readability
+
+// Parse an HTML file
+let result = parse("./article.html")?
+
+// Access extracted data
+result.title       // "Article Title"
+result.byline      // "By John Doe"
+result.textContent // Clean text content
+result.content     // <article> element
+```
+
+**Metadata only (faster):**
+```lambda
+import .utils.readability
+let meta = metadata("./article.html")?
+```
+
+**Save cleaned content (in a procedure):**
+```lambda
+import .utils.readability
+
+pn main() null^ {
+    var result^err = parse_and_save("./input.html", "./output.html")
+    if (err != null) { raise err }
+    print("Cleaned article saved!")
+    return null
+}
+```
+
+### Implementation Notes
+
+1. **File-Based Input Only**: Lambda's `input()` only accepts file paths, not raw HTML strings
+2. **JSON-LD Disabled**: Would need `parse_json(string)` for inline JSON parsing
+3. **Functional Design**: Produces NEW clean documents, never modifies input
+
+### Test Files
+
+Located in `temp/`:
+- `test_readability.ls` - Full parse test
+- `test_readability_metadata.ls` - Metadata extraction test
+- `test_readability_save.ls` - Save functionality test (run mode)
+- `test_readability_helpers.ls` - Helper function tests
+- `test_article.html` - Sample HTML article
+
+Run tests:
+```bash
+./lambda.exe temp/test_readability.ls
+./lambda.exe temp/test_readability_metadata.ls
+./lambda.exe run temp/test_readability_save.ls
+```
+
+### Known Issues & Workarounds
+
+During implementation, several Lambda language issues were discovered (see `doc/Lambda_Known_Issues.md`):
+
+1. **Aliased Imports Bug** (HIGH): `import alias: .path` causes runtime type_id=26 errors
+   - *Workaround*: Use `import .path` without alias
+
+2. **Compound Boolean in Where Clauses** (HIGH): `where x and y` doesn't filter correctly with nulls
+   - *Workaround*: Compute conditions separately, then filter on result
+
+3. **Float × Int Multiplication** (MEDIUM): `sqrt(1.0 * int_val)` causes "unknown mul type: 5, 4" error
+   - *Workaround*: Use integer arithmetic only
+
+4. **Missing `float()` Function** (MEDIUM): No runtime function to convert int to float
+   - *Workaround*: Avoid float conversion
+
+---
+
+## Original Design Proposal
+
+The sections below document the original feasibility analysis and design work.
+
+---
 
 ## Conclusion
 

@@ -871,11 +871,11 @@ https.'api.github.com'.repos.*.issues
 ```lambda
 // Load config with fallback (lazy evaluation)
 let config = .config.'local.json'
-          ?? .config.'default.json'
-          ?? {};
+          or .config.'default.json'
+          or {};
 
 // Environment-specific config
-let env = get_env("LAMBDA_ENV") ?? "dev";
+let env = get_env("LAMBDA_ENV") or "dev";
 let config_path = .config ++ [env + ".json"];
 let config = config_path;  // Loaded when accessed
 ```
