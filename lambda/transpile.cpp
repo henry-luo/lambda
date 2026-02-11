@@ -2008,8 +2008,8 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 transpile_where_check(tp, for_node->where);
             }
 
-            // Body - push to array
-            strbuf_append_str(tp->code_buf, " array_push(arr_out,");
+            // Body - push to array (use spread to flatten nested spreadable arrays)
+            strbuf_append_str(tp->code_buf, " array_push_spread(arr_out,");
             transpile_box_item(tp, for_node->then);
             strbuf_append_str(tp->code_buf, ");");
 

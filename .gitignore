@@ -49,7 +49,7 @@ view_tree*.txt
 view_tree*.json
 log.txt
 _transpiled.c
-_transpiled_js.c
+_transpiled_*.c
 lambda.wasm
 test/lambda.wasm
 
