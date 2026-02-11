@@ -507,6 +507,7 @@ struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
     int index;                  // index of the script in the runtime scripts list
     bool is_main;               // true if this is the main entry-point script
+    bool is_loading;            // true while script is being loaded (for circular import detection)
     const char* source;
     TSTree* syntax_tree;
 

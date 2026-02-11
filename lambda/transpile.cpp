@@ -2760,7 +2760,14 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_glob
     while (item) {
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM) {
             effective_length--;
-            transpile_let_stam(tp, (AstLetNode*)item, is_global);
+            // For modules: LET/PUB_STAM assignments are hoisted to top level of main()
+            // to avoid MIR JIT optimizing away writes inside ({...}) statement expressions
+            if (is_global && !tp->is_main &&
+                (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM)) {
+                // skip - assignments generated in transpile_ast_root pre-pass
+            } else {
+                transpile_let_stam(tp, (AstLetNode*)item, is_global);
+            }
         }
         else if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
             effective_length--;
@@ -4415,19 +4422,18 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
 }
 
-void define_module_import(Transpiler* tp, AstImportNode *import_node) {
-    log_debug("define import module");
-    // import module
-    if (!import_node->script) { log_error("Error: missing script for import");  return; }
-    log_debug("script reference: %s", import_node->script->reference);
-    // loop through the public functions in the module
-    AstNode *node = import_node->script->ast_root;
-    if (!node) { log_error("Error: Missing root node in module_import");  return; }
-    assert(node->node_type == AST_SCRIPT);
-    node = ((AstScript*)node)->child;
-    strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
-    // First member: constants pointer for this module
+// helper: write the fields of a Mod struct for a module's public interface
+// Used by both define_module_import (importing script) and self-struct generation (module itself)
+// Field order: fixed fields → function pointers → pub var fields
+// This ensures runner's pointer arithmetic (for fn ptrs) works without needing pub var sizes
+void write_mod_struct_fields(Transpiler* tp, AstNode *ast_root) {
+    assert(ast_root->node_type == AST_SCRIPT);
+    AstNode *node = ((AstScript*)ast_root)->child;
+    // fixed fields: consts pointer, module main, and init_vars
     strbuf_append_str(tp->code_buf, "void** consts;\n");
+    strbuf_append_str(tp->code_buf, "Item (*_mod_main)(Context*);\n");
+    strbuf_append_str(tp->code_buf, "void (*_init_vars)(void*);\n");
+    // first pass: function pointer fields
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) {
             node = ((AstListNode*)node)->item;
@@ -4435,20 +4441,24 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
         }
         else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-            log_debug("got imported fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
-                ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
             }
         }
+        node = node->next;
+    }
+    // second pass: pub var fields
+    node = ((AstScript*)ast_root)->child;
+    while (node) {
+        if (node->node_type == AST_NODE_CONTENT) {
+            node = ((AstListNode*)node)->item;
+            continue;
+        }
         else if (node->node_type == AST_NODE_PUB_STAM) {
-            // let declaration
             AstNode *declare = ((AstLetNode*)node)->declare;
             while (declare) {
                 AstNamedNode *asn_node = (AstNamedNode*)declare;
-                // declare the type
-                Type *type = asn_node->type;
-                write_type(tp->code_buf, type);
+                write_type(tp->code_buf, asn_node->type);
                 strbuf_append_char(tp->code_buf, ' ');
                 write_var_name(tp->code_buf, asn_node, NULL);
                 strbuf_append_str(tp->code_buf, ";\n");
@@ -4457,6 +4467,17 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
         }
         node = node->next;
     }
+}
+
+void define_module_import(Transpiler* tp, AstImportNode *import_node) {
+    log_debug("define import module");
+    // import module
+    if (!import_node->script) { log_error("Error: missing script for import");  return; }
+    log_debug("script reference: %s", import_node->script->reference);
+    AstNode *node = import_node->script->ast_root;
+    if (!node) { log_error("Error: Missing root node in module_import");  return; }
+    strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
+    write_mod_struct_fields(tp, node);
     strbuf_append_format(tp->code_buf, "} m%d;\n", import_node->script->index);
 }
 
@@ -4533,10 +4554,11 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         break;
     }
     case AST_NODE_PUB_STAM: {
-        // pub vars need to be brought to global scope in C, to allow them to be exported
+        // pub vars are declared at file scope by declare_global_var and assigned in main() by assign_global_var
+        // just recursively process declarations for nested closures/patterns
         AstNode *decl = ((AstLetNode*)node)->declare;
         while (decl) {
-            transpile_assign_expr(tp, (AstNamedNode*)decl);
+            define_ast_node(tp, decl);
             decl = decl->next;
         }
         break;
@@ -4741,8 +4763,7 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
             strbuf_append_str(tp->code_buf, "}");  // close nested scope
         } else {
             AstNamedNode *asn_node = (AstNamedNode*)decl;
-            strbuf_append_str(tp->code_buf, "\n ");
-            strbuf_append_char(tp->code_buf, ' ');
+            strbuf_append_str(tp->code_buf, "\n  ");
             write_var_name(tp->code_buf, asn_node, NULL);
             strbuf_append_char(tp->code_buf, '=');
             transpile_expr(tp, asn_node->as);
@@ -4884,9 +4905,87 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         child = child->next;
     }
 
+    // for imported modules: generate self-struct and _init_mod_vars
+    // _init_mod_vars copies module's global pub vars into the importer's Mod struct
+    if (!tp->is_main) {
+        strbuf_append_str(tp->code_buf, "\n// module self-struct (mirrors importer's Mod struct)\n");
+        strbuf_append_format(tp->code_buf, "struct Mod%d {\n", tp->index);
+        write_mod_struct_fields(tp, (AstNode*)script);
+        strbuf_append_str(tp->code_buf, "};\n");
+
+        // generate _init_mod_vars: copies each pub var into the Mod struct
+        strbuf_append_str(tp->code_buf, "void _init_mod_vars(void* _mp) {\n");
+        strbuf_append_format(tp->code_buf, " struct Mod%d* _m = (struct Mod%d*)_mp;\n", tp->index, tp->index);
+        child = script->child;
+        while (child) {
+            if (child->node_type == AST_NODE_CONTENT) {
+                child = ((AstListNode*)child)->item;
+                continue;
+            }
+            else if (child->node_type == AST_NODE_PUB_STAM) {
+                AstNode *declare = ((AstLetNode*)child)->declare;
+                while (declare) {
+                    AstNamedNode *asn_node = (AstNamedNode*)declare;
+                    strbuf_append_str(tp->code_buf, " _m->");
+                    write_var_name(tp->code_buf, asn_node, NULL);
+                    strbuf_append_str(tp->code_buf, " = ");
+                    write_var_name(tp->code_buf, asn_node, NULL);
+                    strbuf_append_str(tp->code_buf, ";\n");
+                    declare = declare->next;
+                }
+            }
+            child = child->next;
+        }
+        strbuf_append_str(tp->code_buf, "}\n");
+
+        // guard flag to ensure module main() executes only once
+        strbuf_append_str(tp->code_buf, "static int _mod_executed = 0;\n");
+    }
+
     // global evaluation, wrapped inside main()
     log_debug("transpile main() ...");
     strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime) {\n _lambda_rt = runtime;\n");
+
+    // for imported modules: early return if already executed (evaluate once)
+    if (!tp->is_main) {
+        strbuf_append_str(tp->code_buf, " if (_mod_executed) return ITEM_NULL;\n _mod_executed = 1;\n");
+    }
+
+    // initialize imported modules: call each module's main() then copy pub vars
+    child = script->child;
+    while (child) {
+        if (child->node_type == AST_NODE_IMPORT) {
+            AstImportNode* imp = (AstImportNode*)child;
+            if (imp->script) {
+                strbuf_append_format(tp->code_buf, " m%d._mod_main(runtime);\n", imp->script->index);
+                strbuf_append_format(tp->code_buf, " if (m%d._init_vars) m%d._init_vars(&m%d);\n",
+                    imp->script->index, imp->script->index, imp->script->index);
+            }
+        }
+        child = child->next;
+    }
+
+    // For modules: hoist LET/PUB_STAM assignments to top level of main()
+    // MIR JIT may optimize away writes to global BSS variables when assignments
+    // are inside GCC statement expressions ({...}). Moving them outside avoids this.
+    if (!tp->is_main) {
+        child = script->child;
+        while (child) {
+            if (child->node_type == AST_NODE_LET_STAM || child->node_type == AST_NODE_PUB_STAM) {
+                assign_global_var(tp, (AstLetNode*)child);
+            } else if (child->node_type == AST_NODE_CONTENT) {
+                AstNode *item = ((AstListNode*)child)->item;
+                while (item) {
+                    if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM) {
+                        assign_global_var(tp, (AstLetNode*)item);
+                    }
+                    item = item->next;
+                }
+            }
+            child = child->next;
+        }
+        strbuf_append_str(tp->code_buf, "\n");
+    }
 
     // transpile body content
     strbuf_append_str(tp->code_buf, " Item result = ({");

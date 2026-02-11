@@ -459,7 +459,7 @@ Multiple loop variables now produce a **single flat array**, not a nested array:
 
 ```lambda
 // current behavior (nested)
-(for (x in [1, 2], y in [10, 20]) x + y)
+for (x in [1, 2], y in [10, 20]) x + y
 // [[11, 21], [12, 22]] - two-dimensional
 
 // new behavior (flat)
