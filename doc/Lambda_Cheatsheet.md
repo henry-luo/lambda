@@ -77,12 +77,42 @@ b'\xDEADBEEF'     // Hex binary
 b'\64QUVGRw=='    // Base64 binary
 ```
 
+**DateTime:**
+```lambda
+t'2025-01-01T14:30:00Z'  // DateTime
+t'2025-04-26' is date       // Sub-types: date
+t'10:30:00' is time         // Sub-types: time
+
+// Member properties
+dt.date  dt.year  dt.month  dt.day 
+dt.time  dt.hour  dt.minute dt.second  dt.millisecond
+dt.weekday  dt.yearday  dt.week  dt.quarter 
+dt.unix  dt.timezone  dt.utc_offset  dt.utc  dt.local
+
+// Formatting
+dt.format("YYYY-MM-DD")  dt.format('iso')
+
+// Constructors
+datetime()  today()  justnow()   // current date/time
+datetime(2025, 4, 26, 10, 30)   
+date(2025, 4, 26)  time(10, 30, 45)  
+```
+
 **Collections:**
 ```lambda
 [1, 2, 3]         // Array
 (1, "two", 3.0)   // List
 {a: 1, b: 2}      // Map
 <div id: "main">  // Element
+```
+
+**Indexing & Slicing:**
+```lambda
+arr[0]            // First element
+arr.0             // Alt. syntax for const index
+arr[1 to 3]       // Slice (indices 1, 2, 3)
+map.key           // Map field access
+map["key"]        // Map field by string
 ```
 
 **Namespaces Support:**
@@ -93,46 +123,7 @@ namespace xlink: 'http://www.w3.org/1999/xlink'
 <svg.rect svg.width: 100>   // Namespaced tag & attr
 elem.svg.width              // Namespaced member access
 svg.rect                    // Qualified symbol
-symbol("href", 'xlink_url') // Dynamic namespaced symbol
-```
-
-**DateTime:**
-```lambda
-t'2025-01-01'     // Date
-t'14:30:00'       // Time
-t'2025-01-01T14:30:00Z'  // DateTime
-
-// Sub-types: date <: datetime, time <: datetime
-t'2025-04-26' is date       // true
-t'10:30:00' is time         // true
-
-// Member properties
-dt.year  dt.month  dt.day   // date components
-dt.hour  dt.minute dt.second dt.millisecond  // time
-dt.weekday  dt.yearday  dt.week  dt.quarter  // derived
-dt.unix  dt.timezone  dt.utc_offset  // meta
-dt.date  dt.time             // extract parts
-dt.utc   dt.local            // timezone conversion
-
-// Formatting
-dt.format("YYYY-MM-DD")     // "2025-04-26"
-dt.format('iso)             // "2025-04-26T10:30:45"
-
-// Constructors
-datetime()                  // current UTC
-datetime(2025, 4, 26, 10, 30)  // from components
-date(2025, 4, 26)           // date only
-time(10, 30, 45)            // time only
-today()  justnow()          // current date/time
-```
-
-**Indexing & Slicing:**
-```lambda
-arr[0]            // First element
-arr.0             // Alt. syntax for const index
-arr[1 to 3]       // Slice (indices 1, 2, 3)
-map.key           // Map field access
-map["key"]        // Map field by string
+symbol("href", 'xlink_url') // Create namespaced symbol
 ```
 
 ## Variables & Declarations

@@ -67,3 +67,52 @@ true
 true
 true
 true
+"Leap year rules"
+true
+true
+false
+false
+false
+"Days in month"
+31
+28
+29
+30
+31
+"Year day boundaries"
+1
+365
+366
+60
+60
+"Week number"
+1
+1
+52
+53
+"Weekday verification"
+3
+4
+6
+4
+"Quarter boundaries"
+1
+1
+2
+3
+4
+4
+"Time boundaries"
+0
+23
+59
+59
+999
+"Year boundaries"
+1
+2999
+"Extraction preserves components"
+29
+2
+23
+59
