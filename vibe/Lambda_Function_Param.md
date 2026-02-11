@@ -322,12 +322,12 @@ Lambda's optional parameter syntax follows TypeScript's semantics:
 **Example**:
 ```lambda
 // Optional parameter - can call f() or f(5)
-fn f(a?: int) { a ?? 0 }
+fn f(a?: int) { a or 0 }
 f()         // OK, a is null
 f(5)        // OK, a is 5
 
 // Nullable type - must call g(val), even g(null)
-fn g(a: int?) { a ?? 0 }
+fn g(a: int?) { a or 0 }
 g()         // ERROR: missing required parameter
 g(null)     // OK, a is null
 g(5)        // OK, a is 5

@@ -84,22 +84,6 @@ Added global `get_type_name(TypeId)` function in `lambda.h` and updated ~30 erro
 f"Hello {name}, you have {count} messages"
 ```
 
-### 2. Null-Safe Chaining
-
-**Current**:
-```lambda
-if (x != null) x.field else null
-// or
-x.field or default
-```
-
-**Suggested** (optional chaining):
-```lambda
-x?.field?.nested    // Returns null if any part is null
-x?.method()         // Safe method call
-x ?? default        // Null coalescing (distinct from `or`)
-```
-
 ---
 
 ## Feature Suggestions

@@ -42,17 +42,7 @@ In `fn` functions, the last expression being the return value keeps code terse a
 
 ## Language Design Suggestions
 
-### 1. Null Coalescing Operator
-**Suggestion**: A null coalescing operator (`??`) would be useful for providing defaults.
-
-```lambda
-// Suggested
-let name = user.name ?? "anonymous"
-```
-
-Note: `null ++ "text"` was previously producing `"nulltext"`, but this has been **fixed** — it now correctly returns `"text"` (the non-null operand).
-
-### 2. Raw Strings / Multi-line Literals
+### 1. Raw Strings / Multi-line Literals
 For generating code (Lua, JSON, etc.), having raw string literals that don't process escape sequences would be helpful:
 
 ```lambda
@@ -168,8 +158,7 @@ The language *feels* right for its intended purpose (data processing and documen
 
 The remaining pain points are:
 
-1. **Null coalescing** — a `??` operator would be a natural addition for providing defaults
-2. **Standard library gaps** — `pad_left`, `replace_all`, `enumerate`, and other common utilities would reduce boilerplate
+1. **Standard library gaps** — `pad_left`, `replace_all`, `enumerate`, and other common utilities would reduce boilerplate
 
 The language has excellent bones, and the bugs fixed in this session bring it significantly closer to production-ready for scripting tasks.
 
