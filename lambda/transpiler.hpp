@@ -86,7 +86,7 @@ void jit_cleanup(MIR_context_t ctx);
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
 
-Script* load_script(Runtime *runtime, const char* script_path, const char* source);
+Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);

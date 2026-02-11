@@ -154,6 +154,35 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 goto RETURN;
             }
             uint8_t* mod_def = (uint8_t*)imp->addr;
+            
+            // Initialize the module's constants by calling _init_mod_consts
+            // This function is exported by each imported module to set its _mod_consts pointer
+            typedef void (*init_consts_fn)(void**);
+            init_consts_fn init_fn = (init_consts_fn)find_func(import->script->jit_context, "_init_mod_consts");
+            if (init_fn) {
+                log_debug("Initializing module constants for %.*s", (int)(import->module.length), import->module.str);
+                init_fn(import->script->const_list->data);
+            } else {
+                log_debug("Module %.*s has no _init_mod_consts (may have no constants)",
+                    (int)(import->module.length), import->module.str);
+            }
+            
+            // Initialize the module's type_list by calling _init_mod_types
+            // This function is exported by each imported module to set its _mod_type_list pointer
+            typedef void (*init_types_fn)(void*);
+            init_types_fn init_types = (init_types_fn)find_func(import->script->jit_context, "_init_mod_types");
+            if (init_types) {
+                log_debug("Initializing module type_list for %.*s", (int)(import->module.length), import->module.str);
+                init_types(import->script->type_list);
+            } else {
+                log_debug("Module %.*s has no _init_mod_types (may have no types)",
+                    (int)(import->module.length), import->module.str);
+            }
+            
+            // First member is consts pointer (set above via _init_mod_consts, skip it in struct)
+            // Actually the struct still has the consts member for compatibility, skip it
+            mod_def += sizeof(void**);
+            
             // loop through the public functions in the module
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
@@ -308,7 +337,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     tp->jit_context = jit_init(tp->runtime->optimize_level);
     // compile user code to MIR
     log_debug("compiling to MIR...");
-    write_text_file("_transpiled.c", tp->code_buf->str);
+    // Write transpiled code for debugging (module index as suffix)
+    char transpiled_filename[64];
+    snprintf(transpiled_filename, sizeof(transpiled_filename), "_transpiled_%d.c", script->index);
+    write_text_file(transpiled_filename, tp->code_buf->str);
     char* code = tp->code_buf->str + lambda_lambda_h_len;
     // printf("code len: %d\n", (int)strlen(code));
     log_debug("transpiled code (first 500 chars):\n---------%.500s", code);
@@ -335,8 +367,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     print_elapsed_time("JIT compiling", start, end);
 }
 
-Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
-    log_info("Loading script: %s", script_path);
+Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
+    log_info("Loading script: %s (is_import=%d)", script_path, is_import);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
@@ -357,6 +389,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     log_debug("script source length: %d", (int)strlen(new_script->source));
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
+    new_script->is_main = !is_import;  // main script is not an import
 
     // Initialize decimal context (use shared unlimited context for transpiler)
     new_script->decimal_ctx = decimal_unlimited_context();
@@ -573,7 +606,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only) {
     Runner runner;
     runner_init(runtime, &runner);
-    runner.script = load_script(runtime, script_path, source);
+    runner.script = load_script(runtime, script_path, source, false);
     if (transpile_only) {
         log_info("Transpiled script %s only, not executing.", script_path);
         // Return Input with null item for transpile-only mode
@@ -600,7 +633,7 @@ Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
     Runner runner;
     runner_init(runtime, &runner);
-    runner.script = load_script(runtime, script_path, NULL);
+    runner.script = load_script(runtime, script_path, NULL, false);
 
     if (transpile_only) {
         log_info("Transpiled script %s only, not executing.", script_path);
