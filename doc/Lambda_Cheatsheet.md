@@ -71,13 +71,10 @@ string"
 symbol            // Unquoted symbol
 ```
 
-**Binary & DateTime:**
+**Binary:**
 ```lambda
 b'\xDEADBEEF'     // Hex binary
 b'\64QUVGRw=='    // Base64 binary
-t'2025-01-01'     // Date
-t'14:30:00'       // Time
-t'2025-01-01T14:30:00Z'  // DateTime
 ```
 
 **Collections:**
@@ -86,6 +83,47 @@ t'2025-01-01T14:30:00Z'  // DateTime
 (1, "two", 3.0)   // List
 {a: 1, b: 2}      // Map
 <div id: "main">  // Element
+```
+
+**Namespaces Support:**
+```lambda
+namespace svg: 'http://www.w3.org/2000/svg'
+namespace xlink: 'http://www.w3.org/1999/xlink'
+
+<svg.rect svg.width: 100>   // Namespaced tag & attr
+elem.svg.width              // Namespaced member access
+svg.rect                    // Qualified symbol
+symbol("href", 'xlink_url') // Dynamic namespaced symbol
+```
+
+**DateTime:**
+```lambda
+t'2025-01-01'     // Date
+t'14:30:00'       // Time
+t'2025-01-01T14:30:00Z'  // DateTime
+
+// Sub-types: date <: datetime, time <: datetime
+t'2025-04-26' is date       // true
+t'10:30:00' is time         // true
+
+// Member properties
+dt.year  dt.month  dt.day   // date components
+dt.hour  dt.minute dt.second dt.millisecond  // time
+dt.weekday  dt.yearday  dt.week  dt.quarter  // derived
+dt.unix  dt.timezone  dt.utc_offset  // meta
+dt.date  dt.time             // extract parts
+dt.utc   dt.local            // timezone conversion
+
+// Formatting
+dt.format("YYYY-MM-DD")     // "2025-04-26"
+dt.format('iso)             // "2025-04-26T10:30:45"
+
+// Constructors
+datetime()                  // current UTC
+datetime(2025, 4, 26, 10, 30)  // from components
+date(2025, 4, 26)           // date only
+time(10, 30, 45)            // time only
+today()  justnow()          // current date/time
 ```
 
 **Indexing & Slicing:**

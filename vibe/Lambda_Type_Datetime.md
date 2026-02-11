@@ -1,7 +1,7 @@
 # Lambda DateTime Enhancement Proposal
 
-> **Status**: Proposal  
-> **Date**: 2026-02-09  
+> **Status**: Proposal
+> **Date**: 2026-02-09
 > **Related**: [Lambda Data](../doc/Lambda_Data.md), [Lambda Type System](../doc/Lambda_Type.md), [Lambda System Functions](../doc/Lambda_Sys_Func.md)
 
 ---
@@ -371,30 +371,43 @@ dt.format('time')                  // "10:30:45"
 | `Z` | UTC offset | `+00:00` |
 | `ZZ` | UTC offset compact | `+0000` |
 
-### Extraction & Conversion
+### Extraction & Conversion Properties
+
+These are **properties** (not methods) that return transformed datetime values:
 
 ```lambda
 let dt = t'2025-04-26T10:30:45+05:30'
 
-dt.date()                // t'2025-04-26'     (extract date part — existing)
-dt.time()                // t'10:30:45'       (extract time part — existing)
-dt.utc()                 // t'2025-04-26T05:00:45Z' (convert to UTC)
-dt.local()               // convert to local timezone
+dt.date          // t'2025-04-26'          (extract date part)
+dt.time          // t'10:30:45'            (extract time part)
+dt.utc           // t'2025-04-26T05:00:45Z' (convert to UTC)
+dt.local         // convert to local timezone
+```
+
+**Design rationale**: These are properties rather than methods because:
+- They are pure projections/views with no side effects
+- Consistent with other properties (`.year`, `.month`, `.unix`)
+- Simpler syntax, aligns with Lambda's functional style
+- Conceptually: `dt.date` is "the date part of dt" (like `dt.year` is "the year of dt")
+
+### Formatting Method
+
+The only datetime member function is `.format()` which takes a pattern argument:
+
+```lambda
+dt.format("YYYY-MM-DD")  // "2025-04-26"
+dt.format('iso)          // "2025-04-26T10:30:45"
 ```
 
 ### Implementation Approach
 
-Member functions are dispatched through the existing method call mechanism. When the transpiler sees `dt.format(...)` and `dt` has type `LMD_TYPE_DTIME`, it resolves to a system function call:
+Extraction properties are resolved in `fn_member()` alongside other datetime properties. When accessing `dt.date`, `dt.time`, `dt.utc`, or `dt.local`, the member dispatch returns a new datetime value with the appropriate transformation applied.
+
+The `.format()` method is dispatched through the method call mechanism:
 
 ```
 dt.format(pattern)    → fn_dt_format(dt, pattern)
-dt.utc()              → fn_dt_utc(dt)
-dt.local()            → fn_dt_local(dt)
-dt.date()             → fn_date(dt)       (existing)
-dt.time()             → fn_time(dt)       (existing)
 ```
-
-This uses the same mechanism that already exists for `date(dt)` and `time(dt)` as "method-eligible" system functions (the `is_method` flag in the sys func table).
 
 > **Phase 2**: Arithmetic member functions (`.add_days()`, `.add_months()`, etc.), component replacement (`.with()`), and boundary functions (`.start_of()`, `.end_of()`) will be added in Phase 2.
 
