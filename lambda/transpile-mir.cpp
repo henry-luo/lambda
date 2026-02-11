@@ -420,10 +420,10 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     // Load and parse script
     if (source) {
         // Parse and build AST from source string
-        runner.script = load_script(runtime, script_path, source);
+        runner.script = load_script(runtime, script_path, source, false);
     } else {
         // Load script from file - pass script_path as both path and source (load_script will read file)
-        runner.script = load_script(runtime, script_path, NULL);
+        runner.script = load_script(runtime, script_path, NULL, false);
     }
 
     if (!runner.script || !runner.script->ast_root) {
