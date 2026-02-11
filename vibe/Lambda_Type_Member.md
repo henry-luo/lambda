@@ -870,9 +870,6 @@ user3.name              // null (user3 is null)
 user1.address.city.len()   // 3
 user2.address.city.len()   // null
 user3.name.len()           // null
-
-// Practical pattern: provide defaults
-user2.address.city ?? "Unknown"   // "Unknown"
 ```
 
 ---

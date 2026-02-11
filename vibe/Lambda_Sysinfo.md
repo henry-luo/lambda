@@ -185,7 +185,7 @@ if sys.proc.self.env.DEBUG {
 }
 
 // With fallback
-let port = sys.proc.self.env.PORT ?? "8080";
+let port = sys.proc.self.env.PORT or "8080";
 ```
 
 ### 2.6 Directory Paths
