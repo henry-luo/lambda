@@ -18,6 +18,10 @@ This document covers Lambda's literal values, collection types, and expressions 
    - [Symbol Literals](#symbol-literals)
    - [Binary Literals](#binary-literals)
    - [DateTime Literals](#datetime-literals)
+     - [DateTime Sub-Types](#datetime-sub-types)
+     - [DateTime Member Properties](#datetime-member-properties)
+     - [DateTime Member Functions](#datetime-member-functions)
+     - [DateTime Constructors](#datetime-constructors)
    - [Boolean and Null Literals](#boolean-and-null-literals)
 3. [Path Literals](#path-literals)
 4. [Collections](#collections)
@@ -72,6 +76,14 @@ Lambda Script has a rich type system with both primitive and composite types:
 ---
 
 ## Primitive Literals
+
+### Boolean and Null Literals
+
+```lambda
+true
+false
+null
+```
 
 ### Numeric Literals
 
@@ -176,12 +188,193 @@ t'2025-05-01 10:30'
 t'2025-05-01T14:30:00Z'
 ```
 
-### Boolean and Null Literals
+#### DateTime Sub-Types
+
+Lambda has three datetime-related types in a sub-type hierarchy:
+
+```
+         datetime
+        /        \
+     date        time
+```
+
+- `date` — Date-only values (year, month, day)
+- `time` — Time-only values (hour, minute, second, millisecond)
+- `datetime` — Full date and time values
 
 ```lambda
-true
-false
-null
+// Type checking
+t'2025-04-26' is date        // true  (date-only precision)
+t'2025-04-26' is datetime    // true  (date <: datetime)
+t'10:30:00' is time          // true  (time-only precision)
+t'10:30:00' is datetime      // true  (time <: datetime)
+t'2025-04-26T10:30' is date  // false (has both date and time)
+t'2025-04-26T10:30' is time  // false (has both date and time)
+```
+
+#### DateTime Member Properties
+
+Access datetime components using dot notation:
+
+**Date Properties:**
+
+```lambda
+let dt = t'2025-04-26T10:30:45.123+05:30'
+
+dt.year          // 2025       (int)
+dt.month         // 4          (int, 1–12)
+dt.day           // 26         (int, 1–31)
+dt.weekday       // 6          (int, 0=Sunday, 6=Saturday)
+dt.yearday       // 116        (int, 1–366, day of year)
+dt.week          // 17         (int, ISO week number 1–53)
+dt.quarter       // 2          (int, 1–4)
+```
+
+**Time Properties:**
+
+```lambda
+dt.hour          // 10         (int, 0–23)
+dt.minute        // 30         (int, 0–59)
+dt.second        // 45         (int, 0–59)
+dt.millisecond   // 123        (int, 0–999)
+```
+
+**Timezone Properties:**
+
+```lambda
+dt.timezone      // 330        (int, offset in minutes from UTC)
+dt.utc_offset    // '+05:30    (symbol, formatted offset)
+dt.is_utc        // false      (bool)
+```
+
+**Meta Properties:**
+
+```lambda
+dt.unix          // 1745635845123 (int, Unix timestamp in milliseconds)
+dt.is_date       // true       (bool, has date component)
+dt.is_time       // true       (bool, has time component)
+dt.is_leap_year  // false      (bool)
+dt.days_in_month // 30         (int, days in the datetime's month)
+```
+
+**Extraction & Conversion Properties:**
+
+```lambda
+dt.date          // t'2025-04-26'          (extract date part)
+dt.time          // t'10:30:45'            (extract time part)
+dt.utc           // t'2025-04-26T05:00:45Z' (convert to UTC)
+dt.local         // convert to local timezone
+```
+
+#### DateTime Member Functions
+
+**Formatting:**
+
+```lambda
+let dt = t'2025-04-26T10:30:45'
+
+// Custom format patterns
+dt.format("YYYY-MM-DD")              // "2025-04-26"
+dt.format("DD/MM/YYYY")              // "26/04/2025"
+dt.format("hh:mm A")                 // "10:30 AM"
+dt.format("YYYY-MM-DD hh:mm:ss")     // "2025-04-26 10:30:45"
+dt.format("MMM DD, YYYY")            // "Apr 26, 2025"
+
+// Predefined format names (symbol argument)
+dt.format('iso)                      // "2025-04-26T10:30:45"
+dt.format('human)                    // "April 26, 2025 10:30 AM"
+dt.format('date)                     // "2025-04-26"
+dt.format('time)                     // "10:30:45"
+```
+
+**Format Pattern Tokens:**
+
+| Token | Meaning | Example |
+|-------|---------|---------|
+| `YYYY` | 4-digit year | `2025` |
+| `YY` | 2-digit year | `25` |
+| `MM` | 2-digit month | `04` |
+| `M` | Month without padding | `4` |
+| `MMM` | Abbreviated month name | `Apr` |
+| `MMMM` | Full month name | `April` |
+| `DD` | 2-digit day | `26` |
+| `D` | Day without padding | `26` |
+| `ddd` | Abbreviated weekday | `Sat` |
+| `dddd` | Full weekday | `Saturday` |
+| `hh` | 2-digit hour (24h) | `10` |
+| `h` | Hour without padding | `10` |
+| `HH` | 2-digit hour (12h) | `10` |
+| `mm` | 2-digit minute | `30` |
+| `ss` | 2-digit second | `45` |
+| `SSS` | 3-digit millisecond | `000` |
+| `A` | AM/PM | `AM` |
+| `Z` | UTC offset | `+00:00` |
+| `ZZ` | UTC offset compact | `+0000` |
+
+#### DateTime Constructors
+
+**`datetime(...)` — Full Constructor:**
+
+```lambda
+// Current date and time
+datetime()                           // current UTC datetime
+
+// Parse from string
+datetime("2025-04-26T10:30:00")      // parse ISO 8601 string
+
+// From components
+datetime(2025, 4, 26)                // date only: t'2025-04-26'
+datetime(2025, 4, 26, 10, 30)        // date + time: t'2025-04-26 10:30'
+datetime(2025, 4, 26, 10, 30, 45)    // full: t'2025-04-26 10:30:45'
+
+// From Unix timestamp
+datetime(1714100000)                 // from Unix timestamp (seconds)
+
+// From map
+datetime({year: 2025, month: 4, day: 26, hour: 10, minute: 30})
+```
+
+**`date(...)` — Date Constructor:**
+
+```lambda
+// Current date
+date()                   // same as today()
+
+// Extract from datetime
+date(some_datetime)      // extract date part
+
+// From components
+date(2025, 4, 26)        // t'2025-04-26'
+date(2025, 4)            // t'2025-04'   (year-month)
+date(2025)               // t'2025'      (year only)
+
+// Parse from string
+date("2025-04-26")       // parse date string
+```
+
+**`time(...)` — Time Constructor:**
+
+```lambda
+// Current time
+time()                   // same as justnow()
+
+// Extract from datetime
+time(some_datetime)      // extract time part
+
+// From components
+time(10, 30)             // t'10:30'
+time(10, 30, 45)         // t'10:30:45'
+time(10, 30, 45, 500)    // t'10:30:45.500'
+
+// Parse from string
+time("10:30:45")         // parse time string
+```
+
+**Related Functions:**
+
+```lambda
+today()                  // current date (DATE_ONLY precision)
+justnow()                // current time (TIME_ONLY precision)
 ```
 
 ---
@@ -566,7 +759,7 @@ Structured markup elements with attributes and content, used for document proces
 <p; "Hello, world!">
 
 // Element with attributes and content
-<div class: "header"; 
+<div class: "header";
     "Page Title";
     <span; "Subtitle">
 >
@@ -622,7 +815,7 @@ For expressions iterate over collections and return new collections:
 (for (i in 1 to 5) i * i)     // [1, 4, 9, 16, 25]
 
 // Conditional iteration
-(for (num in [1, 2, 3, 4, 5]) 
+(for (num in [1, 2, 3, 4, 5])
     if (num % 2 == 0) num else null)  // [null, 2, null, 4, null]
 ```
 

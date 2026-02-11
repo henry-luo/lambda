@@ -703,6 +703,43 @@ static int get_path_scheme_from_name(StrView name) {
     return -1;  // not a path scheme
 }
 
+// Add a namespace binding to the transpiler context
+static void add_namespace(Transpiler* tp, String* prefix, Target* target) {
+    NamespaceEntry* entry = (NamespaceEntry*)pool_calloc(tp->pool, sizeof(NamespaceEntry));
+    entry->prefix = prefix;
+    entry->target = target;
+    entry->next = tp->namespaces;
+    tp->namespaces = entry;
+    log_debug("namespace added: %.*s", (int)prefix->len, prefix->chars);
+}
+
+// Lookup a namespace by prefix string
+// returns the NamespaceEntry if found, NULL if not
+static NamespaceEntry* lookup_namespace(Transpiler* tp, String* prefix) {
+    NamespaceEntry* entry = tp->namespaces;
+    while (entry) {
+        if (entry->prefix->len == prefix->len &&
+            memcmp(entry->prefix->chars, prefix->chars, prefix->len) == 0) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+// Lookup a namespace by prefix StrView
+static NamespaceEntry* lookup_namespace_strview(Transpiler* tp, StrView prefix) {
+    NamespaceEntry* entry = tp->namespaces;
+    while (entry) {
+        if (entry->prefix->len == prefix.length &&
+            memcmp(entry->prefix->chars, prefix.str, prefix.length) == 0) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
 // check if a member_expr chain starts with a path scheme (file, http, https, sys)
 // and collect all segment names if so
 // returns the PathScheme if it's a path, or -1 if it's a regular member expression
@@ -870,6 +907,75 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         id_node->name = name_pool_create_strview(tp->name_pool, var_name);
         log_debug("member expr field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
         ast_node->field = (AstNode*)id_node;
+
+        // Check if object is a member expression with namespace prefix as field
+        // e.g., in e.ns.attr, when building the outer expr, object is e.ns where ns is namespace
+        if (ast_node->object && ast_node->object->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)ast_node->object;
+            if (pri->expr && pri->expr->node_type == AST_NODE_MEMBER_EXPR) {
+                AstFieldNode* inner = (AstFieldNode*)pri->expr;
+                if (inner->field && inner->field->node_type == AST_NODE_IDENT) {
+                    AstIdentNode* ns_ident = (AstIdentNode*)inner->field;
+                    NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
+                    if (ns_entry) {
+                        // Merge: replace object with inner->object, merge field name
+                        // Create qualified name: ns.attr
+                        size_t ns_len = ns_ident->name->len;
+                        size_t attr_len = id_node->name->len;
+                        size_t total_len = ns_len + 1 + attr_len;  // ns.attr
+                        char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
+                        memcpy(buf, ns_ident->name->chars, ns_len);
+                        buf[ns_len] = '.';
+                        memcpy(buf + ns_len + 1, id_node->name->chars, attr_len);
+                        buf[total_len] = '\0';
+                        StrView qualified = {buf, total_len};
+                        id_node->name = name_pool_create_strview(tp->name_pool, qualified);
+                        // Replace object with inner object (skip the namespace member access)
+                        ast_node->object = inner->object;
+                        log_debug("namespace member expr merged: '%.*s'", (int)id_node->name->len, id_node->name->chars);
+                    }
+                }
+            }
+            // Also check if object is just a namespace prefix identifier (for ns.value syntax)
+            // e.g., ns.value where ns is a namespace prefix
+            else if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+                AstIdentNode* ns_ident = (AstIdentNode*)pri->expr;
+                NamespaceEntry* ns_entry = lookup_namespace(tp, ns_ident->name);
+                if (ns_entry) {
+                    // ns.value becomes a symbol literal with qualified name
+                    // Create qualified name: ns.value
+                    size_t ns_len = ns_ident->name->len;
+                    size_t val_len = id_node->name->len;
+                    size_t total_len = ns_len + 1 + val_len;  // ns.value
+                    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
+                    memcpy(buf, ns_ident->name->chars, ns_len);
+                    buf[ns_len] = '.';
+                    memcpy(buf + ns_len + 1, id_node->name->chars, val_len);
+                    buf[total_len] = '\0';
+                    log_debug("namespace symbol created: '%.*s'", (int)total_len, buf);
+
+                    // Build a symbol type with the qualified name
+                    TypeString* sym_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_SYMBOL, sizeof(TypeString));
+                    sym_type->is_const = 1;
+                    sym_type->is_literal = 1;
+                    // Allocate Symbol struct (has ns field)
+                    Symbol* sym = (Symbol*)pool_alloc(tp->pool, sizeof(Symbol) + total_len + 1);
+                    sym->ns = ns_entry->target;  // set namespace target
+                    sym->ref_cnt = 1;
+                    sym->len = total_len;
+                    memcpy(sym->chars, buf, total_len);
+                    sym->chars[total_len] = '\0';
+                    sym_type->string = (String*)sym;
+                    arraylist_append(tp->const_list, sym);
+                    sym_type->const_index = tp->const_list->length - 1;
+
+                    // Return a primary node with symbol type
+                    AstPrimaryNode* sym_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                    sym_node->type = (Type*)sym_type;
+                    return (AstNode*)sym_node;
+                }
+            }
+        }
     }
     else {
         ast_node->field = build_expr(tp, field_node);
@@ -5069,8 +5175,35 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
             ast = build_module_import(tp, child);
             break;
         case sym_namespace_decl:
-            // namespace declaration - currently just skip (namespaces are resolved at runtime)
+            // namespace declaration: namespace ns1: 'url', ns2: 'url2', ...
             log_debug("namespace declaration found");
+            {
+                // iterate through namespace_binding children
+                uint32_t binding_count = ts_node_named_child_count(child);
+                for (uint32_t i = 0; i < binding_count; i++) {
+                    TSNode binding = ts_node_named_child(child, i);
+                    if (ts_node_symbol(binding) == sym_namespace_binding) {
+                        TSNode prefix_node = ts_node_child_by_field_id(binding, FIELD_PREFIX);
+                        TSNode uri_node = ts_node_child_by_field_id(binding, FIELD_URI);
+                        if (!ts_node_is_null(prefix_node) && !ts_node_is_null(uri_node)) {
+                            StrView prefix_str = ts_node_source(tp, prefix_node);
+                            String* prefix = name_pool_create_strview(tp->name_pool, prefix_str);
+                            // build target from uri (string, symbol, or identifier)
+                            Target* target = (Target*)pool_calloc(tp->pool, sizeof(Target));
+                            TSSymbol uri_sym = ts_node_symbol(uri_node);
+                            StrView uri_str = ts_node_source(tp, uri_node);
+                            if (uri_sym == SYM_STRING || uri_sym == SYM_SYMBOL) {
+                                // strip quotes
+                                uri_str.str++;
+                                uri_str.length -= 2;
+                            }
+                            String* uri_string = name_pool_create_strview(tp->name_pool, uri_str);
+                            target->original = uri_string->chars;  // store as original URL string
+                            add_namespace(tp, prefix, target);
+                        }
+                    }
+                }
+            }
             break;
         case SYM_CONTENT:
             ast = build_content(tp, child, true, true);
