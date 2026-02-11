@@ -316,6 +316,18 @@ Item fn_mul(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
         return push_d(item_a.get_double() * (double)item_b.get_int56());
     }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
+        return push_d((double)item_a.get_int64() * item_b.get_double());
+    }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
+        return push_d(item_a.get_double() * (double)item_b.get_int64());
+    }
+    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
+        return push_l(item_a.get_int56() * item_b.get_int64());
+    }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
+        return push_l(item_a.get_int64() * item_b.get_int56());
+    }
     // else if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_INT) {
     //     String* str_a = (String*)item_a.pointer;
     //     String* result = str_repeat(str_a, item_b.int_val);
@@ -450,6 +462,12 @@ Item fn_sub(Item item_a, Item item_b) {
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
         return push_l(item_a.get_int64() - item_b.get_int56());
+    }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
+        return push_d((double)item_a.get_int64() - item_b.get_double());
+    }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
+        return push_d(item_a.get_double() - (double)item_b.get_int64());
     }
     // Add libmpdec decimal support
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
@@ -2329,13 +2347,13 @@ Item fn_float(Item item) {
         return item;  // Already a float
     }
     else if (item._type_id == LMD_TYPE_INT) {
+        int64_t int_val = item.get_int56();
         double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         if (!val) {
             log_debug("Failed to allocate float");
             return ItemError;
         }
-        *val = (double)item.get_int56();
-
+        *val = (double)int_val;
         return (Item) { .item = d2it(val) };
     }
     else if (item._type_id == LMD_TYPE_INT64) {

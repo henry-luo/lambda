@@ -1124,7 +1124,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_int(tp->code_buf, dec_type->const_index);
                 strbuf_append_char(tp->code_buf, ')');
             }
-            else { // bool, null, float
+            else if (pri_node->type->type_id == LMD_TYPE_NULL) {
+                // null literals (including empty strings "") should be transpiled as ITEM_NULL
+                strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            }
+            else { // bool, float
                 TSNode child = ts_node_named_child(pri_node->node, 0);
                 TSSymbol symbol = ts_node_symbol(child);
                 write_node_source(tp, pri_node->node);
@@ -1204,7 +1208,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         } else {
-            // slightly faster path
+            // slightly faster path for bool && bool
             if (bi_node->op == OPERATOR_AND) {
                 strbuf_append_str(tp->code_buf, "op_and(");
             } else {
