@@ -156,7 +156,6 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             uint8_t* mod_def = (uint8_t*)imp->addr;
             
             // Initialize the module's constants by calling _init_mod_consts
-            // This function is exported by each imported module to set its _mod_consts pointer
             typedef void (*init_consts_fn)(void**);
             init_consts_fn init_fn = (init_consts_fn)find_func(import->script->jit_context, "_init_mod_consts");
             if (init_fn) {
@@ -168,7 +167,6 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             }
             
             // Initialize the module's type_list by calling _init_mod_types
-            // This function is exported by each imported module to set its _mod_type_list pointer
             typedef void (*init_types_fn)(void*);
             init_types_fn init_types = (init_types_fn)find_func(import->script->jit_context, "_init_mod_types");
             if (init_types) {
@@ -179,11 +177,22 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                     (int)(import->module.length), import->module.str);
             }
             
-            // First member is consts pointer (set above via _init_mod_consts, skip it in struct)
-            // Actually the struct still has the consts member for compatibility, skip it
+            // skip consts pointer field
             mod_def += sizeof(void**);
+
+            // populate _mod_main: module's main() entry point
+            *(main_func_t*) mod_def = import->script->main_func;
+            log_debug("set _mod_main for %.*s: %p", (int)(import->module.length), import->module.str, import->script->main_func);
+            mod_def += sizeof(main_func_t);
+
+            // populate _init_vars: function that copies module globals into Mod struct
+            typedef void (*init_vars_fn)(void*);
+            init_vars_fn init_vars_func = (init_vars_fn)find_func(import->script->jit_context, "_init_mod_vars");
+            *(init_vars_fn*) mod_def = init_vars_func;
+            log_debug("set _init_vars for %.*s: %p", (int)(import->module.length), import->module.str, (void*)init_vars_func);
+            mod_def += sizeof(init_vars_fn);
             
-            // loop through the public functions in the module
+            // populate function pointer fields for each public function
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
             node = ((AstScript*)node)->child;
@@ -207,25 +216,10 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         mod_def += sizeof(main_func_t);
                     }
                 }
+                // pub var fields are populated at runtime by _init_mod_vars, skip pointer arithmetic
+                // (struct layout matches but values are set when module main() runs)
                 else if (node->node_type == AST_NODE_PUB_STAM) {
-                    AstLetNode *pub_node = (AstLetNode*)node;
-                    // loop through the declarations
-                    AstNode *declare = pub_node->declare;
-                    while (declare) {
-                        AstNamedNode *dec_node = (AstNamedNode*)declare;
-                        // write the variable name
-                        StrBuf *var_name = strbuf_new();
-                        write_var_name(var_name, dec_node, NULL);
-                        log_debug("loading pub var: %s from script: %s", var_name->str, import->script->reference);
-                        void* data_ptr = find_data(import->script->jit_context, var_name->str);
-                        log_debug("got pub var addr: %s, %p", var_name->str, data_ptr);
-                        // copy the data
-                        int bytes = type_info[dec_node->type->type_id].byte_size;
-                        memcpy(mod_def, data_ptr, bytes);
-                        mod_def += bytes;
-                        strbuf_free(var_name);
-                        declare = declare->next;
-                    }
+                    // no-op: pub vars initialized via _init_mod_vars at runtime
                 }
                 node = node->next;
             }
@@ -373,6 +367,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
         if (strcmp(script->reference, script_path) == 0) {
+            // circular import detection: script is in list but still being loaded
+            if (script->is_loading) {
+                log_error("Circular import detected: %s", script_path);
+                fprintf(stderr, "Error: Circular import detected: %s\n", script_path);
+                return NULL;
+            }
             log_info("Script %s is already loaded.", script_path);
             return script;
         }
@@ -400,7 +400,10 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     transpiler.error_count = 0;
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
     transpiler.errors = arraylist_new(8);  // initialize error list for structured errors
+
+    new_script->is_loading = true;  // mark as loading for circular import detection
     transpile_script(&transpiler, new_script, script_path);
+    new_script->is_loading = false;  // loading complete
 
     // Print structured errors if any
     if (transpiler.errors && transpiler.errors->length > 0) {
@@ -411,6 +414,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             fprintf(stderr, "\n");
         }
         fprintf(stderr, "%d error(s) found.\n", transpiler.errors->length);
+    }
+
+    // check for compilation failure
+    if (!new_script->jit_context) {
+        log_error("Error: Failed to compile script %s", script_path);
+        return NULL;
     }
 
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
