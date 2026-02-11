@@ -1,0 +1,5 @@
+"Lambda"
+1
+42
+5
+"Lambda v1 has 5 items"
