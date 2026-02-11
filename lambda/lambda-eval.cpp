@@ -1605,6 +1605,41 @@ Item fn_member(Item item, Item key) {
         if (strcmp(k, "is_leap_year") == 0)   return {.item = b2it(datetime_is_leap_year_dt(&dt))};
         if (strcmp(k, "days_in_month") == 0)  return {.item = i2it(datetime_days_in_month_dt(&dt))};
 
+        // extraction properties (return transformed datetime)
+        if (strcmp(k, "date") == 0) {
+            DateTime result = dt;
+            result.hour = 0;
+            result.minute = 0;
+            result.second = 0;
+            result.millisecond = 0;
+            result.precision = DATETIME_PRECISION_DATE_ONLY;
+            return push_k(result);
+        }
+        if (strcmp(k, "time") == 0) {
+            DateTime result;
+            memset(&result, 0, sizeof(DateTime));
+            DATETIME_SET_YEAR_MONTH(&result, 1970, 1);
+            result.day = 1;
+            result.hour = dt.hour;
+            result.minute = dt.minute;
+            result.second = dt.second;
+            result.millisecond = dt.millisecond;
+            result.tz_offset_biased = dt.tz_offset_biased;
+            result.precision = DATETIME_PRECISION_TIME_ONLY;
+            result.format_hint = dt.format_hint;
+            return push_k(result);
+        }
+        if (strcmp(k, "utc") == 0) {
+            DateTime* result = datetime_to_utc(context->pool, &dt);
+            if (result) return push_k(*result);
+            return ItemNull;
+        }
+        if (strcmp(k, "local") == 0) {
+            DateTime* result = datetime_to_local(context->pool, &dt);
+            if (result) return push_k(*result);
+            return ItemNull;
+        }
+
         log_debug("fn_member: unknown datetime property '%s'", k);
         return ItemNull;
     }
