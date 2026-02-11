@@ -175,11 +175,11 @@ value or "default"          // Returns value if truthy, else "default"
 
 Lambda has simple truthiness rules:
 
-| Falsy Values | Note                                                   |
-| ------------ | ------------------------------------------------------ |
-| `null`       |                                                        |
-| `false`      |                                                        |
-| "", ''       | Empty string `""` is normalised to `null` under Lambda |
+| Falsy Values | Note                                                                 |
+| ------------ | -------------------------------------------------------------------- |
+| `null`       |                                                                      |
+| `false`      |                                                                      |
+| "", ''       | Empty string`""` or symbol `''` is normalised to `null` under Lambda |
 
 | Truthy Values (Everything Else)                          |
 | -------------------------------------------------------- |
@@ -386,10 +386,10 @@ let grade = if (score >= 90) "A"
 
 ### For Expressions
 
-For expressions iterate and return collections:
+For expressions produce **spreadable arrays** that automatically flatten when nested in collections:
 
 ```lambda
-// Basic iteration
+// Basic iteration - produces spreadable array
 for (x in [1, 2, 3]) x * 2    // [2, 4, 6]
 
 // Range iteration
@@ -398,6 +398,45 @@ for (i in 1 to 5) i * i       // [1, 4, 9, 16, 25]
 // Conditional in body
 for (num in [1, 2, 3, 4, 5]) 
     if (num % 2 == 0) num else null
+```
+
+#### Spreadable Array Behavior
+
+For expressions produce spreadable arrays that flatten when nested in other collections:
+
+```lambda
+// Nested for-expressions flatten automatically
+[for (i in 1 to 3) for (j in 1 to 3) i * j]
+// [1, 2, 3, 2, 4, 6, 3, 6, 9] — flat array, not nested
+
+// Spreading into array literals
+[0, for (x in [1, 2, 3]) x * 10, 99]
+// [0, 10, 20, 30, 99] — for-expr items spread into the array
+
+// Spreading into lists
+(0, for (x in [1, 2]) x * 5, 99)
+// (0, 5, 10, 99)
+
+// Multiple for-expressions spread independently
+[for (x in [1, 2]) x, for (y in [3, 4]) y * 10]
+// [1, 2, 30, 40]
+```
+
+#### Empty For Results
+
+When a for-expression iterates over an empty collection or filters all elements, it produces a **spreadable null** that is skipped when spreading:
+
+```lambda
+// Empty iteration produces spreadable null (evaluates to null)
+let v = for (i in []) i
+v == null              // true
+
+// Spreadable null is skipped in collections
+[for (i in []) i]      // [] — empty array, not [null]
+[1, for (i in []) i, 2]  // [1, 2] — null skipped
+
+// Where clause filters all elements
+[for (x in [1, 2, 3] where x > 100) x]  // []
 ```
 
 ### Extended For-Expression Clauses
@@ -490,6 +529,8 @@ if (temperature > 30) {
 
 #### For Statements
 
+For statements (with curly braces) also produce spreadable arrays:
+
 ```lambda
 for item in [1, 2, 3] {
     print(item)
@@ -500,6 +541,15 @@ for i in 1 to 10 {
         print(i, "is even")
     }
 }
+
+// Nested for-statements flatten like for-expressions
+let matrix = [[1, 2], [3, 4]]
+for row in matrix {
+    for col in row {
+        col * 2
+    }
+}
+// Produces: 2, 4, 6, 8 (flattened)
 
 // Multiple loop variables
 for x in [1, 2], y in [3, 4] {

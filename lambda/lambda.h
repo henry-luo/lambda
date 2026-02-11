@@ -509,6 +509,7 @@ String* heap_strcpy(char* src, int len);
 
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
+#define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
