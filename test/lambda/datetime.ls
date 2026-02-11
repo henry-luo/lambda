@@ -29,15 +29,28 @@
 (let dt = t'2025-04-26T10:30:45', dt.hour)
 (let dt = t'2025-04-26T10:30:45', dt.minute)
 (let dt = t'2025-04-26T10:30:45', dt.second)
+(let dt = t'2025-04-26T10:30:45.123', dt.millisecond)
 
 // Member properties - computed
 "Computed properties"
 (let dt = t'2025-04-26T10:30:45', dt.weekday)
 (let dt = t'2025-01-01T00:00:00', dt.yearday)
+(let dt = t'2025-04-26T10:30:45', dt.week)
 (let dt = t'2025-04-26T10:30:45', dt.quarter)
 (let dt = t'2024-02-29', dt.is_leap_year)
 (let dt = t'2025-02-28', dt.is_leap_year)
 (let dt = t'2024-02-29', dt.days_in_month)
+
+// Timezone offset in minutes
+"Timezone offset"
+(let dt = t'2025-04-26T10:30:00+05:30', dt.timezone)
+(let dt = t'2025-04-26T10:30:00-08:00', dt.timezone)
+(let dt = t'2025-04-26T10:30:00z', dt.timezone)
+
+// Unix timestamp
+"Unix timestamp"
+(let dt = t'1970-01-01T00:00:00z', dt.unix)
+(t'2025-04-26T10:30:45z'.unix > 0)
 
 // Precision checks
 "Precision checks"
@@ -61,6 +74,14 @@
 (t'2025-04-26T10:30:00z' == t'2025-04-26T10:30:00+00:00')
 (t'2025-04-26T10:30:00z' < t'2025-04-26T11:30:00z')
 (t'2025-04-26T10:30:00+05:00' < t'2025-04-26T10:30:00z')
+
+// Extraction properties
+"Extraction properties"
+(let dt = t'2025-04-26T10:30:45', dt.date)
+(let dt = t'2025-04-26T10:30:45', dt.date is date)
+(let dt = t'2025-04-26T10:30:45', dt.time)
+(let dt = t'2025-04-26T10:30:45', dt.time is time)
+(let dt = t'2025-04-26T10:30:00+05:00', dt.utc)
 
 // Constructors
 "Constructors"

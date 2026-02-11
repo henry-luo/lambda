@@ -48,19 +48,29 @@ pn save_result(data) {
 
 ## Function Declarations
 
-### Named Function Statement
+### Function of Statements
 
 ```lambda
+// Statements as function body
+
 fn add(a: int, b: int) int {
     a + b
 }
 
 fn greet(name: string) string {
-    "Hello, " ++ name ++ "!"
+    "Hello, "
+    name
+    "!"
+}
+
+fn process(data) {
+    let filtered = data where ~ > 0;
+    let doubled = filtered | ~ * 2;
+    doubled
 }
 ```
 
-### Arrow Function Expression
+### Function of Expression
 
 ```lambda
 // Single expression body
@@ -75,21 +85,12 @@ fn square(n: int) => n ^ 2
 // Lambda expressions
 (x: int) => x * 2
 
-fn(x: int, y: int) => x + y
+fn (x: int, y: int) { ... }
 
 // With inferred types
 (x) => x * 2
 ```
 
-### Multi-Statement Function Body
-
-```lambda
-fn process(data: [int]) [int] {
-    let filtered = data where ~ > 0;
-    let doubled = filtered | ~ * 2;
-    doubled
-}
-```
 
 ---
 

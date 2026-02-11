@@ -390,14 +390,14 @@ For expressions iterate and return collections:
 
 ```lambda
 // Basic iteration
-(for (x in [1, 2, 3]) x * 2)    // [2, 4, 6]
+for (x in [1, 2, 3]) x * 2    // [2, 4, 6]
 
 // Range iteration
-(for (i in 1 to 5) i * i)       // [1, 4, 9, 16, 25]
+for (i in 1 to 5) i * i       // [1, 4, 9, 16, 25]
 
 // Conditional in body
-(for (num in [1, 2, 3, 4, 5]) 
-    if (num % 2 == 0) num else null)
+for (num in [1, 2, 3, 4, 5]) 
+    if (num % 2 == 0) num else null
 ```
 
 ### Extended For-Expression Clauses
