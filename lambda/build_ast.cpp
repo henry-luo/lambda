@@ -2342,7 +2342,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         //     // coercion is possible
         // } else {
             // Incompatible types that cannot be coerced, use ANY
-        log_warn("Error: incompatible types %d and %d, coercing to ANY", then_type_id, else_type_id);
+        log_warn("incompatible types '%s' and '%s' in if-expression branches, coercing to ANY", get_type_name(then_type_id), get_type_name(else_type_id));
         need_any_type = true;
         // }
     }
