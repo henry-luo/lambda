@@ -1,0 +1,44 @@
+"===== FLOAT CONVERSION TEST SUITE ====="
+'=== Basic float() from int ==='
+0
+1
+-1
+42
+-100
+2.14748e+09
+'=== float() from float (identity) ==='
+3.14
+-2.718
+0
+1.5e+10
+'=== float() from int64 ==='
+1000000
+-999999
+'=== float() from decimal ==='
+3.14
+-0.001
+100
+'=== float() from string ==='
+3.14
+-42.5
+0
+1e+10
+'=== float() in variable assignment ==='
+5
+6
+10
+2
+15
+'=== float() in nested calls ==='
+3
+42
+3
+'=== float() with user-defined typed functions ==='
+6
+10
+4
+3
+'=== type() of float() result ==='
+float
+float
+float
