@@ -37,6 +37,7 @@ extern "C" {
 #define SYM_CALL_EXPR sym_call_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_UNARY_EXPR sym_unary_expr
+#define SYM_SPREAD_EXPR sym_spread_expr
 #define SYM_BINARY_EXPR sym_binary_expr
 #define SYM_BINARY_EXPR_NO_PIPE sym_binary_expr_no_pipe
 
@@ -200,6 +201,7 @@ typedef enum AstNodeType {
     AST_NODE_NULL,
     AST_NODE_PRIMARY,
     AST_NODE_UNARY,
+    AST_NODE_SPREAD,        // spread expression (*expr)
     AST_NODE_BINARY,
     AST_NODE_PIPE,          // pipe expression (| and where)
     AST_NODE_CURRENT_ITEM,  // ~ current item reference

@@ -441,7 +441,8 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, pri->expr, fn_scope, global_scope, captures);
         break;
     }
-    case AST_NODE_UNARY: {
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD: {
         AstUnaryNode* un = (AstUnaryNode*)node;
         collect_captures_from_node(tp, un->operand, fn_scope, global_scope, captures);
         break;
@@ -2023,6 +2024,35 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     return (AstNode*)ast_node;
 }
 
+// build spread expression: *expr
+AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
+    log_debug("build spread expr");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_SPREAD, sp_node, sizeof(AstUnaryNode));
+    ast_node->op = OPERATOR_SPREAD;
+    ast_node->op_str = StrView{"*", 1};
+
+    TSNode operand_node = ts_node_child_by_field_id(sp_node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+
+    if (!ast_node->operand) {
+        log_error("Error: build_spread_expr failed to build operand");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    if (!ast_node->operand->type) {
+        log_error("Error: build_spread_expr operand missing type information");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // spread expression has the same type as its operand (the items will be spread)
+    ast_node->type = ast_node->operand->type;
+
+    log_debug("end build spread expr");
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary expr");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
@@ -2218,6 +2248,7 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_PRIMARY:
         return has_current_item_ref(((AstPrimaryNode*)node)->expr);
     case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
         return has_current_item_ref(((AstUnaryNode*)node)->operand);
     case AST_NODE_BINARY:
     case AST_NODE_PIPE:
@@ -4635,6 +4666,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_expr(tp, expr_node);
     case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
+    case SYM_SPREAD_EXPR:
+        return build_spread_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
     case SYM_BINARY_EXPR_NO_PIPE:
         return build_binary_expr(tp, expr_node);
