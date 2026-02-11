@@ -3,7 +3,38 @@
 //
 // Usage:
 //   import readability: .utils.readability
-//   let result = readability.parse(html_string)
+//   
+//   // Parse HTML file and extract readable content
+//   let result = readability.parse(@./article.html)
+//   
+//   // Result contains:
+//   //   title: string?        - Article title
+//   //   byline: string?       - Author info
+//   //   content: element?     - Extracted content element (can be saved)
+//   //   textContent: string   - Clean text without HTML
+//   //   length: int           - Text length
+//   //   excerpt: string?      - Article excerpt/summary
+//   //   siteName: string?     - Site name
+//   //   lang: string?         - Language code
+//   //   dir: string?          - Text direction (ltr/rtl)
+//   //   publishedTime: string? - Publication timestamp
+//
+// Saving extracted content:
+//   readability.parse_and_save(@./input.html, @./output.html)
+//
+// Quick metadata extraction:
+//   let title = readability.title(@./article.html)
+//   let lang = readability.lang(@./article.html)
+//
+// Note: Lambda's input() function works with file paths, not raw string content.
+// Use parse(@./file.html) to parse HTML files directly.
+//
+// Key Design Principle:
+//   This module follows Lambda's pure functional design - it DOES NOT modify
+//   the input document. Instead, it produces a NEW clean document that can
+//   be serialized and saved independently. The result.content field contains
+//   the extracted article element, while result.textContent provides clean
+//   text without any HTML markup.
 //
 // Based on Mozilla Readability.js (https://github.com/mozilla/readability)
 
@@ -344,6 +375,97 @@ fn has_content(elem) =>
     )
 
 // ============================================
+// Content Cleaning & Document Building
+// ============================================
+// These functions create NEW elements rather than modifying existing ones,
+// following Lambda's pure functional design.
+
+// Tags to remove entirely (including contents) - as strings, converted to symbols when checking
+let REMOVE_TAGS = ["script", "style", "noscript", "iframe", "form", "button", "input", "select", "textarea", "nav", "aside", "header", "footer", "template"]
+
+// Tags that are just containers - unwrap their contents
+let UNWRAP_TAGS = ["span", "font", "center"]
+
+// Attributes to preserve (whitelist approach for cleaner output)
+let PRESERVE_ATTRS = ["href", "src", "alt", "title", "width", "height", "srcset", "sizes", "colspan", "rowspan", "headers", "datetime", "cite", "lang", "dir"]
+
+// Tags that become empty and should be removed
+let CLEANUP_TAGS = ["div", "section", "article", "p"]
+
+// Check if tag should be removed entirely
+fn should_remove_tag(tag) =>
+    string(tag) in REMOVE_TAGS
+
+// Check if tag should be unwrapped (keep contents, remove tag)
+fn should_unwrap_tag(tag) =>
+    string(tag) in UNWRAP_TAGS
+
+// Check if attribute should be preserved
+fn should_preserve_attr(attr_name) =>
+    lower(string(attr_name)) in PRESERVE_ATTRS
+
+// Check if element looks like an ad or non-content element
+fn is_ad_or_noise(elem) => (
+    let match_string = lower(get_match_string(elem)),
+    let ad_patterns = ["ad", "advertisement", "sponsor", "promo", "banner", 
+                       "social", "share", "related", "recommended", "newsletter",
+                       "subscription", "signup", "popup", "modal"],
+    matches_any(match_string, ad_patterns)
+)
+
+// Clean and rebuild a single element (recursive, produces NEW element)
+// Returns: cleaned element tree, list of children for unwrapped tags, or null
+fn clean_element(elem) =>
+    if (elem == null) null
+    else if (elem is string) (
+        // Text node - keep as-is if not empty
+        let trimmed = trim(elem),
+        if (len(trimmed) == 0) null else elem
+    )
+    else if (not (elem is element)) string(elem)
+    else (
+        let tag = get_tag(elem),
+        let tag_str = string(tag),
+        
+        // Skip elements that should be removed entirely
+        if (should_remove_tag(tag)) null
+        else if (is_ad_or_noise(elem)) null
+        else (
+            // Clean children first
+            let n = len(elem),
+            let cleaned_children = [for (i in 0 to n - 1) clean_element(elem[i])],
+            let non_null_children = [for (c in cleaned_children where c != null) c],
+            
+            // If tag should be unwrapped, return children as text
+            if (should_unwrap_tag(tag)) (
+                if (len(non_null_children) == 0) null
+                else if (len(non_null_children) == 1) non_null_children[0]
+                else str_join([for (c in non_null_children) (if (c is string) c else get_text(c))], " ")
+            )
+            // Check if now empty after cleaning
+            else if (len(non_null_children) == 0 and tag_str in CLEANUP_TAGS) null
+            // Return the original element
+            else elem
+        )
+    )
+
+// Get cleaned text content from an element tree (recursive)
+fn get_clean_text(elem) =>
+    if (elem == null) ""
+    else if (elem is string) elem
+    else if (not (elem is element)) string(elem)
+    else (
+        let tag = get_tag(elem),
+        if (should_remove_tag(tag)) ""
+        else if (is_ad_or_noise(elem)) ""
+        else (
+            let n = len(elem),
+            let parts = [for (i in 0 to n - 1) get_clean_text(elem[i])],
+            str_join(parts, " ")
+        )
+    )
+
+// ============================================
 // Metadata Extraction
 // ============================================
 
@@ -384,55 +506,41 @@ fn extract_title(doc) => (
     normalize_whitespace(final_title)
 )
 
+// Helper for checking name match - handles null safely
+fn meta_name_matches(meta_name, query_name) =>
+    if (query_name == "" or query_name == null) false
+    else if (meta_name == "" or meta_name == null) false
+    else lower(meta_name) == lower(query_name)
+
+// Helper for checking property match - handles null safely
+fn meta_property_matches(meta_property, query_property) =>
+    if (query_property == "" or query_property == null) false
+    else if (meta_property == "" or meta_property == null) false
+    else lower(meta_property) == lower(query_property)
+
 // Get meta content by name or property
+// Note: Uses separate condition computation to work around Lambda's
+// compound boolean evaluation issues in where clauses
 fn get_meta_content(doc, name, property) => (
     let metas = find_all(doc, "meta"),
-    let matched = [for (meta in metas, 
-                        let meta_name = get_attr(meta, "name", ""),
-                        let meta_property = get_attr(meta, "property", ""),
-                        let content = get_attr(meta, "content", "")
-                        where content != "" and 
-                              ((name != "" and lower(meta_name) == lower(name)) or
-                               (property != "" and lower(meta_property) == lower(property)))) content],
+    // Compute all conditions as separate values, then filter
+    let all_data = [for (meta in metas,
+                         let meta_name = get_attr(meta, "name", ""),
+                         let meta_property = get_attr(meta, "property", ""),
+                         let content = get_attr(meta, "content", ""),
+                         let name_match = meta_name_matches(meta_name, name),
+                         let prop_match = meta_property_matches(meta_property, property),
+                         let has_content = content != "" and content != null,
+                         let should_include = has_content and (name_match or prop_match))
+                    {content: content, match: should_include}],
+    let matched = [for (d in all_data where d.match == true) d.content],
     if (len(matched) > 0) matched[0] else null
 )
 
 // Extract JSON-LD metadata
-fn get_json_ld(doc) => (
-    let scripts = find_all(doc, "script"),
-    let json_ld_scripts = [for (script in scripts, 
-                                let script_type = get_attr(script, "type", "")
-                                where script_type == "application/ld+json") script],
-    
-    if (len(json_ld_scripts) == 0) null
-    else (
-        let content = get_text(json_ld_scripts[0]),
-        let parsed^err = input(content, 'json'),
-        if (parsed is error) null
-        else (
-            let article_type = if (parsed["@type"] != null) string(parsed["@type"]) else "",
-            if (contains(article_type, "Article") or 
-                contains(article_type, "BlogPosting") or
-                contains(article_type, "NewsArticle")) (
-                let title = if (parsed.headline != null) parsed.headline
-                            else if (parsed.name != null) parsed.name
-                            else null,
-                let byline = if (parsed.author != null) (
-                    if (parsed.author is map and parsed.author.name != null) parsed.author.name
-                    else null
-                ) else null,
-                {
-                    title: title,
-                    byline: byline,
-                    excerpt: parsed.description,
-                    siteName: if (parsed.publisher != null and parsed.publisher.name != null) parsed.publisher.name else null,
-                    publishedTime: parsed.datePublished
-                }
-            )
-            else null
-        )
-    )
-)
+// NOTE: JSON-LD parsing disabled - input() requires file paths, not string content
+// TODO: Re-enable when a parse_json(string) function is available
+fn get_json_ld(doc) => null
 
 // Extract article metadata
 fn extract_metadata(doc, json_ld_param) => (
@@ -585,26 +693,16 @@ fn find_best_candidate(doc) => (
 // Public API Functions
 // ============================================
 
-/// Parse HTML string and extract readable content
-pub fn parse(html_content) => (
-    let doc^err = input(html_content, 'html'),
-    if (doc is error) 
-        {
-            title: null,
-            byline: null,
-            dir: null,
-            content: null,
-            textContent: null,
-            length: 0,
-            excerpt: null,
-            siteName: null,
-            lang: null,
-            publishedTime: null
-        }
-    else parse_doc(doc)
-)
+/// Parse HTML file and extract readable content.
+/// Returns a result map with cleaned content, or propagates error if file can't be read.
+/// The 'content' field contains the extracted article content element.
+/// The 'textContent' field contains clean text without HTML tags.
+/// 
+/// Usage: readability.parse(@./article.html)
+pub fn parse(file_path) map^ => parse_doc(input(file_path, 'html')?)
 
-/// Parse HTML document object
+/// Parse HTML document object.
+/// Produces clean content - follows Lambda's functional design.
 pub fn parse_doc(doc) => (
     let json_ld = get_json_ld(doc),
     let metadata = extract_metadata(doc, json_ld),
@@ -626,8 +724,6 @@ pub fn parse_doc(doc) => (
             publishedTime: metadata.publishedTime
         }
     else (
-        let text_content = get_inner_text(article_content, true),
-        
         // Try to extract byline from article if not in metadata
         let article_byline = if (metadata.byline != null) metadata.byline
                              else find_byline_in_article(article_content),
@@ -642,13 +738,17 @@ pub fn parse_doc(doc) => (
                           else null
                       ),
         
+        // Get cleaned text content (no script/style/ad content)
+        let text_content = get_clean_text(article_content),
+        let normalized_text = normalize_whitespace(text_content),
+        
         {
             title: metadata.title,
             byline: article_byline,
             dir: dir,
-            content: article_content,
-            textContent: text_content,
-            length: len(text_content),
+            content: article_content,      // The extracted content element
+            textContent: normalized_text,  // Clean text without HTML
+            length: len(normalized_text),
             excerpt: excerpt,
             siteName: metadata.siteName,
             lang: lang,
@@ -675,34 +775,43 @@ fn collect_all_elements(elem) =>
         children ++ descendants
     )
 
-/// Parse HTML file
-pub fn parse_file(file_path) => (
-    let doc^err = input(file_path, 'html'),
-    if (doc is error)
-        {
-            title: null,
-            byline: null,
-            dir: null,
-            content: null,
-            textContent: null,
-            length: 0,
-            excerpt: null,
-            siteName: null,
-            lang: null,
-            publishedTime: null
-        }
-    else parse_doc(doc)
-)
+/// Parse HTML file and extract readable content (alias for parse)
+/// Deprecated: Use parse() directly
+pub fn parse_file(file_path) map^ => parse(file_path)
+
+/// Parse and save clean content to file.
+/// Saves the extracted article content as HTML to the specified path.
+/// Usage: readability.parse_and_save(@./input.html, @./output.html)
+pub pn parse_and_save(input_path, output_path) map^ {
+    var result^err = parse(input_path)
+    if (err != null) { raise err }
+    if (result.content != null) {
+        var out^out_err = output(result.content, output_path, 'html')
+        if (out_err != null) { raise out_err }
+    }
+    return result
+}
+
+/// Extract just the article content element (for embedding in other documents)
+pub fn extract_article(file_path) element^ {
+    let result = parse(file_path)?
+    result.content
+}
+
+/// Get clean article HTML string from file
+pub fn to_html(file_path) string^ {
+    let result = parse(file_path)?
+    if (result.content != null) format(result.content, 'html')
+    else ""
+}
 
 /// Quick check if document is probably readable (isProbablyReaderable equivalent)
-pub fn is_readable(html_content, min_content_length, min_score) => (
-    let min_len = if (min_content_length != null) min_content_length else MIN_CONTENT_LENGTH,
-    let min_sc = if (min_score != null) min_score else MIN_SCORE,
-    
-    let doc^err = input(html_content, 'html'),
-    if (doc is error) false
-    else is_doc_readable(doc, min_len, min_sc)
-)
+pub fn is_readable(file_path, min_content_length, min_score) bool^ {
+    let min_len = if (min_content_length != null) min_content_length else MIN_CONTENT_LENGTH
+    let min_sc = if (min_score != null) min_score else MIN_SCORE
+    let doc = input(file_path, 'html')?
+    is_doc_readable(doc, min_len, min_sc)
+}
 
 /// Check if parsed document is readable
 pub fn is_doc_readable(doc, min_content_length, min_score) => (
@@ -718,66 +827,52 @@ pub fn is_doc_readable(doc, min_content_length, min_score) => (
         let nodes = ps ++ pres ++ articles,
         
         // filter to visible nodes with enough content
+        // Score by text length minus minimum (simpler than original sqrt-based)
         let good_nodes = [for (node in nodes,
                           let is_visible = is_probably_visible(node),
                           let is_likely = not is_unlikely_candidate(node),
                           let text_len = len(trim(get_text(node)))
                           where is_visible and is_likely and text_len >= min_len) 
-                         sqrt((text_len - min_len) * 1.0)],
+                         text_len - min_len],
         
         let total_score = sum(good_nodes),
-        total_score > (min_sc * 1.0)
+        total_score > min_sc
     )
 )
 
-/// Helper to ensure doc is parsed
-fn ensure_parsed(doc) => (
+/// Helper to ensure doc is parsed from file path or already an element
+/// Returns element on success, propagates error from input()
+fn ensure_parsed(doc) element^ =>
     if (doc is element) doc
-    else if (type(doc) == 'path') (
-        let parsed^err = input(doc, 'html'),
-        if (parsed is error) null else parsed
-    )
-    else if (doc is string) (
-        let parsed^err = input(doc, 'html'),
-        if (parsed is error) null else parsed
-    )
-    else null
-)
+    else input(doc, 'html')?
 
 /// Extract only the title
-pub fn title(doc) => (
-    let parsed = ensure_parsed(doc),
-    if (parsed == null) null
-    else extract_title(parsed)
-)
+pub fn title(doc) string^ {
+    let parsed = ensure_parsed(doc)?
+    extract_title(parsed)
+}
 
 /// Extract only the text content
-pub fn text(doc) => (
-    let parsed = ensure_parsed(doc),
-    if (parsed == null) ""
-    else (
-        let body = find_deep(parsed, "body"),
-        if (body == null) "" else get_inner_text(body, true)
-    )
-)
+pub fn text(doc) string^ {
+    let parsed = ensure_parsed(doc)?
+    let body = find_deep(parsed, "body")
+    if (body == null) "" else get_inner_text(body, true)
+}
 
 /// Get the language
-pub fn lang(doc) => (
-    let parsed = ensure_parsed(doc),
-    if (parsed == null) null
-    else get_lang(parsed)
-)
+pub fn lang(doc) string^ {
+    let parsed = ensure_parsed(doc)?
+    get_lang(parsed)
+}
 
 /// Get text direction
-pub fn dir(doc) => (
-    let parsed = ensure_parsed(doc),
-    if (parsed == null) null
-    else get_dir(parsed)
-)
+pub fn dir(doc) string^ {
+    let parsed = ensure_parsed(doc)?
+    get_dir(parsed)
+}
 
 /// Get metadata only
-pub fn metadata(doc) => (
-    let parsed = ensure_parsed(doc),
-    if (parsed == null) null
-    else extract_metadata(parsed, null)
-)
+pub fn metadata(doc) map^ {
+    let parsed = ensure_parsed(doc)?
+    extract_metadata(parsed, null)
+}
