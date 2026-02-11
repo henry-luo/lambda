@@ -71,13 +71,31 @@ string"
 symbol            // Unquoted symbol
 ```
 
-**Binary & DateTime:**
+**Binary:**
 ```lambda
 b'\xDEADBEEF'     // Hex binary
 b'\64QUVGRw=='    // Base64 binary
-t'2025-01-01'     // Date
-t'14:30:00'       // Time
+```
+
+**DateTime:**
+```lambda
 t'2025-01-01T14:30:00Z'  // DateTime
+t'2025-04-26' is date       // Sub-types: date
+t'10:30:00' is time         // Sub-types: time
+
+// Member properties
+dt.date  dt.year  dt.month  dt.day 
+dt.time  dt.hour  dt.minute dt.second  dt.millisecond
+dt.weekday  dt.yearday  dt.week  dt.quarter 
+dt.unix  dt.timezone  dt.utc_offset  dt.utc  dt.local
+
+// Formatting
+dt.format("YYYY-MM-DD")  dt.format('iso')
+
+// Constructors
+datetime()  today()  justnow()   // current date/time
+datetime(2025, 4, 26, 10, 30)   
+date(2025, 4, 26)  time(10, 30, 45)  
 ```
 
 **Collections:**
@@ -95,6 +113,17 @@ arr.0             // Alt. syntax for const index
 arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
+```
+
+**Namespaces Support:**
+```lambda
+namespace svg: 'http://www.w3.org/2000/svg'
+namespace xlink: 'http://www.w3.org/1999/xlink'
+
+<svg.rect svg.width: 100>   // Namespaced tag & attr
+elem.svg.width              // Namespaced member access
+svg.rect                    // Qualified symbol
+symbol("href", 'xlink_url') // Create namespaced symbol
 ```
 
 ## Variables & Declarations
