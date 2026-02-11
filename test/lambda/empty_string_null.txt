@@ -1,0 +1,19 @@
+"===== EMPTY STRING NULL TESTS =====1. empty == null:"
+true
+"2. type(empty):"
+type.null
+"3. empty == '':"
+true
+"4. not empty:"
+true
+"5. empty or true:"
+true
+"6. true and not empty:"
+true
+"7. Filter non-empty values:AliceCharlie8. Compound filter (value != '' and name != 'Alice'):Charlie9. empty != 'x':"
+true
+"10. empty != 0:"
+true
+"11. if empty==null then 'yes' else 'no':yes12. Nested empty check:"
+true
+"===== END EMPTY STRING NULL TESTS ====="

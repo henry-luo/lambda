@@ -104,6 +104,9 @@ func_obj_t func_list[] = {
 
     {"fn_int", (fn_ptr) fn_int},
     {"fn_int64", (fn_ptr) fn_int64},
+    {"fn_float", (fn_ptr) fn_float},
+    {"fn_decimal", (fn_ptr) fn_decimal},
+    {"fn_binary", (fn_ptr) fn_binary},
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},
     {"fn_mul", (fn_ptr) fn_mul},

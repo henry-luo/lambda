@@ -625,6 +625,9 @@ typedef struct Context {
     int64_t fn_len(Item item);
     Item fn_int(Item a);
     int64_t fn_int64(Item a);
+    Item fn_float(Item a);
+    Item fn_decimal(Item a);
+    Item fn_binary(Item a);
 
     Item fn_add(Item a, Item b);
     Item fn_mul(Item a, Item b);
