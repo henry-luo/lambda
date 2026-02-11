@@ -978,7 +978,41 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // continue the text flow
                 }
             }
-            // else cannot break, continue the flow in current line
+            // CSS 2.1 §9.5: "If a shortened line box is too small to contain any content,
+            // then the line box is shifted downward until either some content fits or there
+            // are no more floats present."
+            // When text overflows next to a float and there's no word-break opportunity,
+            // try moving below the float where the line box is wider.
+            // Guard conditions:
+            // 1. Float is actually narrowing the line (available width < full container width)
+            // 2. The text would fit on a full-width line (rect->width <= full container width)
+            //    This ensures we only shift when the float is causing the overflow, not when
+            //    the text is inherently too wide for even the full container.
+            // Note: Add 0.5px tolerance to account for sub-pixel float width rounding
+            else if (lycon->line.has_float_intrusion &&
+                     (lycon->line.effective_right - lycon->line.effective_left) <
+                     (lycon->line.right - lycon->line.left) &&
+                     rect->width <= (lycon->line.right - lycon->line.left) + 0.5f) {
+                log_debug("text overflows next to float, shifting below float (eff_width=%.1f < full_width=%.1f)",
+                          lycon->line.effective_right - lycon->line.effective_left,
+                          lycon->line.right - lycon->line.left);
+                // Undo the width we just added - we'll re-layout from LAYOUT_TEXT
+                rect->width -= wd;
+                // Reset str to start of current rect (we haven't output anything yet)
+                str = text_start + rect->start_index;
+                // Remove the rect we allocated (it will be re-created in LAYOUT_TEXT)
+                // Find and unlink this rect from the chain
+                if (text_view->rect == rect) {
+                    text_view->rect = nullptr;
+                } else {
+                    TextRect* prev = text_view->rect;
+                    while (prev && prev->next != rect) prev = prev->next;
+                    if (prev) prev->next = nullptr;
+                }
+                line_break(lycon);
+                goto LAYOUT_TEXT;
+            }
+            // else cannot break and no float intrusion, continue the flow in current line
         }
         if (is_space(*str)) {
             if (collapse_spaces) {
