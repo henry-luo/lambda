@@ -2537,6 +2537,7 @@ void transpile_if_stam(Transpiler* tp, AstIfNode *if_node) {
 // helper: generate the C condition for a match arm pattern
 // type patterns (LMD_TYPE_TYPE, etc.) → fn_is(scrutinee, type)
 // value patterns (literals, variables) → fn_eq(scrutinee, value)
+// constrained types → base type check + inline constraint evaluation
 static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
     if (!pattern || !pattern->type) {
         strbuf_append_str(tp->code_buf, "1"); // fallback: always true
@@ -2555,6 +2556,43 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
             strbuf_append_char(tp->code_buf, ')');
             return;
         }
+    }
+
+    // Check for constrained type (directly or via identifier)
+    AstConstrainedTypeNode* constrained_node = nullptr;
+    if (pattern->node_type == AST_NODE_CONSTRAINED_TYPE) {
+        constrained_node = (AstConstrainedTypeNode*)pattern;
+    } else if (pattern->node_type == AST_NODE_IDENT && pattern->type && pattern->type->kind == TYPE_KIND_CONSTRAINED) {
+        // Identifier referencing a constrained type - look up the AST node
+        AstIdentNode* ident = (AstIdentNode*)pattern;
+        if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
+            AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
+            if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
+                constrained_node = (AstConstrainedTypeNode*)type_def->as;
+            }
+        }
+    }
+
+    if (constrained_node) {
+        // Inline constrained type check: (base_type_check && constraint_check)
+        TypeConstrained* constrained = (TypeConstrained*)constrained_node->type;
+
+        strbuf_append_str(tp->code_buf, "({\n");
+        // Note: _pipe_item already set by the match expression to the scrutinee value
+        // Check base type first
+        strbuf_append_str(tp->code_buf, "    Bool _ct_result = (item_type_id(_pipe_item) == ");
+        strbuf_append_int(tp->code_buf, constrained->base->type_id);
+        strbuf_append_str(tp->code_buf, ");\n");
+
+        // If base type matches, evaluate constraint
+        strbuf_append_str(tp->code_buf, "    if (_ct_result) {\n");
+        strbuf_append_str(tp->code_buf, "      _ct_result = is_truthy(");
+        transpile_box_item(tp, constrained_node->constraint);
+        strbuf_append_str(tp->code_buf, ") ? BOOL_TRUE : BOOL_FALSE;\n");
+        strbuf_append_str(tp->code_buf, "    }\n");
+        strbuf_append_str(tp->code_buf, "    _ct_result;\n");
+        strbuf_append_str(tp->code_buf, "  })");
+        return;
     }
 
     TypeId pattern_type = pattern->type->type_id;
