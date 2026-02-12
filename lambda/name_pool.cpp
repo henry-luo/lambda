@@ -132,7 +132,8 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
     if (pool->parent) {
         String* parent_result = name_pool_lookup_strview(pool->parent, name);
         if (parent_result) {
-            return parent_result;  // ref_cnt already incremented by lookup
+            parent_result->ref_cnt++;  // increment for this new reference
+            return parent_result;
         }
     }
 
@@ -171,13 +172,15 @@ String* name_pool_lookup_len(NamePool* pool, const char* name, size_t len) {
 
 String* name_pool_lookup_strview(NamePool* pool, StrView name) {
     if (!pool) return nullptr;
-    // 1. Try parent pools
+    // 1. Try to find in current pool first
+    String* result = find_string_by_content(pool, name.str, name.length);
+    if (result) return result;
+
+    // 2. Try parent pools
     if (pool->parent) {
         return name_pool_lookup_strview(pool->parent, name);
     }
-
-    // 2. Try to find existing string by content in current pool
-    return find_string_by_content(pool, name.str, name.length);
+    return nullptr;
 }
 
 String* name_pool_lookup_string(NamePool* pool, String* str) {
@@ -227,13 +230,13 @@ bool name_pool_is_poolable_symbol(size_t length) {
 
 String* name_pool_create_symbol_len(NamePool* pool, const char* symbol, size_t len) {
     if (!pool || !symbol || len == 0) return nullptr;
-    
+
     // Only pool symbols within size limit
     if (name_pool_is_poolable_symbol(len)) {
         StrView sv = {.str = symbol, .length = len};
         return name_pool_create_strview(pool, sv);
     }
-    
+
     // Symbol too long - allocate normally from pool (no interning)
     String* str = string_from_strview({.str = symbol, .length = len}, pool->pool);
     if (str) str->ref_cnt = 1;
