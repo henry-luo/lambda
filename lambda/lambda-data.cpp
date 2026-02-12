@@ -136,7 +136,7 @@ void init_type_info() {
     type_info[LMD_TYPE_STRING] = {sizeof(char*), "string", &TYPE_STRING, (Type*)&LIT_TYPE_STRING};
     type_info[LMD_TYPE_BINARY] = {sizeof(char*), "binary", &TYPE_BINARY, (Type*)&LIT_TYPE_BINARY};
     type_info[LMD_TYPE_LIST] = {sizeof(void*), "list", &TYPE_LIST, (Type*)&LIT_TYPE_LIST};
-    type_info[LMD_TYPE_RANGE] = {sizeof(void*), "array", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
+    type_info[LMD_TYPE_RANGE] = {sizeof(void*), "range", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
     type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_INT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_FLOAT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
@@ -190,9 +190,11 @@ double it2d(Item itm) {
     else if (itm._type_id == LMD_TYPE_DECIMAL) {
         return decimal_to_double(itm);
     }
-    log_debug("invalid type %d", itm._type_id);
-    // todo: push error
-    return 0;
+    else if (itm._type_id == LMD_TYPE_ERROR) {
+        return NAN;  // poison NaN — auto-propagates through all downstream arithmetic
+    }
+    log_debug("it2d: cannot convert type %s to double", get_type_name(itm._type_id));
+    return NAN;  // NaN for unrecognized types (was 0.0 — silent data corruption)
 }
 
 bool it2b(Item itm) {
@@ -200,8 +202,8 @@ bool it2b(Item itm) {
         return itm.bool_val != 0;
     }
     // Convert other types to boolean following JavaScript rules
-    else if (itm._type_id == LMD_TYPE_NULL) {
-        return false;
+    else if (itm._type_id == LMD_TYPE_NULL || itm._type_id == LMD_TYPE_ERROR) {
+        return false;  // errors are falsy
     }
     else if (itm._type_id == LMD_TYPE_INT) {
         return itm.get_int56() != 0;
@@ -229,10 +231,13 @@ int it2i(Item itm) {
     else if (itm._type_id == LMD_TYPE_FLOAT) {
         return (int)itm.get_double();
     }
-    else if (itm._type_id == LMD_TYPE_BOOL) { // should bool be convertible to int?
+    else if (itm._type_id == LMD_TYPE_BOOL) {
         return itm.bool_val ? 1 : 0;
     }
-    return ITEM_ERROR;
+    else if (itm._type_id == LMD_TYPE_ERROR) {
+        return 0;  // error items return 0 (callers should check type before calling it2i)
+    }
+    return 0;  // unrecognized type
 }
 
 // extract int56 as int64 (full precision)
@@ -256,6 +261,10 @@ String* it2s(Item itm) {
     if (itm._type_id == LMD_TYPE_STRING) {
         return itm.get_string();
     }
+    if (itm._type_id == LMD_TYPE_ERROR) {
+        static String str_err = {.len = 7, .ref_cnt = 0, .chars = "<error>"};
+        return &str_err;
+    }
     // For other types, we'd need to convert to string
     // For now, return a default string
     return nullptr;
@@ -269,9 +278,13 @@ const char* fn_to_cstr(Item itm) {
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         return itm.get_chars();
     }
+    if (type_id == LMD_TYPE_ERROR) {
+        log_debug("fn_to_cstr: received error item");
+        return "";  // error items return empty string for path segments
+    }
     // For non-string types in path segments, return empty string
     // The calling code should ensure the expression evaluates to a string
-    log_warn("fn_to_cstr: expected string type for path segment, got type_id=%d", type_id);
+    log_warn("fn_to_cstr: expected string type for path segment, got type %s", get_type_name(type_id));
     return "";
 }
 
@@ -505,13 +518,11 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_DECIMAL: {
         Decimal *dval = item.get_decimal();
-        if (dval && dval->dec_val) {
-            char *buf = decimal_to_string(dval);
-            if (buf) decimal_free_string(buf);
+        if (dval) {
+            dval->ref_cnt++;
         } else {
-        log_debug("DEBUG list_push: pushed null decimal value");
+            log_debug("list_push: pushed null decimal value");
         }
-        dval->ref_cnt++;
         break;
     }
     case LMD_TYPE_FLOAT: {

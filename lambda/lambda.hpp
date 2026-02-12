@@ -155,6 +155,40 @@ static inline TypeId get_type_id(Item value) { return value.type_id(); }
 extern Item ItemNull;
 extern Item ItemError;
 
+// ============================================================================
+// Error propagation guard macros (Phase 1 of error handling improvements)
+// If any argument is an error Item, propagate it immediately.
+// For Item-returning functions: returns the original error Item.
+// For Bool-returning functions: returns BOOL_ERROR.
+// ============================================================================
+#define GUARD_ERROR1(a) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return (a)
+#define GUARD_ERROR2(a, b) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return (a); \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return (b)
+#define GUARD_ERROR3(a, b, c) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return (a); \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return (b); \
+    if (get_type_id(c) == LMD_TYPE_ERROR) return (c)
+
+// Bool-returning function guards: propagate error as BOOL_ERROR
+#define GUARD_BOOL_ERROR1(a) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return BOOL_ERROR
+#define GUARD_BOOL_ERROR2(a, b) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return BOOL_ERROR; \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return BOOL_ERROR
+
+// DateTime-returning function guards: propagate error as DATETIME_MAKE_ERROR()
+#define GUARD_DATETIME_ERROR1(a) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR()
+#define GUARD_DATETIME_ERROR2(a, b) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR(); \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR()
+#define GUARD_DATETIME_ERROR3(a, b, c) \
+    if (get_type_id(a) == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR(); \
+    if (get_type_id(b) == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR(); \
+    if (get_type_id(c) == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR()
+
 struct Range : Container {
     int64_t start;  // inclusive start
     int64_t end;    // inclusive end

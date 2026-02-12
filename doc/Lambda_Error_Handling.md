@@ -24,7 +24,8 @@ This document covers Lambda's error handling system — how errors are created, 
 10. [System Functions That Can Raise](#system-functions-that-can-raise)
 11. [Error Code Categories](#error-code-categories)
 12. [Checking for Errors](#checking-for-errors)
-13. [Examples](#examples)
+13. [Error Truthiness and Defaults](#error-truthiness-and-defaults)
+14. [Examples](#examples)
 
 ---
 
@@ -58,10 +59,10 @@ Lambda has a built-in `error` type with the following fields:
 
 ```lambda
 let result^err = divide(10, 0)
-if (err != null) {
+if (^err) {
     print("code: " ++ str(err.code))
     print("message: " ++ err.message)
-    if (err.source != null)
+    if (err.source is error)
         print("caused by: " ++ err.source.message)
 }
 ```
@@ -209,7 +210,7 @@ The `^` in a let binding captures both the success value and the error into sepa
 
 ```lambda
 let result^err = divide(10, x)
-if (err != null) {
+if (^err) {
     print("error: " ++ err.message)
     0  // default value
 } else {
@@ -220,6 +221,7 @@ if (err != null) {
 **Semantics:**
 - If the expression returns an error: the value variable (`result`) is `null`, the error variable (`err`) holds the error.
 - If the expression succeeds: the value variable holds the value, the error variable is `null`.
+- Use `^err` (prefix `^`) to test whether the error variable is an error (see [Checking for Errors](#checking-for-errors)).
 
 This is the primary way to **handle** an error locally rather than propagating it.
 
@@ -351,7 +353,29 @@ User-created errors (via `error("message")`) default to code 318 (`user_error`).
 
 ## Checking for Errors
 
-Use the `is` operator to test whether a value is an error:
+There are two ways to test whether a value is an error:
+
+### `^expr` — Error Check Shorthand
+
+The `^` prefix operator is the idiomatic way to check for errors. It returns `true` if the operand is an error, `false` otherwise:
+
+```lambda
+let result^err = divide(10, x)
+if (^err) {
+    print("Error: " ++ err.message)
+}
+```
+
+This is especially concise with error destructuring:
+
+```lambda
+let data^err = input("file.json")
+if (^err) { raise error("failed to load", err) }
+```
+
+### `expr is error` — Type Check
+
+The `is` operator also works for error testing, and reads more naturally in some contexts:
 
 ```lambda
 let result = some_operation()
@@ -359,6 +383,39 @@ if (result is error) {
     print("Error occurred: " ++ result.message)
 }
 ```
+
+`^expr` is equivalent to `expr is error` — use whichever reads better in context.
+
+---
+
+## Error Truthiness and Defaults
+
+Error values are **falsy** in Lambda. This means:
+
+- `if (err)` treats errors the same as `null` or `false` — the condition is **not** entered.
+- Use `^err` (not bare `err`) to check for errors in conditions.
+
+Because errors are falsy, the `or` operator provides a natural **default value** pattern:
+
+```lambda
+// If divide returns an error, fall through to 0
+let safe_result = divide(10, x) or 0
+
+// Chain with error destructuring for logging + default
+let result^err = parse(input)
+if (^err) { print("Warning: " ++ err.message) }
+let value = result or default_value
+```
+
+### Why Errors Are Falsy
+
+| Pattern | With falsy errors | With truthy errors |
+|---------|-------------------|--------------------|
+| `err or default` | ✅ Falls through to default | ❌ Returns the error |
+| `if (^err)` | ✅ Explicit error check | — |
+| `if (err)` | Treats error like null | Would enter the branch |
+
+Falsy errors enable the `or` default idiom and prevent accidental use of error values as truthy conditions. The `^` prefix provides an explicit, lightweight error check.
 
 ---
 
@@ -377,7 +434,7 @@ may_fail(5)?
 
 // Destructure to handle locally
 let result^err = may_fail(-1)
-if (err != null) {
+if (^err) {
     print("Got error: " ++ err.message)  // "negative input"
 }
 ```
@@ -409,11 +466,11 @@ fn process_file(path: string) ProcessedData^ {
 ```lambda
 fn load_config(path: string) Config^ {
     let content^file_err = input(path, 'text)
-    if (file_err != null)
+    if (^file_err)
         raise error("failed to read config file", file_err)
 
     let parsed^parse_err = input(content, 'json)
-    if (parse_err != null)
+    if (^parse_err)
         raise error("invalid JSON in config", parse_err)
 
     parsed
@@ -428,7 +485,7 @@ pn main() {
 
     for item in config.items {
         let result^err = process(item)
-        if (err != null) {
+        if (^err) {
             print("Warning: " ++ err.message)
             continue
         }
@@ -450,6 +507,7 @@ pn main() {
 | Raise error | `raise error("...")` | Return error from function |
 | Propagate error | `F()?` | Unwrap or auto-return error |
 | Capture error | `let val^err = F()` | Destructure into value + error |
-| Check for error | `x is error` | Test if value is an error |
+| Check for error | `^err` or `x is error` | Test if value is an error |
+| Default on error | `expr or default` | Errors are falsy, fall through to default |
 
 Lambda's error handling provides **Go's simplicity** (errors as values), **Rust's safety** (`?` propagation, type enforcement), and **Zig's strictness** (compiler-enforced handling) — with concise, readable syntax.

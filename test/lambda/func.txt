@@ -22,7 +22,7 @@ array
 map
 type
 function
-array
+range
 true
 true
 true
