@@ -154,14 +154,14 @@ TEST_F(PathTest, PathToString) {
 
     StrBuf* buf = strbuf_new();
 
-    // Test root
+    // Test root - file scheme root outputs "/"
     path_to_string(file_root, buf);
-    EXPECT_STREQ(buf->str, "file");
+    EXPECT_STREQ(buf->str, "/");
 
-    // Test file.etc.hosts
+    // Test /etc.hosts (shorthand for file.etc.hosts)
     strbuf_reset(buf);
     path_to_string(hosts, buf);
-    EXPECT_STREQ(buf->str, "file.etc.hosts");
+    EXPECT_STREQ(buf->str, "/etc.hosts");
 
     strbuf_free(buf);
 }
@@ -258,9 +258,9 @@ TEST_F(PathTest, SpecialCharacterSegments) {
 
     StrBuf* buf = strbuf_new();
 
-    // Segment with dot should be quoted
+    // Segment with dot should be quoted, file scheme uses / prefix
     path_to_string(dotfile, buf);
-    EXPECT_STREQ(buf->str, "file.home.'.bashrc'");
+    EXPECT_STREQ(buf->str, "/home.'.bashrc'");
 
     strbuf_free(buf);
 }
@@ -273,9 +273,9 @@ TEST_F(PathTest, HyphenSegment) {
 
     StrBuf* buf = strbuf_new();
 
-    // Segment with hyphen should be quoted
+    // Segment with hyphen should be quoted, file scheme uses / prefix
     path_to_string(local, buf);
-    EXPECT_STREQ(buf->str, "file.usr.'local-bin'");
+    EXPECT_STREQ(buf->str, "/usr.'local-bin'");
 
     strbuf_free(buf);
 }
@@ -312,7 +312,7 @@ TEST_F(PathTest, DeepPath) {
     Path* file_root = path_get_root(PATH_SCHEME_FILE);
     Path* current = file_root;
 
-    // Build a deep path: file.a.b.c.d.e.f.g.h.i.j
+    // Build a deep path: /a.b.c.d.e.f.g.h.i.j (file scheme uses / prefix)
     const char* segments[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"};
     for (int i = 0; i < 10; i++) {
         current = path_append(current, segments[i]);
@@ -324,6 +324,6 @@ TEST_F(PathTest, DeepPath) {
 
     StrBuf* buf = strbuf_new();
     path_to_string(current, buf);
-    EXPECT_STREQ(buf->str, "file.a.b.c.d.e.f.g.h.i.j");
+    EXPECT_STREQ(buf->str, "/a.b.c.d.e.f.g.h.i.j");
     strbuf_free(buf);
 }
