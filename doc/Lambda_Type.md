@@ -103,6 +103,7 @@ flowchart TD
     scalar --> binary
     number --> int
     number --> float
+    collection --> range
     collection --> list
     collection --> array
     collection --> map
@@ -116,6 +117,7 @@ flowchart TD
 |---------|-----------|---------|
 | `int` | `number` | `42 is number` → `true` |
 | `float` | `number` | `3.14 is number` → `true` |
+| `range` | `collection` | `(1 to 10) is range` → `true` |
 | `[int]` | `[any]` | `[1,2,3] is [any]` → `true` |
 | `null` | `T?` | `null is int?` → `true` |
 | Every type | `any` | `"hello" is any` → `true` |
@@ -137,6 +139,7 @@ string      // UTF-8 string
 symbol      // Interned symbol
 binary      // Binary data
 datetime    // Date and time
+range       // Integer range (e.g. 1 to 10)
 path        // File path or URL
 ```
 
@@ -164,6 +167,65 @@ let config_path: path = .config.json
 ---
 
 ## Collection Types
+
+### Range Types
+
+Ranges represent a contiguous sequence of integer values with inclusive start and end bounds.
+
+```lambda
+// Range type keyword
+range              // Any range value
+
+// Range literal type (specific bounds)
+1 to 10            // Range from 1 to 10 inclusive
+0 to 255           // Byte range
+-100 to 100        // Negative to positive
+```
+
+#### Range Type in Annotations
+
+```lambda
+// As a parameter type
+fn sum_range(r: range) => ...
+
+// Type checking
+(1 to 10) is range          // true
+42 is range                 // false
+
+// Range literal types in match expressions
+fn grade(score: int) => match score {
+    case 90 to 100: "A"
+    case 80 to 89: "B"
+    case 70 to 79: "C"
+    case 60 to 69: "D"
+    default: "F"
+}
+
+// Or-patterns with ranges
+fn classify(code: int) => match code {
+    case 200 to 299: "success"
+    case 400 to 499 | 500 to 599: "error"
+    default: "other"
+}
+```
+
+#### Range Containment
+
+The `in` operator tests whether a value falls within a range:
+
+```lambda
+5 in 1 to 10       // true
+15 in 1 to 10      // false
+```
+
+#### Range Iteration
+
+Ranges are iterable and can be used in `for` expressions:
+
+```lambda
+for i in 1 to 5 { print(i) }   // 1 2 3 4 5
+let squares = for (i in 1 to 5) i ^ 2   // [1, 4, 9, 16, 25]
+```
 
 ### Array Types
 
