@@ -1,9 +1,6 @@
 # Lambda Runtime: Structural Issues Audit
 
-## Date: 2026-02-12
-## Status: Bugs #1–4 Fixed ✅ | #5–16 Open
-
----
+Date: 2026-02-12
 
 ## Priority Summary
 
@@ -144,7 +141,7 @@ Name-pooled strings are shared across all maps, elements, and attributes in an e
 
 ---
 
-### Issue #7: `type_info` array has only 32 slots, nearly full
+### Issue #7: `type_info` array has only 32 slots, nearly full — ✅ FIXED
 
 **File:** `lambda/lambda-data.cpp`
 **Severity:** 🟠 High — will overflow with 2 more types
@@ -217,6 +214,7 @@ switch (common) {
 ### Issue #11: Monolithic source files
 
 **Files affected:**
+
 | File | Lines | Scope |
 |------|-------|-------|
 | `lambda/transpile.cpp` | ~5,443 | C code generation for entire language |

@@ -558,3 +558,4 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
 #endif
 
 Type* alloc_type(Pool* pool, TypeId type, size_t size);
+Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size);
