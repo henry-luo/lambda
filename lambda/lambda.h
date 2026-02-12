@@ -64,10 +64,7 @@ enum EnumTypeId {
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
     LMD_TYPE_TYPE,
-    LMD_TYPE_TYPE_UNARY,  // unary type with occurrence operator (?, +, *, [n], etc.)
-    LMD_TYPE_TYPE_BINARY, // binary type for union (|), intersection (&), exclude (\) operations
     LMD_TYPE_FUNC,
-    LMD_TYPE_PATTERN,  // compiled regex pattern for string matching
 
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
@@ -78,9 +75,20 @@ enum EnumTypeId {
     // Path type for file/URL paths
     LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
 
+    LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 };
 typedef uint8_t TypeId;
+
+// TypeKind: sub-classification for LMD_TYPE_TYPE variants
+// Type structs (TypeUnary, TypeBinary, TypePattern) all share type_id = LMD_TYPE_TYPE
+// but are distinguished by their kind field.
+enum TypeKind {
+    TYPE_KIND_SIMPLE = 0,   // base Type (e.g., int, string, map, etc.)
+    TYPE_KIND_UNARY,        // TypeUnary: occurrence operators (?, +, *, [n])
+    TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
+    TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
+};
 
 // Get human-readable name for a TypeId (for error messages)
 static inline const char* get_type_name(TypeId type_id) {
@@ -106,10 +114,7 @@ static inline const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_MAP: return "map";
         case LMD_TYPE_ELEMENT: return "element";
         case LMD_TYPE_TYPE: return "type";
-        case LMD_TYPE_TYPE_UNARY: return "type_unary";
-        case LMD_TYPE_TYPE_BINARY: return "type_binary";
         case LMD_TYPE_FUNC: return "function";
-        case LMD_TYPE_PATTERN: return "pattern";
         case LMD_TYPE_ANY: return "any";
         case LMD_TYPE_ERROR: return "error";
         case LMD_TYPE_UNDEFINED: return "undefined";
@@ -130,6 +135,7 @@ typedef uint8_t Bool;
 
 typedef struct Type {
     TypeId type_id;
+    uint8_t kind:4;      // TypeKind: sub-classification (SIMPLE, UNARY, BINARY, PATTERN)
     uint8_t is_literal:1;  // is a literal value
     uint8_t is_const:1;  // is a constant expr
 } Type;

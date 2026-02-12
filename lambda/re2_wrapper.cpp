@@ -319,7 +319,8 @@ TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbo
 
     // Allocate TypePattern
     TypePattern* pattern = (TypePattern*)pool_calloc(pool, sizeof(TypePattern));
-    pattern->type_id = LMD_TYPE_PATTERN;
+    pattern->type_id = LMD_TYPE_TYPE;
+    pattern->kind = TYPE_KIND_PATTERN;
     pattern->is_symbol = is_symbol;
     pattern->re2 = re2;
     pattern->pattern_index = -1;  // Will be set when registered
