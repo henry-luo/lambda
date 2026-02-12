@@ -1628,6 +1628,20 @@
                         "icon": "\ud83d\udcca"
                     },
                     {
+                        "source": "parser/test_parser_robustness_gtest.cpp",
+                        "name": "Parser Robustness Tests - Safety and Error Handling",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_parser_robustness_gtest.exe",
+                        "icon": "\ud83d\udee1\ufe0f"
+                    },
+                    {
                         "source": "test_validator_input_gtest.cpp",
                         "name": "Validator Tests - Through lambda-input DLL",
                         "dependencies": [

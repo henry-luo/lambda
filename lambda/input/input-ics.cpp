@@ -41,7 +41,7 @@ static String* parse_property_name(InputContext& ctx, const char **ics) {
         (*ics)++;
     }
 
-    if (sb->length > sizeof(uint32_t)) {
+    if (sb->length > 0) {
         String* result = builder.createString(sb->str->chars, sb->length);
         return result;
     }
@@ -64,7 +64,7 @@ static void parse_property_parameters(InputContext& ctx, const char **ics, Map* 
             (*ics)++;
         }
 
-        if (sb->length <= sizeof(uint32_t)) continue;
+        if (sb->length == 0) continue;
 
         String* param_name = builder.createName(sb->str->chars, sb->length);
         if (!param_name) continue;
@@ -93,7 +93,7 @@ static void parse_property_parameters(InputContext& ctx, const char **ics, Map* 
                 (*ics)++; // skip closing quote
             }
 
-            if (sb->length > sizeof(uint32_t)) {
+            if (sb->length > 0) {
                 param_value = stringbuf_to_string(sb);
             }
         }
@@ -145,7 +145,7 @@ static String* parse_property_value(InputContext& ctx, const char **ics) {
         }
     }
 
-    if (sb->length > sizeof(uint32_t)) {
+    if (sb->length > 0) {
         return builder.createString(sb->str->chars, sb->length);
     }
     return NULL;
@@ -184,7 +184,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
                 return dt_map; // Invalid format
             }
         }
-        if (sb->length > sizeof(uint32_t)) {
+        if (sb->length > 0) {
             String* year_str = stringbuf_to_string(sb);
             String* year_key = builder.createName("year");
             ctx.builder.putToMap(dt_map, year_key, {.item = s2it(year_str)});
@@ -199,7 +199,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
                 return dt_map;
             }
         }
-        if (sb->length > sizeof(uint32_t)) {
+        if (sb->length > 0) {
             String* month_str = stringbuf_to_string(sb);
             String* month_key = builder.createName("month");
             ctx.builder.putToMap(dt_map, month_key, {.item = s2it(month_str)});
@@ -214,7 +214,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
                 return dt_map;
             }
         }
-        if (sb->length > sizeof(uint32_t)) {
+        if (sb->length > 0) {
             String* day_str = stringbuf_to_string(sb);
             String* day_key = builder.createName("day");
             ctx.builder.putToMap(dt_map, day_key, {.item = s2it(day_str)});
@@ -233,7 +233,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
                     return dt_map;
                 }
             }
-            if (sb->length > sizeof(uint32_t)) {
+            if (sb->length > 0) {
                 String* hour_str = stringbuf_to_string(sb);
                 String* hour_key = builder.createName("hour");
                 ctx.builder.putToMap(dt_map, hour_key, {.item = s2it(hour_str)});
@@ -248,7 +248,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
                     return dt_map;
                 }
             }
-            if (sb->length > sizeof(uint32_t)) {
+            if (sb->length > 0) {
                 String* minute_str = stringbuf_to_string(sb);
                 String* minute_key = builder.createName("minute");
                 ctx.builder.putToMap(dt_map, minute_key, {.item = s2it(minute_str)});
@@ -263,7 +263,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
                     return dt_map;
                 }
             }
-            if (sb->length > sizeof(uint32_t)) {
+            if (sb->length > 0) {
                 String* second_str = stringbuf_to_string(sb);
                 String* second_key = builder.createName("second");
                 ctx.builder.putToMap(dt_map, second_key, {.item = s2it(second_str)});
@@ -313,7 +313,7 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
             stringbuf_append_char(sb, *ptr++);
         }
 
-        if (sb->length <= sizeof(uint32_t)) {
+        if (sb->length == 0) {
             ptr++; // skip the unit character
             continue;
         }
@@ -587,6 +587,6 @@ void parse_ics(Input* input, const char* ics_string) {
     input->root = {.item = (uint64_t)calendar_map};
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 }

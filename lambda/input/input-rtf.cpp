@@ -276,14 +276,7 @@ static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
                 Item value;
 
                 if (cw.has_parameter) {
-                    double *dval;
-                    dval = (double*)pool_calloc(input->pool, sizeof(double));
-                    if (dval != NULL) {
-                        *dval = (double)cw.parameter;
-                        value = {.item = d2it(dval)};
-                    } else {
-                        value = {.item = ITEM_NULL};
-                    }
+                    value = ctx.builder.createFloat((double)cw.parameter);
                 } else {
                     value = {.item = b2it(true)};
                 }
@@ -329,42 +322,21 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) 
                     Array* colors = parse_color_table(ctx, rtf);
                     if (colors) {
                         Item color_table = {.item = (uint64_t)colors};
-
-                        String* key;
-                        key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
-                        if (key != NULL) {
-                            strcpy(key->chars, "color_table");
-                            key->len = 11;
-                            key->ref_cnt = 0;
-                            ctx.builder.putToMap(group, key, color_table);
-                        }
+                        String* key = ctx.builder.createString("color_table");
+                        ctx.builder.putToMap(group, key, color_table);
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
                     Array* fonts = parse_font_table(ctx, rtf);
                     if (fonts) {
                         Item font_table = {.item = (uint64_t)fonts};
-
-                        String* key;
-                        key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
-                        if (key != NULL) {
-                            strcpy(key->chars, "font_table");
-                            key->len = 10;
-                            key->ref_cnt = 0;
-                            ctx.builder.putToMap(group, key, font_table);
-                        }
+                        String* key = ctx.builder.createString("font_table");
+                        ctx.builder.putToMap(group, key, font_table);
                     }
                 } else {
                     // Store formatting information
                     Item value;
                     if (cw.has_parameter) {
-                        double *dval;
-                        dval = (double*)pool_calloc(input->pool, sizeof(double));
-                        if (dval != NULL) {
-                            *dval = (double)cw.parameter;
-                            value = {.item = d2it(dval)};
-                        } else {
-                            value = {.item = ITEM_NULL};
-                        }
+                        value = ctx.builder.createFloat((double)cw.parameter);
                     } else {
                         value = {.item = b2it(true)};
                     }
@@ -396,28 +368,14 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) 
     // Add content and formatting to group
     if (content->length > 0) {
         Item content_item = {.item = (uint64_t)content};
-
-        String* content_key;
-        content_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
-        if (content_key != NULL) {
-            strcpy(content_key->chars, "content");
-            content_key->len = 7;
-            content_key->ref_cnt = 0;
-            ctx.builder.putToMap(group, content_key, content_item);
-        }
+        String* content_key = ctx.builder.createString("content");
+        ctx.builder.putToMap(group, content_key, content_item);
     }
 
     if (((TypeMap*)formatting->type)->length > 0) {
         Item format_item = {.item = (uint64_t)formatting};
-
-        String* format_key;
-        format_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
-        if (format_key != NULL) {
-            strcpy(format_key->chars, "formatting");
-            format_key->len = 10;
-            format_key->ref_cnt = 0;
-            ctx.builder.putToMap(group, format_key, format_item);
-        }
+        String* format_key = ctx.builder.createString("formatting");
+        ctx.builder.putToMap(group, format_key, format_item);
     }
     return {.item = (uint64_t)group};
 }
@@ -481,7 +439,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
 
     // Report completion status
     if (ctx.hasErrors()) {
-        ctx.addError(SourceLocation{0, 1, 1}, "RTF parsing completed with errors");
+        ctx.logErrors();
     }
 
     input->root = {.item = (uint64_t)document};
