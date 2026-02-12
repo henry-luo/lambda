@@ -43,7 +43,7 @@ const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 // need to exclude relational exprs in attr, optionally exclude pipe operators
 function binary_expr($, in_attr, exclude_pipe = false) {
   let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr))
-                        : (exclude_pipe ? $._expression_no_pipe : $._expression);
+                        : (exclude_pipe ? $.expr_no_pipe : $._expr);
   let ops = [
     ['+', 'binary_plus'],
     ['++', 'binary_plus'],
@@ -162,7 +162,7 @@ module.exports = grammar({
   // an array of hidden rule names for the generated node types
   // supertype symbols must always have a single visible child
   supertypes: $ => [
-    // $._expression,
+    // $._expr,
   ],
 
   inline: $ => [
@@ -172,12 +172,15 @@ module.exports = grammar({
     $._expr_stam,
     $._number,
     $._datetime,
-    $._expression,
     $._attr_expr,
     $._import_stam,
-    $._type_expr,
     $._statement,
     $._content_expr,
+  ],
+
+  conflicts: $ => [
+    [$._expr, $.member_expr],
+    [$._type_expr, $.constrained_type],
   ],
 
   precedences: $ => [[
@@ -376,7 +379,7 @@ module.exports = grammar({
     ),
 
     list: $ => seq(
-      '(', $._expression, repeat(seq(',', $._expression)), ')'
+      '(', $._expr, repeat(seq(',', $._expr)), ')'
     ),
 
     // Literals and Containers
@@ -393,20 +396,20 @@ module.exports = grammar({
     map_item: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('as', $._expression),
+      field('as', $._expr),
     ),
 
     map: $ => seq(
-      // $._expression for dynamic map item
-      '{', comma_sep(choice($.map_item, $._expression)), '}',
+      // $._expr for dynamic map item
+      '{', comma_sep(choice($.map_item, $._expr)), '}',
     ),
 
     array: $ => seq(
-      '[', comma_sep($._expression), ']',
+      '[', comma_sep($._expr), ']',
     ),
 
     range: $ => seq(
-      $._expression, 'to', $._expression,
+      $._expr, 'to', $._expr,
     ),
 
     attr_binary_expr: $ => choice(
@@ -459,10 +462,10 @@ module.exports = grammar({
     // Expressions
 
     _parenthesized_expr: $ => seq(
-      '(', $._expression, ')',
+      '(', $._expr, ')',
     ),
 
-    _expression: $ => choice(
+    _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
       $.spread_expr,
@@ -476,7 +479,7 @@ module.exports = grammar({
     ),
 
     // Expression without pipe operators (|, where) - used in for loop iteration expression
-    _expression_no_pipe: $ => choice(
+    expr_no_pipe: $ => choice(
       $.primary_expr,
       $.unary_expr,
       $.spread_expr,
@@ -491,7 +494,7 @@ module.exports = grammar({
 
     // raise expression - raises an error in functional context
     raise_expr: $ => prec.right(seq(
-      'raise', field('value', $._expression)
+      'raise', field('value', $._expr)
     )),
 
     // Binary expression without pipe operators
@@ -526,25 +529,25 @@ module.exports = grammar({
       $.current_index,  // ~# for pipe key/index
     )),
 
-    spread_argument: $ => seq('...', $._expression),
+    spread_argument: $ => seq('...', $._expr),
 
     _arguments: $ => seq(
       '(', comma_sep(optional(
-      field('argument', choice($.named_argument, $._expression, $.spread_argument)))), ')',
+      field('argument', choice($.named_argument, $._expr, $.spread_argument)))), ')',
     ),
 
     import: _ => token('import'),
 
-    call_expr: $ => prec.right(seq(
+    call_expr: $ => prec.right(100, seq(
       field('function', choice($.primary_expr, $.import)),
       $._arguments,
       optional(field('propagate', '?')),
     )),
 
-    index_expr: $ => seq(
+    index_expr: $ => prec.right(100, seq(
       field('object', $.primary_expr),
-      '[', field('field', $._expression), ']',
-    ),
+      '[', field('field', $._expr), ']',
+    )),
 
     // Path root: / for absolute file paths
     path_root: _ => '/',
@@ -584,13 +587,13 @@ module.exports = grammar({
 
     unary_expr: $ => prec.left(seq(
       field('operator', choice('not', '-', '+', '^')),
-      field('operand', $._expression),
+      field('operand', $._expr),
     )),
 
     // Spread expression: *expr - spreads array/list items into container
     spread_expr: $ => prec.left(seq(
       field('operator', '*'),
-      field('operand', $._expression),
+      field('operand', $._expr),
     )),
 
     identifier: _ => {
@@ -611,7 +614,7 @@ module.exports = grammar({
         field('name', $.identifier),
         optional(field('optional', '?')),  // optional marker BEFORE type
         optional(seq(':', field('type', $._type_expr))),
-        optional(seq('=', field('default', $._expression))),
+        optional(seq('=', field('default', $._expr))),
       ),
       field('variadic', '...'),  // variadic marker (must be last parameter)
     ),
@@ -620,7 +623,7 @@ module.exports = grammar({
     named_argument: $ => seq(
       field('name', $.identifier),
       ':',
-      field('value', $._expression),
+      field('value', $._expr),
     ),
 
     // fn with stam body
@@ -640,7 +643,7 @@ module.exports = grammar({
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type with optional error type: T or T^E or T^
       optional(field('type', $.return_type)),
-      '=>', field('body', $._expression)
+      '=>', field('body', $._expr)
     ),
 
     // Anonymous Function
@@ -656,7 +659,7 @@ module.exports = grammar({
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         // return type with optional error type: T or T^E or T^
         optional(field('type', $.return_type)),
-        '=>', field('body', $._expression)
+        '=>', field('body', $._expr)
       )),
     ),
 
@@ -670,19 +673,19 @@ module.exports = grammar({
       seq(
         field('name', $.identifier),
         '^', field('error', $.identifier),
-        '=', field('as', $._expression),
+        '=', field('as', $._expr),
       ),
       // single variable assignment
       seq(
         field('name', $.identifier),
-        optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
+        optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expr),
       ),
       // multi-variable decomposition: let a, b = expr OR let a, b at expr
       seq(
         field('name', $.identifier),
         repeat1(seq(',', field('name', $.identifier))),
         field('decompose', choice('=', 'at')),
-        field('as', $._expression),
+        field('as', $._expr),
       ),
     )),
 
@@ -699,13 +702,13 @@ module.exports = grammar({
     ),
 
     if_expr: $ => prec.right(seq(
-      'if', '(', field('cond', $._expression), ')', field('then', $._expression),
+      'if', '(', field('cond', $._expr), ')', field('then', $._expr),
       // 'else' clause is not optional for if_expr
-      seq('else', field('else', $._expression)),
+      seq('else', field('else', $._expr)),
     )),
 
     if_stam: $ => prec.right(seq(
-      'if', field('cond', $._expression), '{', field('then', $.content), '}',
+      'if', field('cond', $._expr), '{', field('then', $.content), '}',
       optional(choice(
         seq('else', field('else', $.if_stam)),
         seq('else', '{', field('else', $.content), '}'),
@@ -716,7 +719,7 @@ module.exports = grammar({
     // match expr { case_arms }
     // Each arm can be expression form (case T: expr) or statement form (case T { stmts })
     match_expr: $ => seq(
-      'match', field('scrutinee', $._expression),
+      'match', field('scrutinee', $._expr),
       '{',
       repeat1(choice($.match_arm_expr, $.match_arm_stam, $.match_default_expr, $.match_default_stam)),
       '}'
@@ -724,11 +727,11 @@ module.exports = grammar({
 
     match_arm_expr: $ => prec.right(seq(
       'case', field('pattern', $._type_expr),
-      ':', field('body', $._expression)
+      ':', field('body', $._expr)
     )),
 
     match_default_expr: $ => prec.right(seq(
-      'default', ':', field('body', $._expression)
+      'default', ':', field('body', $._expr)
     )),
 
     match_arm_stam: $ => seq(
@@ -748,31 +751,31 @@ module.exports = grammar({
     loop_expr: $ => choice(
       // for value in | at expr
       seq(
-        field('name', $.identifier), choice('in', 'at'), field('as', $._expression_no_pipe)
+        field('name', $.identifier), choice('in', 'at'), field('as', $.expr_no_pipe)
       ),
       // for key, value in | at expr
       seq(
         field('index', $.identifier), ',', field('name', $.identifier),
-        choice('in', 'at'), field('as', $._expression_no_pipe)
+        choice('in', 'at'), field('as', $.expr_no_pipe)
       ),
     ),
 
     // let clause within for: let name = expr
     // Use _expression_no_pipe so subsequent 'where' is not consumed
     for_let_clause: $ => seq(
-      'let', field('name', $.identifier), '=', field('value', $._expression_no_pipe)
+      'let', field('name', $.identifier), '=', field('value', $.expr_no_pipe)
     ),
 
     // where clause: where expr
     // Use prec.dynamic to prefer this over binary 'where' in for context
     for_where_clause: $ => prec.dynamic(10, seq(
-      'where', field('cond', $._expression)
+      'where', field('cond', $._expr)
     )),
 
     // order by clause: order by expr [asc|desc] [, expr [asc|desc], ...]
     // Use _expression_no_pipe so limit/offset are not consumed
     order_spec: $ => seq(
-      field('expr', $._expression_no_pipe),
+      field('expr', $.expr_no_pipe),
       optional(field('dir', choice('asc', 'ascending', 'desc', 'descending')))
     ),
 
@@ -783,19 +786,19 @@ module.exports = grammar({
 
     // group by clause: group by expr [, expr, ...] as name
     for_group_clause: $ => seq(
-      'group', 'by', field('key', $._expression),
-      repeat(seq(',', field('key', $._expression))),
+      'group', 'by', field('key', $._expr),
+      repeat(seq(',', field('key', $._expr))),
       'as', field('name', $.identifier)
     ),
 
     // limit clause: limit expr
     for_limit_clause: $ => seq(
-      'limit', field('count', $._expression)
+      'limit', field('count', $._expr)
     ),
 
     // offset clause: offset expr
     for_offset_clause: $ => seq(
-      'offset', field('count', $._expression)
+      'offset', field('count', $._expr)
     ),
 
     // use prec.right so the body expression is consumed greedily
@@ -812,7 +815,7 @@ module.exports = grammar({
       optional(field('limit', $.for_limit_clause)),
       optional(field('offset', $.for_offset_clause)),
       ')',
-      field('then', $._expression),
+      field('then', $._expr),
     )),
 
     for_stam: $ => seq(
@@ -832,7 +835,7 @@ module.exports = grammar({
 
     // while statement (procedural only)
     while_stam: $ => seq(
-      'while', '(', field('cond', $._expression), ')',
+      'while', '(', field('cond', $._expr), ')',
       '{', field('body', $.content), '}'
     ),
 
@@ -846,7 +849,7 @@ module.exports = grammar({
     // use prec.right to prefer consuming expression when present
     return_stam: $ => prec.right(seq(
       'return',
-      optional(field('value', $._expression)),
+      optional(field('value', $._expr)),
       optional(';')
     )),
 
@@ -854,7 +857,7 @@ module.exports = grammar({
     // use prec.right to prefer consuming expression when present
     raise_stam: $ => prec.right(seq(
       'raise',
-      field('value', $._expression),
+      field('value', $._expr),
       optional(';')
     )),
 
@@ -866,7 +869,7 @@ module.exports = grammar({
     // assignment statement for mutable variables (procedural only)
     // use prec.right to prefer consuming expression when present
     assign_stam: $ => seq(
-      field('target', $.identifier), '=', field('value', $._expression),
+      field('target', $.identifier), '=', field('value', $._expr),
       optional(';')
     ),
 
@@ -971,7 +974,7 @@ module.exports = grammar({
       field('base', choice($.primary_type, $.type_occurrence)),
       'where',
       '(',
-      field('constraint', $._expression),
+      field('constraint', $._expr),
       ')',
     ),
 
