@@ -510,6 +510,26 @@ String* heap_strcpy(char* src, int len);
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
+// DateTime error sentinel — all bits set = clearly invalid
+// month=15 (impossible: months are 1-12), every field at maximum
+// Used by DateTime-returning functions to signal errors
+#define DATETIME_ERROR_VALUE  0xFFFFFFFFFFFFFFFFULL
+
+// Check if a DateTime value is the error sentinel
+// Works in both C (uint64_t) and C++ (struct with int64_val)
+#ifdef __cplusplus
+#define DATETIME_IS_ERROR(dt) ((dt).int64_val == DATETIME_ERROR_VALUE)
+#else
+#define DATETIME_IS_ERROR(dt) ((dt) == DATETIME_ERROR_VALUE)
+#endif
+
+// Create a DateTime error value
+#ifdef __cplusplus
+#define DATETIME_MAKE_ERROR() (DateTime{.int64_val = DATETIME_ERROR_VALUE})
+#else
+#define DATETIME_MAKE_ERROR() ((DateTime)DATETIME_ERROR_VALUE)
+#endif
+
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
@@ -699,6 +719,38 @@ typedef struct Context {
     Item fn_cos(Item a);
     Item fn_tan(Item a);
     Item fn_sign(Item a);
+
+    // ============================================================================
+    // UNBOXED SYSTEM FUNCTIONS (fn_*_u)
+    // Native C implementations that bypass Item boxing overhead.
+    // Called directly when types are known at compile time.
+    // ============================================================================
+
+    // Math functions (double → double)
+    double fn_pow_u(double base, double exponent);
+    double fn_min2_u(double a, double b);
+    double fn_max2_u(double a, double b);
+
+    // Integer operations
+    int64_t fn_abs_i(int64_t x);
+    double fn_abs_f(double x);
+    int64_t fn_neg_i(int64_t x);
+    double fn_neg_f(double x);
+    int64_t fn_mod_i(int64_t a, int64_t b);
+    int64_t fn_idiv_i(int64_t a, int64_t b);
+
+    // Boolean operations
+    Bool fn_not_u(Bool x);
+
+    // Sign function
+    int32_t fn_sign_i(int64_t x);
+    int32_t fn_sign_f(double x);
+
+    // Rounding functions (int versions return identity)
+    int64_t fn_floor_i(int64_t x);
+    int64_t fn_ceil_i(int64_t x);
+    int64_t fn_round_i(int64_t x);
+
     // vector manipulation functions
     Item fn_reverse(Item a);
     Item fn_sort1(Item a);

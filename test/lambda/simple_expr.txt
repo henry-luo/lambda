@@ -43,7 +43,7 @@ string
 bool
 symbol
 type
-array
+range
 array
 list
 map

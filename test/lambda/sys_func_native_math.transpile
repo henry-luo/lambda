@@ -1,0 +1,17 @@
+{
+    "expect": [
+        "sin(",
+        "cos(",
+        "tan(",
+        "sqrt(",
+        "log(",
+        "log10(",
+        "exp(",
+        "fabs(",
+        "floor(",
+        "ceil(",
+        "round(",
+        "fn_abs_i"
+    ],
+    "forbid": []
+}

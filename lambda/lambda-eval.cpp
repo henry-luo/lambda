@@ -22,6 +22,9 @@
 
 extern __thread EvalContext* context;
 
+// forward declaration of static error string (defined later in this file)
+extern String STR_ERROR;
+
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
 
@@ -123,7 +126,7 @@ Bool is_truthy(Item item) {
     case LMD_TYPE_NULL:
         return BOOL_FALSE;
     case LMD_TYPE_ERROR:
-        return BOOL_ERROR;
+        return BOOL_FALSE;  // errors are falsy — use `if (^e)` to check for errors
     case LMD_TYPE_BOOL:
         log_debug("is_truthy: BOOL case, bool_val=%d, returning %d", (int)item.bool_val, item.bool_val ? BOOL_TRUE : BOOL_FALSE);
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
@@ -153,7 +156,7 @@ String *fn_strcat(String *left, String *right) {
     log_debug("fn_strcat %p, %p", left, right);
     if (!left || !right) {
         log_error("null pointer in fn_strcat: left=%p, right=%p", left, right);
-        return NULL;
+        return &STR_ERROR;
     }
     int left_len = left->len, right_len = right->len;
     log_debug("left len %d, right len %d", left_len, right_len);
@@ -172,6 +175,7 @@ String *fn_strcat(String *left, String *right) {
 }
 
 Item fn_join(Item left, Item right) {
+    GUARD_ERROR2(left, right);
     // concat two scalars, or join two lists/arrays/maps, or join scalar with list/array, or join two binaries, else error
     TypeId left_type = get_type_id(left), right_type = get_type_id(right);
     log_debug("fn_join: %d, %d", left_type, right_type);
@@ -1026,6 +1030,7 @@ Bool fn_in(Item a_item, Item b_item) {
 String STR_NULL = {.len = 4, .ref_cnt = 0, .chars = "null"};
 String STR_TRUE = {.len = 4, .ref_cnt = 0, .chars = "true"};
 String STR_FALSE = {.len = 5, .ref_cnt = 0, .chars = "false"};
+String STR_ERROR = {.len = 7, .ref_cnt = 0, .chars = "<error>"};
 
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
@@ -1170,7 +1175,7 @@ String* fn_string(Item itm) {
         return result;
     }
     case LMD_TYPE_ERROR:
-        return NULL;
+        return &STR_ERROR;  // static error string — never NULL, prevents crash in callers
     default:
         // for other types
         log_error("fn_string unhandled type: %s", get_type_name(itm._type_id));
@@ -1336,6 +1341,10 @@ extern "C" Item fn_input1(Item url) {
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
 
 String* fn_format2(Item item, Item type) {
+    if (get_type_id(item) == LMD_TYPE_ERROR || get_type_id(type) == LMD_TYPE_ERROR) {
+        log_debug("fn_format2: error item received");
+        return &STR_ERROR;
+    }
     // datetime formatting: format(dt) or format(dt, pattern)
     TypeId item_type_id = get_type_id(item);
     if (item_type_id == LMD_TYPE_DTIME) {
@@ -1746,6 +1755,7 @@ int64_t fn_len(Item item) {
 
 // substring system function - extracts a substring from start to end (exclusive)
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
+    GUARD_ERROR3(str_item, start_item, end_item);
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
         log_debug("fn_substring: first argument must be a string");
         return ItemError;
@@ -1808,6 +1818,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 
 // contains system function - checks if a string contains a substring
 Bool fn_contains(Item str_item, Item substr_item) {
+    GUARD_BOOL_ERROR2(str_item, substr_item);
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: first argument must be a string");
         return BOOL_ERROR;
@@ -1845,6 +1856,7 @@ Bool fn_contains(Item str_item, Item substr_item) {
 
 // starts_with(str, prefix) - check if string starts with prefix
 Bool fn_starts_with(Item str_item, Item prefix_item) {
+    GUARD_BOOL_ERROR2(str_item, prefix_item);
     TypeId str_type = get_type_id(str_item);
     TypeId prefix_type = get_type_id(prefix_item);
 
@@ -1881,6 +1893,7 @@ Bool fn_starts_with(Item str_item, Item prefix_item) {
 
 // ends_with(str, suffix) - check if string ends with suffix
 Bool fn_ends_with(Item str_item, Item suffix_item) {
+    GUARD_BOOL_ERROR2(str_item, suffix_item);
     TypeId str_type = get_type_id(str_item);
     TypeId suffix_type = get_type_id(suffix_item);
 
@@ -1918,6 +1931,10 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
 int64_t fn_index_of(Item str_item, Item sub_item) {
+    // propagate error inputs as INT64_ERROR (distinct from -1 = 'not found')
+    if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
+        return INT64_ERROR;
+    }
     TypeId str_type = get_type_id(str_item);
     TypeId sub_type = get_type_id(sub_item);
 
@@ -1958,6 +1975,10 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
 
 // last_index_of(str, sub) - find last occurrence of substring, returns -1 if not found
 int64_t fn_last_index_of(Item str_item, Item sub_item) {
+    // propagate error inputs as INT64_ERROR (distinct from -1 = 'not found')
+    if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
+        return INT64_ERROR;
+    }
     TypeId str_type = get_type_id(str_item);
     TypeId sub_type = get_type_id(sub_item);
 
@@ -2006,6 +2027,7 @@ static inline bool is_ascii_whitespace(unsigned char c) {
 
 // trim(str) - remove leading and trailing whitespace
 Item fn_trim(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
@@ -2056,6 +2078,7 @@ Item fn_trim(Item str_item) {
 
 // trim_start(str) - remove leading whitespace
 Item fn_trim_start(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
@@ -2093,6 +2116,7 @@ Item fn_trim_start(Item str_item) {
 
 // trim_end(str) - remove trailing whitespace
 Item fn_trim_end(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
@@ -2140,6 +2164,7 @@ Item fn_trim_end(Item str_item) {
 
 // lower(str) - convert string to lowercase (ASCII only for now)
 Item fn_lower(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
@@ -2191,6 +2216,7 @@ Item fn_lower(Item str_item) {
 
 // upper(str) - convert string to uppercase (ASCII only for now)
 Item fn_upper(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
@@ -2242,6 +2268,7 @@ Item fn_upper(Item str_item) {
 
 // split(str, sep) - split string by separator, returns list of strings
 Item fn_split(Item str_item, Item sep_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
     TypeId sep_type = get_type_id(sep_item);
 
@@ -2331,6 +2358,7 @@ Item fn_split(Item str_item, Item sep_item) {
 
 // str_join(strs, sep) - join list of strings with separator
 Item fn_str_join(Item list_item, Item sep_item) {
+    GUARD_ERROR2(list_item, sep_item);
     TypeId list_type = get_type_id(list_item);
     TypeId sep_type = get_type_id(sep_item);
 
@@ -2432,6 +2460,7 @@ Item fn_str_join(Item list_item, Item sep_item) {
 
 // replace(str, old, new) - replace all occurrences of old with new
 Item fn_replace(Item str_item, Item old_item, Item new_item) {
+    GUARD_ERROR3(str_item, old_item, new_item);
     TypeId str_type = get_type_id(str_item);
     TypeId old_type = get_type_id(old_item);
     TypeId new_type = get_type_id(new_item);
@@ -2565,6 +2594,9 @@ DateTime fn_datetime1(Item arg) {
     log_debug("fn_datetime1: parse from arg");
     TypeId arg_type = get_type_id(arg);
 
+    // propagate error inputs
+    if (arg_type == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR();
+
     if (arg_type == LMD_TYPE_STRING || arg_type == LMD_TYPE_SYMBOL) {
         const char* chars = arg.get_chars();
         uint32_t len = arg.get_len();
@@ -2590,9 +2622,7 @@ DateTime fn_datetime1(Item arg) {
         return arg.get_datetime();
     }
 
-    DateTime err;
-    memset(&err, 0, sizeof(DateTime));
-    return err;
+    return DATETIME_MAKE_ERROR();  // error sentinel instead of all-zeros
 }
 
 // date() - current date in UTC (date-only precision)
@@ -2610,6 +2640,9 @@ DateTime fn_date0() {
 DateTime fn_date1(Item arg) {
     log_debug("fn_date1: extract date from arg");
     TypeId arg_type = get_type_id(arg);
+
+    // propagate error inputs
+    if (arg_type == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR();
 
     if (arg_type == LMD_TYPE_DTIME) {
         DateTime dt = arg.get_datetime();
@@ -2636,20 +2669,32 @@ DateTime fn_date1(Item arg) {
         log_error("date: failed to parse string '%.*s'", (int)len, chars);
     }
 
-    DateTime err;
-    memset(&err, 0, sizeof(DateTime));
-    return err;
+    return DATETIME_MAKE_ERROR();  // error sentinel instead of all-zeros
 }
 
 // date(y, m, d) - construct date from year, month, day
 DateTime fn_date3(Item y, Item m, Item d) {
     log_debug("fn_date3: construct date from y/m/d");
+
+    // propagate error inputs
+    GUARD_DATETIME_ERROR3(y, m, d);
+
     DateTime dt;
     memset(&dt, 0, sizeof(DateTime));
 
     int year = (int)(get_type_id(y) == LMD_TYPE_INT ? y.get_int56() : (get_type_id(y) == LMD_TYPE_INT64 ? (int)y.get_int64() : 0));
     int month = (int)(get_type_id(m) == LMD_TYPE_INT ? m.get_int56() : (get_type_id(m) == LMD_TYPE_INT64 ? (int)m.get_int64() : 0));
     int day_val = (int)(get_type_id(d) == LMD_TYPE_INT ? d.get_int56() : (get_type_id(d) == LMD_TYPE_INT64 ? (int)d.get_int64() : 0));
+
+    // validate ranges
+    if (month < 1 || month > 12) {
+        log_error("date: month must be 1-12, got %d", month);
+        return DATETIME_MAKE_ERROR();
+    }
+    if (day_val < 1 || day_val > 31) {
+        log_error("date: day must be 1-31, got %d", day_val);
+        return DATETIME_MAKE_ERROR();
+    }
 
     DATETIME_SET_YEAR_MONTH(&dt, year, month);
     dt.day = day_val;
@@ -2680,6 +2725,9 @@ DateTime fn_time0() {
 DateTime fn_time1(Item arg) {
     log_debug("fn_time1: extract time from arg");
     TypeId arg_type = get_type_id(arg);
+
+    // propagate error inputs
+    if (arg_type == LMD_TYPE_ERROR) return DATETIME_MAKE_ERROR();
 
     if (arg_type == LMD_TYPE_DTIME) {
         DateTime src = arg.get_datetime();
@@ -2716,20 +2764,36 @@ DateTime fn_time1(Item arg) {
         log_error("time: failed to parse string '%.*s'", (int)arg.get_len(), arg.get_chars());
     }
 
-    DateTime err;
-    memset(&err, 0, sizeof(DateTime));
-    return err;
+    return DATETIME_MAKE_ERROR();  // error sentinel instead of all-zeros
 }
 
 // time(h, m, s) - construct time from hour, minute, second
 DateTime fn_time3(Item h, Item m, Item s) {
     log_debug("fn_time3: construct time from h/m/s");
+
+    // propagate error inputs
+    GUARD_DATETIME_ERROR3(h, m, s);
+
     DateTime dt;
     memset(&dt, 0, sizeof(DateTime));
 
     int hour_val = (int)(get_type_id(h) == LMD_TYPE_INT ? h.get_int56() : (get_type_id(h) == LMD_TYPE_INT64 ? (int)h.get_int64() : 0));
     int minute_val = (int)(get_type_id(m) == LMD_TYPE_INT ? m.get_int56() : (get_type_id(m) == LMD_TYPE_INT64 ? (int)m.get_int64() : 0));
     int second_val = (int)(get_type_id(s) == LMD_TYPE_INT ? s.get_int56() : (get_type_id(s) == LMD_TYPE_INT64 ? (int)s.get_int64() : 0));
+
+    // validate ranges
+    if (hour_val < 0 || hour_val > 23) {
+        log_error("time: hour must be 0-23, got %d", hour_val);
+        return DATETIME_MAKE_ERROR();
+    }
+    if (minute_val < 0 || minute_val > 59) {
+        log_error("time: minute must be 0-59, got %d", minute_val);
+        return DATETIME_MAKE_ERROR();
+    }
+    if (second_val < 0 || second_val > 59) {
+        log_error("time: second must be 0-59, got %d", second_val);
+        return DATETIME_MAKE_ERROR();
+    }
 
     // set default date values to match parsed time-only literals
     DATETIME_SET_YEAR_MONTH(&dt, 1970, 1);

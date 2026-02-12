@@ -143,22 +143,49 @@ struct NativeMathFunc {
     const char* lambda_name;
     const char* c_name;
     bool returns_float;  // true if returns float, false if returns int
+    int arg_count;       // 1 or 2 arguments
 };
 
 static const NativeMathFunc native_math_funcs[] = {
-    {"sin", "sin", true},
-    {"cos", "cos", true},
-    {"tan", "tan", true},
-    {"sqrt", "sqrt", true},
-    {"log", "log", true},
-    {"log10", "log10", true},
-    {"exp", "exp", true},
-    {"abs", "fabs", true},
-    {"floor", "floor", true},
-    {"ceil", "ceil", true},
-    {"round", "round", true},
-    {NULL, NULL, false}
+    // Single-argument functions (use C math library directly)
+    {"sin", "sin", true, 1},
+    {"cos", "cos", true, 1},
+    {"tan", "tan", true, 1},
+    {"sqrt", "sqrt", true, 1},
+    {"log", "log", true, 1},
+    {"log10", "log10", true, 1},
+    {"exp", "exp", true, 1},
+    {"abs", "fabs", true, 1},       // Note: fabs for float, but we may prefer fn_abs_i for int
+    {"floor", "floor", true, 1},
+    {"ceil", "ceil", true, 1},
+    {"round", "round", true, 1},
+    // Two-argument functions (use our unboxed wrappers)
+    {"pow", "fn_pow_u", true, 2},
+    {NULL, NULL, false, 0}
 };
+
+// Two-argument min/max functions - separate table since they're overloaded
+struct NativeBinaryFunc {
+    const char* lambda_name;
+    const char* c_name_float;    // double version
+    const char* c_name_int;      // int64 version (or NULL if no int version)
+};
+
+static const NativeBinaryFunc native_binary_funcs[] = {
+    {"min", "fn_min2_u", NULL},
+    {"max", "fn_max2_u", NULL},
+    {NULL, NULL, NULL}
+};
+
+// Helper to check if type is numeric (int, int64, or float)
+static inline bool is_numeric_type(TypeId t) {
+    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT;
+}
+
+// Helper to check if type is integer (int or int64)
+static inline bool is_integer_type(TypeId t) {
+    return t == LMD_TYPE_INT || t == LMD_TYPE_INT64;
+}
 
 // Check if a sys func call can use native C math function
 // Returns the C function name if applicable, NULL otherwise
@@ -167,7 +194,7 @@ static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg
 
     // Check if argument has known numeric type
     TypeId arg_type = arg->type->type_id;
-    if (arg_type != LMD_TYPE_INT && arg_type != LMD_TYPE_INT64 && arg_type != LMD_TYPE_FLOAT) {
+    if (!is_numeric_type(arg_type)) {
         return NULL;
     }
 
@@ -176,6 +203,47 @@ static const char* can_use_native_math(AstSysFuncNode* sys_fn_node, AstNode* arg
     for (int i = 0; native_math_funcs[i].lambda_name != NULL; i++) {
         if (strcmp(fn_name, native_math_funcs[i].lambda_name) == 0) {
             return native_math_funcs[i].c_name;
+        }
+    }
+    return NULL;
+}
+
+// Check if a sys func call can use native two-arg function
+// Returns info about the function if applicable, NULL otherwise
+static const NativeMathFunc* can_use_native_math_binary(AstSysFuncNode* sys_fn_node, AstNode* arg1, AstNode* arg2) {
+    if (!sys_fn_node || !sys_fn_node->fn_info || !arg1 || !arg2 || !arg1->type || !arg2->type) return NULL;
+
+    TypeId type1 = arg1->type->type_id;
+    TypeId type2 = arg2->type->type_id;
+
+    if (!is_numeric_type(type1) || !is_numeric_type(type2)) {
+        return NULL;
+    }
+
+    const char* fn_name = sys_fn_node->fn_info->name;
+    for (int i = 0; native_math_funcs[i].lambda_name != NULL; i++) {
+        if (native_math_funcs[i].arg_count == 2 && strcmp(fn_name, native_math_funcs[i].lambda_name) == 0) {
+            return &native_math_funcs[i];
+        }
+    }
+    return NULL;
+}
+
+// Check if a sys func call can use native binary func (min/max)
+static const NativeBinaryFunc* can_use_native_binary_func(AstSysFuncNode* sys_fn_node, AstNode* arg1, AstNode* arg2) {
+    if (!sys_fn_node || !sys_fn_node->fn_info || !arg1 || !arg2 || !arg1->type || !arg2->type) return NULL;
+
+    TypeId type1 = arg1->type->type_id;
+    TypeId type2 = arg2->type->type_id;
+
+    if (!is_numeric_type(type1) || !is_numeric_type(type2)) {
+        return NULL;
+    }
+
+    const char* fn_name = sys_fn_node->fn_info->name;
+    for (int i = 0; native_binary_funcs[i].lambda_name != NULL; i++) {
+        if (strcmp(fn_name, native_binary_funcs[i].lambda_name) == 0) {
+            return &native_binary_funcs[i];
         }
     }
     return NULL;
@@ -1165,6 +1233,12 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
             strbuf_append_str(tp->code_buf, ")");
         }
     }
+    else if (unary_node->op == OPERATOR_IS_ERROR) {
+        // ^expr shorthand for (expr is error) — checks if item is error type
+        strbuf_append_str(tp->code_buf, "(item_type_id(");
+        transpile_box_item(tp, unary_node->operand);
+        strbuf_append_str(tp->code_buf, ")==LMD_TYPE_ERROR)");
+    }
     else if (unary_node->op == OPERATOR_POS || unary_node->op == OPERATOR_NEG) {
         TypeId operand_type = unary_node->operand->type->type_id;
 
@@ -1240,11 +1314,21 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
     }
     else if (bi_node->op == OPERATOR_POW) {
-        strbuf_append_str(tp->code_buf, "fn_pow(");
-        transpile_box_item(tp, bi_node->left);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');
+        // Use unboxed pow when both operands are numeric
+        if (is_numeric_type(left_type) && is_numeric_type(right_type)) {
+            strbuf_append_str(tp->code_buf, "push_d(fn_pow_u((double)(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, "),(double)(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, ")))");
+        } else {
+            // Fall back to boxed version for non-numeric or unknown types
+            strbuf_append_str(tp->code_buf, "fn_pow(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+        }
     }
     else if (bi_node->op == OPERATOR_ADD) {
         if (left_type == right_type) {
@@ -1309,7 +1393,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MOD) {
-        // Always call runtime fn_mod() for proper error handling (division by zero, type checking)
+        // Always use boxed fn_mod() for proper division-by-zero error handling
+        // Cannot use unboxed fn_mod_i since it cannot return error for b == 0
         strbuf_append_str(tp->code_buf, "fn_mod(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -1334,7 +1419,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IDIV) {
-        // Always call runtime fn_idiv() for proper error handling
+        // Always use boxed fn_idiv() for proper division-by-zero error handling
+        // Cannot use unboxed fn_idiv_i since it cannot return error for b == 0
         strbuf_append_str(tp->code_buf, "fn_idiv(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -3331,10 +3417,43 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     if (is_sys_func) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
-
-        // Check if we can use native C math function
-        // Only for single-argument math functions with typed numeric arg
         AstNode* first_arg = call_node->argument;
+        AstNode* second_arg = first_arg ? first_arg->next : NULL;
+        const char* fn_name = sys_fn_node->fn_info->name;
+
+        // ==== PRIORITY 1: Integer-specific unboxed functions ====
+        // These take precedence over generic float-based native math
+        if (first_arg && !first_arg->next && first_arg->type) {
+            TypeId arg_type = first_arg->type->type_id;
+
+            // Integer abs (prefer fn_abs_i over fabs for integers)
+            if (strcmp(fn_name, "abs") == 0 && is_integer_type(arg_type)) {
+                strbuf_append_str(tp->code_buf, "i2it(fn_abs_i((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, ")))");
+                return;
+            }
+
+            // Sign function with integer arg
+            if (strcmp(fn_name, "sign") == 0 && is_integer_type(arg_type)) {
+                strbuf_append_str(tp->code_buf, "i2it(fn_sign_i((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, ")))");
+                return;
+            }
+
+            // Integer floor/ceil/round (identity for integers)
+            if ((strcmp(fn_name, "floor") == 0 || strcmp(fn_name, "ceil") == 0 ||
+                 strcmp(fn_name, "round") == 0) && is_integer_type(arg_type)) {
+                // For integers, floor/ceil/round is identity - just return the value boxed
+                strbuf_append_str(tp->code_buf, "i2it((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+        }
+
+        // ==== PRIORITY 2: Native C math functions (single argument, double-based) ====
         const char* native_func = can_use_native_math(sys_fn_node, first_arg);
 
         if (native_func && first_arg && !first_arg->next) {
@@ -3346,6 +3465,63 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             transpile_expr(tp, first_arg);
             strbuf_append_str(tp->code_buf, ")))");
             return;  // done - skip normal argument handling
+        }
+
+        // Check if we can use native two-argument math function (pow)
+        const NativeMathFunc* native_binary_math = can_use_native_math_binary(sys_fn_node, first_arg, second_arg);
+        if (native_binary_math && first_arg && second_arg && !second_arg->next) {
+            // Use native binary math: push_d(fn_pow_u((double)arg1, (double)arg2))
+            strbuf_append_str(tp->code_buf, "push_d(");
+            strbuf_append_str(tp->code_buf, native_binary_math->c_name);
+            strbuf_append_str(tp->code_buf, "((double)(");
+            transpile_expr(tp, first_arg);
+            strbuf_append_str(tp->code_buf, "),(double)(");
+            transpile_expr(tp, second_arg);
+            strbuf_append_str(tp->code_buf, ")))");
+            return;
+        }
+
+        // Check if we can use native binary func (min/max with 2 args)
+        const NativeBinaryFunc* native_binary = can_use_native_binary_func(sys_fn_node, first_arg, second_arg);
+        if (native_binary && first_arg && second_arg && !second_arg->next) {
+            // min/max with two numeric args: push_d(fn_min2_u((double)arg1, (double)arg2))
+            strbuf_append_str(tp->code_buf, "push_d(");
+            strbuf_append_str(tp->code_buf, native_binary->c_name_float);
+            strbuf_append_str(tp->code_buf, "((double)(");
+            transpile_expr(tp, first_arg);
+            strbuf_append_str(tp->code_buf, "),(double)(");
+            transpile_expr(tp, second_arg);
+            strbuf_append_str(tp->code_buf, ")))");
+            return;
+        }
+
+        // Check for remaining single-arg unboxed functions (neg, float sign)
+        // Note: abs, int sign, and floor/ceil/round for int are handled in PRIORITY 1 above
+        if (first_arg && !first_arg->next && first_arg->type) {
+            TypeId arg_type = first_arg->type->type_id;
+
+            // Negation (not in native_math_funcs)
+            if (strcmp(fn_name, "neg") == 0) {
+                if (is_integer_type(arg_type)) {
+                    strbuf_append_str(tp->code_buf, "i2it(fn_neg_i((int64_t)(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, ")))");
+                    return;
+                } else if (arg_type == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "push_d(fn_neg_f(");
+                    transpile_expr(tp, first_arg);
+                    strbuf_append_str(tp->code_buf, "))");
+                    return;
+                }
+            }
+
+            // Float sign (integer sign handled in PRIORITY 1)
+            if (strcmp(fn_name, "sign") == 0 && arg_type == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "i2it(fn_sign_f(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
         }
 
         // Use the sys func name from fn_info, not from TSNode source

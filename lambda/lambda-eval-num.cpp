@@ -130,6 +130,7 @@ static Item vector_get(Item item, int64_t index) {
 }
 
 Item fn_add(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
 
@@ -193,8 +194,8 @@ Item fn_add(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_add");
             return ItemError;
         }
@@ -273,6 +274,7 @@ Item fn_add(Item item_a, Item item_b) {
 }
 
 Item fn_mul(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -344,8 +346,8 @@ Item fn_mul(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_mul");
             return ItemError;
         }
@@ -416,6 +418,7 @@ Item fn_mul(Item item_a, Item item_b) {
 }
 
 Item fn_sub(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -475,8 +478,8 @@ Item fn_sub(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_sub");
             return ItemError;
         }
@@ -547,6 +550,7 @@ Item fn_sub(Item item_a, Item item_b) {
 }
 
 Item fn_div(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -632,8 +636,8 @@ Item fn_div(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_div");
             return ItemError;
         }
@@ -750,6 +754,7 @@ Item fn_div(Item item_a, Item item_b) {
 }
 
 Item fn_idiv(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     // Check for division by zero
     bool is_zero = false;
     if (item_b._type_id == LMD_TYPE_INT) {
@@ -787,6 +792,7 @@ Item fn_idiv(Item item_a, Item item_b) {
 }
 
 Item fn_pow(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     // Defensive check: verify items are valid before accessing
     // Check if the item union pointer fields are valid (not small integers that indicate corruption)
     uint64_t ptr_a = item_a.item;
@@ -917,6 +923,7 @@ Item fn_pow(Item item_a, Item item_b) {
 }
 
 Item fn_mod(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -1014,6 +1021,7 @@ Item fn_mod(Item item_a, Item item_b) {
 // Numeric system functions implementation
 
 Item fn_abs(Item item) {
+    GUARD_ERROR1(item);
     // abs() - absolute value of a number or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT) {
@@ -1063,6 +1071,7 @@ Item fn_abs(Item item) {
 }
 
 Item fn_round(Item item) {
+    GUARD_ERROR1(item);
     // round() - round to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
@@ -1106,6 +1115,7 @@ Item fn_round(Item item) {
 }
 
 Item fn_floor(Item item) {
+    GUARD_ERROR1(item);
     // floor() - round down to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
@@ -1148,6 +1158,7 @@ Item fn_floor(Item item) {
 }
 
 Item fn_ceil(Item item) {
+    GUARD_ERROR1(item);
     // ceil() - round up to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
@@ -1190,6 +1201,7 @@ Item fn_ceil(Item item) {
 }
 
 Item fn_min2(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     log_debug("fn_min called with types: %d, %d", item_a._type_id, item_b._type_id);
     // two argument scalar min case
     double a_val = 0.0, b_val = 0.0;
@@ -1226,7 +1238,7 @@ Item fn_min2(Item item_a, Item item_b) {
         b_val = item_b.get_double();
         is_float = true;
     }
-    else if (item_a._type_id == LMD_TYPE_DECIMAL) {
+    else if (item_b._type_id == LMD_TYPE_DECIMAL) {
         log_error("decimal not supported yet in fn_min");
         return ItemError;
     }
@@ -1247,6 +1259,7 @@ Item fn_min2(Item item_a, Item item_b) {
 }
 
 Item fn_min1(Item item_a) {
+    GUARD_ERROR1(item_a);
     // single argument min case
     TypeId type_id = get_type_id(item_a);
     if (type_id == LMD_TYPE_ARRAY_INT) {
@@ -1371,6 +1384,7 @@ Item fn_min1(Item item_a) {
 }
 
 Item fn_max2(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     // two argument max case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
@@ -1419,6 +1433,7 @@ Item fn_max2(Item item_a, Item item_b) {
 }
 
 Item fn_max1(Item item_a) {
+    GUARD_ERROR1(item_a);
     // single argument max case
     TypeId type_id = get_type_id(item_a);
     if (type_id == LMD_TYPE_ARRAY_FLOAT) {
@@ -1535,6 +1550,7 @@ Item fn_max1(Item item_a) {
 }
 
 Item fn_sum(Item item) {
+    GUARD_ERROR1(item);
     // sum() - sum of all elements in an array or list
     TypeId type_id = get_type_id(item);
     log_debug("DEBUG fn_sum: called with type_id: %d", type_id);
@@ -1685,6 +1701,7 @@ Item fn_sum(Item item) {
 }
 
 Item fn_avg(Item item) {
+    GUARD_ERROR1(item);
     // avg() - average of all elements in an array or list
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY) {
@@ -1790,6 +1807,7 @@ Item fn_avg(Item item) {
 }
 
 Item fn_pos(Item item) {
+    GUARD_ERROR1(item);
     // Unary + operator - return the item as-is for numeric types, or cast strings/symbols to numbers
     if (item._type_id == LMD_TYPE_INT) {
         return item;  // Already in correct format
@@ -1839,6 +1857,7 @@ Item fn_pos(Item item) {
 }
 
 Item fn_neg(Item item) {
+    GUARD_ERROR1(item);
     // Unary - operator - negate numeric values or cast and negate strings/symbols
     if (item._type_id == LMD_TYPE_INT) {
         int64_t val = item.get_int56();
@@ -1894,6 +1913,7 @@ Item fn_neg(Item item) {
 }
 
 Item fn_int(Item item) {
+    GUARD_ERROR1(item);
     double dval;  int64_t ival;
     if (item._type_id == LMD_TYPE_INT) {
         return item;
@@ -2027,6 +2047,7 @@ int64_t fn_int64(Item item) {
 // Constructor functions for type conversion
 
 Item fn_decimal(Item item) {
+    GUARD_ERROR1(item);
     // Convert item to decimal type
     if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // Already a decimal
@@ -2104,6 +2125,7 @@ Item fn_decimal(Item item) {
 }
 
 Item fn_binary(Item item) {
+    GUARD_ERROR1(item);
     // Convert item to binary (string) type
     if (item._type_id == LMD_TYPE_STRING) {
         return item;  // Already a string (binary is stored as string)
@@ -2202,6 +2224,10 @@ Item fn_binary(Item item) {
 
 extern "C" Symbol* fn_symbol(Item item) {
     // Convert item to symbol type
+    if (item._type_id == LMD_TYPE_ERROR) {
+        log_debug("fn_symbol: error item received");
+        return NULL;
+    }
     if (item._type_id == LMD_TYPE_SYMBOL) {
         return item.get_symbol();  // Already a symbol
     }
@@ -2287,6 +2313,7 @@ extern "C" Symbol* fn_symbol(Item item) {
 // Note: Must be declared in lambda.h for MIR C2MIR to know the signature
 extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     log_debug("fn_symbol2: name_type=%d, url_type=%d", name_item._type_id, url_item._type_id);
+    GUARD_ERROR2(name_item, url_item);
 
     // extract name string
     const char* name_str = nullptr;
@@ -2342,6 +2369,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
 }
 
 Item fn_float(Item item) {
+    GUARD_ERROR1(item);
     // Convert item to float type
     if (item._type_id == LMD_TYPE_FLOAT) {
         return item;  // Already a float
@@ -2450,4 +2478,101 @@ Item fn_float(Item item) {
         log_debug("Cannot convert type %d to float", item._type_id);
         return ItemError;
     }
+}
+// ============================================================================
+// UNBOXED SYSTEM FUNCTIONS (fn_*_u)
+// These are native C implementations that bypass Item boxing overhead.
+// They are called directly when types are known at compile time.
+// ============================================================================
+
+// --- Math functions (double → double) ---
+
+// Note: sin, cos, tan, sqrt, log, log10, exp, fabs, floor, ceil, round
+// are already handled by native_math_funcs in transpile.cpp which calls
+// the C math library directly. We don't need wrappers for those.
+
+// Power function: native double version
+extern "C" double fn_pow_u(double base, double exponent) {
+    return pow(base, exponent);
+}
+
+// Min/max for two doubles
+extern "C" double fn_min2_u(double a, double b) {
+    return a < b ? a : b;
+}
+
+extern "C" double fn_max2_u(double a, double b) {
+    return a > b ? a : b;
+}
+
+// --- Integer operations ---
+
+// Integer absolute value
+extern "C" int64_t fn_abs_i(int64_t x) {
+    return x < 0 ? -x : x;
+}
+
+// Float absolute value (alternative to fabs)
+extern "C" double fn_abs_f(double x) {
+    return fabs(x);
+}
+
+// Integer negation
+extern "C" int64_t fn_neg_i(int64_t x) {
+    return -x;
+}
+
+// Float negation
+extern "C" double fn_neg_f(double x) {
+    return -x;
+}
+
+// Integer modulo
+extern "C" int64_t fn_mod_i(int64_t a, int64_t b) {
+    // Note: caller is responsible for ensuring b != 0
+    return a % b;
+}
+
+// Integer division
+extern "C" int64_t fn_idiv_i(int64_t a, int64_t b) {
+    // Note: caller is responsible for ensuring b != 0
+    return a / b;
+}
+
+// --- Boolean operations ---
+
+// Logical not (native bool version)
+extern "C" Bool fn_not_u(Bool x) {
+    return !x;
+}
+
+// --- Comparison operations ---
+// These are already handled by native C operators in transpile_binary_expr
+// when both operands have known types, so no wrappers needed.
+
+// --- Sign function ---
+extern "C" int32_t fn_sign_i(int64_t x) {
+    if (x > 0) return 1;
+    if (x < 0) return -1;
+    return 0;
+}
+
+extern "C" int32_t fn_sign_f(double x) {
+    if (x > 0.0) return 1;
+    if (x < 0.0) return -1;
+    return 0;
+}
+
+// --- Rounding functions (int version returns identity) ---
+// floor/ceil/round of an integer is the integer itself
+extern "C" int64_t fn_floor_i(int64_t x) {
+    return x;
+}
+
+extern "C" int64_t fn_ceil_i(int64_t x) {
+    return x;
+}
+
+extern "C" int64_t fn_round_i(int64_t x) {
+    return x;
 }
