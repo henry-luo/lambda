@@ -1854,6 +1854,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
 
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
+
+    // unwrap expr/expr_no_pipe wrapper nodes (no longer inlined in grammar)
+    if (symbol == SYM_EXPR || symbol == SYM_EXPR_NO_PIPE) {
+        child = ts_node_named_child(child, 0);
+        if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
+        symbol = ts_node_symbol(child);
+    }
     log_debug("*** DEBUG: symbol=%d ***", symbol);
     if (symbol == SYM_NULL) {
         ast_node->type = &LIT_NULL;
@@ -4896,6 +4903,26 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     TSSymbol symbol = ts_node_symbol(expr_node);
     log_debug("build_expr: %s", ts_node_type(expr_node));
     switch (symbol) {
+    // Wrapper nodes - unwrap and recurse to single child
+    case SYM_EXPR:
+    case SYM_EXPR_NO_PIPE: {
+        // expr and expr_no_pipe are wrapper nodes with a single named child
+        TSNode child = ts_node_named_child(expr_node, 0);
+        if (ts_node_is_null(child)) {
+            log_error("expr wrapper node has no child");
+            return NULL;
+        }
+        return build_expr(tp, child);
+    }
+    case SYM_TYPE_EXPR: {
+        // type_expr is a wrapper node with a single named child
+        TSNode child = ts_node_named_child(expr_node, 0);
+        if (ts_node_is_null(child)) {
+            log_error("type_expr wrapper node has no child");
+            return NULL;
+        }
+        return build_expr(tp, child);
+    }
     case SYM_PRIMARY_EXPR:
         return build_primary_expr(tp, expr_node);
     case SYM_UNARY_EXPR:

@@ -40,6 +40,9 @@ extern "C" {
 #define SYM_SPREAD_EXPR sym_spread_expr
 #define SYM_BINARY_EXPR sym_binary_expr
 #define SYM_BINARY_EXPR_NO_PIPE sym_binary_expr_no_pipe
+#define SYM_EXPR sym__expr
+#define SYM_EXPR_NO_PIPE sym_expr_no_pipe
+#define SYM_TYPE_EXPR sym__type_expr
 
 // Path wildcards for glob patterns
 #define SYM_PATH_WILDCARD sym_path_wildcard
