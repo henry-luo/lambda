@@ -419,16 +419,25 @@ All Phase 1 tasks have been implemented and validated (220/220 Lambda baseline t
 - **1.3**: `parse_error.cpp` — added null checks after `malloc()` and all 3 `strdup()` calls with proper cleanup on failure. `input-pdf.cpp` — moved null/empty check before `InputContext` construction to prevent crash.
 - **1.4**: Added `if (!str || !*str) { input->root = ITEM_NULL; return; }` guard to all parser entry points. Fixed `parse_math` where `log_debug()` dereferenced `math_string` before the null check.
 
-### Phase 2: Shared utilities (eliminate duplication)
+### Phase 2: Shared utilities (eliminate duplication) ✅ COMPLETED
 
-| # | Task | Files | Effort |
+| # | Task | Files | Status |
 |---|------|-------|--------|
-| 2.1 | Create `input-utils.h/.cpp` with `codepoint_to_utf8()` | New file | S |
-| 2.2 | Replace all 10 inline UTF-8 copies with shared function | `json`, `ini`, `prop`, `toml`, `mark`, `yaml`, `html_entities` | M |
-| 2.3 | Extract `auto_type_value()` to shared utility | `ini`, `prop` | S |
-| 2.4 | Extract `decode_surrogate_pair()` to shared utility | `json`, `prop`, `toml` | S |
-| 2.5 | Add `try_parse_int64()` / `try_parse_double()` | New in `input-utils` | S |
-| 2.6 | Optimize constant table lookups in `input-common.cpp` | `input-common.cpp` | S |
+| 2.1 | Create `input-utils.h/.hpp/.cpp` with `codepoint_to_utf8()`, `decode_surrogate_pair()`, `parse_hex_codepoint()`, `try_parse_int64/double()`, `input_strncasecmp()`, `parse_typed_value()`, `append_codepoint_utf8()` | New files | ✅ |
+| 2.2 | Replace all inline UTF-8 encoding with shared `append_codepoint_utf8()` | `json`, `prop`, `toml`, `mark`, `yaml`, `html_entities` | ✅ |
+| 2.3 | Extract `parse_typed_value()` to shared utility; remove ~95-line duplicates from INI and Properties | `ini`, `prop` | ✅ |
+| 2.4 | Replace inline surrogate-pair math with shared `decode_surrogate_pair()` | `json`, `prop`, `toml` | ✅ |
+| 2.5 | Add `try_parse_int64()` / `try_parse_double()` (stack-buffer, no heap) | `input-utils.cpp` | ✅ |
+| 2.6 | Optimize constant table lookups: sort-once + `bsearch()` (O(n)→O(log n)) | `input-common.cpp` | ✅ |
+
+**Implementation notes:**
+- **2.1**: Three new files created — C API (`input-utils.h`), C++ API (`input-utils.hpp`), implementation (`input-utils.cpp`). Two `append_codepoint_utf8` variants: one for `StringBuf*` (JSON/TOML/Mark/Prop), one for `StrBuf*` (YAML).
+- **2.2**: Replaced 9 inline UTF-8 blocks across 6 files. **Bugfixes**: Mark `\u` and YAML `\u` had only 3-tier UTF-8 (missing 4-byte encoding for emoji/CJK ext-B) — now uses full 4-tier via shared utility.
+- **2.3**: Removed duplicate `case_insensitive_compare` + `parse_typed_value` (~95 lines each) from `input-ini.cpp` and `input-prop.cpp`. Shared version uses stack-buffer `try_parse_int64/double` instead of heap `pool_calloc` for temporary null-terminated strings.
+- **2.4**: Replaced inline surrogate-pair arithmetic `0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00)` with `decode_surrogate_pair()` in 3 files. Structural error-handling logic (lone surrogates, replacement chars) remains parser-specific.
+- **2.6**: All 8 string arrays sorted once on first use via `init_common_tables()`; lookups switched from linear scan to `bsearch()`.
+
+**All tests pass**: Lambda 220/220, Radiant 1972/1972.
 
 ### Phase 3: Consistency unification
 

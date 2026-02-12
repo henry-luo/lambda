@@ -1,6 +1,7 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "source_tracker.hpp"
 
 using namespace lambda;
@@ -77,9 +78,10 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
                         char hex_low[5] = {0};
                         strncpy(hex_low, *toml + 2, 4);
                         int low_surrogate = (int)strtol(hex_low, NULL, 16);
-                        if (low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
+                        uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
+                        if (combined != 0) {
                             // valid surrogate pair - combine into full codepoint
-                            codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low_surrogate - 0xDC00);
+                            codepoint = (int)combined;
                             (*toml) += 6; // skip \uXXXX for low surrogate
                             tracker.advance(6);
                         } else {
@@ -97,21 +99,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
             }
 
             // convert codepoint to UTF-8
-            if (codepoint < 0x80) {
-                stringbuf_append_char(sb, (char)codepoint);
-            } else if (codepoint < 0x800) {
-                stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            } else if (codepoint < 0x10000) {
-                stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            } else {
-                stringbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
-                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
-                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            }
+            append_codepoint_utf8(sb, (uint32_t)codepoint);
             (*toml)--; // Back up one since we'll increment at end
             tracker.advance(-1);
         } break;
@@ -138,21 +126,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
                 return false;
             }
 
-            if (codepoint < 0x80) {
-                stringbuf_append_char(sb, (char)codepoint);
-            } else if (codepoint < 0x800) {
-                stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            } else if (codepoint < 0x10000) {
-                stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            } else {
-                stringbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
-                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
-                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-            }
+            append_codepoint_utf8(sb, (uint32_t)codepoint);
             (*toml)--; // Back up one since we'll increment at end
             tracker.advance(-1);
         } break;
