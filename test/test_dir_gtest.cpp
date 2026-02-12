@@ -3,6 +3,7 @@
 // Tests the directory listing feature - returns a List of Path items
 
 #include <gtest/gtest.h>
+#include "../lambda/transpiler.hpp"
 #include "../lambda/input/input.hpp"
 #include <sys/stat.h>
 #include <unistd.h>
@@ -13,16 +14,44 @@
 
 extern "C" {
 #include "../lib/log.h"
+#include "../lib/mempool.h"
 }
+
+// External path API (defined in path.c)
+extern "C" {
+    void path_init(void);
+}
+
+// Thread-local context (defined in runner.cpp)
+extern __thread EvalContext* context;
 
 // Test fixture for directory tests
 class InputDirTest : public ::testing::Test {
 protected:
     static char test_dir_name[256];
+    Pool* pool;
+    EvalContext test_context;
+    Heap test_heap;
 
     void SetUp() override {
         // Initialize logging
         log_init(NULL);
+        
+        // Set up a minimal context for path operations
+        pool = pool_create();
+        test_heap.pool = pool;
+        test_heap.entries = nullptr;
+        
+        memset(&test_context, 0, sizeof(test_context));
+        test_context.heap = &test_heap;
+        test_context.pool = pool;
+        
+        // Set thread-local context
+        context = &test_context;
+        
+        // Initialize path system
+        path_init();
+        
         // Generate unique directory name using PID to avoid race conditions
         snprintf(test_dir_name, sizeof(test_dir_name), "test_temp_dir_%d_%ld", getpid(), (long)time(NULL));
         setup_test_directory();
@@ -30,6 +59,10 @@ protected:
 
     void TearDown() override {
         cleanup_test_directory();
+        context = nullptr;
+        if (pool) {
+            pool_destroy(pool);
+        }
     }
 
     // Helper function to create a test directory structure
@@ -153,14 +186,35 @@ TEST_F(InputDirTest, FileInsteadOfDirectoryError) {
 // Test fixture for tests that don't need the custom directory
 class InputDirTestSimple : public ::testing::Test {
 protected:
+    Pool* pool;
+    EvalContext test_context;
+    Heap test_heap;
+
     void SetUp() override {
         // Initialize logging
         log_init(NULL);
-        // No setup needed
+        
+        // Set up a minimal context for path operations
+        pool = pool_create();
+        test_heap.pool = pool;
+        test_heap.entries = nullptr;
+        
+        memset(&test_context, 0, sizeof(test_context));
+        test_context.heap = &test_heap;
+        test_context.pool = pool;
+        
+        // Set thread-local context
+        context = &test_context;
+        
+        // Initialize path system
+        path_init();
     }
 
     void TearDown() override {
-        // No cleanup needed
+        context = nullptr;
+        if (pool) {
+            pool_destroy(pool);
+        }
     }
 };
 
