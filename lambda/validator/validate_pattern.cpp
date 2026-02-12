@@ -1,7 +1,7 @@
 /**
  * @file validate_pattern.cpp
  * @brief Pattern validation for Lambda Validator
- * 
+ *
  * Handles validation of:
  * - Occurrence patterns: ?, +, *, [n], [n+], [n,m]
  * - Union types: T1 | T2 | ...
@@ -28,13 +28,13 @@ static ValidationResult* validate_single_item_occurrence(
 ) {
     ValidationResult* result = create_validation_result(validator->get_pool());
     CountConstraint constraint = get_count_constraint(type_unary);
-    
+
     // For optional (?), null is valid
     if (type_unary->op == OPERATOR_OPTIONAL && item.type_id() == LMD_TYPE_NULL) {
         result->valid = true;
         return result;
     }
-    
+
     // Single item can match occurrence of 1
     if (constraint.min <= 1 && (constraint.max == -1 || constraint.max >= 1)) {
         // Validate the single item against the operand type
@@ -46,7 +46,7 @@ static ValidationResult* validate_single_item_occurrence(
             return validate_against_base_type(validator, item, &temp_wrapper);
         }
     }
-    
+
     result->valid = false;
     add_type_mismatch_error(result, validator, "array/list", item.type_id());
     return result;
@@ -62,21 +62,21 @@ static ValidationResult* validate_array_int_occurrence(
     TypeUnary* type_unary
 ) {
     ValidationResult* result = create_validation_result(validator->get_pool());
-    
+
     int count = arr_int ? (int)arr_int->length : 0;
     CountConstraint constraint = get_count_constraint(type_unary);
-    
+
     log_debug("[PATTERN] ArrayInt occurrence: count=%d, min=%d, max=%d",
               count, constraint.min, constraint.max);
-    
+
     // Check count constraints
     if (!check_count_constraint(count, constraint, result, validator, "Array")) {
         return result;
     }
-    
+
     // For ArrayInt, the operand type must be compatible with int
     Type* operand_type = unwrap_type(type_unary->operand);
-    
+
     if (operand_type && operand_type->type_id == LMD_TYPE_INT) {
         result->valid = true;
     } else {
@@ -85,7 +85,7 @@ static ValidationResult* validate_array_int_occurrence(
             "ArrayInt elements are integers, but expected type_id=%d",
             operand_type ? operand_type->type_id : -1);
     }
-    
+
     return result;
 }
 
@@ -98,46 +98,46 @@ static ValidationResult* validate_list_occurrence(
     TypeUnary* type_unary
 ) {
     ValidationResult* result = create_validation_result(validator->get_pool());
-    
+
     int count = list ? (int)list->length : 0;
     CountConstraint constraint = get_count_constraint(type_unary);
-    
+
     log_debug("[PATTERN] List occurrence: count=%d, min=%d, max=%d",
               count, constraint.min, constraint.max);
-    
+
     // Check count constraints
     if (!check_count_constraint(count, constraint, result, validator, "List")) {
         return result;
     }
-    
+
     // Get operand type for element validation
     Type* operand_type = unwrap_type(type_unary->operand);
-    
+
     if (!operand_type) {
         log_error("[PATTERN] TypeUnary operand is null after unwrapping");
         result->valid = false;
         return result;
     }
-    
+
     // Validate each list element
     if (list && count > 0) {
         TypeType temp_wrapper;
         temp_wrapper.type_id = LMD_TYPE_TYPE;
         temp_wrapper.type = operand_type;
-        
+
         for (int i = 0; i < count; i++) {
             PathScope scope(validator, (long)i);
-            
+
             ConstItem elem = list->get(i);
             ValidationResult* elem_result = validate_against_base_type(validator, elem, &temp_wrapper);
-            
+
             if (elem_result && !elem_result->valid) {
                 merge_errors(result, elem_result, validator);
                 return result;
             }
         }
     }
-    
+
     result->valid = true;
     return result;
 }
@@ -149,25 +149,25 @@ ValidationResult* validate_occurrence_type(
 ) {
     log_debug("[PATTERN] validate_occurrence_type: op=%d, min=%d, max=%d",
               type_unary->op, type_unary->min_count, type_unary->max_count);
-    
+
     TypeId item_type_id = item.type_id();
-    
+
     // Check if item is a list/array
     bool is_container = (item_type_id == LMD_TYPE_LIST ||
                          item_type_id == LMD_TYPE_ARRAY ||
                          item_type_id == LMD_TYPE_ARRAY_INT ||
                          item_type_id == LMD_TYPE_ARRAY_INT64 ||
                          item_type_id == LMD_TYPE_ARRAY_FLOAT);
-    
+
     if (!is_container) {
         return validate_single_item_occurrence(validator, item, type_unary);
     }
-    
+
     // Handle typed arrays specially
     if (item_type_id == LMD_TYPE_ARRAY_INT) {
         return validate_array_int_occurrence(validator, item.array_int, type_unary);
     }
-    
+
     // Handle generic List/Array
     return validate_list_occurrence(validator, item.list, type_unary);
 }
@@ -210,7 +210,7 @@ ValidationResult* validate_against_union_type(
             result->valid = true;
             return result;
         }
-        
+
         if (member_result) {
             log_debug("[PATTERN] Union member %d failed with %d errors", i, member_result->error_count);
 
@@ -254,9 +254,9 @@ ValidationResult* validate_against_union_type(
  */
 static void flatten_binary_type(TypeBinary* binary, Type** types, int* count, int max_count, Operator op) {
     if (!binary || *count >= max_count) return;
-    
+
     // Check if left is also a binary type with same operator
-    if (binary->left && binary->left->type_id == LMD_TYPE_TYPE_BINARY) {
+    if (binary->left && binary->left->kind == TYPE_KIND_BINARY) {
         TypeBinary* left_binary = (TypeBinary*)binary->left;
         if (left_binary->op == op) {
             flatten_binary_type(left_binary, types, count, max_count, op);
@@ -267,9 +267,9 @@ static void flatten_binary_type(TypeBinary* binary, Type** types, int* count, in
     } else if (binary->left) {
         types[(*count)++] = binary->left;
     }
-    
+
     // Check if right is also a binary type with same operator
-    if (binary->right && binary->right->type_id == LMD_TYPE_TYPE_BINARY) {
+    if (binary->right && binary->right->kind == TYPE_KIND_BINARY) {
         TypeBinary* right_binary = (TypeBinary*)binary->right;
         if (right_binary->op == op) {
             flatten_binary_type(right_binary, types, count, max_count, op);
@@ -288,33 +288,33 @@ ValidationResult* validate_binary_type(
     TypeBinary* type_binary
 ) {
     log_debug("[PATTERN] validate_binary_type: op=%d", type_binary->op);
-    
+
     ValidationResult* result = create_validation_result(validator->get_pool());
-    
+
     if (!type_binary) {
         add_constraint_error(result, validator, "Invalid binary type (null)");
         return result;
     }
-    
+
     switch (type_binary->op) {
         case OPERATOR_UNION: {
             // Flatten union type into array
             const int MAX_UNION_TYPES = 32;
             Type* union_types[MAX_UNION_TYPES];
             int type_count = 0;
-            
+
             flatten_binary_type(type_binary, union_types, &type_count, MAX_UNION_TYPES, OPERATOR_UNION);
-            
+
             log_debug("[PATTERN] Union type flattened to %d types", type_count);
-            
+
             if (type_count == 0) {
                 add_constraint_error(result, validator, "Empty union type");
                 return result;
             }
-            
+
             return validate_against_union_type(validator, item, union_types, type_count);
         }
-        
+
         case OPERATOR_OR: {
             // Intersection type - item must match ALL types
             // Try left first
@@ -323,18 +323,18 @@ ValidationResult* validate_binary_type(
                 merge_errors(result, left_result, validator);
                 return result;
             }
-            
+
             // Then try right
             ValidationResult* right_result = validate_against_type(validator, item, type_binary->right);
             if (right_result && !right_result->valid) {
                 merge_errors(result, right_result, validator);
                 return result;
             }
-            
+
             result->valid = true;
             return result;
         }
-        
+
         case OPERATOR_EXCLUDE: {
             // Exclude type - item must match left but NOT right
             ValidationResult* left_result = validate_against_type(validator, item, type_binary->left);
@@ -343,7 +343,7 @@ ValidationResult* validate_binary_type(
                 merge_errors(result, left_result, validator);
                 return result;
             }
-            
+
             // Item matches base type - now check it doesn't match excluded type
             ValidationResult* right_result = validate_against_type(validator, item, type_binary->right);
             if (right_result && right_result->valid) {
@@ -351,11 +351,11 @@ ValidationResult* validate_binary_type(
                 add_constraint_error(result, validator, "Item matches excluded type");
                 return result;
             }
-            
+
             result->valid = true;
             return result;
         }
-        
+
         default:
             add_constraint_error_fmt(result, validator, "Unsupported binary type operator: %d", type_binary->op);
             return result;
@@ -414,7 +414,7 @@ ValidationResult* validate_against_occurrence(
         DepthScope depth_scope(validator);
 
         ValidationResult* item_result = validate_against_type(validator, items[i], expected_type);
-        
+
         if (item_result && !item_result->valid) {
             merge_errors(result, item_result, validator);
         }
