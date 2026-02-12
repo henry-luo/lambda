@@ -643,6 +643,36 @@ Bool fn_is(Item a, Item b) {
         return pattern_full_match_chars(pattern, chars, len) ? BOOL_TRUE : BOOL_FALSE;
     }
 
+    // Handle constrained type: base_type where (constraint)
+    if (b_type->kind == TYPE_KIND_CONSTRAINED) {
+        TypeConstrained* constrained = (TypeConstrained*)b_type;
+        log_debug("fn_is: TypeConstrained, checking base type and constraint");
+
+        // First check if value matches the base type
+        // Need to check against the inner base type directly
+        TypeId a_type_id = get_type_id(a);
+        Type* base = constrained->base;
+
+        // Simple base type check (for primitive types like int, string, etc.)
+        if (base->type_id != LMD_TYPE_TYPE) {
+            // Base is a primitive type like int, string, etc.
+            if (a_type_id != base->type_id) {
+                // Allow numeric coercion: int is valid for int64, float is valid for float64, etc.
+                if (!(LMD_TYPE_INT <= a_type_id && a_type_id <= base->type_id &&
+                      LMD_TYPE_INT <= base->type_id && base->type_id <= LMD_TYPE_NUMBER)) {
+                    log_debug("fn_is: base type mismatch: got %d, expected %d", a_type_id, base->type_id);
+                    return BOOL_FALSE;
+                }
+            }
+        }
+        // TODO: handle complex base types (arrays, maps, etc.) via recursive fn_is call
+
+        // For now, return true if base type matches - full constraint eval requires context setup
+        // TODO: implement constraint evaluation by setting _pipe_item = a and evaluating constraint
+        log_debug("fn_is: constrained type - base type matched, constraint eval not yet implemented");
+        return BOOL_TRUE;
+    }
+
     // If b is a TypeUnary directly (kind = TYPE_KIND_UNARY), handle it directly
     if (b_type->kind == TYPE_KIND_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)b_type;
@@ -1194,7 +1224,6 @@ Type* const_type(int type_index) {
         return &LIT_TYPE_ERROR;
     }
     Type* type = (Type*)(type_list->data[type_index]);
-        log_debug("const_type %d, %d, %p", type_index, type->type_id, type);
     return type;
 }
 

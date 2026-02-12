@@ -91,6 +91,7 @@ extern "C" {
 #define SYM_ERROR_TYPE_PATTERN sym_error_type_pattern
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
+#define SYM_CONSTRAINED_TYPE sym_constrained_type
 #define SYM_TYPE_DEFINE sym_type_stam
 #define SYM_TYPE_OCCURRENCE sym_type_occurrence
 
@@ -153,6 +154,8 @@ extern "C" {
 #define FIELD_INDEX field_index
 #define FIELD_SEGMENT field_segment
 #define FIELD_DECOMPOSE field_decompose
+#define FIELD_BASE field_base
+#define FIELD_CONSTRAINT field_constraint
 // For expression clause fields
 #define FIELD_LET field_let
 #define FIELD_WHERE field_where
@@ -262,6 +265,7 @@ typedef enum AstNodeType {
     AST_NODE_FUNC_TYPE,
     AST_NODE_BINARY_TYPE,
     AST_NODE_UNARY_TYPE,
+    AST_NODE_CONSTRAINED_TYPE,  // type with where constraint
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
     AST_NODE_PROC, // procedural function
@@ -349,6 +353,13 @@ typedef struct AstBinaryNode : AstNode {
 
 // Pipe expression (| and where) - same structure as binary, different semantics
 typedef AstBinaryNode AstPipeNode;
+
+// Constrained type: type where (constraint)
+// e.g., int where (5 < ~ < 10), string where (len(~) > 0)
+typedef struct AstConstrainedTypeNode : AstNode {
+    AstNode *base;          // base type (e.g., int, string)
+    AstNode *constraint;    // constraint expression (uses ~ to refer to value)
+} AstConstrainedTypeNode;
 
 // for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
 typedef struct AstNamedNode : AstNode {

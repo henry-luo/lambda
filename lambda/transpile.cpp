@@ -1418,11 +1418,79 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IS) {
-        strbuf_append_str(tp->code_buf, "fn_is(");
-        transpile_box_item(tp, bi_node->left);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_box_item(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');
+        // Check if right operand is a constrained type for inline constraint evaluation
+        AstNode* right = bi_node->right;
+        // Unwrap primary node
+        if (right->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)right;
+            if (pri->expr) right = pri->expr;
+        }
+
+        // Check if the type is a constrained type (directly or via TypeType wrapper)
+        AstConstrainedTypeNode* constrained_node = nullptr;
+        if (right->node_type == AST_NODE_CONSTRAINED_TYPE) {
+            constrained_node = (AstConstrainedTypeNode*)right;
+        } else if (right->type && right->type->kind == TYPE_KIND_CONSTRAINED) {
+            // The identifier's type is directly the TypeConstrained
+            // We need the AST node to get the constraint expression
+            // Look up the original type definition
+            if (right->node_type == AST_NODE_IDENT) {
+                AstIdentNode* ident = (AstIdentNode*)right;
+                if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
+                    AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
+                    if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
+                        constrained_node = (AstConstrainedTypeNode*)type_def->as;
+                    }
+                }
+            }
+        } else if (right->type && right->type->type_id == LMD_TYPE_TYPE) {
+            // Check if it's a TypeType wrapping a TypeConstrained
+            TypeType* type_type = (TypeType*)right->type;
+            if (type_type->type && type_type->type->kind == TYPE_KIND_CONSTRAINED) {
+                // Look up the original type definition to get constraint AST
+                if (right->node_type == AST_NODE_IDENT) {
+                    AstIdentNode* ident = (AstIdentNode*)right;
+                    if (ident->entry && ident->entry->node && ident->entry->node->node_type == AST_NODE_ASSIGN) {
+                        AstNamedNode* type_def = (AstNamedNode*)ident->entry->node;
+                        if (type_def->as && type_def->as->node_type == AST_NODE_CONSTRAINED_TYPE) {
+                            constrained_node = (AstConstrainedTypeNode*)type_def->as;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (constrained_node) {
+            // Inline constrained type check: (base_type_check && constraint_check)
+            TypeConstrained* constrained = (TypeConstrained*)constrained_node->type;
+
+            strbuf_append_str(tp->code_buf, "({\n");
+            strbuf_append_str(tp->code_buf, "  Item _ct_value = ");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, ";\n");
+            strbuf_append_str(tp->code_buf, "  Item _pipe_item = _ct_value;\n");  // for ~ in constraint
+
+            // Check base type using base_type() function
+            strbuf_append_str(tp->code_buf, "  Bool _ct_result = (item_type_id(_ct_value) == ");
+            strbuf_append_int(tp->code_buf, constrained->base->type_id);
+            strbuf_append_str(tp->code_buf, ");\n");
+
+            // If base type matches, evaluate constraint
+            strbuf_append_str(tp->code_buf, "  if (_ct_result) {\n");
+            strbuf_append_str(tp->code_buf, "    _ct_result = is_truthy(");
+            transpile_box_item(tp, constrained_node->constraint);
+            strbuf_append_str(tp->code_buf, ") ? BOOL_TRUE : BOOL_FALSE;\n");
+            strbuf_append_str(tp->code_buf, "  }\n");
+            strbuf_append_str(tp->code_buf, "  _ct_result;\n");
+            strbuf_append_str(tp->code_buf, "})");
+        } else {
+            // Standard fn_is call
+            strbuf_append_str(tp->code_buf, "fn_is(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+        }
     }
     else if (bi_node->op == OPERATOR_IN) {
         strbuf_append_str(tp->code_buf, "fn_in(");
@@ -4784,6 +4852,14 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_UNARY_TYPE:
         transpile_unary_type(tp, (AstUnaryNode*)expr_node);
         break;
+    case AST_NODE_CONSTRAINED_TYPE: {
+        // Transpile constrained type: emit const_type(index) for runtime lookup
+        AstConstrainedTypeNode* constrained_node = (AstConstrainedTypeNode*)expr_node;
+        // ast_node->type is directly the TypeConstrained* (not wrapped in TypeType)
+        TypeConstrained* constrained = (TypeConstrained*)constrained_node->type;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", constrained->type_index);
+        break;
+    }
     case AST_NODE_IMPORT:
         log_debug("import module");
         break;

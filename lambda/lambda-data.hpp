@@ -393,6 +393,17 @@ typedef struct TypeUnary : Type {
     int max_count;   // maximum occurrence count (-1 for unbounded)
 } TypeUnary;
 
+// Constrained type: base_type where (constraint)
+// e.g. int where (5 < ~ < 10)
+// The constraint_fn is a compiled function that takes the value and returns bool
+typedef uint8_t (*ConstraintFn)(uint64_t value);  // returns Bool (BOOL_TRUE/BOOL_FALSE)
+typedef struct TypeConstrained : Type {
+    Type* base;                 // base type (e.g., int, string)
+    struct AstNode* constraint; // constraint expression AST (for error messages)
+    int type_index;             // index in the type list
+    ConstraintFn constraint_fn; // compiled constraint check function
+} TypeConstrained;
+
 typedef struct TypeParam : Type {
     struct TypeParam* next;
     bool is_optional;           // whether parameter is optional (? marker or default value)
