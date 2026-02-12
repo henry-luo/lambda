@@ -398,28 +398,30 @@ TEST_F(MarkBuilderTest, CreateComplexStructure) {
 TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     MarkBuilder builder(input);
 
-    // Names are always pooled
+    // Names created via createNameItem produce Symbol type (arena-allocated, NOT pooled)
     Item name1 = builder.createNameItem("element");
     Item name2 = builder.createNameItem("element");
     EXPECT_EQ(get_type_id(name1), LMD_TYPE_SYMBOL);
     EXPECT_EQ(get_type_id(name2), LMD_TYPE_SYMBOL);
 
-    // Extract actual String pointers
-    String* str_name1 = name1.get_string();
-    String* str_name2 = name2.get_string();
-    EXPECT_EQ(str_name1, str_name2);  // Same instance due to pooling
+    // Symbols are arena-allocated, not pooled - different pointers
+    Symbol* sym_name1 = name1.get_symbol();
+    Symbol* sym_name2 = name2.get_symbol();
+    EXPECT_NE(sym_name1, sym_name2);  // Different instances (arena allocated)
+    EXPECT_STREQ(sym_name1->chars, sym_name2->chars);  // Same content
 
-    // Short symbols are pooled (≤32 chars)
+    // Symbols created via createSymbolItem (arena-allocated, NOT pooled)
     Item sym1 = builder.createSymbolItem("short");
     Item sym2 = builder.createSymbolItem("short");
     EXPECT_EQ(get_type_id(sym1), LMD_TYPE_SYMBOL);
     EXPECT_EQ(get_type_id(sym2), LMD_TYPE_SYMBOL);
 
-    String* str_sym1 = sym1.get_string();
-    String* str_sym2 = sym2.get_string();
-    EXPECT_EQ(str_sym1, str_sym2);  // Pooled
+    Symbol* s1 = sym1.get_symbol();
+    Symbol* s2 = sym2.get_symbol();
+    EXPECT_NE(s1, s2);  // Different instances (arena allocated)
+    EXPECT_STREQ(s1->chars, s2->chars);  // Same content
 
-    // Long symbols not pooled (>32 chars)
+    // Long symbols also not pooled
     const char* long_sym = "this_is_a_very_long_symbol_name_exceeding_32_characters";
     Item long1 = builder.createSymbolItem(long_sym);
     Item long2 = builder.createSymbolItem(long_sym);
@@ -435,17 +437,17 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     EXPECT_EQ(get_type_id(str1), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(str2), LMD_TYPE_STRING);
 
-    String* s1 = str1.get_string();
-    String* s2 = str2.get_string();
-    ASSERT_NE(s1, nullptr);
-    ASSERT_NE(s2, nullptr);
+    String* str_s1 = str1.get_string();
+    String* str_s2 = str2.get_string();
+    ASSERT_NE(str_s1, nullptr);
+    ASSERT_NE(str_s2, nullptr);
 
     // Both should have the same content
-    EXPECT_STREQ(s1->chars, "test");
-    EXPECT_STREQ(s2->chars, "test");
+    EXPECT_STREQ(str_s1->chars, "test");
+    EXPECT_STREQ(str_s2->chars, "test");
 
     // Strings are NOT pooled - different pointers
-    EXPECT_NE(s1, s2);
+    EXPECT_NE(str_s1, str_s2);
 }
 
 // Test auto string merge
@@ -866,23 +868,23 @@ TEST_F(MarkBuilderTest, BuildFragmentArray) {
 TEST_F(MarkBuilderTest, IntegerBoundaries) {
     MarkBuilder builder(input);
 
-    // Note: Item.int_val is only 32 bits, so test 32-bit boundaries
+    // Item.int_val is a 56-bit signed integer field
     Item max_int = builder.createInt(INT32_MAX);
-    EXPECT_EQ(max_int.int_val, INT32_MAX);
+    EXPECT_EQ(max_int.int_val, (int64_t)INT32_MAX);
 
     Item min_int = builder.createInt(INT32_MIN);
-    EXPECT_EQ(min_int.int_val, INT32_MIN);
+    EXPECT_EQ(min_int.int_val, (int64_t)INT32_MIN);
 
     Item zero = builder.createInt(0);
     EXPECT_EQ(zero.int_val, 0);
 
     // Negative values
     Item neg = builder.createInt(-42);
-    EXPECT_EQ(neg.int_val, -42);
+    EXPECT_EQ(neg.int_val, (int64_t)-42);
 
     // Large values that fit in 32 bits
     Item large = builder.createInt(1000000);
-    EXPECT_EQ(large.int_val, 1000000);
+    EXPECT_EQ(large.int_val, (int64_t)1000000);
 }
 
 // Test float special values
@@ -909,11 +911,9 @@ TEST_F(MarkBuilderTest, FloatSpecialValues) {
 TEST_F(MarkBuilderTest, EmptyStringBuf) {
     MarkBuilder builder(input);
 
-    // Get empty string from builder (returns EMPTY_STRING sentinel)
+    // emptyString() returns nullptr (no sentinel string)
     String* empty = builder.emptyString();
-    ASSERT_NE(empty, nullptr);
-    EXPECT_EQ(empty->len, 10);
-    EXPECT_STREQ(empty->chars, "lambda.nil");
+    EXPECT_EQ(empty, nullptr);
 }
 
 // Test duplicate keys in map (last wins)
