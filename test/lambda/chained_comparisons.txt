@@ -1,0 +1,14 @@
+true
+false
+false
+true
+false
+false
+[7]
+[4, 5, 6, 7]
+true
+true
+false
+true
+false
+[true, true, false, [7]]
