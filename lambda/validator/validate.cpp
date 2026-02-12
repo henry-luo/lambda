@@ -94,17 +94,17 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
     }
 
     // Handle TypeUnary (occurrence operators: ?, +, *, [n], [n+], [n,m])
-    if (base_type->type_id == LMD_TYPE_TYPE_UNARY) {
+    if (base_type->kind == TYPE_KIND_UNARY) {
         return validate_occurrence_type(validator, item, (TypeUnary*)base_type);
     }
 
     // Handle TypeBinary (union/intersection: |, &, \)
-    if (base_type->type_id == LMD_TYPE_TYPE_BINARY) {
+    if (base_type->kind == TYPE_KIND_BINARY) {
         return validate_binary_type(validator, item, (TypeBinary*)base_type);
     }
 
     // Handle Pattern type (string/symbol pattern)
-    if (base_type->type_id == LMD_TYPE_PATTERN) {
+    if (base_type->kind == TYPE_KIND_PATTERN) {
         return validate_against_pattern_type(validator, item, (TypePattern*)base_type);
     }
 
@@ -212,7 +212,7 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
                   (void*)unwrapped, unwrapped ? unwrapped->type_id : -1);
 
         // Check if unwrapped type is TypeUnary (occurrence operator)
-        if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE) {
+        if (unwrapped && unwrapped->kind == TYPE_KIND_UNARY) {
             TypeUnary* possible_unary = (TypeUnary*)unwrapped;
             if (possible_unary->op == OPERATOR_ONE_MORE && length < 1) {
                 char error_msg[256];
@@ -491,22 +491,16 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         }
 
         case LMD_TYPE_TYPE:
-            result = validate_against_base_type(validator, item, (TypeType*)type);
-            break;
-
-        case LMD_TYPE_TYPE_UNARY:
-            // TypeUnary passed directly - delegate to occurrence validation
-            result = validate_occurrence_type(validator, item, (TypeUnary*)type);
-            break;
-
-        case LMD_TYPE_TYPE_BINARY:
-            // TypeBinary passed directly - delegate to binary type validation
-            result = validate_binary_type(validator, item, (TypeBinary*)type);
-            break;
-
-        case LMD_TYPE_PATTERN:
-            // Pattern type - validate string/symbol against regex pattern
-            result = validate_against_pattern_type(validator, item, (TypePattern*)type);
+            // Dispatch on kind for type variants
+            if (type->kind == TYPE_KIND_UNARY) {
+                result = validate_occurrence_type(validator, item, (TypeUnary*)type);
+            } else if (type->kind == TYPE_KIND_BINARY) {
+                result = validate_binary_type(validator, item, (TypeBinary*)type);
+            } else if (type->kind == TYPE_KIND_PATTERN) {
+                result = validate_against_pattern_type(validator, item, (TypePattern*)type);
+            } else {
+                result = validate_against_base_type(validator, item, (TypeType*)type);
+            }
             break;
 
         default:

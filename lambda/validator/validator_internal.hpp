@@ -1,7 +1,7 @@
 /**
  * @file validator_internal.hpp
  * @brief Internal helpers for Lambda Validator
- * 
+ *
  * This header provides internal utilities for validation:
  * - PathScope: RAII class for managing validation path
  * - DepthScope: RAII class for tracking validation depth
@@ -17,10 +17,10 @@
 
 /**
  * PathScope - RAII guard for validation path management
- * 
+ *
  * Automatically pushes a path segment on construction and
  * restores the previous path on destruction.
- * 
+ *
  * Usage:
  *   {
  *       PathScope scope(validator, PATH_INDEX, index);
@@ -114,7 +114,7 @@ public:
 
 /**
  * DepthScope - RAII guard for validation depth tracking
- * 
+ *
  * Automatically increments depth on construction and
  * decrements on destruction.
  */
@@ -140,12 +140,12 @@ public:
 
 /**
  * Unwrap nested TypeType wrappers to get the underlying type
- * 
+ *
  * @param type The type to unwrap
  * @return The innermost non-TypeType type, or nullptr if input is nullptr
  */
 inline Type* unwrap_type(Type* type) {
-    while (type && type->type_id == LMD_TYPE_TYPE) {
+    while (type && type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_SIMPLE) {
         type = ((TypeType*)type)->type;
     }
     return type;
@@ -153,14 +153,13 @@ inline Type* unwrap_type(Type* type) {
 
 /**
  * Check if a type is optional (TypeUnary with OPERATOR_OPTIONAL)
- * 
+ *
  * @param type The type to check (may be wrapped in TypeType)
  * @return true if the type is optional
  */
 inline bool is_type_optional(Type* type) {
     Type* unwrapped = unwrap_type(type);
-    if (unwrapped && (unwrapped->type_id == LMD_TYPE_TYPE_UNARY || 
-                      unwrapped->type_id == LMD_TYPE_TYPE)) {
+    if (unwrapped && unwrapped->kind == TYPE_KIND_UNARY) {
         TypeUnary* unary = (TypeUnary*)unwrapped;
         return unary->op == OPERATOR_OPTIONAL;
     }
@@ -172,7 +171,7 @@ inline bool is_type_optional(Type* type) {
  */
 inline bool is_type_unary(Type* type) {
     Type* unwrapped = unwrap_type(type);
-    return unwrapped && unwrapped->type_id == LMD_TYPE_TYPE_UNARY;
+    return unwrapped && unwrapped->kind == TYPE_KIND_UNARY;
 }
 
 // ==================== Validation State Helpers ====================

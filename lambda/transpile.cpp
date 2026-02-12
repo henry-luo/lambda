@@ -863,13 +863,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_PATH:
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
-        // All container types including Function* and Path* are direct pointers
-        strbuf_append_str(tp->code_buf, "(Item)(");
-        transpile_expr(tp, item);  // raw pointer treated as Item
-        strbuf_append_char(tp->code_buf, ')');
-        break;
-    case LMD_TYPE_PATTERN:
-        // Pattern is a pointer to TypePattern, which contains compiled RE2
+        // All container types including Function*, Path*, and Type* (patterns, type expressions) are direct pointers
         strbuf_append_str(tp->code_buf, "(Item)(");
         transpile_expr(tp, item);  // raw pointer treated as Item
         strbuf_append_char(tp->code_buf, ')');
@@ -947,10 +941,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             }
         }
         // ANY and ERROR types are already Item at runtime - no boxing needed
-        transpile_expr(tp, item);
-        break;
-    case LMD_TYPE_TYPE_BINARY:
-        // Union types (T | error from T^) - value is already Item at runtime
         transpile_expr(tp, item);
         break;
     default:
@@ -2502,8 +2492,7 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
     TypeId pattern_type = pattern->type->type_id;
 
     // type patterns use fn_is (matches runtime type checking)
-    if (pattern_type == LMD_TYPE_TYPE || pattern_type == LMD_TYPE_TYPE_UNARY ||
-        pattern_type == LMD_TYPE_TYPE_BINARY) {
+    if (pattern_type == LMD_TYPE_TYPE) {
         strbuf_append_str(tp->code_buf, "fn_is(_pipe_item, ");
         transpile_box_item(tp, pattern);
         strbuf_append_char(tp->code_buf, ')');
