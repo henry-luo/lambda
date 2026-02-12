@@ -645,7 +645,7 @@ module.exports = grammar({
       '=>', field('body', $._expression)
     ),
 
-    // anonymous function
+    // Anonymous Function
     fn_expr: $ => choice(
       seq('fn',
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
