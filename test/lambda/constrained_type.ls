@@ -34,3 +34,43 @@ type between1and10 = int where (~ >= 1 and ~ <= 10)
   (1 is between1and10),   // true
   (11 is between1and10)   // false
 ]
+
+// Constrained types in match case expressions
+fn classify(x) => match x {
+  case int where (~ > 0): "positive"
+  case int where (~ < 0): "negative"
+  case 0: "zero"
+  default: "other"
+}
+
+classify(5)      // expected: "positive"
+classify(-3)     // expected: "negative"
+classify(0)      // expected: "zero"
+classify("hi")   // expected: "other"
+
+// Match with range constraints
+fn grade(score) => match score {
+  case int where (90 <= ~ <= 100): "A"
+  case int where (80 <= ~ < 90): "B"
+  case int where (70 <= ~ < 80): "C"
+  case int where (60 <= ~ < 70): "D"
+  case int where (0 <= ~ < 60): "F"
+  default: "invalid"
+}
+
+grade(95)    // expected: "A"
+grade(85)    // expected: "B"
+grade(75)    // expected: "C"
+grade(65)    // expected: "D"
+grade(55)    // expected: "F"
+grade(-5)    // expected: "invalid"
+
+// Combined match results
+[
+  classify(5),
+  classify(-3),
+  classify(0),
+  grade(95),
+  grade(75),
+  grade(55)
+]
