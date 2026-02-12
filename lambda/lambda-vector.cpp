@@ -514,6 +514,7 @@ Item fn_prod(Item item) {
 
 // cumsum(vec) - cumulative sum
 Item fn_cumsum(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
@@ -563,6 +564,7 @@ Item fn_cumsum(Item item) {
 
 // cumprod(vec) - cumulative product
 Item fn_cumprod(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
@@ -611,8 +613,8 @@ Item fn_cumprod(Item item) {
 
 // argmin(vec) - index of minimum element
 Item fn_argmin(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len <= 0) return ItemError;
 
     int64_t min_idx = 0;
     double min_val = item_to_double(vector_get(item, 0));
@@ -630,8 +632,8 @@ Item fn_argmin(Item item) {
 
 // argmax(vec) - index of maximum element
 Item fn_argmax(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len <= 0) return ItemError;
 
     int64_t max_idx = 0;
     double max_val = item_to_double(vector_get(item, 0));
@@ -649,6 +651,7 @@ Item fn_argmax(Item item) {
 
 // fill(n, value) - create vector of n copies of value
 Item fn_fill(Item n_item, Item value) {
+    GUARD_ERROR2(n_item, value);
     if (get_type_id(n_item) != LMD_TYPE_INT && get_type_id(n_item) != LMD_TYPE_INT64) {
         log_error("fn_fill: first argument must be integer");
         return ItemError;
@@ -724,8 +727,8 @@ Item fn_dot(Item a, Item b) {
 
 // norm(vec) - Euclidean norm (L2 norm)
 Item fn_norm(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) return push_d(0.0);
 
     double sum_sq = 0.0;
@@ -747,6 +750,7 @@ Item fn_norm(Item item) {
 
 // mean(vec) - arithmetic mean (alias for avg)
 Item fn_mean(Item item) {
+    GUARD_ERROR1(item);
     // Delegate to existing fn_avg
     extern Item fn_avg(Item);
     return fn_avg(item);
@@ -754,8 +758,8 @@ Item fn_mean(Item item) {
 
 // median(vec) - median value
 Item fn_median(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
 
     // Copy values to sortable array
@@ -789,8 +793,8 @@ Item fn_median(Item item) {
 
 // variance(vec) - population variance
 Item fn_variance(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
 
     // Calculate mean
@@ -818,6 +822,7 @@ Item fn_variance(Item item) {
 
 // deviation(vec) - population standard deviation
 Item fn_deviation(Item item) {
+    GUARD_ERROR1(item);
     Item var_result = fn_variance(item);
     if (get_type_id(var_result) == LMD_TYPE_ERROR) return var_result;
     if (get_type_id(var_result) == LMD_TYPE_NULL) return var_result;
@@ -828,6 +833,7 @@ Item fn_deviation(Item item) {
 
 // quantile(vec, p) - p-th quantile (0 <= p <= 1)
 Item fn_quantile(Item item, Item p_item) {
+    GUARD_ERROR2(item, p_item);
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) return ItemNull;
@@ -1065,6 +1071,7 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
 
 // sqrt(vec) - element-wise square root
 Item fn_sqrt(Item item) {
+    GUARD_ERROR1(item);
     // Check if scalar
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
@@ -1076,6 +1083,7 @@ Item fn_sqrt(Item item) {
 
 // log(vec) - element-wise natural logarithm
 Item fn_log(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1086,6 +1094,7 @@ Item fn_log(Item item) {
 
 // log10(vec) - element-wise base-10 logarithm
 Item fn_log10(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1096,6 +1105,7 @@ Item fn_log10(Item item) {
 
 // exp(vec) - element-wise exponential
 Item fn_exp(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1106,6 +1116,7 @@ Item fn_exp(Item item) {
 
 // sin(vec) - element-wise sine
 Item fn_sin(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1116,6 +1127,7 @@ Item fn_sin(Item item) {
 
 // cos(vec) - element-wise cosine
 Item fn_cos(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1126,6 +1138,7 @@ Item fn_cos(Item item) {
 
 // tan(vec) - element-wise tangent
 Item fn_tan(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1143,6 +1156,7 @@ static double sign_func(double x) {
 
 // sign(vec) - element-wise sign (-1, 0, 1)
 Item fn_sign(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT) {
         double val = item_to_double(item);
@@ -1175,8 +1189,8 @@ Item fn_sign(Item item) {
 
 // reverse(vec) - reverse order of elements
 Item fn_reverse(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) {
         List* result = list();
         return { .list = result };
@@ -1211,8 +1225,8 @@ Item fn_reverse(Item item) {
 
 // sort(vec) - sort in ascending order
 Item fn_sort1(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) {
         List* result = list();
         return { .list = result };
@@ -1272,8 +1286,8 @@ Item fn_sort1(Item item) {
 
 // sort(vec, direction) - sort with direction ('asc' or 'desc')
 Item fn_sort2(Item item, Item dir_item) {
+    GUARD_ERROR2(item, dir_item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) {
         List* result = list();
         return { .list = result };
@@ -1352,8 +1366,8 @@ Item fn_sort2(Item item, Item dir_item) {
 
 // unique(vec) - remove duplicates
 Item fn_unique(Item item) {
+    GUARD_ERROR1(item);
     int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
     if (len == 0) {
         List* result = list();
         return { .list = result };
@@ -1382,6 +1396,7 @@ Item fn_unique(Item item) {
 
 // concat(v1, v2) - concatenate two vectors
 Item fn_concat(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
 
@@ -1414,6 +1429,7 @@ Item fn_concat(Item a, Item b) {
 
 // take(vec, n) - first n elements
 Item fn_take(Item vec, Item n_item) {
+    GUARD_ERROR2(vec, n_item);
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
@@ -1448,6 +1464,7 @@ Item fn_take(Item vec, Item n_item) {
 
 // drop(vec, n) - drop first n elements
 Item fn_drop(Item vec, Item n_item) {
+    GUARD_ERROR2(vec, n_item);
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
@@ -1484,6 +1501,7 @@ Item fn_drop(Item vec, Item n_item) {
 // slice(vec, start, end) - extract elements from start (inclusive) to end (exclusive)
 // Works for arrays, lists, and strings
 Item fn_slice(Item vec, Item start_item, Item end_item) {
+    GUARD_ERROR3(vec, start_item, end_item);
     TypeId type = get_type_id(vec);
 
     // Handle strings - delegate to fn_substring
@@ -1535,6 +1553,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 
 // zip(v1, v2) - pair elements into tuples
 Item fn_zip(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
 
@@ -1554,6 +1573,7 @@ Item fn_zip(Item a, Item b) {
 
 // range(start, end, step) - generate range with step
 Item fn_range3(Item start_item, Item end_item, Item step_item) {
+    GUARD_ERROR3(start_item, end_item, step_item);
     double start = item_to_double(start_item);
     double end = item_to_double(end_item);
     double step = item_to_double(step_item);
