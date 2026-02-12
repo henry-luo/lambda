@@ -590,8 +590,16 @@ Item elmt_get(Element* elmt, Item key) {
     } else {
         return ItemNull;  // only string or symbol keys are supported
     }
-    // handle special 'tag' property - returns the element's tag name
-    if (strcmp(key_str, "tag") == 0) {
+
+    // PRIORITY 1: First try to get user-defined attribute
+    Item result = _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
+    if (is_found) {
+        return result;
+    }
+
+    // PRIORITY 2: Fall back to system/built-in properties
+    // handle special 'name' property - returns the element's tag name
+    if (strcmp(key_str, "name") == 0) {
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         if (elmt_type && elmt_type->name.str) {
             Symbol* tag_sym = heap_create_symbol(elmt_type->name.str, elmt_type->name.length);
@@ -599,7 +607,8 @@ Item elmt_get(Element* elmt, Item key) {
         }
         return ItemNull;
     }
-    return _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
+
+    return ItemNull;
 }
 
 Item item_at(Item data, int index) {
@@ -669,21 +678,6 @@ Item item_attr(Item data, const char* key) {
     }
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;
-        // handle special 'tag' property - returns element tag name as symbol
-        if (strcmp(key, "tag") == 0) {
-            TypeElmt* elmt_type = (TypeElmt*)elmt->type;
-            log_debug("item_attr: element tag requested, type=%p", (void*)elmt_type);
-            if (elmt_type) {
-                log_debug("item_attr: element name.str=%p, name.length=%zu", elmt_type->name.str, elmt_type->name.length);
-            }
-            if (elmt_type && elmt_type->name.str) {
-                // return the tag name as a symbol
-                log_debug("item_attr: creating symbol for tag '%.*s'", (int)elmt_type->name.length, elmt_type->name.str);
-                Symbol* sym = heap_create_symbol(elmt_type->name.str, elmt_type->name.length);
-                return (Item){.item = s2it(sym)};
-            }
-            return ItemNull;
-        }
         // fall through to attribute lookup
         bool is_found;
         return _map_get((TypeMap*)elmt->type, elmt->data, (char*)key, &is_found);
