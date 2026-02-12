@@ -19,13 +19,13 @@
 // Parse math expression string and set input root
 // This is the Lambda Input interface
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
-    log_debug("parse_math called with: '%s', flavor: '%s'",
-              math_string, flavor_str ? flavor_str : "null");
-
     if (!math_string || !*math_string) {
         input->root = ItemNull;
         return;
     }
+
+    log_debug("parse_math called with: '%s', flavor: '%s'",
+              math_string, flavor_str ? flavor_str : "null");
 
     // ASCII math uses separate parser
     if (flavor_str && (strcmp(flavor_str, "ascii") == 0 || strcmp(flavor_str, "asciimath") == 0)) {

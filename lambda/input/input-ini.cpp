@@ -288,6 +288,11 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
 }
 
 void parse_ini(Input* input, const char* ini_string) {
+    if (!ini_string || !*ini_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     InputContext ctx(input, ini_string, strlen(ini_string));
     SourceTracker& tracker = ctx.tracker;
 

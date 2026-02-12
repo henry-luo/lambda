@@ -6,11 +6,13 @@
 
 using namespace lambda;
 
-static Item parse_element(InputContext& ctx, const char **xml);
+static const int XML_MAX_DEPTH = 512;
+
+static Item parse_element(InputContext& ctx, const char **xml, int depth = 0);
 static Item parse_comment(InputContext& ctx, const char **xml);
 static Item parse_cdata(InputContext& ctx, const char **xml);
 static Item parse_entity(InputContext& ctx, const char **xml);
-static Item parse_doctype(InputContext& ctx, const char **xml);
+static Item parse_doctype(InputContext& ctx, const char **xml, int depth = 0);
 static Item parse_dtd_declaration(InputContext& ctx, const char **xml);
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char);
 
@@ -378,7 +380,7 @@ static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
     return element.final();
 }
 
-static Item parse_doctype(InputContext& ctx, const char **xml) {
+static Item parse_doctype(InputContext& ctx, const char **xml, int depth) {
     MarkBuilder& builder = ctx.builder;
     // Skip past the "!DOCTYPE" part (already consumed by caller)
     skip_whitespace(xml);
@@ -426,7 +428,7 @@ static Item parse_doctype(InputContext& ctx, const char **xml) {
                 } else {
                     // Other elements (shouldn't happen in DTD, but handle gracefully)
                     (*xml)--; // back up to <
-                    Item element = parse_element(ctx, xml);
+                    Item element = parse_element(ctx, xml, depth + 1);
                     if (element.item != ITEM_ERROR) {
                         dt_elmt.child(element);
                     }
@@ -457,13 +459,18 @@ static Item parse_doctype(InputContext& ctx, const char **xml) {
         if (**xml == '>') {
             (*xml)++; // skip >
         }
-        return parse_element(ctx, xml); // parse next element
+        return parse_element(ctx, xml, depth); // parse next element
     }
 }
 
-static Item parse_element(InputContext& ctx, const char **xml) {
+static Item parse_element(InputContext& ctx, const char **xml, int depth) {
     MarkBuilder& builder = ctx.builder;
     skip_whitespace(xml);
+
+    if (depth >= XML_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum XML nesting depth (%d) exceeded", XML_MAX_DEPTH);
+        return {.item = ITEM_ERROR};
+    }
 
     if (**xml != '<') return {.item = ITEM_ERROR};
     (*xml)++; // skip <
@@ -604,7 +611,7 @@ static Item parse_element(InputContext& ctx, const char **xml) {
         while (**xml && !(**xml == '<' && *(*xml + 1) == '/')) {
             if (**xml == '<') {
                 // Child element (could be regular element, comment, or PI)
-                Item child = parse_element(ctx, xml);
+                Item child = parse_element(ctx, xml, depth + 1);
                 if (child.item != ITEM_ERROR) {
                     element.child(child);
                 }
@@ -710,6 +717,10 @@ static Item parse_element(InputContext& ctx, const char **xml) {
 }
 
 void parse_xml(Input* input, const char* xml_string) {
+    if (!xml_string || !*xml_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
     InputContext ctx(input, xml_string, strlen(xml_string));
     MarkBuilder& builder = ctx.builder;
 
@@ -730,7 +741,7 @@ void parse_xml(Input* input, const char* xml_string) {
         const char* old_xml = xml; // Save position to detect infinite loops
 
         if (*xml == '<') {
-            Item element = parse_element(ctx, &xml);
+            Item element = parse_element(ctx, &xml, 0);
             if (element.item != ITEM_ERROR) {
                 doc_element.child(element);
 

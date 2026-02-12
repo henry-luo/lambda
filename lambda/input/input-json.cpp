@@ -421,6 +421,11 @@ static Item parse_value(InputContext& ctx, const char **json, int depth) {
 }
 
 void parse_json(Input* input, const char* json_string) {
+    if (!json_string || !*json_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     InputContext ctx(input, json_string, strlen(json_string));
 
     input->root = parse_value(ctx, &json_string, 0);

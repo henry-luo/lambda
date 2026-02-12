@@ -6,7 +6,9 @@
 
 using namespace lambda;
 
-static Item parse_rtf_content(InputContext& ctx, const char **rtf);
+static const int RTF_MAX_DEPTH = 512;
+
+static Item parse_rtf_content(InputContext& ctx, const char **rtf, int depth = 0);
 
 // RTF color table entry
 typedef struct {
@@ -294,10 +296,14 @@ static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
     return props;
 }
 
-static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
+static Item parse_rtf_group(InputContext& ctx, const char **rtf, int depth = 0) {
     Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder;
     if (**rtf != '{') {
+        return {.item = ITEM_ERROR};
+    }
+    if (depth >= RTF_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum RTF nesting depth (%d) exceeded", RTF_MAX_DEPTH);
         return {.item = ITEM_ERROR};
     }
 
@@ -367,7 +373,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
             }
         } else if (**rtf == '{') {
             // Nested group
-            Item nested = parse_rtf_group(ctx, rtf);
+            Item nested = parse_rtf_group(ctx, rtf, depth + 1);
             if (nested .item != ITEM_ERROR && nested .item != ITEM_NULL) {
                 array_append(content, nested, input->pool);
             }
@@ -416,17 +422,21 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
     return {.item = (uint64_t)group};
 }
 
-static Item parse_rtf_content(InputContext& ctx, const char **rtf) {
+static Item parse_rtf_content(InputContext& ctx, const char **rtf, int depth) {
     skip_whitespace(rtf);
 
     if (**rtf == '{') {
-        return parse_rtf_group(ctx, rtf);
+        return parse_rtf_group(ctx, rtf, depth);
     }
 
     return {.item = ITEM_ERROR};
 }
 
 void parse_rtf(Input* input, const char* rtf_string) {
+    if (!rtf_string || !*rtf_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
     log_debug("rtf_parse\n");
     InputContext ctx(input, rtf_string, strlen(rtf_string));
     MarkBuilder& builder = ctx.builder;
@@ -456,7 +466,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
         if (*rtf == '\0') break;
 
         if (*rtf == '{') {
-            Item group = parse_rtf_group(ctx, &rtf);
+            Item group = parse_rtf_group(ctx, &rtf, 0);
             if (group.item != ITEM_ERROR && group.item != ITEM_NULL) {
                 array_append(document, group, input->pool);
             } else if (group.item == ITEM_ERROR) {
