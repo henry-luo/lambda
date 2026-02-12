@@ -1,0 +1,16 @@
+'name on element:'
+'div'
+'.name property:'
+'div'
+'name on symbol:'
+'my_symbol'
+'name on type:'
+'int'
+'user-defined name takes precedence:'
+"custom"
+'name on null returns null:'
+"yes"
+'error code:'
+318
+'error message:'
+"this is an error message"
