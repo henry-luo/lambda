@@ -15,9 +15,11 @@ typedef struct {
     bool escaped;
 } JSXExpressionState;
 
+static const int JSX_MAX_DEPTH = 512;
+
 // Forward declarations
-static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end);
-static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end);
+static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end, int depth = 0);
+static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end, int depth = 0);
 static void parse_jsx_attributes(InputContext& ctx, Element* element, const char** jsx, const char* end);
 static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end);
 static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const char* end);
@@ -319,8 +321,12 @@ static void parse_jsx_attributes(InputContext& ctx, ElementBuilder& element, con
 }
 
 // Parse JSX fragment: <>...</>
-static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end) {
+static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end, int depth) {
     if (*jsx + 1 >= end || **jsx != '<' || *(*jsx + 1) != '>') {
+        return NULL;
+    }
+    if (depth >= JSX_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum JSX nesting depth (%d) exceeded", JSX_MAX_DEPTH);
         return NULL;
     }
 
@@ -341,7 +347,7 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
         if (*jsx >= end) break;
 
         if (**jsx == '<') {
-            Element* child = parse_jsx_element(ctx, jsx, end);
+            Element* child = parse_jsx_element(ctx, jsx, end, depth + 1);
             if (child) {
                 Item child_item = {.item = (uint64_t)child};
                 fragment.child(child_item);
@@ -376,14 +382,18 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
 }
 
 // Parse JSX element: <tag>...</tag> or <tag />
-static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end) {
+static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end, int depth) {
     if (*jsx >= end || **jsx != '<') {
+        return NULL;
+    }
+    if (depth >= JSX_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum JSX nesting depth (%d) exceeded", JSX_MAX_DEPTH);
         return NULL;
     }
 
     // Check for fragment
     if (*jsx + 1 < end && *(*jsx + 1) == '>') {
-        return parse_jsx_fragment(ctx, jsx, end);
+        return parse_jsx_fragment(ctx, jsx, end, depth);
     }
 
     (*jsx)++; // Skip <
@@ -439,7 +449,7 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
         }
 
         if (**jsx == '<') {
-            Element* child = parse_jsx_element(ctx, jsx, end);
+            Element* child = parse_jsx_element(ctx, jsx, end, depth + 1);
             if (child) {
                 Item child_item = {.item = (uint64_t)child};
                 element.child(child_item);

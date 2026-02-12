@@ -164,7 +164,7 @@ static String* parse_date_value(InputContext& ctx, const char* date_str) {
 
 // Main EML parsing function
 void parse_eml(Input* input, const char* eml_string) {
-    if (!eml_string || !input) return;
+    if (!eml_string || !input || !*eml_string) return;
 
     // create error tracking context with source
     InputContext ctx(input, eml_string, strlen(eml_string));
