@@ -3,7 +3,7 @@
 
 pn main() {
     var entries^err = input("test/input/test_dir_listing", "dir")
-    if (err) {
+    if (^err) {
         print("error")
         return null
     }
