@@ -2451,3 +2451,100 @@ Item fn_float(Item item) {
         return ItemError;
     }
 }
+// ============================================================================
+// UNBOXED SYSTEM FUNCTIONS (fn_*_u)
+// These are native C implementations that bypass Item boxing overhead.
+// They are called directly when types are known at compile time.
+// ============================================================================
+
+// --- Math functions (double → double) ---
+
+// Note: sin, cos, tan, sqrt, log, log10, exp, fabs, floor, ceil, round
+// are already handled by native_math_funcs in transpile.cpp which calls
+// the C math library directly. We don't need wrappers for those.
+
+// Power function: native double version
+extern "C" double fn_pow_u(double base, double exponent) {
+    return pow(base, exponent);
+}
+
+// Min/max for two doubles
+extern "C" double fn_min2_u(double a, double b) {
+    return a < b ? a : b;
+}
+
+extern "C" double fn_max2_u(double a, double b) {
+    return a > b ? a : b;
+}
+
+// --- Integer operations ---
+
+// Integer absolute value
+extern "C" int64_t fn_abs_i(int64_t x) {
+    return x < 0 ? -x : x;
+}
+
+// Float absolute value (alternative to fabs)
+extern "C" double fn_abs_f(double x) {
+    return fabs(x);
+}
+
+// Integer negation
+extern "C" int64_t fn_neg_i(int64_t x) {
+    return -x;
+}
+
+// Float negation
+extern "C" double fn_neg_f(double x) {
+    return -x;
+}
+
+// Integer modulo
+extern "C" int64_t fn_mod_i(int64_t a, int64_t b) {
+    // Note: caller is responsible for ensuring b != 0
+    return a % b;
+}
+
+// Integer division
+extern "C" int64_t fn_idiv_i(int64_t a, int64_t b) {
+    // Note: caller is responsible for ensuring b != 0
+    return a / b;
+}
+
+// --- Boolean operations ---
+
+// Logical not (native bool version)
+extern "C" Bool fn_not_u(Bool x) {
+    return !x;
+}
+
+// --- Comparison operations ---
+// These are already handled by native C operators in transpile_binary_expr
+// when both operands have known types, so no wrappers needed.
+
+// --- Sign function ---
+extern "C" int32_t fn_sign_i(int64_t x) {
+    if (x > 0) return 1;
+    if (x < 0) return -1;
+    return 0;
+}
+
+extern "C" int32_t fn_sign_f(double x) {
+    if (x > 0.0) return 1;
+    if (x < 0.0) return -1;
+    return 0;
+}
+
+// --- Rounding functions (int version returns identity) ---
+// floor/ceil/round of an integer is the integer itself
+extern "C" int64_t fn_floor_i(int64_t x) {
+    return x;
+}
+
+extern "C" int64_t fn_ceil_i(int64_t x) {
+    return x;
+}
+
+extern "C" int64_t fn_round_i(int64_t x) {
+    return x;
+}
