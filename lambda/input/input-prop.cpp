@@ -263,6 +263,11 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
 }
 
 void parse_properties(Input* input, const char* prop_string) {
+    if (!prop_string || !*prop_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     // create error tracking context with source tracking
     InputContext ctx(input, prop_string, strlen(prop_string));
     MarkBuilder& builder = ctx.builder;

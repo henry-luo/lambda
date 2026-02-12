@@ -359,6 +359,11 @@ static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const ch
 }
 
 void parse_graph_d2(Input* input, const char* d2_string) {
+    if (!d2_string || !*d2_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     InputContext ctx(input, d2_string);
     SourceTracker& tracker = ctx.tracker;
 
