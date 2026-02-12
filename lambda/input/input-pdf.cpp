@@ -7,7 +7,7 @@
 
 using namespace lambda;
 
-static Item parse_pdf_object(InputContext& ctx, const char **pdf);
+static Item parse_pdf_object(InputContext& ctx, const char **pdf, int depth = 0);
 static String* parse_pdf_name(InputContext& ctx, const char **pdf);
 static String* parse_pdf_string(InputContext& ctx, const char **pdf);
 static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf);
@@ -110,7 +110,7 @@ static Array* parse_pdf_array(InputContext& ctx, const char **pdf) {
 
     int item_count = 0;
     while (**pdf && **pdf != ']' && item_count < 10) { // reduced limit for safety
-        Item obj = parse_pdf_object(ctx, pdf);
+        Item obj = parse_pdf_object(ctx, pdf, 1);
         if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
             array_append(arr, obj, ctx.input()->pool);
             item_count++;
@@ -149,7 +149,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
         skip_pdf_whitespace_and_comments(pdf);
 
         // parse value
-        Item value = parse_pdf_object(ctx, pdf);
+        Item value = parse_pdf_object(ctx, pdf, 1);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
             ctx.builder.putToMap(dict, key, value);
             pair_count++;
@@ -299,21 +299,16 @@ static bool is_digit_or_space_ahead(const char *pdf, int max_lookahead) {
     return false;
 }
 
-static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
-    static int call_count = 0;
-    call_count++;
-
+static Item parse_pdf_object(InputContext& ctx, const char **pdf, int depth) {
     // prevent runaway recursion - increased limit for complex PDFs
-    if (call_count > 50) {
-        log_debug("Warning: too many parse calls, stopping recursion\n");
-        call_count--;
+    if (depth > 50) {
+        log_debug("pdf: recursion depth exceeded at depth %d", depth);
         return {.item = ITEM_NULL};
     }
 
     skip_pdf_whitespace_and_comments(pdf);
 
     if (!**pdf) {
-        call_count--;
         return {.item = ITEM_NULL};
     }
 
@@ -374,12 +369,12 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
         result = parse_pdf_number(ctx.input(), pdf);
     }
     // check for arrays (increased depth limit for complex PDFs)
-    else if (**pdf == '[' && call_count <= 20) {
+    else if (**pdf == '[' && depth <= 20) {
         Array* arr = parse_pdf_array(ctx, pdf);
         result = arr ? (Item){.item = (uint64_t)arr} : (Item){.item = ITEM_ERROR};
     }
     // check for dictionaries (increased depth limit for complex PDFs)
-    else if (**pdf == '<' && *(*pdf + 1) == '<' && call_count <= 20) {
+    else if (**pdf == '<' && *(*pdf + 1) == '<' && depth <= 20) {
         Map* dict = parse_pdf_dictionary(ctx, pdf);
         if (dict) {
             // Check if this dictionary is followed by a stream
@@ -434,7 +429,6 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
         result = {.item = ITEM_NULL};
     }
 
-    call_count--;
     return result;
 }
 
@@ -524,7 +518,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     skip_pdf_whitespace_and_comments(pdf);
 
     // Parse the object content
-    Item content = parse_pdf_object(ctx, pdf);
+    Item content = parse_pdf_object(ctx, pdf, 1);
 
     // Skip to endobj (optional - for safety)
     const char* endobj_pos = strstr(*pdf, "endobj");
@@ -981,6 +975,13 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
     log_debug("pdf_parse\n");
 
+    // Validate input before constructing context
+    if (!pdf_string || pdf_length == 0) {
+        log_debug("pdf: empty PDF content\n");
+        input->root = {.item = ITEM_ERROR};
+        return;
+    }
+
     // create unified InputContext with source tracking
     InputContext ctx(input, pdf_string, pdf_length);
 
@@ -988,14 +989,6 @@ void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length) {
 
     const char* pdf = pdf_string;
     const char* pdf_file_end = pdf_string + pdf_length; // track actual end of binary content
-
-    // Validate input
-    if (!pdf_string || pdf_length == 0) {
-        ctx.addError(ctx.tracker.location(), "Empty PDF content");
-        log_debug("Error: Empty PDF content\n");
-        input->root = {.item = ITEM_ERROR};
-        return;
-    }
 
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {

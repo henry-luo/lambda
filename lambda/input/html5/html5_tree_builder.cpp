@@ -221,6 +221,10 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
 
 // main entry point for parsing HTML
 Element* html5_parse(Input* input, const char* html) {
+    if (!html || !*html) {
+        return nullptr;
+    }
+
     Pool* pool = input->pool;
     Arena* arena = input->arena;
 
