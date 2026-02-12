@@ -20,8 +20,9 @@ This document covers Lambda's expressions and statements, including control flow
 6. [Member Access and Null Safety](#member-access-and-null-safety)
 7. [Pipe Expressions](#pipe-expressions)
 8. [Control Flow Expressions](#control-flow-expressions)
-9. [Statements](#statements)
-10. [Operators](#operators)
+9. [Match Expressions](#match-expressions)
+10. [Statements](#statements)
+11. [Operators](#operators)
 
 ---
 
@@ -396,8 +397,8 @@ If expressions require both branches and return a value:
 let result = if (x > 0) "positive" else "non-positive"
 
 // Nested if expressions
-let grade = if (score >= 90) "A" 
-            else if (score >= 80) "B" 
+let grade = if (score >= 90) "A"
+            else if (score >= 80) "B"
             else if (score >= 70) "C"
             else "F"
 
@@ -417,7 +418,7 @@ for (x in [1, 2, 3]) x * 2    // [2, 4, 6]
 for (i in 1 to 5) i * i       // [1, 4, 9, 16, 25]
 
 // Conditional in body
-for (num in [1, 2, 3, 4, 5]) 
+for (num in [1, 2, 3, 4, 5])
     if (num % 2 == 0) num else null
 ```
 
@@ -509,17 +510,162 @@ type("hello")      // 'string
 
 ---
 
+## Match Expressions
+
+The `match` expression provides multi-way branching based on type or value patterns. It is an expression that produces a value, and works in both functional and procedural contexts.
+
+### Syntax
+
+```
+match <expr> {
+    case <type_expr>: <expr>            // expression arm
+    case <type_expr> { <statements> }   // statement arm
+    default: <expr>                     // default expression arm
+    default { <statements> }            // default statement arm
+}
+```
+
+- **Braces are required** around the arm block.
+- Parentheses around the scrutinee are optional: `match (expr) { ... }` and `match expr { ... }` are both valid.
+- Expression and statement arms can be freely mixed within one match.
+- `~` refers to the matched value inside arm bodies, like in pipe expressions.
+- Arms are tested top-to-bottom; the first matching arm is selected.
+- `default` is the catch-all arm (matches anything not matched by previous arms).
+
+### Type Patterns
+
+Match on the runtime type using type expressions:
+
+```lambda
+fn describe(value: int | string | bool) => match value {
+    case int: "integer"
+    case string: "text"
+    case bool: "boolean"
+}
+```
+
+### Literal Patterns
+
+Literal values (integers, floats, booleans, strings, symbols, null) work as case patterns. The case checks equality against the literal value:
+
+```lambda
+fn status_text(code: int) => match code {
+    case 200: "OK"
+    case 404: "Not Found"
+    case 500: "Server Error"
+    default: "Unknown"
+}
+```
+
+### Symbol Patterns
+
+```lambda
+fn color_of(level) => match level {
+    case 'info': "blue"
+    case 'warn': "yellow"
+    case 'error': "red"
+    default: "white"
+}
+```
+
+### Or-Patterns
+
+Combine multiple patterns into a single arm using `|`:
+
+```lambda
+fn day_type(day) => match day {
+    case 'mon' | 'tue' | 'wed' | 'thu' | 'fri': "weekday"
+    case 'sat' | 'sun': "weekend"
+}
+```
+
+### Current Item Reference (`~`)
+
+Inside match arms, `~` refers to the matched value:
+
+```lambda
+fn check_range(n: int) => match n {
+    case 0: "zero"
+    case int: if (~ > 0) "positive" else "negative"
+}
+```
+
+### Mixed Expression and Statement Arms
+
+Expression arms (`case T: expr`) and statement arms (`case T { stmts }`) can be freely combined:
+
+```lambda
+fn describe(shape) => match shape.tag {
+    case 'circle' {
+        let area = 3.14159 * shape.r ^ 2;
+        "circle with area " ++ string(area)
+    }
+    case 'rect' {
+        let area = shape.w * shape.h;
+        "rectangle with area " ++ string(area)
+    }
+    default: "unknown shape"
+}
+```
+
+### Nested Match
+
+```lambda
+fn classify(value) => match value {
+    case int: match value {
+        case 0: "zero"
+        default: "nonzero int"
+    }
+    case string: "string"
+    default: "other"
+}
+```
+
+### Match in Procedural Context
+
+Match works in procedural functions with statement arms supporting `var`, `while`, `break`, `continue`, `return`:
+
+```lambda
+pn handle(event) {
+    match event.kind {
+        case 'click' {
+            var count = state.clicks;
+            count = count + 1;
+            update_state({clicks: count})
+        }
+        case 'keypress' {
+            if (event.key == "Escape") return null;
+            process_key(event.key)
+        }
+        default: null
+    }
+}
+```
+
+### Match in Let Bindings
+
+```lambda
+let label = match status {
+    case 'ok': "success"
+    case 'warn': "warning"
+    case 'error': "failure"
+}
+```
+
+---
+
 ## Statements
 
 ### Common Statements
 
 `let`, `if` and `for` statements work in both functional and procedural context.
 
-| Construct | Expression Form       | Statement Form         |
-| --------- | --------------------- | ---------------------- |
-| If        | `if (cond) a else b`  | `if (cond) { ... }`    |
-| For       | `for (x in col) expr` | `for x in col { ... }` |
-| Let       | `(let x = 1, x + 1)`  | `let x = 1;`           |
+| Construct | Expression Form             | Statement Form                  |
+| --------- | --------------------------- | ------------------------------- |
+| If        | `if (cond) a else b`        | `if (cond) { ... }`            |
+| For       | `for (x in col) expr`       | `for x in col { ... }`         |
+| Match     | `match x { case T: expr }`  | `match x { case T { ... } }`   |
+| Let       | `(let x = 1, x + 1)`       | `let x = 1;`                   |
 
 #### Let Statements
 
@@ -602,7 +748,7 @@ pn example() {
 
     // Early return
     if (error) return null
-    
+
     result
 }
 ```
@@ -697,7 +843,7 @@ Available only in procedural (`pn`) functions:
 pn save_data() {
     // Write to file
     {name: "Lambda"} |> "/tmp/config.mk"
-    
+
     // Append to file
     {event: "log"} |>> "/tmp/events.log"
 }

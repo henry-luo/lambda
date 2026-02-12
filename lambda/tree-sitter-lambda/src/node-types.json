@@ -1077,7 +1077,7 @@
           "named": true
         },
         {
-          "type": "match_stam",
+          "type": "match_expr",
           "named": true
         },
         {
@@ -3066,72 +3066,6 @@
           "named": true
         },
         {
-          "type": "match_default_expr",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "match_stam",
-    "named": true,
-    "fields": {
-      "scrutinee": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expr",
-            "named": true
-          },
-          {
-            "type": "fn_expr",
-            "named": true
-          },
-          {
-            "type": "for_expr",
-            "named": true
-          },
-          {
-            "type": "if_expr",
-            "named": true
-          },
-          {
-            "type": "let_expr",
-            "named": true
-          },
-          {
-            "type": "match_expr",
-            "named": true
-          },
-          {
-            "type": "primary_expr",
-            "named": true
-          },
-          {
-            "type": "raise_expr",
-            "named": true
-          },
-          {
-            "type": "spread_expr",
-            "named": true
-          },
-          {
-            "type": "unary_expr",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "match_arm_expr",
-          "named": true
-        },
-        {
           "type": "match_arm_stam",
           "named": true
         },
@@ -4011,6 +3945,10 @@
           "named": true
         },
         {
+          "type": "range_type",
+          "named": true
+        },
+        {
           "type": "string",
           "named": true
         },
@@ -4143,6 +4081,120 @@
           },
           {
             "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "range_type",
+    "named": true,
+    "fields": {
+      "end": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "'",
+            "named": false
+          },
+          {
+            "type": "binary",
+            "named": true
+          },
+          {
+            "type": "datetime",
+            "named": true
+          },
+          {
+            "type": "decimal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "t'",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          }
+        ]
+      },
+      "start": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "'",
+            "named": false
+          },
+          {
+            "type": "binary",
+            "named": true
+          },
+          {
+            "type": "datetime",
+            "named": true
+          },
+          {
+            "type": "decimal",
+            "named": true
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "t'",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": true
+          },
+          {
+            "type": "true",
             "named": true
           }
         ]
@@ -5026,6 +5078,10 @@
     "named": false
   },
   {
+    "type": "range",
+    "named": false
+  },
+  {
     "type": "return",
     "named": false
   },
@@ -5039,11 +5095,11 @@
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "t'",

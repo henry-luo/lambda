@@ -59,7 +59,6 @@ extern "C" {
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
 #define SYM_MATCH_EXPR sym_match_expr
-#define SYM_MATCH_STAM sym_match_stam
 #define SYM_MATCH_ARM_EXPR sym_match_arm_expr
 #define SYM_MATCH_DEFAULT_EXPR sym_match_default_expr
 #define SYM_MATCH_ARM_STAM sym_match_arm_stam
@@ -86,6 +85,7 @@ extern "C" {
 #define SYM_CONTENT_TYPE sym_content_type
 #define SYM_ELEMENT_TYPE sym_element_type
 #define SYM_FN_TYPE sym_fn_type
+#define SYM_RANGE_TYPE sym_range_type
 #define SYM_RETURN_TYPE sym_return_type
 #define SYM_ERROR_UNION_TYPE sym_error_union_type
 #define SYM_ERROR_TYPE_PATTERN sym_error_type_pattern
@@ -167,6 +167,8 @@ extern "C" {
 #define FIELD_EXPR field_expr
 #define FIELD_ERROR field_error
 #define FIELD_PROPAGATE field_propagate
+#define FIELD_START field_start
+#define FIELD_END field_end
 
 // Symbols for for-expression clauses
 #define SYM_FOR_LET_CLAUSE sym_for_let_clause
@@ -227,7 +229,6 @@ typedef enum AstNodeType {
     AST_NODE_IF_EXPR,
     AST_NODE_IF_STAM,
     AST_NODE_MATCH_EXPR,
-    AST_NODE_MATCH_STAM,
     AST_NODE_MATCH_ARM,
     AST_NODE_FOR_EXPR,
     AST_NODE_FOR_STAM,
