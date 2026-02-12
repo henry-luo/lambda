@@ -50,8 +50,9 @@ static String* make_string(const char* text) {
 }
 
 // Helper to parse markup and return JSON
+// Uses "auto" type to trigger MIME detection from filename extension
 static String* parse_to_json(const char* content, const char* filename) {
-    String* type_str = make_string("markup");
+    String* type_str = make_string("auto");
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, filename);
     char* content_copy = strdup(content);
@@ -511,6 +512,160 @@ TEST_F(FormatAdapterTest, TextileDetection) {
     ASSERT_NE(json, nullptr);
 
     EXPECT_GT(json->len, 0);
+}
+
+// =============================================================================
+// Typst Format Tests
+// =============================================================================
+
+// Test Typst format detection
+TEST_F(FormatAdapterTest, TypstDetection) {
+    const char* content =
+        "= Main Title\n"
+        "\n"
+        "This is a paragraph.\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    // Should parse as Typst with = headers
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "Main Title"));
+}
+
+// Test Typst headers (= syntax)
+TEST_F(FormatAdapterTest, TypstHeaders) {
+    const char* content =
+        "= Level 1\n"
+        "== Level 2\n"
+        "=== Level 3\n"
+        "==== Level 4\n"
+        "===== Level 5\n"
+        "====== Level 6\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    // Verify h1-h6 elements are created
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h3\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h4\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h5\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h6\""));
+}
+
+// Test Typst emphasis (* = bold, _ = italic)
+TEST_F(FormatAdapterTest, TypstEmphasis) {
+    const char* content =
+        "This has *bold text* and _italic text_.\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    // In Typst: * = bold (strong), _ = italic (em)
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"em\""));
+    EXPECT_TRUE(json_contains(json->chars, "bold text"));
+    EXPECT_TRUE(json_contains(json->chars, "italic text"));
+}
+
+// Test Typst bullet lists (- syntax)
+TEST_F(FormatAdapterTest, TypstBulletLists) {
+    const char* content =
+        "- First item\n"
+        "- Second item\n"
+        "- Third item\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ul\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "First item"));
+}
+
+// Test Typst numbered lists (+ syntax)
+TEST_F(FormatAdapterTest, TypstNumberedLists) {
+    const char* content =
+        "+ First numbered\n"
+        "+ Second numbered\n"
+        "+ Third numbered\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    // In Typst: + = ordered list (ol)
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"ol\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"li\""));
+    EXPECT_TRUE(json_contains(json->chars, "First numbered"));
+}
+
+// Test Typst inline code
+TEST_F(FormatAdapterTest, TypstInlineCode) {
+    const char* content =
+        "Some `inline code` here.\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "inline code"));
+}
+
+// Test Typst fenced code blocks
+TEST_F(FormatAdapterTest, TypstCodeBlocks) {
+    const char* content =
+        "```python\n"
+        "def hello():\n"
+        "    print(\"Hello\")\n"
+        "```\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\"") ||
+                json_contains(json->chars, "\"$\":\"pre\""));
+    EXPECT_TRUE(json_contains(json->chars, "python"));
+}
+
+// Test Typst mixed content
+TEST_F(FormatAdapterTest, TypstMixedContent) {
+    const char* content =
+        "= Document Title\n"
+        "\n"
+        "A paragraph with *bold* and _italic_ text.\n"
+        "\n"
+        "== Section\n"
+        "\n"
+        "- Bullet item\n"
+        "+ Numbered item\n"
+        "\n"
+        "Some `code` inline.\n";
+
+    String* json = parse_to_json(content, "test.typ");
+    ASSERT_NE(json, nullptr);
+
+    // Verify various elements
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"p\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"em\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"code\""));
+}
+
+// Test Typst .typst extension (alternative)
+TEST_F(FormatAdapterTest, TypstAlternativeExtension) {
+    const char* content =
+        "= Title\n"
+        "*Bold* text.\n";
+
+    String* json = parse_to_json(content, "test.typst");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\":\"strong\""));
 }
 
 // =============================================================================
