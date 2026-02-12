@@ -412,7 +412,7 @@ Range* fn_to(Item item_a, Item item_b) {
 
 Function* to_fn(fn_ptr ptr) {
     log_debug("create fn %p", ptr);
-    Function *fn = (Function*)calloc(1, sizeof(Function));
+    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->ptr = ptr;
@@ -423,7 +423,7 @@ Function* to_fn(fn_ptr ptr) {
 // Create function with arity info
 Function* to_fn_n(fn_ptr ptr, int arity) {
     log_debug("create fn %p with arity %d", ptr, arity);
-    Function *fn = (Function*)calloc(1, sizeof(Function));
+    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->arity = (uint8_t)arity;
@@ -436,7 +436,7 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
 // Create function with arity and name for stack traces
 Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
     log_debug("create fn %p with arity %d, name %s", ptr, arity, name ? name : "(null)");
-    Function *fn = (Function*)calloc(1, sizeof(Function));
+    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->arity = (uint8_t)arity;
@@ -449,7 +449,7 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     log_debug("create closure %p with arity %d and env %p", ptr, arity, env);
-    Function* fn = (Function*)calloc(1, sizeof(Function));
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->fn_type = NULL;
@@ -463,7 +463,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
 // Create a closure with captured environment and name for stack traces
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     log_debug("create closure %p with arity %d, env %p, name %s", ptr, arity, env, name ? name : "(null)");
-    Function* fn = (Function*)calloc(1, sizeof(Function));
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->fn_type = NULL;
@@ -1220,10 +1220,70 @@ Type* fn_type(Item item) {
     if (item._type_id) {
         item_type->type_id = item._type_id;
     }
-    else if (item._type_id == LMD_TYPE_RAW_POINTER) {
+    else if (item.item == 0) {
+        // handle raw 0 value (from y2it(nullptr) etc.) as null
+        item_type->type_id = LMD_TYPE_NULL;
+    }
+    else if (item._type_id == LMD_TYPE_RAW_POINTER && item.container) {
         item_type->type_id = item.container->type_id;
     }
+    else {
+        // fallback to null for any other case
+        item_type->type_id = LMD_TYPE_NULL;
+    }
     return (Type*)type;
+}
+
+/**
+ * fn_name(item) - return the (local) name of an element, function, or type
+ * Returns the name as a symbol, or nullptr if the item doesn't have a name.
+ */
+Symbol* fn_name(Item item) {
+    TypeId type_id = get_type_id(item);
+
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_ERROR:
+        return nullptr;
+    case LMD_TYPE_ELEMENT: {
+        // return the element's tag name as a symbol
+        Element* elmt = item.element;
+        if (!elmt || !elmt->type) return nullptr;
+        TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+        if (elmt_type->name.str && elmt_type->name.length > 0) {
+            return heap_create_symbol(elmt_type->name.str, elmt_type->name.length);
+        }
+        return nullptr;
+    }
+    case LMD_TYPE_FUNC: {
+        // return the function's name as a symbol
+        Function* fn = item.function;
+        if (!fn) return nullptr;
+        // function name is stored in the name field
+        if (fn->name && strlen(fn->name) > 0) {
+            return heap_create_symbol(fn->name, strlen(fn->name));
+        }
+        // We return null for anonymous functions
+        return nullptr;
+    }
+    case LMD_TYPE_TYPE: {
+        // return the type's name as a symbol (e.g., "int", "string", "User")
+        // For built-in types, use the type name
+        TypeType* type_type = (TypeType*)item.type;
+        if (!type_type || !type_type->type) return nullptr;
+        const char* name = get_type_name(type_type->type->type_id);
+        if (name) {
+            return heap_create_symbol(name, strlen(name));
+        }
+        return nullptr;
+    }
+    case LMD_TYPE_SYMBOL: {
+        // for symbols, just return the symbol itself (it's already a name)
+        return item.get_symbol();
+    }
+    default:
+        return nullptr;
+    }
 }
 
 // returns the TypeId of an item for use in MIR-compiled code
@@ -1565,8 +1625,30 @@ Item fn_member(Item item, Item key) {
     switch (type_id) {
     case LMD_TYPE_NULL:
         return ItemNull;  // null-safe: null.field returns null
-    case LMD_TYPE_ERROR:
-        return item;      // error propagation: error.field returns error
+    case LMD_TYPE_ERROR: {
+        // error member properties: .code and .message
+        const char* k = key.get_chars();
+        if (!k) return item;  // error propagation
+
+        if (strcmp(k, "code") == 0) {
+            // return error code from context->last_error
+            if (context && context->last_error) {
+                return {.item = i2it(context->last_error->code)};
+            }
+            return {.item = i2it(ERR_USER_ERROR)};  // default error code
+        }
+        if (strcmp(k, "message") == 0) {
+            // return error message from context->last_error
+            if (context && context->last_error && context->last_error->message) {
+                String* msg = heap_strcpy(context->last_error->message, strlen(context->last_error->message));
+                return {.item = s2it(msg)};
+            }
+            String* msg = heap_create_name("Error");
+            return {.item = s2it(msg)};  // default message
+        }
+
+        return item;  // error propagation for other properties
+    }
     case LMD_TYPE_DTIME: {
         // datetime member properties
         DateTime dt = item.get_datetime();
