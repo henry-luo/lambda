@@ -287,7 +287,7 @@ void parse_mdx(Input* input, const char* mdx_string) {
     }
 
     if (ctx.hasErrors()) {
-        // errors were tracked, root may be partial
+        ctx.logErrors();
     }
 }
 

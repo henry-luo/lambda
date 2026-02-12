@@ -41,7 +41,7 @@ static String* parse_property_name(InputContext& ctx, const char **vcf) {
         (*vcf)++;
     }
 
-    if (sb->length > sizeof(uint32_t)) {
+    if (sb->length > 0) {
         String* result = builder.createString(sb->str->chars, sb->length);
         return result;
     }
@@ -65,7 +65,7 @@ static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* 
             (*vcf)++;
         }
 
-        if (sb->length <= sizeof(uint32_t)) continue;
+        if (sb->length == 0) continue;
 
         String* param_name = builder.createName(sb->str->chars, sb->length);
         if (!param_name) continue;
@@ -94,7 +94,7 @@ static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* 
                 (*vcf)++; // skip closing quote
             }
 
-            if (sb->length > sizeof(uint32_t)) {
+            if (sb->length > 0) {
                 param_value = builder.createString(sb->str->chars, sb->length);
             }
         }
@@ -146,7 +146,7 @@ static String* parse_property_value(InputContext& ctx, const char **vcf) {
         }
     }
 
-    if (sb->length > sizeof(uint32_t)) {
+    if (sb->length > 0) {
         return builder.createString(sb->str->chars, sb->length);
     }
     return NULL;
@@ -183,7 +183,7 @@ static Map* parse_structured_name(InputContext& ctx, const char* value) {
             ptr++;
         }
 
-        if (sb->length > sizeof(uint32_t)) {
+        if (sb->length > 0) {
             String* field_value = builder.createString(sb->str->chars, sb->length);
             if (field_value && field_value->len > 0) {
                 String* field_key = builder.createName(field_names[i]);
@@ -221,7 +221,7 @@ static Map* parse_address(InputContext& ctx, const char* value) {
             ptr++;
         }
 
-        if (sb->length > sizeof(uint32_t)) {
+        if (sb->length > 0) {
             String* field_value = builder.createString(sb->str->chars, sb->length);
             if (field_value && field_value->len > 0) {
                 String* field_key = builder.createName(field_names[i]);
@@ -403,6 +403,6 @@ void parse_vcf(Input* input, const char* vcf_string) {
     input->root = {.item = ((uint64_t)LMD_TYPE_MAP << 56) | (uint64_t)contact_map};
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 }

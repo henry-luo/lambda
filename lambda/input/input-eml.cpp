@@ -312,6 +312,6 @@ void parse_eml(Input* input, const char* eml_string) {
     input->root = {.item = (uint64_t)email_map};
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 }
