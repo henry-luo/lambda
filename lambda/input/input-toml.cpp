@@ -1062,4 +1062,8 @@ void parse_toml(Input* input, const char* toml_string) {
 
         skip_line(&toml, &line_num);
     }
+
+    if (ctx.hasErrors()) {
+        ctx.logErrors();
+    }
 }

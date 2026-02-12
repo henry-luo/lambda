@@ -607,6 +607,6 @@ void parse_mark(Input* input, const char* mark_string) {
     input->root = parse_content(ctx, &mark, 0);
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 }
