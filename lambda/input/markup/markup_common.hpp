@@ -74,6 +74,7 @@ enum class Format {
     ORG,            // Org-mode
     ASCIIDOC,       // AsciiDoc
     MAN,            // Unix man pages (troff)
+    TYPST,          // Typst markup language
     AUTO_DETECT     // Detect from content/filename
 };
 
