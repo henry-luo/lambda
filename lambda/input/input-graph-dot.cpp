@@ -20,9 +20,11 @@ static String* parse_identifier(InputContext& ctx);
 static String* parse_quoted_string(InputContext& ctx);
 static String* parse_attribute_value(InputContext& ctx);
 static void parse_attribute_list(InputContext& ctx, Element* element);
+static const int DOT_MAX_DEPTH = 256;
+
 static Element* parse_node_statement(InputContext& ctx);
 static Element* parse_edge_statement(InputContext& ctx);
-static void parse_subgraph(InputContext& ctx, Element* graph);
+static void parse_subgraph(InputContext& ctx, Element* graph, int depth = 0);
 
 // Skip whitespace and comments
 static void skip_whitespace_and_comments(SourceTracker& tracker) {
@@ -316,8 +318,13 @@ static Element* parse_edge_statement(InputContext& ctx) {
 }
 
 // Parse subgraph or cluster
-static void parse_subgraph(InputContext& ctx, Element* graph) {
+static void parse_subgraph(InputContext& ctx, Element* graph, int depth) {
     SourceTracker& tracker = ctx.tracker;
+
+    if (depth >= DOT_MAX_DEPTH) {
+        ctx.addError(tracker.location(), "Maximum DOT subgraph nesting depth (%d) exceeded", DOT_MAX_DEPTH);
+        return;
+    }
 
     skip_whitespace_and_comments(tracker);
 
@@ -423,6 +430,10 @@ static void parse_subgraph(InputContext& ctx, Element* graph) {
 
 // Main DOT parser function
 void parse_graph_dot(Input* input, const char* dot_string) {
+    if (!dot_string || !*dot_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
     InputContext ctx(input, dot_string);
     SourceTracker& tracker = ctx.tracker;
 
