@@ -220,15 +220,15 @@ bool types_compatible(Type* arg_type, Type* param_type) {
     // If param is a union type, check if arg matches either side
     // For TypeParam with complex types, use full_type if available
     Type* actual_param = param_type;
-    if (param_type->type_id == LMD_TYPE_TYPE_BINARY) {
+    if (param_type->kind == TYPE_KIND_BINARY) {
         // Check if this is a TypeParam with full_type pointer
         TypeParam* tp = (TypeParam*)param_type;
-        if (tp->full_type && tp->full_type->type_id == LMD_TYPE_TYPE_BINARY) {
+        if (tp->full_type && tp->full_type->kind == TYPE_KIND_BINARY) {
             actual_param = tp->full_type;
         }
     }
 
-    if (actual_param->type_id == LMD_TYPE_TYPE_BINARY) {
+    if (actual_param->kind == TYPE_KIND_BINARY) {
         TypeBinary* union_type = (TypeBinary*)actual_param;
         if (union_type->op == OPERATOR_UNION) {
             // unwrap TypeType if present
@@ -3325,7 +3325,7 @@ AstNode* build_error_union_type(Transpiler* tp, TSNode node) {
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
         AST_NODE_BINARY_TYPE, node, sizeof(AstBinaryNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeBinary* type = (TypeBinary*)alloc_type(tp->pool, LMD_TYPE_TYPE_BINARY, sizeof(TypeBinary));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     // Get the "ok" field - the success type
@@ -3366,7 +3366,7 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
         AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeBinary* type = (TypeBinary*)alloc_type(tp->pool, LMD_TYPE_TYPE_BINARY, sizeof(TypeBinary));
+    TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
@@ -3556,7 +3556,7 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     log_debug("build occurrence type");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
     ast_node->type = alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeUnary* type = (TypeUnary*)alloc_type(tp->pool, LMD_TYPE_TYPE_UNARY, sizeof(TypeUnary));
+    TypeUnary* type = (TypeUnary*)alloc_type_kind(tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     // initialize occurrence counts to defaults
@@ -4354,7 +4354,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
                 // Copy base Type fields
                 *(Type*)param_type = *type_type->type;
                 // For complex types (TypeBinary), store pointer to full type
-                if (type_type->type->type_id == LMD_TYPE_TYPE_BINARY) {
+                if (type_type->type->kind == TYPE_KIND_BINARY) {
                     param_type->full_type = type_type->type;
                     log_debug("parameter has union type, storing full_type pointer");
                 } else {
@@ -5060,7 +5060,7 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
     }
 
     // Type is pattern
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     return (AstNode*)ast_node;
 }
 
@@ -5077,7 +5077,7 @@ AstNode* build_pattern_range(Transpiler* tp, TSNode node) {
     ast_node->end = build_lit_node(tp, right_node, true, SYM_STRING);
 
     // Type is pattern
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     return (AstNode*)ast_node;
 }
 
@@ -5108,7 +5108,7 @@ AstNode* build_primary_pattern(Transpiler* tp, TSNode node) {
         AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
         ast_node->char_class = PATTERN_ANY;
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         return (AstNode*)ast_node;
     } else if (symbol == SYM_PATTERN_ANY_STAR) {
         // Build a unary node for '...' (equivalent to \.*)
@@ -5118,11 +5118,11 @@ AstNode* build_primary_pattern(Transpiler* tp, TSNode node) {
         AstPatternCharClassNode* any_node = (AstPatternCharClassNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
         any_node->char_class = PATTERN_ANY;
-        any_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        any_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         ast_node->operand = (AstNode*)any_node;
         ast_node->op = OPERATOR_ZERO_MORE;
         ast_node->op_str = {.str = "*", .length = 1};
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         return (AstNode*)ast_node;
     }
 
@@ -5159,7 +5159,7 @@ AstNode* build_pattern_occurrence(Transpiler* tp, TSNode node) {
         ast_node->op = OPERATOR_REPEAT;
     }
 
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     return (AstNode*)ast_node;
 }
 
@@ -5173,7 +5173,7 @@ AstNode* build_pattern_negation(Transpiler* tp, TSNode node) {
     ast_node->op = OPERATOR_NOT;
     ast_node->op_str = {.str = "!", .length = 1};
 
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     return (AstNode*)ast_node;
 }
 
@@ -5199,7 +5199,7 @@ AstNode* build_binary_pattern(Transpiler* tp, TSNode node) {
         }
     }
 
-    ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     return (AstNode*)ast_node;
 }
 
@@ -5218,7 +5218,7 @@ AstNode* build_pattern_expr(Transpiler* tp, TSNode node) {
         AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
         ast_node->char_class = PATTERN_ANY;
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         return (AstNode*)ast_node;
     }
     else if (symbol == SYM_PATTERN_ANY_STAR) {
@@ -5228,11 +5228,11 @@ AstNode* build_pattern_expr(Transpiler* tp, TSNode node) {
         AstPatternCharClassNode* any_node = (AstPatternCharClassNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
         any_node->char_class = PATTERN_ANY;
-        any_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        any_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         ast_node->operand = (AstNode*)any_node;
         ast_node->op = OPERATOR_ZERO_MORE;
         ast_node->op_str = {.str = "*", .length = 1};
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
         return (AstNode*)ast_node;
     }
     else if (symbol == SYM_PATTERN_RANGE) {
@@ -5254,7 +5254,7 @@ AstNode* build_pattern_expr(Transpiler* tp, TSNode node) {
         // Pattern sequence - concatenation of multiple patterns
         AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
             alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
-        seq_node->type = alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+        seq_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
 
         uint32_t child_count = ts_node_named_child_count(node);
         log_debug("build_pattern_seq: %d children", child_count);
@@ -5313,7 +5313,7 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     ast_node->as = build_pattern_expr(tp, pattern_node);
 
     // Type is pattern type
-    TypePattern* pattern_type = (TypePattern*)alloc_type(tp->pool, LMD_TYPE_PATTERN, sizeof(TypePattern));
+    TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
     pattern_type->is_symbol = is_symbol;
     pattern_type->pattern_index = -1;  // Will be set during compilation
     pattern_type->re2 = nullptr;       // Will be compiled during transpilation
