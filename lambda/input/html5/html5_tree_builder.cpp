@@ -221,7 +221,8 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
 
 // main entry point for parsing HTML
 Element* html5_parse(Input* input, const char* html) {
-    if (!html || !*html) {
+    // note: empty string is valid HTML input - produces implicit <html><head><body>
+    if (!html) {
         return nullptr;
     }
 
