@@ -1,6 +1,7 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "lib/log.h"
 #include "lib/memtrack.h"
@@ -139,103 +140,7 @@ static String* parse_raw_value(InputContext& ctx, const char **ini) {
     return nullptr;  // empty string maps to null
 }
 
-static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        char c1 = tolower((unsigned char)s1[i]);
-        char c2 = tolower((unsigned char)s2[i]);
-        if (c1 != c2) return c1 - c2;
-    }
-    return 0;
-}
-
-static Item parse_typed_value(InputContext& ctx, String* value_str) {
-    if (!value_str || value_str->len == 0) {
-        return {.item = s2it(value_str)};
-    }
-    Input* input = ctx.input();
-    char* str = value_str->chars;  size_t len = value_str->len;
-    // check for boolean values (case insensitive)
-    if ((len == 4 && case_insensitive_compare(str, "true", 4) == 0) ||
-        (len == 3 && case_insensitive_compare(str, "yes", 3) == 0) ||
-        (len == 2 && case_insensitive_compare(str, "on", 2) == 0) ||
-        (len == 1 && str[0] == '1')) {
-        return {.item = b2it(true)};
-    }
-    if ((len == 5 && case_insensitive_compare(str, "false", 5) == 0) ||
-        (len == 2 && case_insensitive_compare(str, "no", 2) == 0) ||
-        (len == 3 && case_insensitive_compare(str, "off", 3) == 0) ||
-        (len == 1 && str[0] == '0')) {
-        return {.item = b2it(false)};
-    }
-    // check for null/empty values
-    if ((len == 4 && case_insensitive_compare(str, "null", 4) == 0) ||
-        (len == 3 && case_insensitive_compare(str, "nil", 3) == 0) ||
-        (len == 5 && case_insensitive_compare(str, "empty", 5) == 0)) {
-        return {.item = ITEM_NULL};
-    }
-
-    // try to parse as number
-    char* end;  bool is_number = true, has_dot = false;
-    for (size_t i = 0; i < len; i++) {
-        char c = str[i];
-        if (i == 0 && (c == '-' || c == '+')) {
-            continue; // allow leading sign
-        }
-        if (c == '.' && !has_dot) {
-            has_dot = true;
-            continue;
-        }
-        if (c == 'e' || c == 'E') {
-            // allow scientific notation
-            if (i + 1 < len && (str[i + 1] == '+' || str[i + 1] == '-')) {
-                i++; // skip the sign after e/E
-            }
-            continue;
-        }
-        if (!isdigit(c)) {
-            is_number = false;
-            break;
-        }
-    }
-
-    if (is_number && len > 0) {
-        // Create null-terminated string for parsing (temporary allocation)
-        char* temp_str = (char*)mem_calloc(1, len + 1, MEM_CAT_INPUT_INI);
-        if (temp_str) {
-            memcpy(temp_str, str, len);
-            temp_str[len] = '\0';
-
-            if (has_dot || strchr(temp_str, 'e') || strchr(temp_str, 'E')) {
-                // Parse as floating point
-                double dval = strtod(temp_str, &end);
-                if (end == temp_str + len) {
-                    double* dval_ptr;
-                    dval_ptr = (double*)pool_calloc(input->pool, sizeof(double));
-                    if (dval_ptr != NULL) {
-                        *dval_ptr = dval;
-                        mem_free(temp_str);
-                        return {.item = d2it(dval_ptr)};
-                    }
-                }
-            } else {
-                // Parse as integer
-                int64_t lval = strtol(temp_str, &end, 10);
-                if (end == temp_str + len) {
-                    int64_t* lval_ptr;
-                    lval_ptr = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-                    if (lval_ptr != NULL) {
-                        *lval_ptr = lval;
-                        mem_free(temp_str);
-                        return {.item = l2it(lval_ptr)};
-                    }
-                }
-            }
-
-            mem_free(temp_str);
-        }
-    }
-    return {.item = s2it(value_str)};
-}
+// use shared parse_typed_value from input-utils.hpp
 
 static Map* parse_section(InputContext& ctx, const char **ini, String* section_name) {
     log_debug("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
@@ -279,7 +184,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
         tracker.advance(1);
 
         String* value_str = parse_raw_value(ctx, ini);
-        Item value = value_str ? parse_typed_value(ctx, value_str) : (Item){.item = ITEM_NULL};
+        Item value = value_str ? parse_typed_value(ctx, value_str->chars, value_str->len) : (Item){.item = ITEM_NULL};
         ctx.builder.putToMap(section_map, key, value);
 
         skip_to_newline(ini, &tracker);
