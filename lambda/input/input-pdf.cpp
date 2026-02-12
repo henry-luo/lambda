@@ -109,7 +109,7 @@ static Array* parse_pdf_array(InputContext& ctx, const char **pdf) {
     if (!arr) return NULL;
 
     int item_count = 0;
-    while (**pdf && **pdf != ']' && item_count < 10) { // reduced limit for safety
+    while (**pdf && **pdf != ']' && item_count < 10000) { // increased limit for real PDFs
         Item obj = parse_pdf_object(ctx, pdf, 1);
         if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
             array_append(arr, obj, ctx.input()->pool);
@@ -213,7 +213,7 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
         (*pdf)++; // skip (
         int paren_count = 1;
         int char_count = 0;
-        int max_chars = 500; // Safety limit
+        int max_chars = 100000; // Safety limit - increased for real PDFs
 
         while (**pdf && paren_count > 0 && char_count < max_chars) {
             if (**pdf == '\\') {
@@ -257,7 +257,7 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
         // hexadecimal string
         (*pdf)++; // skip <
         int char_count = 0;
-        int max_chars = 500; // Safety limit
+        int max_chars = 100000; // Safety limit - increased for real PDFs
 
         while (**pdf && **pdf != '>' && char_count < max_chars) {
             if (isxdigit(**pdf)) {
