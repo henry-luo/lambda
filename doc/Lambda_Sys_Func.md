@@ -40,6 +40,7 @@ Functions for type conversion and inspection.
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `type(x)` | Get type of value | `type(42)` | `'int` |
+| `name(x)` | Get name of element, function, or type | `name(<div>)` | `'div` |
 | `len(x)` | Get length of collection | `len([1, 2, 3])` | `3` |
 
 ```lambda
@@ -53,6 +54,8 @@ symbol("text")     // 'text
 type(42)           // 'int
 type("hello")      // 'string
 type([1, 2, 3])    // 'array
+name(<div>)        // 'div
+name(type(42))     // 'int
 len([1, 2, 3])     // 3
 len("hello")       // 5
 ```
@@ -482,16 +485,16 @@ Writes data to a file or URL. The format can be auto-detected from the target ex
 ```lambda
 pn save_data() {
     let data = {name: "Alice", age: 30, scores: [95, 87, 92]}
-    
+
     // Using Path literals
     output(data, @./result.json)     // Writes JSON
     output(data, @./result.yaml)     // Writes YAML
     output(data, @./result.xml)      // Writes XML
-    
+
     // Explicit format specification
     output(data, @./data.txt, 'json)    // Force JSON format
     output(data, @./data.out, 'yaml)    // Force YAML format
-    
+
     // With options
     output(data, @./pretty.json, {type: 'json, indent: 4})
 }
@@ -522,7 +525,7 @@ The `|>` operator writes data to a target, truncating existing content:
 pn generate_report() {
     let report = {title: "Monthly Report", date: today(), items: [...]}
     report |> @./reports/monthly.json
-    
+
     // Equivalent to:
     output(report, @./reports/monthly.json)
 }
@@ -645,7 +648,7 @@ pn api_operations() {
         method: 'GET,
         headers: {Authorization: "Bearer token123"}
     })
-    
+
     // POST request
     let result = io.fetch(@https://api.example.com/users, {
         method: 'POST,
@@ -663,7 +666,7 @@ Execute a shell command and return the result.
 pn run_commands() {
     let files = cmd("ls", "-la")
     let date = cmd("date", "+%Y-%m-%d")
-    
+
     // With multiple arguments
     cmd("git", "commit", "-m", "Update files")
 }
