@@ -22,7 +22,7 @@ static String* parse_mermaid_label(InputContext& ctx);
 static void parse_mermaid_node_def(InputContext& ctx, Element* graph);
 static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id);
 static void parse_mermaid_class_def(InputContext& ctx, Element* graph);
-static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id);
+static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id, const char** out_shape);
 static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph);
 static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_elem);
 
@@ -88,15 +88,13 @@ static String* parse_mermaid_identifier(InputContext& ctx) {
 //   [/text\]     - trapezoid (wider bottom)
 //   [\text/]     - inverse trapezoid (wider top)
 //
-// Returns the extracted label text and sets g_current_node_shape for the caller
-static const char* g_current_node_shape = "box";
-
-static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) {
+// Returns the extracted label text and sets *out_shape for the caller
+static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id, const char** out_shape) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) {
-        g_current_node_shape = "box";
+        *out_shape = "box";
         return ctx.builder.createString(node_id);
     }
 
@@ -177,14 +175,14 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) 
         open_len = 1;
     } else {
         // no shape specified, return node_id as label
-        g_current_node_shape = "box";
+        *out_shape = "box";
         return ctx.builder.createString(node_id);
     }
 
     // Advance past opening delimiter
     tracker.advance(open_len);
 
-    g_current_node_shape = shape;
+    *out_shape = shape;
 
     // Extract label text until closing delimiter
     if (close_pattern) {
@@ -296,14 +294,15 @@ static void parse_mermaid_node_def(InputContext& ctx, Element* graph) {
 
     skip_whitespace_and_comments_mermaid(tracker);
 
-    // parse node shape and label (sets g_current_node_shape)
-    String* label = parse_mermaid_node_shape(ctx, node_id->chars);
+    // parse node shape and label
+    const char* node_shape = "box";
+    String* label = parse_mermaid_node_shape(ctx, node_id->chars, &node_shape);
     if (!label) {
         label = node_id; // use ID as label if no shape specified
     }
 
     // create node element with shape passed directly (before finalization)
-    Element* node = create_node_element(ctx.input(), node_id->chars, label->chars, g_current_node_shape);
+    Element* node = create_node_element(ctx.input(), node_id->chars, label->chars, node_shape);
 
     // add to graph
     add_node_to_graph(ctx.input(), graph, node);
@@ -414,11 +413,12 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
 
     if (has_shape) {
         // parse node shape and get label
-        String* to_label = parse_mermaid_node_shape(ctx, to_id->chars);
+        const char* to_shape = "box";
+        String* to_label = parse_mermaid_node_shape(ctx, to_id->chars, &to_shape);
 
         // create and add target node element with shape passed directly (before finalization)
         Element* to_node = create_node_element(ctx.input(), to_id->chars,
-            to_label ? to_label->chars : to_id->chars, g_current_node_shape);
+            to_label ? to_label->chars : to_id->chars, to_shape);
         add_node_to_graph(ctx.input(), graph, to_node);
     }
 
@@ -476,10 +476,9 @@ static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph) {
     // Parse subgraph ID
     String* subgraph_id = parse_mermaid_identifier(ctx);
     if (!subgraph_id) {
-        // Generate a unique ID
-        static int subgraph_counter = 0;
+        // Generate a unique ID using the tracker offset as a unique seed
         char id_buf[32];
-        snprintf(id_buf, sizeof(id_buf), "subgraph_%d", subgraph_counter++);
+        snprintf(id_buf, sizeof(id_buf), "subgraph_%zu", ctx.tracker.offset());
         subgraph_id = ctx.builder.createString(id_buf);
     }
 
@@ -582,11 +581,12 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
 
             char c0 = tracker.current();
             if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
-                node_label = parse_mermaid_node_shape(ctx, potential_node->chars);
+                const char* sub_node_shape = "box";
+                node_label = parse_mermaid_node_shape(ctx, potential_node->chars, &sub_node_shape);
                 skip_whitespace_and_comments_mermaid(tracker);
 
                 Element* node = create_node_element(ctx.input(), potential_node->chars,
-                    node_label ? node_label->chars : potential_node->chars, g_current_node_shape);
+                    node_label ? node_label->chars : potential_node->chars, sub_node_shape);
                 add_node_to_graph(ctx.input(), subgraph_elem, node);
             }
 
@@ -624,6 +624,11 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
 
 // Main Mermaid parser function
 void parse_graph_mermaid(Input* input, const char* mermaid_string) {
+    if (!mermaid_string || !*mermaid_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     InputContext ctx(input, mermaid_string, strlen(mermaid_string));
 
     SourceTracker& tracker = ctx.tracker;
@@ -701,13 +706,14 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             // Check for any shape opening pattern
             char c0 = tracker.current();
             if (c0 == '[' || c0 == '(' || c0 == '{' || c0 == '>') {
-                // parse node shape and get label (sets g_current_node_shape)
-                node_label = parse_mermaid_node_shape(ctx, potential_node->chars);
+                // parse node shape and get label
+                const char* main_node_shape = "box";
+                node_label = parse_mermaid_node_shape(ctx, potential_node->chars, &main_node_shape);
                 skip_whitespace_and_comments_mermaid(tracker);
 
                 // create and add node element with shape passed directly (before finalization)
                 Element* node = create_node_element(ctx.input(), potential_node->chars,
-                    node_label ? node_label->chars : potential_node->chars, g_current_node_shape);
+                    node_label ? node_label->chars : potential_node->chars, main_node_shape);
                 add_node_to_graph(ctx.input(), graph, node);
             }
 

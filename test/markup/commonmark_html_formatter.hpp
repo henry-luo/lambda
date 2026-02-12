@@ -59,6 +59,19 @@ static inline bool has_valid_content(String* str) {
     return str && str->chars && str->len > 0 && !is_lambda_nil(str->chars, str->len);
 }
 
+// Helper to check if a String* has non-whitespace content (for block context in list items)
+static inline bool has_non_whitespace_content(String* str) {
+    if (!str || !str->chars || str->len == 0) return false;
+    if (is_lambda_nil(str->chars, str->len)) return false;
+    for (size_t i = 0; i < str->len; i++) {
+        char c = str->chars[i];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+            return true;
+        }
+    }
+    return false;
+}
+
 // URL encoding for href/src attributes (percent-encode special chars)
 static void format_cm_url(CommonMarkHtmlContext& ctx, const char* text, size_t len) {
     StringBuf* sb = ctx.output();
@@ -327,8 +340,18 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                 if (child.isElement()) {
                     ElementReader child_elem = child.asElement();
                     const char* child_tag = child_elem.tagName();
-                    bool is_block = is_block_tag(child_tag);
-                    bool is_inline = is_inline_tag(child_tag);
+                    
+                    // For code elements, check if it's block-level (has type="block", info, or language attr)
+                    bool is_block_code = false;
+                    if (child_tag && strcmp(child_tag, "code") == 0) {
+                        String* type_attr = child_elem.get_string_attr("type");
+                        is_block_code = (type_attr && strcmp(type_attr->chars, "block") == 0) ||
+                                       child_elem.get_string_attr("info") != nullptr ||
+                                       child_elem.get_string_attr("language") != nullptr;
+                    }
+                    
+                    bool is_block = is_block_tag(child_tag) && (strcmp(child_tag, "code") != 0 || is_block_code);
+                    bool is_inline = is_inline_tag(child_tag) && (strcmp(child_tag, "code") != 0 || !is_block_code);
                     bool is_list = child_tag && (strcmp(child_tag, "ul") == 0 || strcmp(child_tag, "ol") == 0);
 
                     // For tight lists with nested sublists: <li>foo\n<ul>
@@ -355,7 +378,8 @@ static void format_cm_element(CommonMarkHtmlContext& ctx, const ElementReader& e
                     // (Note: Currently disabled to match CommonMark spec expectations)
                 } else if (child.isString()) {
                     String* str = child.asString();
-                    if (has_valid_content(str)) {
+                    // In block context, skip whitespace-only strings (they're just separators)
+                    if (has_non_whitespace_content(str)) {
                         format_cm_text(ctx, str->chars, str->len);
                         previous_was_inline = true;
                     }

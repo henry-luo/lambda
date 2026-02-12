@@ -5,10 +5,12 @@
 
 using namespace lambda;
 
+static const int TOML_MAX_DEPTH = 512;
+
 // Forward declarations
-static Item parse_value(InputContext& ctx, const char **toml, int *line_num);
-static Array* parse_array(InputContext& ctx, const char **toml, int *line_num);
-static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num);
+static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int depth = 0);
+static Array* parse_array(InputContext& ctx, const char **toml, int *line_num, int depth = 0);
+static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num, int depth = 0);
 static String* parse_bare_key(InputContext& ctx, const char **toml);
 static String* parse_quoted_key(InputContext& ctx, const char **toml);
 static String* parse_literal_key(InputContext& ctx, const char **toml);
@@ -656,13 +658,17 @@ static Item parse_number(InputContext& ctx, const char **toml) {
     }
 }
 
-static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
+static Array* parse_array(InputContext& ctx, const char **toml, int *line_num, int depth) {
     SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder;
 
     if (**toml != '[') return NULL;
+    if (depth >= TOML_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum TOML nesting depth (%d) exceeded", TOML_MAX_DEPTH);
+        return NULL;
+    }
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
 
@@ -675,7 +681,7 @@ static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
     }
 
     while (**toml) {
-        Item value = parse_value(ctx, toml, line_num);
+        Item value = parse_value(ctx, toml, line_num, depth + 1);
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
@@ -703,13 +709,17 @@ static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
     return arr;
 }
 
-static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num) {
+static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num, int depth) {
     SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder;
 
     if (**toml != '{') return NULL;
+    if (depth >= TOML_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum TOML nesting depth (%d) exceeded", TOML_MAX_DEPTH);
+        return NULL;
+    }
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
 
@@ -737,7 +747,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
         tracker.advance(1);
         skip_tab_pace(toml);
 
-        Item value = parse_value(ctx, toml, line_num);
+        Item value = parse_value(ctx, toml, line_num, depth + 1);
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
@@ -760,25 +770,30 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
     return mp;
 }
 
-static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
+static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int depth) {
     SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder;
+
+    if (depth >= TOML_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum TOML nesting depth (%d) exceeded", TOML_MAX_DEPTH);
+        return {.item = ITEM_ERROR};
+    }
 
     skip_tab_pace_and_comments(toml, line_num);
 
     SourceLocation value_loc = tracker.location();
     switch (**toml) {
         case '{': {
-            Map* table = parse_inline_table(ctx, toml, line_num);
+            Map* table = parse_inline_table(ctx, toml, line_num, depth + 1);
             if (!table) {
                 ctx.addError(value_loc, "Invalid inline table");
             }
             return table ? (Item){.item = (uint64_t)table} : (Item){.item = ITEM_ERROR};
         }
         case '[': {
-            Array* array = parse_array(ctx, toml, line_num);
+            Array* array = parse_array(ctx, toml, line_num, depth + 1);
             if (!array) {
                 ctx.addError(value_loc, "Invalid array");
             }
@@ -998,6 +1013,10 @@ static bool parse_table_header(const char **toml, char *table_name, int *line_nu
 }
 
 void parse_toml(Input* input, const char* toml_string) {
+    if (!toml_string || !*toml_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
     InputContext ctx(input, toml_string, strlen(toml_string));
 
     Map* root_map = map_pooled(input->pool);
