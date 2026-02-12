@@ -582,14 +582,16 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
         return false;
     }
 
-    const char* element_attr = dom_element_get_attribute(element, attr_name);
-    if (!element_attr) {
-        return false;
+    // For existence check (no value specified), use has_attribute
+    // This handles the case where attribute exists but has empty value (stored as null)
+    if (!attr_value || attr_type == CSS_SELECTOR_ATTR_EXISTS) {
+        return dom_element_has_attribute(element, attr_name);
     }
 
-    // If no value specified, just check existence
-    if (!attr_value) {
-        return true;
+    const char* element_attr = dom_element_get_attribute(element, attr_name);
+    if (!element_attr) {
+        // Attribute exists but has empty/null value - can't match any value-based selector
+        return false;
     }
 
     // Determine comparison function - respect both parameter AND matcher configuration
