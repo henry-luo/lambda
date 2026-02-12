@@ -57,6 +57,12 @@ extern "C" {
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
+#define SYM_MATCH_EXPR sym_match_expr
+#define SYM_MATCH_STAM sym_match_stam
+#define SYM_MATCH_ARM_EXPR sym_match_arm_expr
+#define SYM_MATCH_DEFAULT_EXPR sym_match_default_expr
+#define SYM_MATCH_ARM_STAM sym_match_arm_stam
+#define SYM_MATCH_DEFAULT_STAM sym_match_default_stam
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
 #define SYM_PUB_STAM sym_pub_stam
@@ -117,6 +123,7 @@ extern "C" {
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
 #define FIELD_ELSE field_else
+#define FIELD_SCRUTINEE field_scrutinee
 #define FIELD_LEFT field_left
 #define FIELD_RIGHT field_right
 #define FIELD_NAME field_name
@@ -217,6 +224,9 @@ typedef enum AstNodeType {
     AST_NODE_GROUP_CLAUSE,  // group by clause
     AST_NODE_IF_EXPR,
     AST_NODE_IF_STAM,
+    AST_NODE_MATCH_EXPR,
+    AST_NODE_MATCH_STAM,
+    AST_NODE_MATCH_ARM,
     AST_NODE_FOR_EXPR,
     AST_NODE_FOR_STAM,
     AST_NODE_WHILE_STAM,    // while statement (procedural only)
@@ -405,6 +415,19 @@ typedef struct AstIfNode : AstNode {
     AstNode *then;
     AstNode *otherwise;
 } AstIfNode;
+
+// match arm: case <pattern>: <body> or case <pattern> { <body> }
+typedef struct AstMatchArm : AstNode {
+    AstNode *pattern;   // type expression to match against (NULL for default arm)
+    AstNode *body;      // expression or content block
+} AstMatchArm;
+
+// match expression/statement: match <scrutinee> case ... case ... default ...
+typedef struct AstMatchNode : AstNode {
+    AstNode *scrutinee;     // expression being matched
+    AstMatchArm *first_arm; // first arm (linked list via AstNode::next)
+    int arm_count;          // number of arms
+} AstMatchNode;
 
 // while statement (procedural only)
 typedef struct AstWhileNode : AstNode {
