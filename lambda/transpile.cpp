@@ -398,6 +398,7 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
         pre_define_closure_envs(tp, ((AstPrimaryNode*)node)->expr);
         break;
     case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
         pre_define_closure_envs(tp, ((AstUnaryNode*)node)->operand);
         break;
     case AST_NODE_BINARY:
@@ -1199,6 +1200,15 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
         log_error("Error: transpile_unary_expr unknown operator %d", unary_node->op);
         strbuf_append_str(tp->code_buf, "null");
     }
+}
+
+// transpile spread expression: *expr
+// wraps the expression with item_spread() to mark it as spreadable
+void transpile_spread_expr(Transpiler* tp, AstUnaryNode *spread_node) {
+    log_debug("transpile spread expr");
+    strbuf_append_str(tp->code_buf, "item_spread(");
+    transpile_box_item(tp, spread_node->operand);
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
@@ -2638,10 +2648,9 @@ void transpile_items(Transpiler* tp, AstNode *item) {
 // check if any item in the list/array needs spreading (for-expression or spread operator)
 static bool has_spreadable_item(AstNode *item) {
     while (item) {
-        if (item->node_type == AST_NODE_FOR_EXPR) {
+        if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD) {
             return true;
         }
-        // TODO: also check for spread operator when implemented
         item = item->next;
     }
     return false;
@@ -4431,6 +4440,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_UNARY:
         transpile_unary_expr(tp, (AstUnaryNode*)expr_node);
         break;
+    case AST_NODE_SPREAD:
+        transpile_spread_expr(tp, (AstUnaryNode*)expr_node);
+        break;
     case AST_NODE_BINARY:
         transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
         break;
@@ -4657,6 +4669,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }
         break;
     case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
         define_ast_node(tp, ((AstUnaryNode*)node)->operand);
         break;
     case AST_NODE_BINARY:
