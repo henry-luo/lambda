@@ -832,6 +832,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
         log_debug("[unary expr %.*s:%s]", (int)((AstUnaryNode*)node)->op_str.length,
             ((AstUnaryNode*)node)->op_str.str, type_name);
         print_ast_node(script, ((AstUnaryNode*)node)->operand, indent + 1);
