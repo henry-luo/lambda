@@ -156,16 +156,23 @@ Adding 2 more types will overflow the array. Additionally, `LMD_TYPE_PATTERN` ha
 
 ---
 
-### Issue #8: Function objects allocated with raw `calloc`, never freed
+### Issue #8: Function objects allocated with raw `calloc`, never freed — ✅ FIXED
 
 **File:** `lambda/lambda-eval.cpp` — `create_fn_*` functions
 **Severity:** 🟠 High — systematic memory leak
 
-All 5 function/closure creation functions (`create_fn_lambda`, `create_fn_closure`, etc.) use bare `calloc` — NOT `pool_calloc`, NOT tracked by the heap system. These allocations are invisible to `heap_cleanup` and are **never freed**.
+All 5 function/closure creation functions (`to_fn`, `to_fn_n`, `to_fn_named`, `to_closure`, `to_closure_named`) use bare `calloc` — NOT `pool_calloc`, NOT tracked by the heap system. These allocations are invisible to `heap_cleanup` and are **never freed**.
 
 Every lambda/closure creation leaks ~64 bytes. In a long-running script that creates many closures (e.g., in a loop), this adds up.
 
-**Fix:** Allocate via `pool_calloc(context->heap->pool, sizeof(Function))` and track in heap entries, OR use arena allocation for function objects with the same lifetime as their containing scope.
+**Fix applied:**
+- Changed all 5 function creation functions from `calloc(1, sizeof(Function))` to `heap_calloc(sizeof(Function), LMD_TYPE_FUNC)` to track in heap system
+- Added `fn->ref_cnt++` in `list_push()` when storing functions in lists
+- Added `fn->ref_cnt++` in `set_fields()` when storing functions in map fields
+- Modified `heap_calloc()` to skip setting `is_heap` flag for functions (different struct layout than Container)
+- Added function freeing in `frame_end()` for heap cleanup
+- Added function freeing in `free_map_item()` for map field cleanup
+- Added function freeing in `free_item()` for list item cleanup
 
 ---
 
