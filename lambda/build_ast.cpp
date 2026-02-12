@@ -2078,6 +2078,11 @@ AstNode* build_spread_expr(Transpiler* tp, TSNode sp_node) {
     return (AstNode*)ast_node;
 }
 
+// Helper: check if operator is a relational comparison (<, <=, >, >=)
+static inline bool is_relational_op(Operator op) {
+    return op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT || op == OPERATOR_GE;
+}
+
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     log_debug("build binary expr");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
@@ -2148,6 +2153,34 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         log_error("Error: build_binary_expr failed to build right operand");
         ast_node->type = &TYPE_ERROR;
         return (AstNode*)ast_node;
+    }
+
+    // Chained comparison transformation: a < b < c => (a < b) and (b < c)
+    // Detect when left operand is a comparison and current op is also a comparison
+    if (is_relational_op(ast_node->op) && ast_node->left->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* left_cmp = (AstBinaryNode*)ast_node->left;
+        if (is_relational_op(left_cmp->op)) {
+            log_debug("chained comparison detected: transforming to AND");
+            // Transform: (a op1 b) op2 c  =>  (a op1 b) and (b op2 c)
+            // Create a new comparison node for: b op2 c
+            AstBinaryNode* right_cmp = (AstBinaryNode*)pool_calloc(tp->pool, sizeof(AstBinaryNode));
+            right_cmp->node_type = AST_NODE_BINARY;
+            right_cmp->node = bi_node;
+            right_cmp->left = left_cmp->right;  // reuse 'b' from left comparison
+            right_cmp->op = ast_node->op;       // op2
+            right_cmp->op_str = ast_node->op_str;
+            right_cmp->right = ast_node->right; // c
+            right_cmp->type = &TYPE_BOOL;
+
+            // Transform current node into AND node
+            ast_node->left = (AstNode*)left_cmp;  // left stays the same (a op1 b)
+            ast_node->op = OPERATOR_AND;
+            ast_node->op_str = {.str = "and", .length = 3};
+            ast_node->right = (AstNode*)right_cmp;
+            ast_node->type = &TYPE_BOOL;  // AND produces bool
+
+            return (AstNode*)ast_node;
+        }
     }
 
     // Additional validation: ensure both operands have valid types
@@ -3298,6 +3331,53 @@ AstNode* build_range_type(Transpiler* tp, TSNode type_node) {
     if (!ts_node_is_null(end_node)) {
         ast_node->right = build_expr(tp, end_node);
     }
+
+    return (AstNode*)ast_node;
+}
+
+// build constrained type: base_type where (constraint)
+// e.g. int where (5 < ~ < 10), string where (len(~) > 0)
+AstNode* build_constrained_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build constrained type");
+    AstConstrainedTypeNode* ast_node = (AstConstrainedTypeNode*)alloc_ast_node(tp,
+        AST_NODE_CONSTRAINED_TYPE, type_node, sizeof(AstConstrainedTypeNode));
+
+    // Build base type
+    TSNode base_node = ts_node_child_by_field_id(type_node, FIELD_BASE);
+    if (!ts_node_is_null(base_node)) {
+        ast_node->base = build_expr(tp, base_node);
+    }
+
+    // Build constraint expression
+    TSNode constraint_node = ts_node_child_by_field_id(type_node, FIELD_CONSTRAINT);
+    if (!ts_node_is_null(constraint_node)) {
+        ast_node->constraint = build_expr(tp, constraint_node);
+    }
+
+    // Create TypeConstrained directly (not wrapped in TypeType)
+    // TypeConstrained inherits from Type with type_id = LMD_TYPE_TYPE and kind = TYPE_KIND_CONSTRAINED
+    TypeConstrained* constrained = (TypeConstrained*)alloc_type_kind(tp->pool,
+        TYPE_KIND_CONSTRAINED, sizeof(TypeConstrained));
+
+    // Get the inner type from the base (unwrap if TypeType)
+    if (ast_node->base && ast_node->base->type) {
+        if (ast_node->base->type->type_id == LMD_TYPE_TYPE) {
+            TypeType* base_type_type = (TypeType*)ast_node->base->type;
+            constrained->base = base_type_type->type;
+        } else {
+            constrained->base = ast_node->base->type;
+        }
+    } else {
+        constrained->base = &TYPE_ANY;
+    }
+    constrained->constraint = ast_node->constraint;
+
+    // Set ast_node->type to the TypeConstrained directly (no TypeType wrapper)
+    ast_node->type = (Type*)constrained;
+
+    // Add to type_list for runtime const_type() access
+    arraylist_append(tp->type_list, ast_node->type);
+    constrained->type_index = tp->type_list->length - 1;
 
     return (AstNode*)ast_node;
 }
@@ -4933,6 +5013,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_occurrence_type(tp, expr_node);
     case SYM_RANGE_TYPE:
         return build_range_type(tp, expr_node);
+    case SYM_CONSTRAINED_TYPE:
+        return build_constrained_type(tp, expr_node);
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:

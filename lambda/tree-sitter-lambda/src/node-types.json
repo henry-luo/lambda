@@ -78,6 +78,10 @@
           "named": true
         },
         {
+          "type": "constrained_type",
+          "named": true
+        },
+        {
           "type": "error_union_type",
           "named": true
         },
@@ -106,6 +110,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -201,6 +209,10 @@
             "named": true
           },
           {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
             "type": "error_union_type",
             "named": true
           },
@@ -292,6 +304,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -864,6 +880,10 @@
             "named": true
           },
           {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
             "type": "error_union_type",
             "named": true
           },
@@ -901,6 +921,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -1003,6 +1027,72 @@
           {
             "type": "?",
             "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "constrained_type",
+    "named": true,
+    "fields": {
+      "base": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_occurrence",
+            "named": true
+          }
+        ]
+      },
+      "constraint": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fn_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "raise_expr",
+            "named": true
+          },
+          {
+            "type": "spread_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
           }
         ]
       }
@@ -1141,6 +1231,10 @@
       "types": [
         {
           "type": "binary_type",
+          "named": true
+        },
+        {
+          "type": "constrained_type",
           "named": true
         },
         {
@@ -1305,6 +1399,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -1514,6 +1612,10 @@
             "named": true
           },
           {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
             "type": "error_union_type",
             "named": true
           },
@@ -1619,6 +1721,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -2558,6 +2664,10 @@
           "named": true
         },
         {
+          "type": "constrained_type",
+          "named": true
+        },
+        {
           "type": "error_union_type",
           "named": true
         },
@@ -2797,6 +2907,10 @@
             "named": true
           },
           {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
             "type": "error_union_type",
             "named": true
           },
@@ -2885,6 +2999,10 @@
             "named": true
           },
           {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
             "type": "error_union_type",
             "named": true
           },
@@ -2920,6 +3038,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -3474,6 +3596,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -4291,6 +4417,10 @@
             "named": true
           },
           {
+            "type": "constrained_type",
+            "named": true
+          },
+          {
             "type": "error_union_type",
             "named": true
           },
@@ -4489,6 +4619,10 @@
         "types": [
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "constrained_type",
             "named": true
           },
           {
@@ -4879,11 +5013,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -4931,11 +5065,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -5091,11 +5225,11 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",

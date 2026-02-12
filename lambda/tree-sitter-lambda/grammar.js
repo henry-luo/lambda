@@ -215,6 +215,7 @@ module.exports = grammar({
   ],
   [
     $.fn_type,
+    $.constrained_type,
     $.type_occurrence,
     $.primary_type,
     $.binary_type,
@@ -229,9 +230,6 @@ module.exports = grammar({
     'pattern_intersect',
     'pattern_union',
   ]],
-
-  conflicts: $ => [
-  ],
 
   rules: {
     document: $ => optional(choice(
@@ -537,11 +535,11 @@ module.exports = grammar({
 
     import: _ => token('import'),
 
-    call_expr: $ => seq(
+    call_expr: $ => prec.right(seq(
       field('function', choice($.primary_expr, $.import)),
       $._arguments,
       optional(field('propagate', '?')),
-    ),
+    )),
 
     index_expr: $ => seq(
       field('object', $.primary_expr),
@@ -962,6 +960,19 @@ module.exports = grammar({
       $.type_occurrence,
       $.binary_type,
       $.error_union_type,
+      $.constrained_type,  // type with where clause constraint
+    ),
+
+    // Constrained type: base_type where (constraint_expr)
+    // e.g. int where (5 < ~ < 10), string where (len(~) > 0)
+    // The constraint uses ~ to refer to the value being checked
+    // Parentheses required to avoid grammar ambiguity with index expressions
+    constrained_type: $ => seq(
+      field('base', choice($.primary_type, $.type_occurrence)),
+      'where',
+      '(',
+      field('constraint', $._expression),
+      ')',
     ),
 
     // Error union type: T^ means T | error
