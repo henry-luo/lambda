@@ -622,32 +622,34 @@ Bool fn_is(Item a, Item b) {
     log_debug("fn_is");
     TypeId b_type_id = get_type_id(b);
 
+    if (b_type_id != LMD_TYPE_TYPE) {
+        log_error("2nd argument must be a type or pattern, got type: %s", get_type_name(b_type_id));
+        return BOOL_ERROR;
+    }
+
+    Type* b_type = b.type;  // all type variants now share type_id = LMD_TYPE_TYPE
+
     // Handle pattern matching: "str" is pattern
-    if (b_type_id == LMD_TYPE_PATTERN) {
+    if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
         if (a_type_id != LMD_TYPE_STRING && a_type_id != LMD_TYPE_SYMBOL) {
             log_error("pattern matching requires string or symbol, got type: %s", get_type_name(a_type_id));
             return BOOL_ERROR;
         }
-        TypePattern* pattern = (TypePattern*)b.type;  // pattern is stored as Type*
+        TypePattern* pattern = (TypePattern*)b_type;
         const char* chars = a.get_chars();
         uint32_t len = a.get_len();
         log_debug("fn_is pattern matching: str=%.*s", (int)len, chars);
         return pattern_full_match_chars(pattern, chars, len) ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    if (b_type_id != LMD_TYPE_TYPE && b_type_id != LMD_TYPE_TYPE_UNARY && b_type_id != LMD_TYPE_TYPE_BINARY) {
-        log_error("2nd argument must be a type or pattern, got type: %s", get_type_name(b_type_id));
-        return BOOL_ERROR;
-    }
-
-    // If b is a TypeUnary directly (type_id = LMD_TYPE_TYPE_UNARY), handle it directly
-    if (b_type_id == LMD_TYPE_TYPE_UNARY) {
-        TypeUnary* type_unary = (TypeUnary*)b.type;
+    // If b is a TypeUnary directly (kind = TYPE_KIND_UNARY), handle it directly
+    if (b_type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* type_unary = (TypeUnary*)b_type;
         log_debug("fn_is: TypeUnary (direct), op=%d, min=%d, max=%d",
                   type_unary->op, type_unary->min_count, type_unary->max_count);
         // Use full type validation for occurrence types
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), (Type*)type_unary);
+        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
         if (result->error_count > 0) {
             print_validation_result(result);
             log_debug("type validation failed with %d errors", result->error_count);
@@ -657,12 +659,12 @@ Bool fn_is(Item a, Item b) {
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    // If b is a TypeBinary directly (type_id = LMD_TYPE_TYPE_BINARY), handle it via validator
-    if (b_type_id == LMD_TYPE_TYPE_BINARY) {
-        TypeBinary* type_binary = (TypeBinary*)b.type;
+    // If b is a TypeBinary directly (kind = TYPE_KIND_BINARY), handle it via validator
+    if (b_type->kind == TYPE_KIND_BINARY) {
+        TypeBinary* type_binary = (TypeBinary*)b_type;
         log_debug("fn_is: TypeBinary (direct), op=%d", type_binary->op);
         // Use full type validation for union/intersection types
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), (Type*)type_binary);
+        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
         if (result->error_count > 0) {
             print_validation_result(result);
             log_debug("type validation failed with %d errors", result->error_count);
@@ -672,13 +674,12 @@ Bool fn_is(Item a, Item b) {
         return result->valid ? BOOL_TRUE : BOOL_FALSE;
     }
 
-    TypeType *type_b = (TypeType *)b.type;
+    TypeType *type_b = (TypeType *)b_type;
     TypeId a_type_id = get_type_id(a);
 
     // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
-    // TypeUnary has a distinct type_id = LMD_TYPE_TYPE_UNARY
-    log_debug("fn_is: checking inner type, type_b->type->type_id=%d", type_b->type->type_id);
-    if (type_b->type->type_id == LMD_TYPE_TYPE_UNARY) {
+    log_debug("fn_is: checking inner type, type_b->type->kind=%d", type_b->type->kind);
+    if (type_b->type->kind == TYPE_KIND_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)type_b->type;
         log_debug("fn_is: TypeUnary detected, op=%d (REPEAT=%d, OPTIONAL=%d)",
                   type_unary->op, OPERATOR_REPEAT, OPERATOR_OPTIONAL);
@@ -695,8 +696,7 @@ Bool fn_is(Item a, Item b) {
     }
 
     // Check if inner type is TypeBinary (union/intersection: |, &, \)
-    // TypeBinary has a distinct type_id = LMD_TYPE_TYPE_BINARY
-    if (type_b->type->type_id == LMD_TYPE_TYPE_BINARY) {
+    if (type_b->type->kind == TYPE_KIND_BINARY) {
         TypeBinary* type_binary = (TypeBinary*)type_b->type;
         log_debug("fn_is: TypeBinary detected (wrapped), op=%d", type_binary->op);
         // Use full type validation for union/intersection types
@@ -1205,8 +1205,8 @@ TypePattern* const_pattern(int pattern_index) {
         return nullptr;
     }
     Type* type = (Type*)(type_list->data[pattern_index]);
-    if (type->type_id != LMD_TYPE_PATTERN) {
-        log_error("const_pattern: index %d is not a pattern, got type: %s", pattern_index, get_type_name(type->type_id));
+    if (type->kind != TYPE_KIND_PATTERN) {
+        log_error("const_pattern: index %d is not a pattern, got type: %s (kind=%d)", pattern_index, get_type_name(type->type_id), type->kind);
         return nullptr;
     }
     log_debug("const_pattern %d -> %p", pattern_index, type);
