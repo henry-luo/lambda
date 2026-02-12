@@ -1990,6 +1990,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
     else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
+    else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_IS_ERROR; }
 
     TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
     ast_node->operand = build_expr(tp, operand_node);
@@ -2012,7 +2013,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     TypeId operand_type = ast_node->operand->type->type_id;
     TypeId type_id;
 
-    if (ast_node->op == OPERATOR_NOT) {
+    if (ast_node->op == OPERATOR_NOT || ast_node->op == OPERATOR_IS_ERROR) {
         type_id = LMD_TYPE_BOOL;
     }
     else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
