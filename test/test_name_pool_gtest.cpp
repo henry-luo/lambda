@@ -146,17 +146,18 @@ TEST_F(NamePoolTest, MarkBuilderIntegration) {
     Input* input = InputManager::create_input(nullptr);
     MarkBuilder builder(input);
 
-    // Test createName
+    // Test createName - names ARE pooled via name_pool
     String* name1 = builder.createName("element");
     String* name2 = builder.createName("element");
     EXPECT_EQ(name1, name2);  // Should be pooled
 
-    // Test createSymbol
+    // Test createSymbol - symbols are arena-allocated, NOT pooled
     Symbol* sym1 = builder.createSymbol("short");
     Symbol* sym2 = builder.createSymbol("short");
-    EXPECT_EQ(sym1, sym2);  // Should be pooled
+    EXPECT_NE(sym1, sym2);  // Different instances (arena allocated)
+    EXPECT_STREQ(sym1->chars, sym2->chars);  // But content same
 
-    // Test createString
+    // Test createString - strings are arena-allocated, NOT pooled
     String* str1 = builder.createString("content");
     String* str2 = builder.createString("content");
     EXPECT_NE(str1, str2);  // Should NOT be pooled
@@ -249,12 +250,17 @@ TEST_F(NamePoolTest, AttributeNamesPooled) {
 TEST_F(NamePoolTest, EmptyStrings) {
     NamePool* name_pool = name_pool_create(pool, nullptr);
 
-    // Empty strings return NULL from name_pool functions
+    // Empty strings are valid and pooled (same instance returned)
     String* empty1 = name_pool_create_name(name_pool, "");
-    String* empty2 = name_pool_create_len(name_pool, nullptr, 0);
+    String* empty2 = name_pool_create_name(name_pool, "");
 
-    EXPECT_EQ(empty1, nullptr);
-    EXPECT_EQ(empty2, nullptr);
+    ASSERT_NE(empty1, nullptr);  // Empty string is valid
+    EXPECT_EQ(empty1->len, 0);   // Length is 0
+    EXPECT_EQ(empty1, empty2);   // Same pooled instance
+
+    // NULL string returns nullptr
+    String* null_str = name_pool_create_len(name_pool, nullptr, 0);
+    EXPECT_EQ(null_str, nullptr);
 
     name_pool_release(name_pool);
 }
