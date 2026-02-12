@@ -1,6 +1,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
 
 // Common LaTeX command definitions - shared between parsers
 const char* greek_letters[] = {
@@ -87,77 +89,91 @@ const char* raw_text_environments[] = {
     "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", "comment", NULL
 };
 
-// Utility function implementations
+// ── Binary search infrastructure ───────────────────────────────────
+
+static int cmp_str_ptr(const void* a, const void* b) {
+    return strcmp(*(const char**)a, *(const char**)b);
+}
+
+static size_t count_str_array(const char* arr[]) {
+    size_t n = 0;
+    while (arr[n]) n++;
+    return n;
+}
+
+static void sort_str_array(const char* arr[], size_t* out_n) {
+    *out_n = count_str_array(arr);
+    qsort(arr, *out_n, sizeof(const char*), cmp_str_ptr);
+}
+
+static bool str_in_sorted_array(const char* key, const char* arr[], size_t n) {
+    return bsearch(&key, arr, n, sizeof(const char*), cmp_str_ptr) != NULL;
+}
+
+// pre-computed array sizes (filled by init_common_tables)
+static size_t n_greek_letters;
+static size_t n_math_operators;
+static size_t n_trig_functions;
+static size_t n_log_functions;
+static size_t n_latex_commands;
+static size_t n_latex_environments;
+static size_t n_math_environments;
+static size_t n_raw_text_environments;
+static bool tables_initialized = false;
+
+static void init_common_tables() {
+    if (tables_initialized) return;
+    sort_str_array(greek_letters,       &n_greek_letters);
+    sort_str_array(math_operators,      &n_math_operators);
+    sort_str_array(trig_functions,      &n_trig_functions);
+    sort_str_array(log_functions,       &n_log_functions);
+    sort_str_array(latex_commands,      &n_latex_commands);
+    sort_str_array(latex_environments,  &n_latex_environments);
+    sort_str_array(math_environments,   &n_math_environments);
+    sort_str_array(raw_text_environments, &n_raw_text_environments);
+    tables_initialized = true;
+}
+
+// ── Lookup functions (O(log n) via binary search) ──────────────────
+
 bool is_greek_letter(const char* cmd_name) {
-    for (int i = 0; greek_letters[i]; i++) {
-        if (strcmp(cmd_name, greek_letters[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(cmd_name, greek_letters, n_greek_letters);
 }
 
 bool is_math_operator(const char* cmd_name) {
-    for (int i = 0; math_operators[i]; i++) {
-        if (strcmp(cmd_name, math_operators[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(cmd_name, math_operators, n_math_operators);
 }
 
 bool is_trig_function(const char* cmd_name) {
-    for (int i = 0; trig_functions[i]; i++) {
-        if (strcmp(cmd_name, trig_functions[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(cmd_name, trig_functions, n_trig_functions);
 }
 
 bool is_log_function(const char* cmd_name) {
-    for (int i = 0; log_functions[i]; i++) {
-        if (strcmp(cmd_name, log_functions[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(cmd_name, log_functions, n_log_functions);
 }
 
 bool is_latex_command(const char* cmd_name) {
-    for (int i = 0; latex_commands[i]; i++) {
-        if (strcmp(cmd_name, latex_commands[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(cmd_name, latex_commands, n_latex_commands);
 }
 
 bool is_latex_environment(const char* env_name) {
-    for (int i = 0; latex_environments[i]; i++) {
-        if (strcmp(env_name, latex_environments[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(env_name, latex_environments, n_latex_environments);
 }
 
 bool is_math_environment(const char* env_name) {
-    for (int i = 0; math_environments[i]; i++) {
-        if (strcmp(env_name, math_environments[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(env_name, math_environments, n_math_environments);
 }
 
 bool is_raw_text_environment(const char* env_name) {
-    for (int i = 0; raw_text_environments[i]; i++) {
-        if (strcmp(env_name, raw_text_environments[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
+    init_common_tables();
+    return str_in_sorted_array(env_name, raw_text_environments, n_raw_text_environments);
 }
 
 void skip_latex_comment(const char **latex) {

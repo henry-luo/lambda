@@ -1,6 +1,7 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include "../../lib/datetime.h"
 
@@ -60,16 +61,7 @@ static String* parse_string(InputContext& ctx, const char **mark) {
                     strncpy(hex, *mark, 4);
                     (*mark) += 4; // skip 4 hex digits
                     int codepoint = (int)strtol(hex, NULL, 16);
-                    if (codepoint < 0x80) {
-                        stringbuf_append_char(sb, (char)codepoint);
-                    } else if (codepoint < 0x800) {
-                        stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else {
-                        stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    }
+                    append_codepoint_utf8(sb, (uint32_t)codepoint);
                 } break;
                 default: break; // invalid escape
             }

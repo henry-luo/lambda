@@ -8,6 +8,7 @@
  */
 
 #include "html_entities.h"
+#include "input-utils.h"
 #include <cstring>
 #include <cstdio>
 
@@ -259,34 +260,12 @@ const char* html_entity_name_for_codepoint(uint32_t codepoint) {
 }
 
 int unicode_to_utf8(uint32_t codepoint, char* out) {
-    if (!out) return 0;
-
-    if (codepoint < 0x80) {
-        out[0] = (char)codepoint;
-        out[1] = '\0';
+    // delegate to shared utility
+    int n = codepoint_to_utf8(codepoint, out);
+    if (n == 0) {
+        // invalid codepoint fallback
+        if (out) { out[0] = '?'; out[1] = '\0'; }
         return 1;
-    } else if (codepoint < 0x800) {
-        out[0] = (char)(0xC0 | (codepoint >> 6));
-        out[1] = (char)(0x80 | (codepoint & 0x3F));
-        out[2] = '\0';
-        return 2;
-    } else if (codepoint < 0x10000) {
-        out[0] = (char)(0xE0 | (codepoint >> 12));
-        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (codepoint & 0x3F));
-        out[3] = '\0';
-        return 3;
-    } else if (codepoint < 0x110000) {
-        out[0] = (char)(0xF0 | (codepoint >> 18));
-        out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
-        out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
-        out[3] = (char)(0x80 | (codepoint & 0x3F));
-        out[4] = '\0';
-        return 4;
     }
-
-    // Invalid codepoint
-    out[0] = '?';
-    out[1] = '\0';
-    return 1;
+    return n;
 }
