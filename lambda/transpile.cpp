@@ -1233,6 +1233,12 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
             strbuf_append_str(tp->code_buf, ")");
         }
     }
+    else if (unary_node->op == OPERATOR_IS_ERROR) {
+        // ^expr shorthand for (expr is error) — checks if item is error type
+        strbuf_append_str(tp->code_buf, "(item_type_id(");
+        transpile_box_item(tp, unary_node->operand);
+        strbuf_append_str(tp->code_buf, ")==LMD_TYPE_ERROR)");
+    }
     else if (unary_node->op == OPERATOR_POS || unary_node->op == OPERATOR_NEG) {
         TypeId operand_type = unary_node->operand->type->type_id;
 

@@ -510,6 +510,26 @@ String* heap_strcpy(char* src, int len);
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
+// DateTime error sentinel — all bits set = clearly invalid
+// month=15 (impossible: months are 1-12), every field at maximum
+// Used by DateTime-returning functions to signal errors
+#define DATETIME_ERROR_VALUE  0xFFFFFFFFFFFFFFFFULL
+
+// Check if a DateTime value is the error sentinel
+// Works in both C (uint64_t) and C++ (struct with int64_val)
+#ifdef __cplusplus
+#define DATETIME_IS_ERROR(dt) ((dt).int64_val == DATETIME_ERROR_VALUE)
+#else
+#define DATETIME_IS_ERROR(dt) ((dt) == DATETIME_ERROR_VALUE)
+#endif
+
+// Create a DateTime error value
+#ifdef __cplusplus
+#define DATETIME_MAKE_ERROR() (DateTime{.int64_val = DATETIME_ERROR_VALUE})
+#else
+#define DATETIME_MAKE_ERROR() ((DateTime)DATETIME_ERROR_VALUE)
+#endif
+
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)

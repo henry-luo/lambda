@@ -585,7 +585,7 @@ module.exports = grammar({
     current_index: _ => '~#',
 
     unary_expr: $ => prec.left(seq(
-      field('operator', choice('not', '-', '+')),
+      field('operator', choice('not', '-', '+', '^')),
       field('operand', $._expression),
     )),
 

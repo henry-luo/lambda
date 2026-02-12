@@ -110,6 +110,11 @@ Item push_l(int64_t lval) {
 }
 
 Item push_k(DateTime val) {
+    // Check for DateTime error sentinel before pushing
+    if (DATETIME_IS_ERROR(val)) {
+        log_debug("push_k: received DateTime error sentinel");
+        return ItemError;
+    }
     // Safety check: if context is num_stack is NULL
     if (!context->num_stack) {
         log_error("push_k called with invalid context");
