@@ -8,7 +8,7 @@ typedef struct Item {
     union {
         // packed values with type_id tagging
         struct {
-            uint64_t int_val: 56;
+            int64_t int_val: 56;  // signed for proper sign extension
             uint64_t _type_id: 8;
         };
         struct {
