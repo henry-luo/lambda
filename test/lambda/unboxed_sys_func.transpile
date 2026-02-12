@@ -1,0 +1,16 @@
+{
+    "expect": [
+        "fn_pow_u",
+        "fn_min2_u",
+        "fn_max2_u",
+        "fn_abs_i",
+        "fn_sign_i",
+        "fn_sign_f"
+    ],
+    "forbid": [
+        "= fn_pow(",
+        "= fn_min(",
+        "= fn_max(",
+        "return fn_pow("
+    ]
+}

@@ -1,0 +1,12 @@
+"1. Power operator (fn_pow_u)"
+[8, 1024]
+"2. min/max two-arg (fn_min2_u, fn_max2_u)"
+[2.5, 3.5, 10, 20]
+"3. abs with typed args"
+[42, 3.14]
+"4. sign with typed args"
+[-1, 1, 0, -1, 1]
+"5. floor/ceil/round with int (identity)"
+[42, 42, 42]
+"6. Compositions with unboxed"
+[true, false, 7]
