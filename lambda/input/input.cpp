@@ -401,6 +401,8 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "text/x-asciidoc") == 0) return "asciidoc";
     if (strcmp(mime_type, "text/x-wiki") == 0) return "wiki";
     if (strcmp(mime_type, "text/troff") == 0) return "man";
+    if (strcmp(mime_type, "text/typst") == 0) return "typst";
+    if (strcmp(mime_type, "application/typst") == 0) return "typst";
     if (strcmp(mime_type, "text/x-mark") == 0) return "mark";
     if (strcmp(mime_type, "application/x-mark") == 0) return "mark";
     if (strcmp(mime_type, "text/css") == 0) return "css";
@@ -698,6 +700,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         else if (strcmp(effective_type, "org") == 0) {
             input->root = input_markup_with_format(input, source, MARKUP_ORG);
+        }
+        else if (strcmp(effective_type, "typst") == 0) {
+            input->root = input_markup_with_format(input, source, MARKUP_TYPST);
         }
         else if (strcmp(effective_type, "css") == 0) {
             parse_css(input, source);

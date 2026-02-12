@@ -173,6 +173,8 @@ MimeGlob glob_patterns[] = {
     {"*.man", "text/troff"},
     {"*.tex", "application/x-tex"},
     {"*.latex", "application/x-latex"},
+    {"*.typ", "text/typst"},
+    {"*.typst", "text/typst"},
     {"*.vcf", "text/vcard"},
     {"*.vcard", "text/vcard"},
     {"*.ics", "text/calendar"},

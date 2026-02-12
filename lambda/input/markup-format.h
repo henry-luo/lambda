@@ -16,6 +16,7 @@ typedef enum {
     MARKUP_ORG,
     MARKUP_ASCIIDOC,
     MARKUP_MAN,        // Unix man pages (troff)
+    MARKUP_TYPST,      // Typst markup language
     MARKUP_AUTO_DETECT
 } MarkupFormat;
 

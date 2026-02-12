@@ -553,7 +553,20 @@ static Item build_nested_list_from_content(MarkupParser* parser, const char* con
         return parse_inline_spans(parser, content);
     }
 
-    bool is_ordered = is_ordered_marker(marker);
+    // Use adapter to determine if this is an ordered list
+    // This handles format-specific markers like + in Typst
+    bool is_ordered = false;
+    FormatAdapter* adapter = parser->adapter();
+    if (adapter) {
+        ListItemInfo item_info = adapter->detectListItem(content);
+        if (item_info.valid) {
+            is_ordered = item_info.is_ordered;
+        }
+    }
+    // Fallback to default marker check if no adapter or detection failed
+    if (!adapter) {
+        is_ordered = is_ordered_marker(marker);
+    }
 
     // Create the list container
     Element* list = create_element(parser, is_ordered ? "ol" : "ul");
@@ -802,7 +815,21 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
     const char* first_line = parser->lines[parser->current_line];
     char marker = get_list_marker(first_line);
-    bool is_ordered = is_ordered_marker(marker);
+    
+    // Use adapter to determine if this is an ordered list
+    // This handles format-specific markers like + in Typst
+    bool is_ordered = false;
+    FormatAdapter* adapter = parser->adapter();
+    if (adapter) {
+        ListItemInfo first_item_info = adapter->detectListItem(first_line);
+        if (first_item_info.valid) {
+            is_ordered = first_item_info.is_ordered;
+        }
+    }
+    // Fallback to default marker check if no adapter or detection failed
+    if (!adapter) {
+        is_ordered = is_ordered_marker(marker);
+    }
 
     // Create the appropriate list container
     Element* list = create_element(parser, is_ordered ? "ol" : "ul");
