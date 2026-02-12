@@ -31,6 +31,7 @@ SysFuncInfo sys_funcs[] = {
     // {fn, name, arg_count, return_type, is_proc, is_overloaded, is_method_eligible, first_param_type, can_raise}
     {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false, true, LMD_TYPE_ANY, false},
+    {SYSFUNC_NAME, "name", 1, &TYPE_SYMBOL, false, false, true, LMD_TYPE_ANY, false},  // name(item) - get local name
     {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false},
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},
@@ -149,6 +150,18 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},     // io_fetch(target, options) -> any^
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false},     // exists(path) -> bool (never fails)
 };
+
+// Check if a name matches any system function (regardless of arg count)
+// Returns true if the name is reserved for system functions
+bool is_sys_func_name(const char* name, int name_len) {
+    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
+        if ((int)strlen(sys_funcs[i].name) == name_len &&
+            strncmp(sys_funcs[i].name, name, name_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
     for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
@@ -4421,6 +4434,15 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     if (is_named) {
         TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
         StrView name = ts_node_source(tp, fn_name_node);
+
+        // check if name conflicts with a system function (only for global scope)
+        if (is_global && is_sys_func_name(name.str, name.length)) {
+            record_semantic_error(tp, func_node, ERR_DUPLICATE_DEFINITION,
+                "cannot override system function '%.*s'",
+                (int)name.length, name.str);
+            // continue anyway to allow further error checking
+        }
+
         ast_node->name = name_pool_create_strview(tp->name_pool, name);
         // add fn name to current scope
         push_name(tp, (AstNamedNode*)ast_node, NULL);

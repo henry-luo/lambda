@@ -501,6 +501,10 @@ void list_push(List *list, Item item) {
         Container *container = item.container;
         container->ref_cnt++;
     }
+    else if (type_id == LMD_TYPE_FUNC) {
+        Function *fn = item.function;
+        if (fn) fn->ref_cnt++;
+    }
 
     // store the value in the list (and we may need two slots for long/double)
     log_debug("list pushing item: type: %d, length: %ld", type_id, list->length);
@@ -713,8 +717,14 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 container->ref_cnt++;
                 break;
             }
-            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC: {
-                *(void**)field_ptr = (void*)item.function;  // use function pointer accessor
+            case LMD_TYPE_TYPE: {
+                *(void**)field_ptr = (void*)item.type;
+                break;
+            }
+            case LMD_TYPE_FUNC: {
+                Function* fn = item.function;
+                *(Function**)field_ptr = fn;
+                if (fn) fn->ref_cnt++;
                 break;
             }
             case LMD_TYPE_PATH: {
@@ -757,9 +767,12 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_TYPE:
                     titem.type = item.type;
                     break;
-                case LMD_TYPE_FUNC:
-                    titem.function = item.function;
+                case LMD_TYPE_FUNC: {
+                    Function* fn = item.function;
+                    titem.function = fn;
+                    if (fn) fn->ref_cnt++;
                     break;
+                }
                 case LMD_TYPE_PATH:
                     titem.path = item.path;
                     break;
