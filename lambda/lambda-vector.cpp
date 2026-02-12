@@ -342,6 +342,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
 //==============================================================================
 
 Item vec_add(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
 
@@ -358,6 +359,7 @@ Item vec_add(Item a, Item b) {
 }
 
 Item vec_sub(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
 
@@ -374,6 +376,7 @@ Item vec_sub(Item a, Item b) {
 }
 
 Item vec_mul(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
 
@@ -390,6 +393,7 @@ Item vec_mul(Item a, Item b) {
 }
 
 Item vec_div(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
 
@@ -406,6 +410,7 @@ Item vec_div(Item a, Item b) {
 }
 
 Item vec_mod(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
 
@@ -422,6 +427,7 @@ Item vec_mod(Item a, Item b) {
 }
 
 Item vec_pow(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
 
@@ -443,6 +449,7 @@ Item vec_pow(Item a, Item b) {
 
 // prod(vec) - product of all elements
 Item fn_prod(Item item) {
+    GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
     log_debug("fn_prod: type=%d", type);
 
@@ -690,6 +697,7 @@ Item fn_fill(Item n_item, Item value) {
 
 // dot(a, b) - dot product of two vectors
 Item fn_dot(Item a, Item b) {
+    GUARD_ERROR2(a, b);
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
 

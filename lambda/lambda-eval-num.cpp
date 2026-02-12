@@ -130,6 +130,7 @@ static Item vector_get(Item item, int64_t index) {
 }
 
 Item fn_add(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
 
@@ -273,6 +274,7 @@ Item fn_add(Item item_a, Item item_b) {
 }
 
 Item fn_mul(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -416,6 +418,7 @@ Item fn_mul(Item item_a, Item item_b) {
 }
 
 Item fn_sub(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -547,6 +550,7 @@ Item fn_sub(Item item_a, Item item_b) {
 }
 
 Item fn_div(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -750,6 +754,7 @@ Item fn_div(Item item_a, Item item_b) {
 }
 
 Item fn_idiv(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     // Check for division by zero
     bool is_zero = false;
     if (item_b._type_id == LMD_TYPE_INT) {
@@ -787,6 +792,7 @@ Item fn_idiv(Item item_a, Item item_b) {
 }
 
 Item fn_pow(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     // Defensive check: verify items are valid before accessing
     // Check if the item union pointer fields are valid (not small integers that indicate corruption)
     uint64_t ptr_a = item_a.item;
@@ -917,6 +923,7 @@ Item fn_pow(Item item_a, Item item_b) {
 }
 
 Item fn_mod(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
 
     // vector operations
@@ -1014,6 +1021,7 @@ Item fn_mod(Item item_a, Item item_b) {
 // Numeric system functions implementation
 
 Item fn_abs(Item item) {
+    GUARD_ERROR1(item);
     // abs() - absolute value of a number or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT) {
@@ -1063,6 +1071,7 @@ Item fn_abs(Item item) {
 }
 
 Item fn_round(Item item) {
+    GUARD_ERROR1(item);
     // round() - round to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
@@ -1106,6 +1115,7 @@ Item fn_round(Item item) {
 }
 
 Item fn_floor(Item item) {
+    GUARD_ERROR1(item);
     // floor() - round down to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
@@ -1148,6 +1158,7 @@ Item fn_floor(Item item) {
 }
 
 Item fn_ceil(Item item) {
+    GUARD_ERROR1(item);
     // ceil() - round up to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
@@ -1190,6 +1201,7 @@ Item fn_ceil(Item item) {
 }
 
 Item fn_min2(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     log_debug("fn_min called with types: %d, %d", item_a._type_id, item_b._type_id);
     // two argument scalar min case
     double a_val = 0.0, b_val = 0.0;
@@ -1226,7 +1238,7 @@ Item fn_min2(Item item_a, Item item_b) {
         b_val = item_b.get_double();
         is_float = true;
     }
-    else if (item_a._type_id == LMD_TYPE_DECIMAL) {
+    else if (item_b._type_id == LMD_TYPE_DECIMAL) {
         log_error("decimal not supported yet in fn_min");
         return ItemError;
     }
@@ -1247,6 +1259,7 @@ Item fn_min2(Item item_a, Item item_b) {
 }
 
 Item fn_min1(Item item_a) {
+    GUARD_ERROR1(item_a);
     // single argument min case
     TypeId type_id = get_type_id(item_a);
     if (type_id == LMD_TYPE_ARRAY_INT) {
@@ -1371,6 +1384,7 @@ Item fn_min1(Item item_a) {
 }
 
 Item fn_max2(Item item_a, Item item_b) {
+    GUARD_ERROR2(item_a, item_b);
     // two argument max case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
@@ -1419,6 +1433,7 @@ Item fn_max2(Item item_a, Item item_b) {
 }
 
 Item fn_max1(Item item_a) {
+    GUARD_ERROR1(item_a);
     // single argument max case
     TypeId type_id = get_type_id(item_a);
     if (type_id == LMD_TYPE_ARRAY_FLOAT) {
@@ -1535,6 +1550,7 @@ Item fn_max1(Item item_a) {
 }
 
 Item fn_sum(Item item) {
+    GUARD_ERROR1(item);
     // sum() - sum of all elements in an array or list
     TypeId type_id = get_type_id(item);
     log_debug("DEBUG fn_sum: called with type_id: %d", type_id);
@@ -1685,6 +1701,7 @@ Item fn_sum(Item item) {
 }
 
 Item fn_avg(Item item) {
+    GUARD_ERROR1(item);
     // avg() - average of all elements in an array or list
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_ARRAY) {
@@ -1790,6 +1807,7 @@ Item fn_avg(Item item) {
 }
 
 Item fn_pos(Item item) {
+    GUARD_ERROR1(item);
     // Unary + operator - return the item as-is for numeric types, or cast strings/symbols to numbers
     if (item._type_id == LMD_TYPE_INT) {
         return item;  // Already in correct format
@@ -1839,6 +1857,7 @@ Item fn_pos(Item item) {
 }
 
 Item fn_neg(Item item) {
+    GUARD_ERROR1(item);
     // Unary - operator - negate numeric values or cast and negate strings/symbols
     if (item._type_id == LMD_TYPE_INT) {
         int64_t val = item.get_int56();
@@ -1894,6 +1913,7 @@ Item fn_neg(Item item) {
 }
 
 Item fn_int(Item item) {
+    GUARD_ERROR1(item);
     double dval;  int64_t ival;
     if (item._type_id == LMD_TYPE_INT) {
         return item;
@@ -2027,6 +2047,7 @@ int64_t fn_int64(Item item) {
 // Constructor functions for type conversion
 
 Item fn_decimal(Item item) {
+    GUARD_ERROR1(item);
     // Convert item to decimal type
     if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // Already a decimal
@@ -2104,6 +2125,7 @@ Item fn_decimal(Item item) {
 }
 
 Item fn_binary(Item item) {
+    GUARD_ERROR1(item);
     // Convert item to binary (string) type
     if (item._type_id == LMD_TYPE_STRING) {
         return item;  // Already a string (binary is stored as string)
@@ -2202,6 +2224,10 @@ Item fn_binary(Item item) {
 
 extern "C" Symbol* fn_symbol(Item item) {
     // Convert item to symbol type
+    if (item._type_id == LMD_TYPE_ERROR) {
+        log_debug("fn_symbol: error item received");
+        return NULL;
+    }
     if (item._type_id == LMD_TYPE_SYMBOL) {
         return item.get_symbol();  // Already a symbol
     }
@@ -2287,6 +2313,7 @@ extern "C" Symbol* fn_symbol(Item item) {
 // Note: Must be declared in lambda.h for MIR C2MIR to know the signature
 extern "C" Item fn_symbol2(Item name_item, Item url_item) {
     log_debug("fn_symbol2: name_type=%d, url_type=%d", name_item._type_id, url_item._type_id);
+    GUARD_ERROR2(name_item, url_item);
 
     // extract name string
     const char* name_str = nullptr;
@@ -2342,6 +2369,7 @@ extern "C" Item fn_symbol2(Item name_item, Item url_item) {
 }
 
 Item fn_float(Item item) {
+    GUARD_ERROR1(item);
     // Convert item to float type
     if (item._type_id == LMD_TYPE_FLOAT) {
         return item;  // Already a float
