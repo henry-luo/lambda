@@ -18,6 +18,7 @@ class OrgAdapter;
 class ManAdapter;
 class AsciidocAdapter;
 class TextileAdapter;
+class TypstAdapter;
 
 // External adapter instances (defined in format/*.cpp)
 // Declared as FormatAdapter* to avoid incomplete type issues
@@ -28,6 +29,7 @@ extern FormatAdapter* getOrgAdapter();
 extern FormatAdapter* getManAdapter();
 extern FormatAdapter* getAsciidocAdapter();
 extern FormatAdapter* getTextileAdapter();
+extern FormatAdapter* getTypstAdapter();
 
 // Static adapter table
 static FormatAdapter* s_adapters[] = {
@@ -38,6 +40,7 @@ static FormatAdapter* s_adapters[] = {
     nullptr,  // ORG
     nullptr,  // ASCIIDOC
     nullptr,  // MAN
+    nullptr,  // TYPST
     nullptr   // AUTO_DETECT (unused)
 };
 
@@ -54,6 +57,7 @@ static void ensureInitialized() {
     s_adapters[(int)Format::ORG] = getOrgAdapter();
     s_adapters[(int)Format::ASCIIDOC] = getAsciidocAdapter();
     s_adapters[(int)Format::MAN] = getManAdapter();
+    s_adapters[(int)Format::TYPST] = getTypstAdapter();
 
     s_initialized = true;
 }
@@ -121,7 +125,8 @@ Format FormatRegistry::detectFromFilename(const char* filename) {
         s_adapters[(int)Format::ORG],
         s_adapters[(int)Format::MAN],
         s_adapters[(int)Format::ASCIIDOC],
-        s_adapters[(int)Format::TEXTILE]
+        s_adapters[(int)Format::TEXTILE],
+        s_adapters[(int)Format::TYPST]
     };
 
     for (FormatAdapter* adapter : adapters) {
@@ -213,8 +218,31 @@ Format FormatRegistry::detectFromContent(const char* content) {
         return Format::TEXTILE;
     }
 
+    // Check for Typst: #set, #let, #import, or = heading (single = with space)
+    // Note: = with space could be AsciiDoc too, so we check for Typst patterns first
+    if (content[0] == '#') {
+        // Typst code expression at start: #set, #let, #import, #show, #include
+        if (strncmp(content, "#set ", 5) == 0 ||
+            strncmp(content, "#let ", 5) == 0 ||
+            strncmp(content, "#import ", 8) == 0 ||
+            strncmp(content, "#show ", 6) == 0 ||
+            strncmp(content, "#include ", 9) == 0) {
+            return Format::TYPST;
+        }
+    }
+
     // Check for AsciiDoc: = Header (single =) or [source]
     if (content[0] == '=' && content[1] == ' ') {
+        // Could be Typst or AsciiDoc - look for more clues
+        // Typst typically has #set or #let somewhere
+        const char* p = content;
+        while (*p) {
+            if (*p == '#' && (strncmp(p, "#set ", 5) == 0 || strncmp(p, "#let ", 5) == 0)) {
+                return Format::TYPST;
+            }
+            if (*p == '\n') p++;
+            else while (*p && *p != '\n') p++;
+        }
         return Format::ASCIIDOC;
     }
     if (content[0] == '[' && strncmp(content, "[source", 7) == 0) {
