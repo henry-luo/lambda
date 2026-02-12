@@ -194,8 +194,8 @@ Item fn_add(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_add");
             return ItemError;
         }
@@ -346,8 +346,8 @@ Item fn_mul(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_mul");
             return ItemError;
         }
@@ -478,8 +478,8 @@ Item fn_sub(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_sub");
             return ItemError;
         }
@@ -636,8 +636,8 @@ Item fn_div(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal conversion failed in fn_div");
             return ItemError;
         }

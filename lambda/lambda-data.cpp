@@ -136,7 +136,7 @@ void init_type_info() {
     type_info[LMD_TYPE_STRING] = {sizeof(char*), "string", &TYPE_STRING, (Type*)&LIT_TYPE_STRING};
     type_info[LMD_TYPE_BINARY] = {sizeof(char*), "binary", &TYPE_BINARY, (Type*)&LIT_TYPE_BINARY};
     type_info[LMD_TYPE_LIST] = {sizeof(void*), "list", &TYPE_LIST, (Type*)&LIT_TYPE_LIST};
-    type_info[LMD_TYPE_RANGE] = {sizeof(void*), "array", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
+    type_info[LMD_TYPE_RANGE] = {sizeof(void*), "range", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
     type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_INT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_ARRAY_FLOAT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
@@ -518,13 +518,11 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_DECIMAL: {
         Decimal *dval = item.get_decimal();
-        if (dval && dval->dec_val) {
-            char *buf = decimal_to_string(dval);
-            if (buf) decimal_free_string(buf);
+        if (dval) {
+            dval->ref_cnt++;
         } else {
-        log_debug("DEBUG list_push: pushed null decimal value");
+            log_debug("list_push: pushed null decimal value");
         }
-        dval->ref_cnt++;
         break;
     }
     case LMD_TYPE_FLOAT: {
