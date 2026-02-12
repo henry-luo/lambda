@@ -1410,20 +1410,6 @@
                         "icon": "\ud83d\udee1\ufe0f"
                     },
                     {
-                        "source": "test_math_gtest.cpp",
-                        "name": "Math Roundtrip Tests",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "binary": "test_math_gtest.exe",
-                        "icon": "\ud83d\udd22"
-                    },
-                    {
                         "source": "test_math_ascii_gtest.cpp",
                         "name": "ASCII Math Roundtrip Tests",
                         "dependencies": [
@@ -2406,8 +2392,8 @@
                 "parallel": true
             },
             {
-                "suite": "tex",
-                "name": "\ud83d\udcdd TeX Typesetting Tests",
+                "suite": "extended",
+                "name": "\ud83e\uddea Extended Development Tests",
                 "category": "extended",
                 "tests": [
                     {
@@ -3065,6 +3051,20 @@
                 "name": "\ud83e\uddea Extended Development Tests",
                 "category": "extended",
                 "tests": [
+                    {
+                        "source": "test/test_math_gtest.cpp",
+                        "name": "Math Roundtrip Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_math_gtest.exe",
+                        "icon": "\ud83d\udd22"
+                    },
                     {
                         "source": "test/test_http_gtest.cpp",
                         "name": "HTTP/HTTPS Tests",
