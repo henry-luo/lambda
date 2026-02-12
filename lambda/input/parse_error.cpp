@@ -35,19 +35,25 @@ bool ParseErrorList::addError(const ParseError& error) {
 
     // Allocate a copy of the error
     ParseError* err_copy = (ParseError*)malloc(sizeof(ParseError));
+    if (!err_copy) {
+        return false;
+    }
     *err_copy = error;
 
     // Deep copy the message string since it may be in a reused buffer
     if (error.message) {
         err_copy->message = strdup(error.message);
+        if (!err_copy->message) { free(err_copy); return false; }
     }
     // Deep copy context_line if present
     if (error.context_line) {
         err_copy->context_line = strdup(error.context_line);
+        if (!err_copy->context_line) { free((void*)err_copy->message); free(err_copy); return false; }
     }
     // Deep copy hint if present
     if (error.hint) {
         err_copy->hint = strdup(error.hint);
+        if (!err_copy->hint) { free((void*)err_copy->context_line); free((void*)err_copy->message); free(err_copy); return false; }
     }
 
     arraylist_append(errors_, err_copy);

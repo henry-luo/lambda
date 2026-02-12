@@ -2448,6 +2448,11 @@ static const char* strip_comment_environments(Arena* arena, const char* latex_st
 
 // Main entry point - tree-sitter LaTeX parser
 extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
+    if (!latex_string || !*latex_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     log_info("Tree-sitter LaTeX parser starting...");
     
     // Pre-process: strip comment environments before parsing

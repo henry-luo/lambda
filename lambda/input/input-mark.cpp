@@ -6,9 +6,11 @@
 
 using namespace lambda;
 
-static Element* parse_element(InputContext& ctx, const char **mark);
-static Item parse_value(InputContext& ctx, const char **mark);
-static Item parse_content(InputContext& ctx, const char **mark);
+static const int MARK_MAX_DEPTH = 512;
+
+static Element* parse_element(InputContext& ctx, const char **mark, int depth = 0);
+static Item parse_value(InputContext& ctx, const char **mark, int depth = 0);
+static Item parse_content(InputContext& ctx, const char **mark, int depth = 0);
 
 static void skip_comments(const char **mark) {
     skip_whitespace(mark);
@@ -246,9 +248,13 @@ static Item parse_number(Input *input, const char **mark) {
     return {.item = d2it(dval)};
 }
 
-static Array* parse_array(InputContext& ctx, const char **mark) {
+static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {
     Input* input = ctx.input();
     if (**mark != '[') return NULL;
+    if (depth >= MARK_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        return NULL;
+    }
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
 
@@ -261,7 +267,7 @@ static Array* parse_array(InputContext& ctx, const char **mark) {
     }
 
     while (**mark) {
-        Item item = parse_value(ctx, mark);
+        Item item = parse_value(ctx, mark, depth + 1);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
@@ -278,9 +284,13 @@ static Array* parse_array(InputContext& ctx, const char **mark) {
     return arr;
 }
 
-static Array* parse_list(InputContext& ctx, const char **mark) {
+static Array* parse_list(InputContext& ctx, const char **mark, int depth = 0) {
     Input* input = ctx.input();
     if (**mark != '(') return NULL;
+    if (depth >= MARK_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        return NULL;
+    }
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
 
@@ -293,7 +303,7 @@ static Array* parse_list(InputContext& ctx, const char **mark) {
     }
 
     while (**mark) {
-        Item item = parse_value(ctx, mark);
+        Item item = parse_value(ctx, mark, depth + 1);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
@@ -310,9 +320,13 @@ static Array* parse_list(InputContext& ctx, const char **mark) {
     return arr;
 }
 
-static Map* parse_map(InputContext& ctx, const char **mark) {
+static Map* parse_map(InputContext& ctx, const char **mark, int depth = 0) {
     Input* input = ctx.input();
     if (**mark != '{') return NULL;
+    if (depth >= MARK_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        return NULL;
+    }
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
 
@@ -343,7 +357,7 @@ static Map* parse_map(InputContext& ctx, const char **mark) {
         (*mark)++;
         skip_comments(mark);
 
-        Item value = parse_value(ctx, mark);
+        Item value = parse_value(ctx, mark, depth + 1);
         ctx.builder.putToMap(mp, key, value);
 
         skip_comments(mark);
@@ -358,9 +372,13 @@ static Map* parse_map(InputContext& ctx, const char **mark) {
     return mp;
 }
 
-static Element* parse_element(InputContext& ctx, const char **mark) {
+static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
     Input* input = ctx.input();
     if (**mark != '<') return NULL;
+    if (depth >= MARK_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        return NULL;
+    }
 
     (*mark)++; // skip '<'
     skip_comments(mark);
@@ -428,7 +446,7 @@ static Element* parse_element(InputContext& ctx, const char **mark) {
         skip_comments(mark);
 
         // Parse attribute value
-        Item attr_value = parse_value(ctx, mark);
+        Item attr_value = parse_value(ctx, mark, depth + 1);
         MarkBuilder builder(input);
         String* key = builder.createString(attr_name->chars);
         if (key) {
@@ -447,7 +465,7 @@ static Element* parse_element(InputContext& ctx, const char **mark) {
 
     // Parse content - content can be separated by semicolons, newlines, or just whitespace
     while (**mark && **mark != '>') {
-        Item content_item = parse_content(ctx, mark);
+        Item content_item = parse_content(ctx, mark, depth + 1);
         if (content_item .item != ITEM_ERROR && content_item .item != ITEM_NULL) {
             // Add content to element
             list_push((List*)element, content_item);
@@ -469,29 +487,34 @@ static Element* parse_element(InputContext& ctx, const char **mark) {
     return element;
 }
 
-static Item parse_content(InputContext& ctx, const char **mark) {
+static Item parse_content(InputContext& ctx, const char **mark, int depth) {
     skip_comments(mark);
 
     if (**mark == '<') {
-        return {.item = (uint64_t)parse_element(ctx, mark)};
+        return {.item = (uint64_t)parse_element(ctx, mark, depth)};
     } else {
-        return parse_value(ctx, mark);
+        return parse_value(ctx, mark, depth);
     }
 }
 
-static Item parse_value(InputContext& ctx, const char **mark) {
+static Item parse_value(InputContext& ctx, const char **mark, int depth) {
     Input* input = ctx.input();
     skip_comments(mark);
 
+    if (depth >= MARK_MAX_DEPTH) {
+        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        return {.item = ITEM_ERROR};
+    }
+
     switch (**mark) {
         case '{':
-            return {.item = (uint64_t)parse_map(ctx, mark)};
+            return {.item = (uint64_t)parse_map(ctx, mark, depth + 1)};
         case '[':
-            return {.item = (uint64_t)parse_array(ctx, mark)};
+            return {.item = (uint64_t)parse_array(ctx, mark, depth + 1)};
         case '(':
-            return {.item = (uint64_t)parse_list(ctx, mark)};
+            return {.item = (uint64_t)parse_list(ctx, mark, depth + 1)};
         case '<':
-            return {.item = (uint64_t)parse_element(ctx, mark)};
+            return {.item = (uint64_t)parse_element(ctx, mark, depth + 1)};
         case '"':
             return {.item = s2it(parse_string(ctx, mark))};
         case '\'':
@@ -578,6 +601,10 @@ static Item parse_value(InputContext& ctx, const char **mark) {
 }
 
 void parse_mark(Input* input, const char* mark_string) {
+    if (!mark_string || !*mark_string) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
     // create error tracking context with integrated source tracking
     InputContext ctx(input, mark_string, strlen(mark_string));
 
@@ -585,7 +612,7 @@ void parse_mark(Input* input, const char* mark_string) {
     skip_comments(&mark);
 
     // Parse the root content - could be a single value or element
-    input->root = parse_content(ctx, &mark);
+    input->root = parse_content(ctx, &mark, 0);
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing
