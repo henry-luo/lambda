@@ -1,5 +1,6 @@
 #include "input.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "../mark_builder.hpp"
 #include <cstring>
 
@@ -78,9 +79,10 @@ static String* parse_string(InputContext& ctx, const char **json) {
                             tracker.advance(4);
                             
                             int low_surrogate = (int)strtol(hex_low, NULL, 16);
-                            if (low_surrogate >= 0xDC00 && low_surrogate <= 0xDFFF) {
+                            uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
+                            if (combined != 0) {
                                 // valid surrogate pair - combine into full codepoint
-                                codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low_surrogate - 0xDC00);
+                                codepoint = (int)combined;
                             } else {
                                 ctx.addWarning(tracker.location(), 
                                     "Invalid surrogate pair: high surrogate not followed by low surrogate");
@@ -108,22 +110,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
                     }
                     
                     // encode codepoint as UTF-8
-                    if (codepoint < 0x80) {
-                        stringbuf_append_char(sb, (char)codepoint);
-                    } else if (codepoint < 0x800) {
-                        stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else if (codepoint < 0x10000) {
-                        stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else {
-                        // 4-byte UTF-8 for codepoints >= 0x10000 (emojis, etc.)
-                        stringbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
-                        stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
-                        stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    }
+                    append_codepoint_utf8(sb, (uint32_t)codepoint);
                     continue;  // skip the (*json)++ at end of loop - we already advanced
                 }
                 default:

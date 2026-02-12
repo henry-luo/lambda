@@ -1,5 +1,6 @@
 #include "input.hpp"
 #include "input-context.hpp"
+#include "input-utils.hpp"
 #include "../mark_builder.hpp"
 #include "../../lib/memtrack.h"
 #include "../../lib/strbuf.h"
@@ -393,49 +394,21 @@ static Item parse_double_quoted(YamlParser* p) {
                     char hex[3] = {0};
                     for (int i = 0; i < 2 && !at_end(p); i++) { hex[i] = peek(p); advance(p); }
                     unsigned int val = strtoul(hex, NULL, 16);
-                    if (val < 0x80) {
-                        strbuf_append_char(sb, (char)val);
-                    } else {
-                        strbuf_append_char(sb, (char)(0xc0 | (val >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (val & 0x3f)));
-                    }
+                    append_codepoint_utf8_strbuf(sb, val);
                     break;
                 }
                 case 'u': {
                     char hex[5] = {0};
                     for (int i = 0; i < 4 && !at_end(p); i++) { hex[i] = peek(p); advance(p); }
                     unsigned int val = strtoul(hex, NULL, 16);
-                    if (val < 0x80) {
-                        strbuf_append_char(sb, (char)val);
-                    } else if (val < 0x800) {
-                        strbuf_append_char(sb, (char)(0xc0 | (val >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (val & 0x3f)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xe0 | (val >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((val >> 6) & 0x3f)));
-                        strbuf_append_char(sb, (char)(0x80 | (val & 0x3f)));
-                    }
+                    append_codepoint_utf8_strbuf(sb, val);
                     break;
                 }
                 case 'U': {
                     char hex[9] = {0};
                     for (int i = 0; i < 8 && !at_end(p); i++) { hex[i] = peek(p); advance(p); }
                     unsigned int val = strtoul(hex, NULL, 16);
-                    if (val < 0x80) {
-                        strbuf_append_char(sb, (char)val);
-                    } else if (val < 0x800) {
-                        strbuf_append_char(sb, (char)(0xc0 | (val >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (val & 0x3f)));
-                    } else if (val < 0x10000) {
-                        strbuf_append_char(sb, (char)(0xe0 | (val >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((val >> 6) & 0x3f)));
-                        strbuf_append_char(sb, (char)(0x80 | (val & 0x3f)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xf0 | (val >> 18)));
-                        strbuf_append_char(sb, (char)(0x80 | ((val >> 12) & 0x3f)));
-                        strbuf_append_char(sb, (char)(0x80 | ((val >> 6) & 0x3f)));
-                        strbuf_append_char(sb, (char)(0x80 | (val & 0x3f)));
-                    }
+                    append_codepoint_utf8_strbuf(sb, val);
                     break;
                 }
                 case '\n': {
