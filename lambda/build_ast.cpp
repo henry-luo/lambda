@@ -461,8 +461,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, if_node->otherwise, fn_scope, global_scope, captures);
         break;
     }
-    case AST_NODE_MATCH_EXPR:
-    case AST_NODE_MATCH_STAM: {
+    case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         collect_captures_from_node(tp, match_node->scrutinee, fn_scope, global_scope, captures);
         AstMatchArm* arm = match_node->first_arm;
@@ -2273,8 +2272,7 @@ bool has_current_item_ref(AstNode* node) {
                has_current_item_ref(if_node->then) ||
                has_current_item_ref(if_node->otherwise);
     }
-    case AST_NODE_MATCH_EXPR:
-    case AST_NODE_MATCH_STAM: {
+    case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         if (has_current_item_ref(match_node->scrutinee)) return true;
         AstMatchArm* arm = match_node->first_arm;
@@ -2470,11 +2468,10 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
     return (AstNode*)ast_node;
 }
 
-// build a match expression or statement from Tree-sitter CST node
-// match_type: AST_NODE_MATCH_EXPR for expression form, AST_NODE_MATCH_STAM for statement form
-AstNode* build_match(Transpiler* tp, TSNode match_node, AstNodeType match_type) {
-    log_debug("build match %s", match_type == AST_NODE_MATCH_EXPR ? "expr" : "stam");
-    AstMatchNode* ast_node = (AstMatchNode*)alloc_ast_node(tp, match_type, match_node, sizeof(AstMatchNode));
+// build a match expression from Tree-sitter CST node
+AstNode* build_match(Transpiler* tp, TSNode match_node) {
+    log_debug("build match expr");
+    AstMatchNode* ast_node = (AstMatchNode*)alloc_ast_node(tp, AST_NODE_MATCH_EXPR, match_node, sizeof(AstMatchNode));
 
     // build scrutinee expression
     TSNode scrutinee_node = ts_node_child_by_field_id(match_node, FIELD_SCRUTINEE);
@@ -2550,7 +2547,7 @@ AstNode* build_match(Transpiler* tp, TSNode match_node, AstNodeType match_type) 
     TypeId type_id = need_any_type ? LMD_TYPE_ANY : result_type_id;
     ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
 
-    log_debug("end build match %s: %d arms", match_type == AST_NODE_MATCH_EXPR ? "expr" : "stam", arm_count);
+    log_debug("end build match expr: %d arms", arm_count);
     return (AstNode*)ast_node;
 }
 
@@ -2993,6 +2990,9 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "list")) {
         ast_node->type = (Type*)&LIT_TYPE_LIST;
     }
+    else if (strview_equal(&type_name, "range")) {
+        ast_node->type = (Type*)&LIT_TYPE_RANGE;
+    }
     else if (strview_equal(&type_name, "array")) {
         ast_node->type = (Type*)&LIT_TYPE_ARRAY;
     }
@@ -3266,6 +3266,28 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
     return (AstNode*)ast_node;
 }
 
+// build range type: start to end (e.g. 1 to 10, 'a' to 'z')
+// constructs as a binary node with OPERATOR_TO and type LMD_TYPE_RANGE
+AstNode* build_range_type(Transpiler* tp, TSNode type_node) {
+    log_debug("build range type");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp,
+        AST_NODE_BINARY, type_node, sizeof(AstBinaryNode));
+    ast_node->op = OPERATOR_TO;
+    ast_node->type = &TYPE_RANGE;
+
+    TSNode start_node = ts_node_child_by_field_id(type_node, FIELD_START);
+    TSNode end_node = ts_node_child_by_field_id(type_node, FIELD_END);
+
+    if (!ts_node_is_null(start_node)) {
+        ast_node->left = build_expr(tp, start_node);
+    }
+    if (!ts_node_is_null(end_node)) {
+        ast_node->right = build_expr(tp, end_node);
+    }
+
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     log_debug("build primary type");
     TSNode child = ts_node_named_child(type_node, 0);
@@ -3284,6 +3306,8 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
             return build_element_type(tp, child);
         case SYM_FN_TYPE:
             return build_func_type(tp, child);
+        case SYM_RANGE_TYPE:
+            return build_range_type(tp, child);
         case SYM_COMMENT:
             break; // skip comments
         default: // literal values
@@ -4811,9 +4835,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_IF_STAM:
         return build_if_stam(tp, expr_node);
     case SYM_MATCH_EXPR:
-        return build_match(tp, expr_node, AST_NODE_MATCH_EXPR);
-    case SYM_MATCH_STAM:
-        return build_match(tp, expr_node, AST_NODE_MATCH_STAM);
+        return build_match(tp, expr_node);
     case SYM_ASSIGN_EXPR:
         return build_assign_expr(tp, expr_node, false);  // standalone assign_expr is not a type definition
     case SYM_ARRAY:
@@ -4886,6 +4908,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_error_union_type(tp, expr_node);
     case SYM_TYPE_OCCURRENCE:
         return build_occurrence_type(tp, expr_node);
+    case SYM_RANGE_TYPE:
+        return build_range_type(tp, expr_node);
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
