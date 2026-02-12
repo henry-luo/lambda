@@ -570,7 +570,22 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
     size_t content_len = content_end - content_start;
 
     // Create element
-    const char* tag = (use_count == 2) ? "strong" : "em";
+    // Determine tag based on format and delimiter type
+    const char* tag;
+    Format format = parser->config.format;
+    
+    if (format == Format::TYPST) {
+        // Typst: single * = bold (strong), single _ = italic (em)
+        // Typst doesn't use ** or __ for emphasis
+        tag = (marker == '*') ? "strong" : "em";
+    } else if (format == Format::ORG) {
+        // Org-mode: single * = bold (strong), single / = italic (em)
+        // But emphasis parser only handles * and _, / handled elsewhere
+        tag = (marker == '*') ? "strong" : "em";
+    } else {
+        // Default (Markdown/CommonMark): ** = strong, * = em
+        tag = (use_count == 2) ? "strong" : "em";
+    }
     Element* elem = create_element(parser, tag);
     if (!elem) {
         return Item{.item = ITEM_ERROR};
