@@ -388,52 +388,32 @@ static Item parse_ascii_simple_expression(InputContext& ctx, ASCIIToken* tokens,
 
     // Handle numbers
     if (token->type == ASCII_TOKEN_NUMBER) {
-        char* number_str = (char*)malloc(token->length + 1);
-        if (!number_str) {
-            return {.item = ITEM_ERROR};
-        }
-        strncpy(number_str, token->start, token->length);
-        number_str[token->length] = '\0';
-
-        String* number_string = builder.createString(number_str);
-        free(number_str);
-
+        String* number_string = builder.createString(token->start, token->length);
         (*pos)++;
         return {.item = s2it(number_string)};
     }
 
     // Handle identifiers and symbols
     if (token->type == ASCII_TOKEN_IDENTIFIER || token->type == ASCII_TOKEN_SYMBOL) {
-        char* name_str = (char*)malloc(token->length + 1);
-        if (!name_str) {
-            return {.item = ITEM_ERROR};
-        }
-        strncpy(name_str, token->start, token->length);
-        name_str[token->length] = '\0';
-
-        String* name_string = builder.createString(name_str);
-        free(name_str);
-
+        String* name_string = builder.createString(token->start, token->length);
         (*pos)++;
         return {.item = y2it(name_string)};
     }
 
     // Handle functions
     if (token->type == ASCII_TOKEN_FUNCTION) {
-        char* func_name = (char*)malloc(token->length + 1);
-        if (!func_name) {
-            return {.item = ITEM_ERROR};
-        }
-        strncpy(func_name, token->start, token->length);
-        func_name[token->length] = '\0';
+        // Use stack buffer for function name (all function names < 32 chars)
+        char func_name_buf[32];
+        size_t name_len = token->length < 31 ? token->length : 31;
+        memcpy(func_name_buf, token->start, name_len);
+        func_name_buf[name_len] = '\0';
 
         // Find the corresponding constant to get element name
         const ASCIIConstant* constant = find_ascii_constant(token->start, token->length);
-        const char* element_name = constant ? constant->element_name : func_name;
+        const char* element_name = constant ? constant->element_name : func_name_buf;
 
         Element* func_element = create_math_element(input, element_name);
         if (!func_element) {
-            free(func_name);
             return {.item = ITEM_ERROR};
         }
 
@@ -514,7 +494,6 @@ static Item parse_ascii_simple_expression(InputContext& ctx, ASCIIToken* tokens,
         // Set content length
         ((TypeElmt*)func_element->type)->content_length = ((List*)func_element)->length;
 
-        free(func_name);
         return {.item = (uint64_t)func_element};
     }
 
@@ -816,7 +795,7 @@ Item parse_ascii_math(Input* input, const char* math_text) {
     log_debug("DEBUG: Parse result: item=0x%lx\n", result.item);
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 
     // Clean up

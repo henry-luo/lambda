@@ -775,7 +775,7 @@ void parse_xml(Input* input, const char* xml_string) {
 
     // Report errors if any
     if (ctx.hasErrors()) {
-        ctx.addError(SourceLocation{0, 1, 1}, "XML parsing completed with errors");
+        ctx.logErrors();
     }
 
     // Always return the document wrapper to maintain consistent structure

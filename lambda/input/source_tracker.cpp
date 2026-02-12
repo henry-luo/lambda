@@ -1,4 +1,5 @@
 #include "source_tracker.hpp"
+#include "../../lib/log.h"
 #include <cstring>
 #include <cctype>
 
@@ -26,9 +27,14 @@ void SourceTracker::buildLineIndex() {
     line_count_ = 1;
     line_starts_[0] = 0;
 
-    for (size_t i = 0; i < source_len_ && line_count_ < MAX_LINE_STARTS; ++i) {
+    for (size_t i = 0; i < source_len_; ++i) {
         if (source_[i] == '\n') {
-            line_starts_[line_count_++] = i + 1;
+            if (line_count_ < MAX_LINE_STARTS) {
+                line_starts_[line_count_++] = i + 1;
+            } else {
+                log_warn("SourceTracker: exceeded max line tracking limit (%zu lines)", MAX_LINE_STARTS);
+                break;
+            }
         }
     }
 
@@ -55,8 +61,13 @@ bool SourceTracker::advance(size_t count) {
             location_.column = 1;
 
             // Track line start for context extraction
-            if (!line_index_built_ && line_count_ < MAX_LINE_STARTS) {
-                line_starts_[line_count_++] = location_.offset;
+            if (!line_index_built_) {
+                if (line_count_ < MAX_LINE_STARTS) {
+                    line_starts_[line_count_++] = location_.offset;
+                } else if (line_count_ == MAX_LINE_STARTS) {
+                    log_warn("SourceTracker: exceeded max line tracking limit (%zu lines)", MAX_LINE_STARTS);
+                    line_count_++;  // prevent repeated warnings
+                }
             }
         } else if (!isUtf8Continuation((unsigned char)c)) {
             // Only increment column for non-continuation bytes

@@ -587,6 +587,6 @@ void parse_ics(Input* input, const char* ics_string) {
     input->root = {.item = (uint64_t)calendar_map};
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 }

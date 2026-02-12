@@ -13,7 +13,7 @@ namespace lambda {
 // Handles UTF-8 multi-byte characters correctly
 class SourceTracker {
 private:
-    static const size_t MAX_LINE_STARTS = 10000;  // Max tracked lines
+    static const size_t MAX_LINE_STARTS = 100000;  // Max tracked lines (100K)
 
     const char* source_;        // Source text (not owned)
     size_t source_len_;         // Total length of source
