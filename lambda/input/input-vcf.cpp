@@ -403,6 +403,6 @@ void parse_vcf(Input* input, const char* vcf_string) {
     input->root = {.item = ((uint64_t)LMD_TYPE_MAP << 56) | (uint64_t)contact_map};
 
     if (ctx.hasErrors()) {
-        // errors occurred during parsing
+        ctx.logErrors();
     }
 }

@@ -507,7 +507,7 @@ Item input_jsx(Input* input, const char* jsx_string) {
     }
 
     if (ctx.hasErrors()) {
-        // errors occurred
+        ctx.logErrors();
     }
 
     return {.item = ITEM_NULL};
