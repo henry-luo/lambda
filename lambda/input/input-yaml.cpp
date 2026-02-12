@@ -2465,6 +2465,11 @@ static Item parse_document(YamlParser* p, bool* has_content) {
 // ============================================================================
 
 void parse_yaml(Input *input, const char* yaml_str) {
+    if (!yaml_str || !*yaml_str) {
+        input->root = {.item = ITEM_NULL};
+        return;
+    }
+
     InputContext ctx(input, yaml_str);
 
     YamlParser parser;
