@@ -215,8 +215,6 @@ void parse_properties(Input* input, const char* prop_string) {
     }
 
     if (ctx.hasErrors()) {
-        log_debug("Properties parsing completed with errors\n");
-    } else {
-        log_debug("Properties parsing completed\n");
+        ctx.logErrors();
     }
 }

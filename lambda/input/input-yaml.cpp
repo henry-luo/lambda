@@ -1373,7 +1373,7 @@ static Item parse_block_sequence(YamlParser* p, int seq_indent) {
     int max_entries = p->len;
 
     while (!at_end(p)) {
-        if (--max_entries < 0) { log_error("yaml: block sequence max entries at pos %d", p->pos); break; }
+        if (--max_entries < 0) { p->ctx->addWarning(p->ctx->tracker.location(), "Block sequence max entries exceeded at position %d", p->pos); break; }
         int loop_guard = p->pos;
 
         if (!skip_blank_lines(p)) break;
@@ -1418,7 +1418,7 @@ static Item parse_block_mapping(YamlParser* p, int map_indent) {
     int max_entries = p->len;
 
     while (!at_end(p)) {
-        if (--max_entries < 0) { log_error("yaml: block mapping max entries at pos %d", p->pos); break; }
+        if (--max_entries < 0) { p->ctx->addWarning(p->ctx->tracker.location(), "Block mapping max entries exceeded at position %d", p->pos); break; }
         int loop_guard = p->pos;
 
         if (!skip_blank_lines(p)) break;
@@ -1766,7 +1766,7 @@ static Item parse_block_mapping_inline(YamlParser* p, int map_indent) {
     bool first_entry = true;
 
     while (!at_end(p)) {
-        if (--max_entries < 0) { log_error("yaml: inline block mapping max entries at pos %d", p->pos); break; }
+        if (--max_entries < 0) { p->ctx->addWarning(p->ctx->tracker.location(), "Inline block mapping max entries exceeded at position %d", p->pos); break; }
         int loop_guard = p->pos;
 
         if (!first_entry) {
@@ -2509,7 +2509,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
     int iter_count = 0;
     while (!at_end(p)) {
         if (++iter_count > max_iterations) {
-            log_error("yaml: main loop exceeded max iterations at pos %d/%d", p->pos, p->len);
+            p->ctx->addError(p->ctx->tracker.location(), "Parser loop exceeded max iterations at position %d/%d", p->pos, p->len);
             break;
         }
         int loop_guard = p->pos;
