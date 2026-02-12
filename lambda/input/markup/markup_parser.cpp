@@ -818,6 +818,7 @@ static Format markup_format_to_format(MarkupFormat mf) {
         case MARKUP_ORG:         return Format::ORG;
         case MARKUP_ASCIIDOC:    return Format::ASCIIDOC;
         case MARKUP_MAN:         return Format::MAN;
+        case MARKUP_TYPST:       return Format::TYPST;
         case MARKUP_AUTO_DETECT:
         default:                 return Format::AUTO_DETECT;
     }
