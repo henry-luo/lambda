@@ -558,13 +558,13 @@ inline uint64_t b2it(uint8_t bool_val) {
 #else
 #define i2it(int_val)        (((int64_t)(int_val) <= INT56_MAX && (int64_t)(int_val) >= INT56_MIN) ? (ITEM_INT | ((uint64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : ITEM_ERROR)
 #endif
-#define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): null)
-#define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): null)
-#define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): null)
-#define s2it(str_ptr)        ((str_ptr)? ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr)): null)
-#define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): null)
-#define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): null)
-#define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): null)
+#define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
+#define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
+#define c2it(decimal_ptr)    ((decimal_ptr)? ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr)): ITEM_NULL)
+#define s2it(str_ptr)        ((str_ptr)? ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr)): ITEM_NULL)
+#define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)
+#define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): ITEM_NULL)
+#define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): ITEM_NULL)
 
 Array* array_fill(Array* arr, int count, ...);
 ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
@@ -808,6 +808,9 @@ typedef struct Context {
     // returns the type of the item
     Type* fn_type(Item item);
     TypeId item_type_id(Item item);  // returns the TypeId of an item (for MIR use)
+
+    // returns the name of an element, function, or type as a symbol
+    Symbol* fn_name(Item item);
 
     Item fn_input1(Item url);
     Item fn_input2(Item url, Item options);

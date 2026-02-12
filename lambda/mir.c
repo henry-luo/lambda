@@ -23,6 +23,9 @@ extern Bool fn_exists(Item path);
 extern Symbol* fn_symbol(Item item);
 extern Item fn_symbol2(Item name, Item url);
 
+// Name function (implemented in lambda-eval.cpp)
+extern Symbol* fn_name(Item item);
+
 // Shared runtime context pointer - all JIT modules import this
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
@@ -240,8 +243,7 @@ func_obj_t func_list[] = {
     {"fn_string", (fn_ptr) fn_string},
     {"fn_symbol1", (fn_ptr) fn_symbol},
     {"fn_symbol2", (fn_ptr) fn_symbol2},
-    {"fn_type", (fn_ptr) fn_type},
-    {"fn_input1", (fn_ptr) fn_input1},
+    {"fn_type", (fn_ptr) fn_type},    {"fn_name", (fn_ptr) fn_name},    {"fn_input1", (fn_ptr) fn_input1},
     {"fn_input2", (fn_ptr) fn_input2},
     {"fn_format1", (fn_ptr) fn_format1},
     {"fn_format2", (fn_ptr) fn_format2},

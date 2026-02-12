@@ -776,9 +776,17 @@ Structured markup elements with attributes and content, used for document proces
 
 ```lambda
 let el = <div class: "main"; "content">;
-el.tag       // 'div
+el.name      // 'div (built-in: element tag name)
 el.class     // "main" (attribute access)
 el[0]        // "content" (content/child access)
+```
+
+**Built-in Properties**: Elements have a built-in `.name` property that returns the element's tag name as a symbol. User-defined attributes with the same name take precedence:
+
+```lambda
+let custom = <div name: "custom">;
+custom.name  // "custom" (user-defined takes precedence)
+name(custom) // 'div (function always returns tag)
 ```
 
 ### Ranges
