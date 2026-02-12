@@ -205,6 +205,7 @@ module.exports = grammar({
     'pipe',
     'pipe_file',  // |> and |>> - lowest binary precedence
     $.if_expr,
+    $.match_expr,
     $.for_expr,
     $.let_expr,
     $.fn_expr,
@@ -228,7 +229,9 @@ module.exports = grammar({
     'pattern_union',
   ]],
 
-  conflicts: $ => [],
+  conflicts: $ => [
+    [$.match_expr, $.match_stam],
+  ],
 
   rules: {
     document: $ => optional(choice(
@@ -353,6 +356,7 @@ module.exports = grammar({
       $.object_type,
       $.entity_type,
       $.if_stam,
+      $.match_stam,
       $.for_stam,
       $.while_stam,
       $.fn_stam,
@@ -466,6 +470,7 @@ module.exports = grammar({
       $.binary_expr,
       $.let_expr,
       $.if_expr,
+      $.match_expr,
       $.for_expr,
       $.fn_expr,
       $.raise_expr,
@@ -478,6 +483,7 @@ module.exports = grammar({
       $.binary_expr_no_pipe,
       $.let_expr,
       $.if_expr,
+      $.match_expr,
       $.for_expr,
       $.fn_expr,
       $.raise_expr,
@@ -699,6 +705,52 @@ module.exports = grammar({
         seq('else', '{', field('else', $.content), '}'),
       )),
     )),
+
+    // Match expression (functional form) — each arm uses : <expression>
+    // Braced form for multi-line: match x { case int: ... case string: ... }
+    // Inline form for single-line: match x case int: ... case string: ...
+    match_expr: $ => choice(
+      seq(
+        'match', field('scrutinee', $._expression),
+        '{',
+        repeat1(choice($.match_arm_expr, $.match_default_expr)),
+        '}'
+      ),
+      prec.right(seq(
+        'match', field('scrutinee', $._expression),
+        repeat1(choice($.match_arm_expr, $.match_default_expr))
+      )),
+    ),
+
+    match_arm_expr: $ => prec.right(seq(
+      'case', field('pattern', $._type_expr),
+      ':', field('body', $._expression)
+    )),
+
+    match_default_expr: $ => prec.right(seq(
+      'default', ':', field('body', $._expression)
+    )),
+
+    // Match statement (procedural form) — arms use { <statements> } or : <expression>
+    // Supports both braced and non-braced top-level forms:
+    //   match x { case ... }     — braced form
+    //   match x case ... case ...  — non-braced form (multi-line at statement level)
+    match_stam: $ => seq(
+      'match', field('scrutinee', $._expression),
+      choice(
+        seq('{', repeat1(choice($.match_arm_stam, $.match_arm_expr, $.match_default_stam, $.match_default_expr)), '}'),
+        repeat1(choice($.match_arm_stam, $.match_arm_expr, $.match_default_stam, $.match_default_expr)),
+      )
+    ),
+
+    match_arm_stam: $ => seq(
+      'case', field('pattern', $._type_expr),
+      '{', field('body', $.content), '}'
+    ),
+
+    match_default_stam: $ => seq(
+      'default', '{', field('body', $.content), '}'
+    ),
 
     // Loop variable binding with optional index and 'in' or 'at' keyword
     // Single variable: for v in expr

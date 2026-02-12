@@ -2375,13 +2375,16 @@ Item fn_float(Item item) {
             log_debug("Failed to convert decimal to string");
             return ItemError;
         }
+        log_debug("fn_float: decimal string = '%s'", dec_str);
         char* endptr;
         errno = 0;
         double dval = strtod(dec_str, &endptr);
+        int saved_errno = errno;
+        bool fully_parsed = (*endptr == '\0');
         mpd_free(dec_str);
 
-        if (errno != 0 || *endptr != '\0') {
-            log_debug("Failed to convert decimal to float");
+        if (saved_errno != 0 || !fully_parsed) {
+            log_debug("fn_float: failed to convert decimal to float");
             return ItemError;
         }
 
@@ -2425,9 +2428,11 @@ Item fn_float(Item item) {
         char* endptr;
         errno = 0;
         double val = strtod(buf, &endptr);
+        int saved_errno = errno;
+        bool fully_parsed = (*endptr == '\0');
         free(buf);
 
-        if (errno != 0 || *endptr != '\0') {
+        if (saved_errno != 0 || !fully_parsed) {
             log_debug("Cannot convert string to float: %.*s", (int)len, chars);
             return ItemError;
         }
