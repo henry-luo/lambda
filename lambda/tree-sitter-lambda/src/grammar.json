@@ -4737,46 +4737,50 @@
       }
     },
     "call_expr": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "FIELD",
-          "name": "function",
-          "content": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "function",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "primary_expr"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "import"
+                }
+              ]
+            }
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_arguments"
+          },
+          {
             "type": "CHOICE",
             "members": [
               {
-                "type": "SYMBOL",
-                "name": "primary_expr"
+                "type": "FIELD",
+                "name": "propagate",
+                "content": {
+                  "type": "STRING",
+                  "value": "?"
+                }
               },
               {
-                "type": "SYMBOL",
-                "name": "import"
+                "type": "BLANK"
               }
             ]
           }
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_arguments"
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "FIELD",
-              "name": "propagate",
-              "content": {
-                "type": "STRING",
-                "value": "?"
-              }
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        }
-      ]
+        ]
+      }
     },
     "index_expr": {
       "type": "SEQ",
@@ -8697,6 +8701,52 @@
         {
           "type": "SYMBOL",
           "name": "error_union_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "constrained_type"
+        }
+      ]
+    },
+    "constrained_type": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "base",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "primary_type"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "type_occurrence"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "where"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "constraint",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_expression"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
         }
       ]
     },
@@ -9880,6 +9930,10 @@
       {
         "type": "SYMBOL",
         "name": "fn_type"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "constrained_type"
       },
       {
         "type": "SYMBOL",

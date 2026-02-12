@@ -88,6 +88,7 @@ enum TypeKind {
     TYPE_KIND_UNARY,        // TypeUnary: occurrence operators (?, +, *, [n])
     TYPE_KIND_BINARY,       // TypeBinary: union, intersection, exclude
     TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
+    TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
 };
 
 // Get human-readable name for a TypeId (for error messages)
