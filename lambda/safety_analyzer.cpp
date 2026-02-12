@@ -230,8 +230,7 @@ static bool has_any_recursive_call(AstNode* expr, AstFuncNode* func_node) {
         return false;
     }
 
-    case AST_NODE_MATCH_EXPR:
-    case AST_NODE_MATCH_STAM: {
+    case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match = (AstMatchNode*)expr;
         if (has_any_recursive_call(match->scrutinee, func_node)) return true;
         AstMatchArm* arm = match->first_arm;
