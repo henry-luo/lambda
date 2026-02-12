@@ -301,6 +301,20 @@ static void transpile_mir_unary_expr(MIR_context_t ctx, MIR_item_t func_item, MI
             MIR_new_int_op(ctx, 0)));
         break;
 
+    case OPERATOR_IS_ERROR: {
+        // ^expr: check if item type is LMD_TYPE_ERROR (type tag in upper 8 bits)
+        MIR_reg_t type_reg = new_reg(ctx, func, "type_id", MIR_T_I64);
+        MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_RSH,
+            MIR_new_reg_op(ctx, type_reg),
+            MIR_new_reg_op(ctx, operand_reg),
+            MIR_new_int_op(ctx, 56)));
+        MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_EQ,
+            MIR_new_reg_op(ctx, *result_reg),
+            MIR_new_reg_op(ctx, type_reg),
+            MIR_new_int_op(ctx, LMD_TYPE_ERROR)));
+        break;
+    }
+
     case OPERATOR_POS:
     default:
         MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV,
@@ -416,7 +430,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     // Initialize runner with the same pattern as run_script()
     Runner runner;
     runner_init(runtime, &runner);
-    
+
     // Load and parse script
     if (source) {
         // Parse and build AST from source string
@@ -471,12 +485,12 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
 
     // Now we can use the common execution path
     Input* output = execute_script_and_create_output(&runner, run_main);
-    
+
     // Cleanup MIR context
     jit_cleanup(ctx);
-    
+
     // Note: Script must remain alive - it shares the pool with output
     // The caller will eventually destroy the pool, cleaning up both Script and output
-    
+
     return output;
 }

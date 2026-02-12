@@ -2375,6 +2375,17 @@
                         "icon": "\u26a1"
                     },
                     {
+                        "source": "test/test_transpile_patterns_gtest.cpp",
+                        "name": "Transpile Pattern Tests",
+                        "dependencies": [],
+                        "binary": "test_transpile_patterns_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "\ud83d\udd0d"
+                    },
+                    {
                         "source": "test/test_math_parser_gtest.cpp",
                         "name": "Math Parser Tests",
                         "dependencies": [

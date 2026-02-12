@@ -210,6 +210,7 @@ typedef enum Operator {
     OPERATOR_NEG,
     OPERATOR_POS,
     OPERATOR_SPREAD, // * spread operator
+    OPERATOR_IS_ERROR, // ^expr - error type check shorthand
 
     // binary
     OPERATOR_ADD,
