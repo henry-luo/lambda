@@ -240,66 +240,24 @@ void path_to_string(Path* path, void* out_ptr) {
         segments[count++] = p;
         p = p->parent;
     }
-
-    // Check scheme type
-    bool is_file_scheme = false;
-    bool is_rel_scheme = false;
-    bool is_parent_scheme = false;
-    if (count > 0) {
-        const char* root_name = segments[count - 1]->name;
-        is_file_scheme = root_name && strcmp(root_name, "file") == 0;
-        is_rel_scheme = root_name && strcmp(root_name, ".") == 0;
-        is_parent_scheme = root_name && strcmp(root_name, "..") == 0;
-    }
     
-    // Handle bare root cases (no segments beyond root)
-    if (count == 1) {
-        if (is_file_scheme) {
-            strbuf_append_char(out, '/');
-            return;
-        }
-        if (is_rel_scheme) {
-            strbuf_append_char(out, '.');
-            return;
-        }
-        if (is_parent_scheme) {
-            strbuf_append_str(out, "..");
-            return;
-        }
+    // Handle bare root case (just a root node with no children collected)
+    if (count == 0 && path->parent == NULL) {
+        // This is a root node itself
+        const char* root_name = path->name ? path->name : "";
+        strbuf_append_str(out, root_name);
+        return;
     }
 
-    // Output in forward order (root first)
-    bool just_output_root = false;  // tracks if we just output /, ., or ..
+    // Output in forward order (root first) with dot separators
+    // Lambda path syntax: file.etc.hosts, .src.main, ..parent.file
     for (int i = count - 1; i >= 0; i--) {
         Path* seg_path = segments[i];
         
-        // For file scheme: output "/" prefix, skip "file" segment
-        if (is_file_scheme && i == count - 1) {
-            strbuf_append_char(out, '/');  // root prefix
-            just_output_root = true;
-            continue;  // skip "file" segment itself
-        }
-        
-        // For relative scheme (.): output "." prefix, skip "." segment
-        if (is_rel_scheme && i == count - 1) {
-            strbuf_append_char(out, '.');
-            just_output_root = true;
-            continue;
-        }
-        
-        // For parent scheme (..): output ".." and skip the root segment
-        if (is_parent_scheme && i == count - 1) {
-            strbuf_append_str(out, "..");
-            just_output_root = true;
-            continue;
-        }
-        
         // Add separator dot before non-root segments
-        // But not right after root (/, ., ..) since those already form the prefix
-        if (i < count - 1 && !just_output_root) {
+        if (i < count - 1) {
             strbuf_append_char(out, '.');
         }
-        just_output_root = false;
 
         LPathSegmentType seg_type = PATH_GET_SEG_TYPE(seg_path);
 
