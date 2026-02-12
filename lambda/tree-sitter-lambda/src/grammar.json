@@ -3718,6 +3718,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "spread_expr"
+        },
+        {
+          "type": "SYMBOL",
           "name": "binary_expr"
         },
         {
@@ -3756,6 +3760,10 @@
         {
           "type": "SYMBOL",
           "name": "unary_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "spread_expr"
         },
         {
           "type": "SYMBOL",
@@ -5797,6 +5805,31 @@
                   "value": "+"
                 }
               ]
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "operand",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
+            }
+          }
+        ]
+      }
+    },
+    "spread_expr": {
+      "type": "PREC_LEFT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "operator",
+            "content": {
+              "type": "STRING",
+              "value": "*"
             }
           },
           {

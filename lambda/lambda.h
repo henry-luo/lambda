@@ -276,6 +276,9 @@ void array_push_spread(Array* arr, Item item);  // push item, spreading if sprea
 Item array_end(Array* arr);  // finalize and return array as Item
 void frame_end();  // cleanup memory frame after for-expression
 
+// Mark an item as spreadable (for spread operator *expr)
+Item item_spread(Item item);
+
 typedef void* (*fn_ptr)();
 
 // Function as first-class value
