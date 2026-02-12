@@ -148,6 +148,12 @@ let a = 1, b = 2;         // Multiple variables
 +  -  *  /  div  %  ^
 ```
 
+**Spread:** 
+```lambda
+let a = [1, 2, 3]
+(*a, *[10, 20])    // (1, 2, 3, 10, 20)
+```
+
 **Comparison:** equal, not equal, less than, less equal, greater than, greater equal
 ```lambda
 ==  !=  <  <=  >  >=

@@ -209,6 +209,7 @@ typedef enum Operator {
     OPERATOR_NOT,
     OPERATOR_NEG,
     OPERATOR_POS,
+    OPERATOR_SPREAD, // * spread operator
 
     // binary
     OPERATOR_ADD,

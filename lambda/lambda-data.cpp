@@ -543,7 +543,7 @@ void list_push(List *list, Item item) {
     // log_item({.list = list}, "list_after_push");
 }
 
-// push item to list, spreading spreadable arrays inline
+// push item to list, spreading spreadable arrays or lists inline
 // skips spreadable nulls (from empty for-expressions)
 void list_push_spread(List *list, Item item) {
     TypeId type_id = get_type_id(item);
@@ -559,6 +559,50 @@ void list_push_spread(List *list, Item item) {
             log_debug("list_push_spread: spreading array of length %ld", arr->length);
             for (int i = 0; i < arr->length; i++) {
                 list_push(list, arr->items[i]);
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable list
+    if (type_id == LMD_TYPE_LIST) {
+        List* inner = item.list;
+        if (inner && inner->is_spreadable) {
+            log_debug("list_push_spread: spreading list of length %ld", inner->length);
+            for (int i = 0; i < inner->length; i++) {
+                list_push(list, inner->items[i]);
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable ArrayInt
+    if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr = item.array_int;
+        if (arr && arr->is_spreadable) {
+            log_debug("list_push_spread: spreading array_int of length %ld", arr->length);
+            for (int i = 0; i < arr->length; i++) {
+                list_push(list, {.item = i2it(arr->items[i])});
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable ArrayInt64
+    if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        if (arr && arr->is_spreadable) {
+            log_debug("list_push_spread: spreading array_int64 of length %ld", arr->length);
+            for (int i = 0; i < arr->length; i++) {
+                list_push(list, {.item = l2it(arr->items[i])});
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable ArrayFloat
+    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;
+        if (arr && arr->is_spreadable) {
+            log_debug("list_push_spread: spreading array_float of length %ld", arr->length);
+            for (int i = 0; i < arr->length; i++) {
+                list_push(list, {.item = d2it(arr->items[i])});
             }
             return;
         }

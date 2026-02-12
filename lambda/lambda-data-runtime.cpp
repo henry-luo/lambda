@@ -330,8 +330,77 @@ void array_push_spread(Array* arr, Item item) {
             return;
         }
     }
+    // check if this is a spreadable list
+    if (type_id == LMD_TYPE_LIST) {
+        List* inner = item.list;
+        if (inner && inner->is_spreadable) {
+            log_debug("array_push_spread: spreading list of length %ld", inner->length);
+            for (int i = 0; i < inner->length; i++) {
+                array_push(arr, inner->items[i]);
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable ArrayInt
+    if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* inner = item.array_int;
+        if (inner && inner->is_spreadable) {
+            log_debug("array_push_spread: spreading array_int of length %ld", inner->length);
+            for (int i = 0; i < inner->length; i++) {
+                array_push(arr, {.item = i2it(inner->items[i])});
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable ArrayInt64
+    if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* inner = item.array_int64;
+        if (inner && inner->is_spreadable) {
+            log_debug("array_push_spread: spreading array_int64 of length %ld", inner->length);
+            for (int i = 0; i < inner->length; i++) {
+                array_push(arr, {.item = l2it(inner->items[i])});
+            }
+            return;
+        }
+    }
+    // check if this is a spreadable ArrayFloat
+    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* inner = item.array_float;
+        if (inner && inner->is_spreadable) {
+            log_debug("array_push_spread: spreading array_float of length %ld", inner->length);
+            for (int i = 0; i < inner->length; i++) {
+                array_push(arr, {.item = d2it(inner->items[i])});
+            }
+            return;
+        }
+    }
     // not spreadable, push as-is
     array_push(arr, item);
+}
+
+// mark an item as spreadable (for spread operator *expr)
+// works on arrays and lists - marks the is_spreadable flag
+// returns the item unchanged for spreading when used with push_spread functions
+Item item_spread(Item item) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_ARRAY) {
+        Array* arr = item.array;
+        if (arr) arr->is_spreadable = true;
+    } else if (type_id == LMD_TYPE_LIST) {
+        List* list = item.list;
+        if (list) list->is_spreadable = true;
+    } else if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr = item.array_int;
+        if (arr) arr->is_spreadable = true;
+    } else if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        if (arr) arr->is_spreadable = true;
+    } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;
+        if (arr) arr->is_spreadable = true;
+    }
+    // for other types, just return as-is (they will be pushed normally)
+    return item;
 }
 
 Item list_fill(List *list, int count, ...) {

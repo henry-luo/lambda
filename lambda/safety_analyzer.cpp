@@ -250,6 +250,7 @@ static bool has_any_recursive_call(AstNode* expr, AstFuncNode* func_node) {
     }
 
     case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
         return has_any_recursive_call(((AstUnaryNode*)expr)->operand, func_node);
 
     case AST_NODE_LIST:
@@ -386,6 +387,7 @@ static bool has_non_tail_recursive_call(AstNode* expr, AstFuncNode* func_node, b
     }
 
     case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
         // Unary operand is not in tail position
         return has_non_tail_recursive_call(((AstUnaryNode*)expr)->operand, func_node, false);
 
