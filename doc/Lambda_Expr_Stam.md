@@ -201,6 +201,7 @@ Lambda has simple truthiness rules:
 | ------------ | -------------------------------------------------------------------- |
 | `null`       |                                                                      |
 | `false`      |                                                                      |
+| `error`      | error is falsy, which allows idiom like: `err or fallback`           |
 | "", ''       | Empty string`""` or symbol `''` is normalised to `null` under Lambda |
 
 | Truthy Values (Everything Else)                          |

@@ -370,29 +370,21 @@ let area = math.PI * math.square(radius);
 
 **Creating Errors:**
 ```lambda
-error("Something went wrong")               // Simple error (code = user_error)
-error("load failed", inner_err)              // Wrap/chain another error
-error({code: 304, message: "div by zero"})   // Full control via map
+error("Message")    error("load failed", inner_err)
+error({code: 304, message: "div by zero"})
 ```
 
 **Error Return Types (`T^E`):**
 ```lambda
-fn parse(s: string) int^ { ... }             // May return int or any error
-fn divide(a, b) int^DivisionError { ... }    // Specific error type
-fn load(p) Config^ParseError|IOError { ... } // Multiple error types
+fn parse(s: string) int^ { ... }           // Return int or any error
+fn divide(a, b) int ^ DivisionError { ... }    // Specific error type
+fn load(p) Config ^ ParseError|IOError { ... } // Multiple error types
 ```
 
-**`raise` — return an error:**
-```lambda
-fn divide(a, b) int^ {
-    if (b == 0) raise error("division by zero")
-    else a / b
-}
-```
-
-**`?` — propagate error to caller:**
+**`raise` error , or propagate error with `?`**
 ```lambda
 fn compute(x: int) int^ {
+    if (b == 0) raise error("div by zero")  // raise error
     let a = parse(input)?    // error → return immediately
     let b = divide(a, x)?    // error → return immediately
     a + b
@@ -403,15 +395,8 @@ fun()?                        // propagate error, discard value
 **`let a^err` — destructure value and error:**
 ```lambda
 let result^err = divide(10, x)
-if (err != null) print("error: " ++ err.message)
+if (^err) print("Err: " ++ err.message)  // ^err to check if err is error
 else result * 2
-```
-
-**Compile-time enforcement (errors cannot be ignored):**
-```lambda
-divide(10, 0)             // ❌ compile error: unhandled error
-let x = divide(10, 0)    // ❌ compile error: unhandled error
-// Must use: let x^err = divide(10, 0)  or  divide(10, 0)?
 ```
 
 ## Operator Precedence (High to Low)

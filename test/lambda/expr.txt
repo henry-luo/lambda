@@ -82,7 +82,7 @@ nan
 14
 15
 16
-array
+range
 true
 true
 false
