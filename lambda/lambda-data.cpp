@@ -119,7 +119,7 @@ void init_typetype() {
     EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
 }
 
-TypeInfo type_info[32];
+TypeInfo type_info[LMD_CONTAINER_HEAP_START + 1];
 
 void init_type_info() {
     type_info[LMD_TYPE_RAW_POINTER] = {sizeof(void*), "pointer", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
@@ -169,6 +169,13 @@ Type* alloc_type(Pool* pool, TypeId type, size_t size) {
         log_warn("Warning: alloc_type - is_const flag was not zeroed properly");
         t->is_const = 0; // Force correction
     }
+    return t;
+}
+
+// allocate a Type with type_id = LMD_TYPE_TYPE and a specific TypeKind
+Type* alloc_type_kind(Pool* pool, uint8_t kind, size_t size) {
+    Type* t = alloc_type(pool, LMD_TYPE_TYPE, size);
+    t->kind = kind;
     return t;
 }
 
