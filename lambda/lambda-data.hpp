@@ -264,6 +264,7 @@ typedef enum PatternCharClass {
 typedef enum SysFunc {
     SYSFUNC_LEN,
     SYSFUNC_TYPE,
+    SYSFUNC_NAME,       // name(item) - get local name of element, function, or type
     SYSFUNC_INT,
     SYSFUNC_INT64,
     SYSFUNC_FLOAT,

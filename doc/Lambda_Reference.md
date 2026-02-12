@@ -315,7 +315,7 @@ print(format(report, 'json));
 let doc = input("article.md", 'markdown);
 
 // Extract headings
-let headings = doc where ~.tag == 'h1 or ~.tag == 'h2 | ~.content;
+let headings = doc where ~.name == 'h1 or ~.name == 'h2 | ~.content;
 
 // Generate table of contents
 let toc = <div class: "toc";
