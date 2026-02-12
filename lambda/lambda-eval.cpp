@@ -22,6 +22,9 @@
 
 extern __thread EvalContext* context;
 
+// forward declaration of static error string (defined later in this file)
+extern String STR_ERROR;
+
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
 
@@ -153,7 +156,7 @@ String *fn_strcat(String *left, String *right) {
     log_debug("fn_strcat %p, %p", left, right);
     if (!left || !right) {
         log_error("null pointer in fn_strcat: left=%p, right=%p", left, right);
-        return NULL;
+        return &STR_ERROR;
     }
     int left_len = left->len, right_len = right->len;
     log_debug("left len %d, right len %d", left_len, right_len);
@@ -2075,6 +2078,7 @@ Item fn_trim(Item str_item) {
 
 // trim_start(str) - remove leading whitespace
 Item fn_trim_start(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {
@@ -2112,6 +2116,7 @@ Item fn_trim_start(Item str_item) {
 
 // trim_end(str) - remove trailing whitespace
 Item fn_trim_end(Item str_item) {
+    GUARD_ERROR1(str_item);
     TypeId str_type = get_type_id(str_item);
 
     if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) {

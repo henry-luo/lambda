@@ -261,6 +261,10 @@ String* it2s(Item itm) {
     if (itm._type_id == LMD_TYPE_STRING) {
         return itm.get_string();
     }
+    if (itm._type_id == LMD_TYPE_ERROR) {
+        static String str_err = {.len = 7, .ref_cnt = 0, .chars = "<error>"};
+        return &str_err;
+    }
     // For other types, we'd need to convert to string
     // For now, return a default string
     return nullptr;
