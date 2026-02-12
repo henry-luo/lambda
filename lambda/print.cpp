@@ -868,6 +868,27 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     }
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_MATCH_STAM: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        log_debug("[match %s:%s] arms=%d",
+            node->node_type == AST_NODE_MATCH_EXPR ? "expr" : "stam", type_name, match->arm_count);
+        print_label(indent + 1, "scrutinee:");
+        print_ast_node(script, match->scrutinee, indent + 1);
+        AstMatchArm* arm = match->first_arm;
+        while (arm) {
+            if (arm->pattern) {
+                print_label(indent + 1, "pattern:");
+                print_ast_node(script, arm->pattern, indent + 2);
+            } else {
+                print_label(indent + 1, "default:");
+            }
+            print_label(indent + 1, "body:");
+            print_ast_node(script, arm->body, indent + 2);
+            arm = (AstMatchArm*)arm->next;
+        }
+        break;
+    }
     case AST_NODE_TYPE_STAM: {
         log_debug("[type def:%s]", type_name);
         AstNode *declare = ((AstLetNode*)node)->declare;

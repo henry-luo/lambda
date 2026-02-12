@@ -460,6 +460,18 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, if_node->otherwise, fn_scope, global_scope, captures);
         break;
     }
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_MATCH_STAM: {
+        AstMatchNode* match_node = (AstMatchNode*)node;
+        collect_captures_from_node(tp, match_node->scrutinee, fn_scope, global_scope, captures);
+        AstMatchArm* arm = match_node->first_arm;
+        while (arm) {
+            if (arm->pattern) collect_captures_from_node(tp, arm->pattern, fn_scope, global_scope, captures);
+            collect_captures_from_node(tp, arm->body, fn_scope, global_scope, captures);
+            arm = (AstMatchArm*)arm->next;
+        }
+        break;
+    }
     case AST_NODE_FOR_EXPR:
     case AST_NODE_FOR_STAM: {
         AstForNode* for_node = (AstForNode*)node;
@@ -2230,6 +2242,17 @@ bool has_current_item_ref(AstNode* node) {
                has_current_item_ref(if_node->then) ||
                has_current_item_ref(if_node->otherwise);
     }
+    case AST_NODE_MATCH_EXPR:
+    case AST_NODE_MATCH_STAM: {
+        AstMatchNode* match_node = (AstMatchNode*)node;
+        if (has_current_item_ref(match_node->scrutinee)) return true;
+        AstMatchArm* arm = match_node->first_arm;
+        while (arm) {
+            if (has_current_item_ref(arm->body)) return true;
+            arm = (AstMatchArm*)arm->next;
+        }
+        return false;
+    }
     case AST_NODE_CALL_EXPR: {
         AstCallNode* call = (AstCallNode*)node;
         if (has_current_item_ref(call->function)) return true;
@@ -2413,6 +2436,90 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
     ast_node->type = ast_node->otherwise && ast_node->otherwise->type &&
         ast_node->otherwise->type->type_id == ast_node->then->type->type_id ? ast_node->then->type : &TYPE_ANY;
     log_debug("end build if stam");
+    return (AstNode*)ast_node;
+}
+
+// build a match expression or statement from Tree-sitter CST node
+// match_type: AST_NODE_MATCH_EXPR for expression form, AST_NODE_MATCH_STAM for statement form
+AstNode* build_match(Transpiler* tp, TSNode match_node, AstNodeType match_type) {
+    log_debug("build match %s", match_type == AST_NODE_MATCH_EXPR ? "expr" : "stam");
+    AstMatchNode* ast_node = (AstMatchNode*)alloc_ast_node(tp, match_type, match_node, sizeof(AstMatchNode));
+
+    // build scrutinee expression
+    TSNode scrutinee_node = ts_node_child_by_field_id(match_node, FIELD_SCRUTINEE);
+    ast_node->scrutinee = build_expr(tp, scrutinee_node);
+    if (!ast_node->scrutinee) {
+        log_error("build_match: failed to build scrutinee expression");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // iterate over children to find match arms and default arms
+    AstMatchArm* first_arm = NULL;
+    AstMatchArm* last_arm = NULL;
+    int arm_count = 0;
+    TypeId result_type_id = LMD_TYPE_NULL;
+    bool has_default = false;
+    bool need_any_type = false;
+
+    uint32_t child_count = ts_node_child_count(match_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(match_node, i);
+        if (!ts_node_is_named(child)) continue;
+        TSSymbol sym = ts_node_symbol(child);
+
+        bool is_arm = (sym == SYM_MATCH_ARM_EXPR || sym == SYM_MATCH_ARM_STAM);
+        bool is_default = (sym == SYM_MATCH_DEFAULT_EXPR || sym == SYM_MATCH_DEFAULT_STAM);
+        if (!is_arm && !is_default) continue;
+
+        AstMatchArm* arm = (AstMatchArm*)alloc_ast_node(tp, AST_NODE_MATCH_ARM, child, sizeof(AstMatchArm));
+
+        // build pattern (type expression) — NULL for default arm
+        if (is_arm) {
+            TSNode pattern_node = ts_node_child_by_field_id(child, FIELD_PATTERN);
+            arm->pattern = build_expr(tp, pattern_node);
+        } else {
+            arm->pattern = NULL;
+            has_default = true;
+        }
+
+        // create a new scope for the arm body (like if_stam branches)
+        NameScope* arm_scope = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+        arm_scope->parent = tp->current_scope;
+        arm_scope->is_proc = tp->current_scope->is_proc;
+        tp->current_scope = arm_scope;
+
+        // build arm body
+        TSNode body_node = ts_node_child_by_field_id(child, FIELD_BODY);
+        arm->body = build_expr(tp, body_node);
+
+        tp->current_scope = arm_scope->parent; // restore scope
+
+        // type inference: track union of all arm body types
+        if (arm->body && arm->body->type) {
+            TypeId body_type_id = arm->body->type->type_id;
+            if (arm_count == 0) {
+                result_type_id = body_type_id;
+            } else if (body_type_id != result_type_id) {
+                need_any_type = true;
+            }
+        }
+
+        // link arm into list
+        if (!first_arm) first_arm = arm;
+        else last_arm->next = (AstNode*)arm;
+        last_arm = arm;
+        arm_count++;
+    }
+
+    ast_node->first_arm = first_arm;
+    ast_node->arm_count = arm_count;
+
+    // result type: if all arms have same type, use it; otherwise ANY
+    TypeId type_id = need_any_type ? LMD_TYPE_ANY : result_type_id;
+    ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+
+    log_debug("end build match %s: %d arms", match_type == AST_NODE_MATCH_EXPR ? "expr" : "stam", arm_count);
     return (AstNode*)ast_node;
 }
 
@@ -4670,6 +4777,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_if_expr(tp, expr_node);
     case SYM_IF_STAM:
         return build_if_stam(tp, expr_node);
+    case SYM_MATCH_EXPR:
+        return build_match(tp, expr_node, AST_NODE_MATCH_EXPR);
+    case SYM_MATCH_STAM:
+        return build_match(tp, expr_node, AST_NODE_MATCH_STAM);
     case SYM_ASSIGN_EXPR:
         return build_assign_expr(tp, expr_node, false);  // standalone assign_expr is not a type definition
     case SYM_ARRAY:
