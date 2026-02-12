@@ -24,11 +24,11 @@ string  symbol  binary  datetime
 
 **Container Types:**
 ```lambda
-1 to 10             // Range
-[123, true]         // Array of values
-(0.5, "string:)     // List/tuple
-{key: 'symbol'}     // Map
-<div class: bold; "text" <br>>    // Element
+range, 1 to 10               // Range
+array, [123, true]           // Array of values
+list, (0.5, "string:)        // List
+map, {key: 'symbol'}         // Map
+element, <div class: bold; "text" <br>>  // Element
 ```
 
 **Type Operators:**
@@ -84,9 +84,9 @@ t'2025-04-26' is date       // Sub-types: date
 t'10:30:00' is time         // Sub-types: time
 
 // Member properties
-dt.date  dt.year  dt.month  dt.day 
+dt.date  dt.year  dt.month  dt.day
 dt.time  dt.hour  dt.minute dt.second  dt.millisecond
-dt.weekday  dt.yearday  dt.week  dt.quarter 
+dt.weekday  dt.yearday  dt.week  dt.quarter
 dt.unix  dt.timezone  dt.utc_offset  dt.utc  dt.local
 
 // Formatting
@@ -94,8 +94,8 @@ dt.format("YYYY-MM-DD")  dt.format('iso')
 
 // Constructors
 datetime()  today()  justnow()   // current date/time
-datetime(2025, 4, 26, 10, 30)   
-date(2025, 4, 26)  time(10, 30, 45)  
+datetime(2025, 4, 26, 10, 30)
+date(2025, 4, 26)  time(10, 30, 45)
 ```
 
 **Collections:**
@@ -148,7 +148,7 @@ let a = 1, b = 2;         // Multiple variables
 +  -  *  /  div  %  ^
 ```
 
-**Spread:** 
+**Spread:** *
 ```lambda
 let a = [1, 2, 3]
 (*a, *[10, 20])    // (1, 2, 3, 10, 20)
@@ -220,6 +220,21 @@ else if (score >= 80) "B" else "C"
 ```lambda
 if (x > 0) { "positive" }
 if (condition) { something() } else { otherThing() }
+```
+
+**Match Expressions:**
+```lambda
+// Type patterns or Literal
+match value {
+    case 200: "OK"                // case literal
+    case string: "text"           // case type
+    case int | float: "numnber"   // case type union
+    case Circle {                 // mixed stam arm
+        let area = 3.14 * ~.r ^ 2
+        "area: " ++ area
+    }
+    default: "other"
+}
 ```
 
 **For Expressions:** (produce spreadable arrays)
@@ -355,14 +370,48 @@ let area = math.PI * math.square(radius);
 
 **Creating Errors:**
 ```lambda
-error("Something went wrong")   // Create error value
+error("Something went wrong")               // Simple error (code = user_error)
+error("load failed", inner_err)              // Wrap/chain another error
+error({code: 304, message: "div by zero"})   // Full control via map
 ```
 
-**Error Checking:**
+**Error Return Types (`T^E`):**
 ```lambda
-let result = risky_operation();
-if (result is error) { print("Error:", result) }
-else { print("Success:", result) }
+fn parse(s: string) int^ { ... }             // May return int or any error
+fn divide(a, b) int^DivisionError { ... }    // Specific error type
+fn load(p) Config^ParseError|IOError { ... } // Multiple error types
+```
+
+**`raise` — return an error:**
+```lambda
+fn divide(a, b) int^ {
+    if (b == 0) raise error("division by zero")
+    else a / b
+}
+```
+
+**`?` — propagate error to caller:**
+```lambda
+fn compute(x: int) int^ {
+    let a = parse(input)?    // error → return immediately
+    let b = divide(a, x)?    // error → return immediately
+    a + b
+}
+fun()?                        // propagate error, discard value
+```
+
+**`let a^err` — destructure value and error:**
+```lambda
+let result^err = divide(10, x)
+if (err != null) print("error: " ++ err.message)
+else result * 2
+```
+
+**Compile-time enforcement (errors cannot be ignored):**
+```lambda
+divide(10, 0)             // ❌ compile error: unhandled error
+let x = divide(10, 0)    // ❌ compile error: unhandled error
+// Must use: let x^err = divide(10, 0)  or  divide(10, 0)?
 ```
 
 ## Operator Precedence (High to Low)

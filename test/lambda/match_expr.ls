@@ -40,16 +40,23 @@ color_of('warn')
 color_of('error')
 color_of('unknown')
 
-// Test 4: inline match (single line, no braces)
-fn sign_of(n: int) => match n case 0: "zero" default: "nonzero"
+// Test 4: braced match in function
+fn sign_of(n: int) => match n {
+    case 0: "zero"
+    default: "nonzero"
+}
 
-"Test 4: inline match"
+"Test 4: braced match"
 sign_of(0)
 sign_of(42)
 sign_of(-1)
 
 // Test 5: match in let expression
-let x = match 42 case int: "is int" case string: "is string" default: "other"
+let x = match 42 {
+    case int: "is int"
+    case string: "is string"
+    default: "other"
+}
 "Test 5: let match"
 x
 
@@ -63,9 +70,12 @@ fn check_null(v) => match v {
 check_null(null)
 check_null(42)
 
-// Test 7: nested match (inner match must use braces or be single-line delimited)
+// Test 7: nested match (both matches use braces)
 fn classify(value) => match value {
-    case int: match value { case 0: "zero" default: "nonzero int" }
+    case int: match value {
+        case 0: "zero"
+        default: "nonzero int"
+    }
     case string: "string"
     default: "other"
 }
@@ -110,3 +120,46 @@ fn float_match(v) => match v {
 float_match(0.0)
 float_match(3.14)
 float_match(42)
+
+// Test 11: match with range patterns
+fn grade(score: int) => match score {
+    case 90 to 100: "A"
+    case 80 to 89: "B"
+    case 70 to 79: "C"
+    case 60 to 69: "D"
+    default: "F"
+}
+
+"Test 11: range patterns"
+grade(95)
+grade(85)
+grade(75)
+grade(65)
+grade(50)
+
+// Test 12: match range type keyword
+fn check_type(v) => match v {
+    case range: "is range"
+    case int: "is int"
+    default: "other"
+}
+
+"Test 12: range type"
+check_type(1 to 10)
+check_type(42)
+check_type("hi")
+
+// Test 13: match range with or-patterns
+fn http_status(code: int) => match code {
+    case 200 to 299: "success"
+    case 300 to 399: "redirect"
+    case 400 to 499 | 500 to 599: "error"
+    default: "unknown"
+}
+
+"Test 13: range or-patterns"
+http_status(200)
+http_status(301)
+http_status(404)
+http_status(503)
+http_status(100)

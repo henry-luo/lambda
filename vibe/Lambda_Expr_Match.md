@@ -99,23 +99,22 @@ The design draws selectively from the best aspects of established pattern matchi
 
 ## Syntax Specification
 
-### Expression Form
+### Unified Match Expression
 
-The match **expression** produces a value. Each arm is `case <type_expr>: <expr>`.
-
-**Multi-line form** (with braces) — use `{ }` to delimit arms when match is inside another expression (e.g., `fn =>`, `let =`, function arguments):
+Match has a single, unified syntax with required braces. Each arm can be in **expression form** or **statement form**. The match construct works in both functional and procedural contexts.
 
 ```
 match <expr> {
-    case <type_expr>: <expr>
-    case <type_expr>: <expr>
-    ...
-    default: <expr>
+    case <type_expr>: <expr>            // expression arm
+    case <type_expr> { <statements> }   // statement arm
+    default: <expr>                     // default expression arm
+    default { <statements> }            // default statement arm
 }
 ```
 
+**Expression arms** (with `:`):
+
 ```lambda
-// In a function body — braces required for multi-line match inside =>
 fn classify(n: int) => match n {
     case 0: "zero"
     case int: if (~ > 0) "positive" else "negative"
@@ -128,69 +127,11 @@ let label = match status {
 }
 ```
 
-**Inline form** (no braces) — all arms on a single line:
-
-```lambda
-let result = match code case 200: "OK" case 404: "Not Found" default: "Other"
-fn sign_of(n: int) => match n case 0: "zero" default: "nonzero"
-```
-
-**Statement-level form** (no braces) — at the top level of a block, match can span multiple lines without braces because there is no linebreak termination issue:
-
-```lambda
-match value
-    case int: "integer"
-    case string: "text"
-    default: "other"
-```
-
-With parenthesized scrutinee (also valid):
-
-```lambda
-let result = match (get_status()) {
-    case 200: "OK"
-    case 404: "Not Found"
-    default: "Other"
-}
-```
-
-### Statement Form
-
-The match **statement** uses curly-brace arms. It is available in both `fn` and `pn` bodies.
-
-```
-match <expr>
-    case <type_expr> {
-        <statements>
-    }
-    case <type_expr> {
-        <statements>
-    }
-    ...
-    default {
-        <statements>
-    }
-```
-
-```lambda
-fn describe(shape) {
-    match shape.tag
-        case 'circle' {
-            let area = 3.14159 * shape.r ^ 2;
-            "circle with area " ++ string(area)
-        }
-        case 'rect' {
-            let area = shape.w * shape.h;
-            "rectangle with area " ++ string(area)
-        }
-}
-```
-
-In procedural functions, the statement form naturally supports `var`, `while`, `break`, `continue`, `return`:
+**Statement arms** (with `{ }`):
 
 ```lambda
 pn handle_event(event) {
-    match event.kind
+    match event.kind {
         case 'click' {
             var count = state.clicks;
             count = count + 1;
@@ -203,15 +144,44 @@ pn handle_event(event) {
         default {
             // ignore other events
         }
+    }
+}
+```
+
+**Mixed arms** — expression and statement arms can be freely combined:
+
+```lambda
+fn describe(shape) => match shape.tag {
+    case 'circle' {
+        let area = 3.14159 * shape.r ^ 2;
+        "circle with area " ++ string(area)
+    }
+    case 'rect' {
+        let area = shape.w * shape.h;
+        "rectangle with area " ++ string(area)
+    }
+    default: "unknown shape"
+}
+```
+
+With parenthesized scrutinee (also valid):
+
+```lambda
+let result = match (get_status()) {
+    case 200: "OK"
+    case 404: "Not Found"
+    default: "Other"
 }
 ```
 
 ### Syntactic Notes
 
+- **Braces are required** — `match <expr> { ... }` always uses `{ }` to delimit the arm block.
 - Parentheses around the scrutinee are **optional** (unlike `if` and `for`).
-- **Expression form** uses `case <type_expr>: <expr>` — the `:` is the arm separator.
-- **Statement form** uses `case <type_expr> { <stmts> }` — curly braces delimit the arm body.
-- `default` replaces `_` as the catch-all arm keyword. It matches anything.
+- **Expression arms** use `case <type_expr>: <expr>` — the `:` is the arm separator.
+- **Statement arms** use `case <type_expr> { <stmts> }` — curly braces delimit the arm body.
+- Expression and statement arms can be **freely mixed** within one match.
+- `default` is the catch-all arm keyword. It matches anything.
 - No comma or semicolon between arms — arms are delimited by `case` and `default`.
 - **Fall-through does not exist.** Each arm is independent (like Rust, unlike C `switch`).
 - **`~`** refers to the matched value in arm bodies, just like in pipe expressions.
@@ -227,22 +197,24 @@ Case arms use **type expressions** as patterns. In Lambda's type system, literal
 Match on the runtime type using any type expression:
 
 ```lambda
-match data
+match data {
     case int: ~ * 2
     case string: ~.upper()
     case [int]: sum(~)
     default: error("unsupported")
+}
 ```
 
 Complex type expressions work as patterns:
 
 ```lambda
-match value
+match value {
     case int | float: "numeric: " ++ string(~)
     case string: "text: " ++ ~
     case [any]: "array of " ++ string(len(~))
     case {name: string, age: int}: ~.name ++ " is " ++ string(~.age)
     default: "other"
+}
 ```
 
 ### Literal Patterns
@@ -252,42 +224,46 @@ Since literal values are type expressions in Lambda, they work directly as case 
 **Integer literals:**
 
 ```lambda
-match code
+match code {
     case 200: "OK"
     case 301: "Moved"
     case 404: "Not Found"
     case 500: "Server Error"
     default: "Unknown"
+}
 ```
 
 **Boolean and null literals:**
 
 ```lambda
-match value
+match value {
     case true: "yes"
     case false: "no"
     case null: "nothing"
+}
 ```
 
 **String literals:**
 
 ```lambda
-match command
+match command {
     case "help": show_help()
     case "version": show_version()
     case "quit": exit()
     default: error("unknown command: " ++ ~)
+}
 ```
 
 **Symbol literals** (quoted with `'...'`):
 
 ```lambda
-match direction
+match direction {
     case 'north': (0, 1)
     case 'south': (0, -1)
     case 'east': (1, 0)
     case 'west': (-1, 0)
     default: (0, 0)
+}
 ```
 
 ### Or-Patterns
@@ -295,27 +271,30 @@ match direction
 Combine multiple type expressions into a single arm using `|`. The arm matches if **any** of the patterns match.
 
 ```lambda
-match day
+match day {
     case 'mon' | 'tue' | 'wed' | 'thu' | 'fri': "weekday"
     case 'sat' | 'sun': "weekend"
+}
 ```
 
 ```lambda
-match code
+match code {
     case 200 | 201 | 204: "success"
     case 301 | 302: "redirect"
     case 400 | 403 | 404: "client error"
     case 500 | 502 | 503: "server error"
     default: "unknown"
+}
 ```
 
 Or-patterns also work with type expressions:
 
 ```lambda
-match value
+match value {
     case int | float: "number: " ++ string(~)
     case string | symbol: "text-like: " ++ string(~)
     default: "other"
+}
 ```
 
 > **Note**: `|` in case patterns denotes alternatives, which is consistent with Lambda's union type syntax `int | string`. A `case int | string:` arm matches values that are `int` or `string` — exactly the same as checking `~ is int | string`.
@@ -325,10 +304,11 @@ match value
 The `default` keyword serves as the catch-all arm. It matches any value not matched by previous arms.
 
 ```lambda
-match status
+match status {
     case 'ok': handle_ok()
     case 'error': handle_error()
     default: handle_unknown(~)     // ~ is the unmatched value
+}
 ```
 
 - `default` must be the **last** arm (if present).
@@ -346,20 +326,22 @@ This keeps the pattern language simple — cases are just type expressions — w
 ### Basic Access
 
 ```lambda
-match data
+match data {
     case int: ~ * 2                    // arithmetic on the matched int
     case string: ~.upper()             // method call on the matched string
     case [int]: sum(~)                 // pass the matched array to a function
     default: string(~)
+}
 ```
 
 ### Field Access
 
 ```lambda
-match event
+match event {
     case {type: symbol, x: int, y: int}: handle_click(~.x, ~.y)
     case {type: symbol, key: string}: handle_key(~.key)
     default: null
+}
 ```
 
 ### Nested Pipe Within Arms
@@ -367,18 +349,20 @@ match event
 Since `~` already refers to the matched value, pipe expressions within match arms work naturally:
 
 ```lambda
-match data
+match data {
     case [int]: ~ | ~ ^ 2 | sum       // square each element, then sum
     case [string]: ~ | ~.upper()       // uppercase each string
     default: null
+}
 ```
 
 ### Index Access
 
 ```lambda
-match args
+match args {
     case [string]: execute(~.0, ~[1 to -1])   // first element + rest
     default: show_help()
+}
 ```
 
 ### Why `~` Instead of Destructuring
@@ -452,8 +436,8 @@ This is consistent with Lambda's existing type guard behavior in `if (value is T
 
 ### Value of Match
 
-- **Expression form**: The match expression evaluates to the value of the selected arm's expression. All arms must produce compatible types (unified via standard type inference).
-- **Statement form**: The match statement evaluates each statement in the selected arm's block. The last expression in the block is the value produced (consistent with Lambda's block semantics).
+- **Expression arms** (`case T: expr`): The match expression evaluates to the value of the selected arm's expression. All expression arms should produce compatible types (unified via standard type inference).
+- **Statement arms** (`case T { stmts }`): The statements in the selected arm's block are executed. In expression context, the match result is `null` for statement arms.
 
 If no arm matches (which should be prevented by exhaustiveness checking), the match expression evaluates to `null`.
 
@@ -476,10 +460,11 @@ events | match ~ {
 
 ```lambda
 for (item in data)
-    match item
+    match item {
         case int: ~ * 2
         case string: len(~)
         default: 0
+    }
 ```
 
 ### With Error Handling
@@ -487,10 +472,11 @@ for (item in data)
 ```lambda
 fn process(input: string) int^ {
     let parsed = parse(input)?;
-    match parsed
+    match parsed {
         case {value: int}: ~.value
         case {value: string}: raise error("expected int, got string")
         default: raise error("unexpected structure")
+    }
 }
 ```
 
@@ -513,10 +499,11 @@ Lambda's string patterns integrate as type expressions in cases:
 string Email = \w+ "@" \w+ "." \a[2, 6]
 string Phone = \d[3] "-" \d[3] "-" \d[4]
 
-match contact_info
+match contact_info {
     case Email: "email: " ++ ~
     case Phone: "phone: " ++ ~
     case string: "unknown format: " ++ ~
+}
 ```
 
 ---
@@ -571,15 +558,17 @@ fn eval(node) => match node.op {
 ```lambda
 fn route(req) => match req.method {
     case 'GET' {
-        match req.path
+        match req.path {
             case "/": home_page()
             case "/api/users": list_users()
             default: {status: 404, body: "not found"}
+        }
     }
     case 'POST' {
-        match req.path
+        match req.path {
             case "/api/users": create_user(req.body)
             default: {status: 404, body: "not found"}
+        }
     }
     default {
         {status: 405, body: "method not allowed"}
@@ -628,7 +617,7 @@ fn summarize(data) => match data {
 ```lambda
 pn process_events(events) {
     for event in events {
-        match event.kind
+        match event.kind {
             case 'init' {
                 var state = init_state();
                 log("initialized")
@@ -648,6 +637,7 @@ pn process_events(events) {
             default {
                 log("unknown event: " ++ string(event.kind))
             }
+        }
     }
 }
 ```
@@ -659,32 +649,15 @@ pn process_events(events) {
 Below is the actual Tree-sitter grammar implementation for `match`:
 
 ```js
-// Match expression (functional form) — each arm uses : <expression>
-// Braced form for multi-line: match x { case int: ... case string: ... }
-// Inline form for single-line: match x case int: ... case string: ...
-match_expr: $ => choice(
-    seq(
-        'match', field('scrutinee', $._expression),
-        '{',
-        repeat1(choice($.match_arm_expr, $.match_default_expr)),
-        '}'
-    ),
-    prec.right(seq(
-        'match', field('scrutinee', $._expression),
-        repeat1(choice($.match_arm_expr, $.match_default_expr))
-    )),
-),
-
-// Match statement (procedural form) — arms use { <statements> } or : <expression>
-// Both braced and non-braced top-level forms supported
-match_stam: $ => seq(
+// Match expression — unified form with required braces
+// match expr { case_arms }
+// Each arm can be expression form (case T: expr) or statement form (case T { stmts })
+match_expr: $ => seq(
     'match', field('scrutinee', $._expression),
-    choice(
-        seq('{', repeat1(choice($.match_arm_stam, $.match_arm_expr,
-                                $.match_default_stam, $.match_default_expr)), '}'),
-        repeat1(choice($.match_arm_stam, $.match_arm_expr,
-                        $.match_default_stam, $.match_default_expr)),
-    )
+    '{',
+    repeat1(choice($.match_arm_expr, $.match_arm_stam,
+                   $.match_default_expr, $.match_default_stam)),
+    '}'
 ),
 
 // Expression arm:  case <type_expr>: <expr>
@@ -773,22 +746,24 @@ Arms could include a `where` boolean condition that must be true for the arm to 
 
 ```lambda
 // Future syntax — not yet supported
-match n
+match n {
     case int where ~ > 0 and ~ < 100: "small positive"
     case int where ~ >= 100: "large positive"
     case 0: "zero"
     default: "negative: " ++ string(~)
+}
 ```
 
 Guard clauses would enable refining a type/literal match with arbitrary boolean conditions. When added, guarded arms would **not** count toward exhaustiveness (since the guard can fail). In the meantime, use `if`/`else` inside arm bodies to achieve the same effect:
 
 ```lambda
 // Current workaround
-match n
+match n {
     case int: if (~ > 0 and ~ < 100) "small positive"
              else if (~ >= 100) "large positive"
              else "negative: " ++ string(~)
     case 0: "zero"
+}
 ```
 
 ### Range Patterns (`to`)
@@ -797,12 +772,13 @@ Arms could match against a range of values using Lambda's `to` operator:
 
 ```lambda
 // Future syntax — not yet supported
-match score
+match score {
     case 90 to 100: "A"
     case 80 to 89: "B"
     case 70 to 79: "C"
     case 60 to 69: "D"
     default: "F"
+}
 ```
 
 Range patterns would be inclusive on both ends, consistent with Lambda's `to` semantics. This requires Lambda's type expression system to support range types as first-class type expressions.

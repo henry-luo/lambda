@@ -127,6 +127,7 @@ function built_in_types(include_null) {
     'symbol',
     'string',
     'binary',
+    'range',
     'list',
     'array',
     'map',
@@ -230,7 +231,6 @@ module.exports = grammar({
   ]],
 
   conflicts: $ => [
-    [$.match_expr, $.match_stam],
   ],
 
   rules: {
@@ -356,7 +356,7 @@ module.exports = grammar({
       $.object_type,
       $.entity_type,
       $.if_stam,
-      $.match_stam,
+      $.match_expr,
       $.for_stam,
       $.while_stam,
       $.fn_stam,
@@ -714,20 +714,14 @@ module.exports = grammar({
       )),
     )),
 
-    // Match expression (functional form) — each arm uses : <expression>
-    // Braced form for multi-line: match x { case int: ... case string: ... }
-    // Inline form for single-line: match x case int: ... case string: ...
-    match_expr: $ => choice(
-      seq(
-        'match', field('scrutinee', $._expression),
-        '{',
-        repeat1(choice($.match_arm_expr, $.match_default_expr)),
-        '}'
-      ),
-      prec.right(seq(
-        'match', field('scrutinee', $._expression),
-        repeat1(choice($.match_arm_expr, $.match_default_expr))
-      )),
+    // Match expression — unified form with required braces
+    // match expr { case_arms }
+    // Each arm can be expression form (case T: expr) or statement form (case T { stmts })
+    match_expr: $ => seq(
+      'match', field('scrutinee', $._expression),
+      '{',
+      repeat1(choice($.match_arm_expr, $.match_arm_stam, $.match_default_expr, $.match_default_stam)),
+      '}'
     ),
 
     match_arm_expr: $ => prec.right(seq(
@@ -738,18 +732,6 @@ module.exports = grammar({
     match_default_expr: $ => prec.right(seq(
       'default', ':', field('body', $._expression)
     )),
-
-    // Match statement (procedural form) — arms use { <statements> } or : <expression>
-    // Supports both braced and non-braced top-level forms:
-    //   match x { case ... }     — braced form
-    //   match x case ... case ...  — non-braced form (multi-line at statement level)
-    match_stam: $ => seq(
-      'match', field('scrutinee', $._expression),
-      choice(
-        seq('{', repeat1(choice($.match_arm_stam, $.match_arm_expr, $.match_default_stam, $.match_default_expr)), '}'),
-        repeat1(choice($.match_arm_stam, $.match_arm_expr, $.match_default_stam, $.match_default_expr)),
-      )
-    ),
 
     match_arm_stam: $ => seq(
       'case', field('pattern', $._type_expr),
@@ -948,10 +930,17 @@ module.exports = grammar({
       field('type', $._type_expr),
     ),
 
+    // Range type: literal 'to' literal — supports integer ranges as types
+    // e.g. 1 to 10, 0 to 255
+    range_type: $ => prec.left('range_to', seq(
+      field('start', $._non_null_literal), 'to', field('end', $._non_null_literal),
+    )),
+
     primary_type: $ => choice(
       $._non_null_literal, // non-null literal values; null is now a base type
       $.base_type,
       $.identifier,  // type reference
+      $.range_type,
       $.list_type,
       $.array_type,
       $.map_type,

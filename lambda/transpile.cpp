@@ -420,7 +420,7 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
         pre_define_closure_envs(tp, if_node->otherwise);
         break;
     }
-    case AST_NODE_MATCH_EXPR:  case AST_NODE_MATCH_STAM: {
+    case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         pre_define_closure_envs(tp, match_node->scrutinee);
         AstMatchArm* arm = match_node->first_arm;
@@ -2398,12 +2398,33 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
         strbuf_append_str(tp->code_buf, "1"); // fallback: always true
         return;
     }
+
+    // union patterns (T | U): recursively generate OR conditions for each side
+    // handles mixed patterns: type | type, range | range, literal | literal, etc.
+    if (pattern->node_type == AST_NODE_BINARY_TYPE) {
+        AstBinaryNode* bi = (AstBinaryNode*)pattern;
+        if (bi->op == OPERATOR_UNION) {
+            strbuf_append_char(tp->code_buf, '(');
+            transpile_match_condition(tp, bi->left);
+            strbuf_append_str(tp->code_buf, " || ");
+            transpile_match_condition(tp, bi->right);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+    }
+
     TypeId pattern_type = pattern->type->type_id;
 
     // type patterns use fn_is (matches runtime type checking)
     if (pattern_type == LMD_TYPE_TYPE || pattern_type == LMD_TYPE_TYPE_UNARY ||
         pattern_type == LMD_TYPE_TYPE_BINARY) {
         strbuf_append_str(tp->code_buf, "fn_is(_pipe_item, ");
+        transpile_box_item(tp, pattern);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    // range patterns use fn_in (membership/containment check)
+    else if (pattern_type == LMD_TYPE_RANGE) {
+        strbuf_append_str(tp->code_buf, "fn_in(_pipe_item, ");
         transpile_box_item(tp, pattern);
         strbuf_append_char(tp->code_buf, ')');
     }
@@ -2416,6 +2437,7 @@ static void transpile_match_condition(Transpiler* tp, AstNode* pattern) {
 }
 
 // match expression — generates C statement expression ({...}) with if-else chain
+// handles both expression arms (case T: expr) and statement arms (case T { stmts })
 void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
     log_debug("transpile match expr");
     if (!match_node || !match_node->scrutinee || !match_node->first_arm) {
@@ -2444,22 +2466,34 @@ void transpile_match(Transpiler* tp, AstMatchNode *match_node) {
             }
             transpile_match_condition(tp, arm->pattern);
             strbuf_append_str(tp->code_buf, ") {\n");
-            strbuf_append_str(tp->code_buf, "    _match_result = ");
-            transpile_box_item(tp, arm->body);
-            strbuf_append_str(tp->code_buf, ";\n");
+            // handle both expression and statement arms
+            if (arm->body && arm->body->node_type == AST_NODE_CONTENT) {
+                transpile_proc_statements(tp, (AstListNode*)arm->body);
+            } else {
+                strbuf_append_str(tp->code_buf, "    _match_result = ");
+                transpile_box_item(tp, arm->body);
+                strbuf_append_str(tp->code_buf, ";\n");
+            }
             strbuf_append_str(tp->code_buf, "  }");
         } else {
             // default arm
             if (first) {
-                // only a default arm (unusual)
-                strbuf_append_str(tp->code_buf, "  _match_result = ");
-                transpile_box_item(tp, arm->body);
-                strbuf_append_str(tp->code_buf, ";\n");
+                if (arm->body && arm->body->node_type == AST_NODE_CONTENT) {
+                    transpile_proc_statements(tp, (AstListNode*)arm->body);
+                } else {
+                    strbuf_append_str(tp->code_buf, "  _match_result = ");
+                    transpile_box_item(tp, arm->body);
+                    strbuf_append_str(tp->code_buf, ";\n");
+                }
             } else {
                 strbuf_append_str(tp->code_buf, " else {\n");
-                strbuf_append_str(tp->code_buf, "    _match_result = ");
-                transpile_box_item(tp, arm->body);
-                strbuf_append_str(tp->code_buf, ";\n");
+                if (arm->body && arm->body->node_type == AST_NODE_CONTENT) {
+                    transpile_proc_statements(tp, (AstListNode*)arm->body);
+                } else {
+                    strbuf_append_str(tp->code_buf, "    _match_result = ");
+                    transpile_box_item(tp, arm->body);
+                    strbuf_append_str(tp->code_buf, ";\n");
+                }
                 strbuf_append_str(tp->code_buf, "  }");
             }
         }
@@ -2802,7 +2836,7 @@ void transpile_proc_statements(Transpiler* tp, AstListNode *list_node) {
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)item);
         }
-        else if (item->node_type == AST_NODE_MATCH_STAM) {
+        else if (item->node_type == AST_NODE_MATCH_EXPR) {
             transpile_match_stam(tp, (AstMatchNode*)item);
         }
         else {
@@ -2874,7 +2908,7 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
             strbuf_append_str(tp->code_buf, "\n ");
             transpile_if_stam(tp, (AstIfNode*)item);
         }
-        else if (item->node_type == AST_NODE_MATCH_STAM) {
+        else if (item->node_type == AST_NODE_MATCH_EXPR) {
             transpile_match_stam(tp, (AstMatchNode*)item);
         }
         else if (item->node_type == AST_NODE_IF_EXPR) {
@@ -4466,9 +4500,6 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_MATCH_EXPR:
         transpile_match(tp, (AstMatchNode*)expr_node);
         break;
-    case AST_NODE_MATCH_STAM:
-        transpile_match(tp, (AstMatchNode*)expr_node);
-        break;
     case AST_NODE_FOR_EXPR:
         transpile_for(tp, (AstForNode*)expr_node);
         break;
@@ -4694,7 +4725,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }
         break;
     }
-    case AST_NODE_MATCH_EXPR:  case AST_NODE_MATCH_STAM: {
+    case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         define_ast_node(tp, match_node->scrutinee);
         AstMatchArm* arm = match_node->first_arm;
