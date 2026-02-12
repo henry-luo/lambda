@@ -412,7 +412,7 @@ Range* fn_to(Item item_a, Item item_b) {
 
 Function* to_fn(fn_ptr ptr) {
     log_debug("create fn %p", ptr);
-    Function *fn = (Function*)calloc(1, sizeof(Function));
+    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->ptr = ptr;
@@ -423,7 +423,7 @@ Function* to_fn(fn_ptr ptr) {
 // Create function with arity info
 Function* to_fn_n(fn_ptr ptr, int arity) {
     log_debug("create fn %p with arity %d", ptr, arity);
-    Function *fn = (Function*)calloc(1, sizeof(Function));
+    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->arity = (uint8_t)arity;
@@ -436,7 +436,7 @@ Function* to_fn_n(fn_ptr ptr, int arity) {
 // Create function with arity and name for stack traces
 Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
     log_debug("create fn %p with arity %d, name %s", ptr, arity, name ? name : "(null)");
-    Function *fn = (Function*)calloc(1, sizeof(Function));
+    Function *fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->arity = (uint8_t)arity;
@@ -449,7 +449,7 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name) {
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     log_debug("create closure %p with arity %d and env %p", ptr, arity, env);
-    Function* fn = (Function*)calloc(1, sizeof(Function));
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->fn_type = NULL;
@@ -463,7 +463,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env) {
 // Create a closure with captured environment and name for stack traces
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name) {
     log_debug("create closure %p with arity %d, env %p, name %s", ptr, arity, env, name ? name : "(null)");
-    Function* fn = (Function*)calloc(1, sizeof(Function));
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     fn->type_id = LMD_TYPE_FUNC;
     fn->ref_cnt = 1;
     fn->fn_type = NULL;

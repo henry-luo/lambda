@@ -31,7 +31,8 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     void* ptr = heap_alloc(size, type_id);
     memset(ptr, 0, size);
     // mark containers as heap-owned so free_container can distinguish from arena-owned
-    if (type_id >= LMD_TYPE_CONTAINER) {
+    // Note: Function has different layout (arity at offset 1 instead of flags), skip it
+    if (type_id >= LMD_TYPE_CONTAINER && type_id != LMD_TYPE_FUNC) {
         ((Container*)ptr)->is_heap = 1;
     }
     return ptr;
@@ -242,6 +243,16 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
                 if (!container->ref_cnt) free_container(container, clear_entry);
             }
         }
+        else if (field->type->type_id == LMD_TYPE_FUNC) {
+            Function *fn = *(Function**)field_ptr;
+            if (fn) {
+                if (fn->ref_cnt > 0) fn->ref_cnt--;
+                if (!fn->ref_cnt) {
+                    log_debug("freeing map field function: %p", fn);
+                    pool_free(context->heap->pool, fn);
+                }
+            }
+        }
         field = field->next;
     }
 }
@@ -363,6 +374,16 @@ void free_item(Item item, bool clear_entry) {
             pool_free(context->heap->pool, dec);
         }
     }
+    else if (item._type_id == LMD_TYPE_FUNC) {
+        Function *fn = item.function;
+        if (fn) {
+            if (fn->ref_cnt > 0) fn->ref_cnt--;
+            if (!fn->ref_cnt) {
+                log_debug("freeing function item: %p", fn);
+                pool_free(context->heap->pool, fn);
+            }
+        }
+    }
     else if (item._type_id == LMD_TYPE_RAW_POINTER) {
         Container* container = item.container;
         if (container && container->is_heap) {
@@ -426,7 +447,21 @@ void frame_end() {
         else if (itm._type_id == LMD_TYPE_RAW_POINTER) {
             Container* cont = itm.container;
             if (cont) {
-                if (cont->ref_cnt > 0) {
+                // check if this is a Function (type_id at offset 0)
+                TypeId type_id = cont->type_id;
+                if (type_id == LMD_TYPE_FUNC) {
+                    // Function has different layout than Container
+                    Function* fn = (Function*)cont;
+                    if (fn->ref_cnt > 0) {
+                        // still referenced, keep in heap
+                        entries->data[i] = NULL;
+                    } else {
+                        // no references, free it
+                        log_debug("freeing heap function: %p", fn);
+                        pool_free(context->heap->pool, fn);
+                    }
+                }
+                else if (cont->ref_cnt > 0) {
                     // clear the heap entry, and keep the container to be freed by ref_cnt
                     entries->data[i] = NULL;
                 }
