@@ -1042,6 +1042,19 @@
                 "category": "baseline",
                 "tests": [
                     {
+                        "source": "test_str_gtest.cpp",
+                        "name": "Str Library Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_str_gtest.exe",
+                        "icon": "\ud83d\udcd0"
+                    },
+                    {
                         "source": "test_strbuf_gtest.cpp",
                         "name": "String Buffer Tests",
                         "dependencies": [
