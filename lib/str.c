@@ -372,19 +372,22 @@ size_t str_count(const char* s, size_t s_len,
 size_t str_count_byte(const char* s, size_t s_len, char c) {
     if (!s) return 0;
     size_t count = 0;
-    /* SWAR: use popcount on match mask for bulk counting */
+    /* SWAR: XOR with broadcast(c), then count zero bytes.
+     * Note: _swar_has_byte can have false positives due to borrow propagation
+     * across byte boundaries, so we use an OR-cascade approach instead:
+     * XOR → collapse non-zero bytes to 0x01, zero bytes stay 0x00 →
+     * horizontal sum via multiply → subtract from 8. */
     size_t i = 0;
     for (; i + 8 <= s_len; i += 8) {
-        uint64_t mask = _swar_has_byte(_load_u64(s + i), (uint8_t)c);
-        /* each matching byte has its high bit set — count those bits / 8 */
-        if (mask) {
-#if defined(__GNUC__) || defined(__clang__)
-            count += (size_t)__builtin_popcountll(mask) / 8;
-#else
-            while (mask) { count++; mask &= mask - 1; } /* clear lowest set group */
-            /* actually need to count set high-bits spaced 8 apart */
-#endif
-        }
+        uint64_t w = _load_u64(s + i) ^ _swar_broadcast((uint8_t)c);
+        /* collapse each non-zero byte to have at least bit 0 set */
+        w |= (w >> 4);
+        w |= (w >> 2);
+        w |= (w >> 1);
+        w &= 0x0101010101010101ULL; /* each byte is now 0x00 (match) or 0x01 (no match) */
+        /* horizontal sum of the 8 bytes into the top byte via multiply */
+        uint64_t non_matches = (w * 0x0101010101010101ULL) >> 56;
+        count += 8 - (size_t)non_matches;
     }
     for (; i < s_len; i++) {
         if (s[i] == c) count++;
