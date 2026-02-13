@@ -80,7 +80,7 @@ int cmd_webdriver(int argc, char** argv) {
         } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) {
             if (i + 1 < argc) {
                 i++;
-                port = (int)str_to_int64_or(argv[i], strlen(argv[i]), 0);
+                port = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
                 if (port <= 0 || port > 65535) {
                     printf("Error: Invalid port number '%s'\n", argv[i]);
                     return 1;

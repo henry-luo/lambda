@@ -74,7 +74,7 @@ static void format_heading(StringBuf* sb, Element* elem) {
             if (child_type && strcmp(child_type, "level") == 0) {
                 String* level_str = get_first_string_content(child);
                 if (level_str) {
-                    level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
+                    level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
                 }
             } else if (child_type && strcmp(child_type, "todo") == 0) {
                 todo = get_first_string_content(child);

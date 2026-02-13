@@ -363,7 +363,7 @@ static void process_picture_children(PictureState* state, const ElementReader& e
                             // Try to parse as count
                             const char* inner_text = extract_first_text(elem_reader);
                             if (inner_text) {
-                                int val = (int)str_to_int64_or(inner_text, strlen(inner_text), 0);
+                                int val = (int)str_to_int64_default(inner_text, strlen(inner_text), 0);
                                 if (val > 0) {
                                     n = val;
                                     continue;
@@ -417,7 +417,7 @@ static void process_picture_children(PictureState* state, const ElementReader& e
                         // Extract length from curly group
                         const char* len_text = extract_first_text(len_elem);
                         if (len_text) {
-                            length = (float)str_to_double_or(len_text, strlen(len_text), 0.0);
+                            length = (float)str_to_double_default(len_text, strlen(len_text), 0.0);
                         }
                         break;
                     }
@@ -448,7 +448,7 @@ static void process_picture_children(PictureState* state, const ElementReader& e
                         // Extract length from curly group
                         const char* len_text = extract_first_text(len_elem);
                         if (len_text) {
-                            length = (float)str_to_double_or(len_text, strlen(len_text), 0.0);
+                            length = (float)str_to_double_default(len_text, strlen(len_text), 0.0);
                         }
                         break;
                     }
@@ -474,7 +474,7 @@ static void process_picture_children(PictureState* state, const ElementReader& e
                 if (circle_child.isString()) {
                     const char* text = circle_child.cstring();
                     if (text && text[0] != '\0') {
-                        diameter = (float)str_to_double_or(text, strlen(text), 0.0);
+                        diameter = (float)str_to_double_default(text, strlen(text), 0.0);
                     }
                 }
             }
@@ -886,7 +886,7 @@ void picture_cmd_multiput(PictureState* state, const ElementReader& elem) {
                 }
             } else if (text) {
                 // Could be the count
-                int val = (int)str_to_int64_or(text, strlen(text), 0);
+                int val = (int)str_to_int64_default(text, strlen(text), 0);
                 if (val > 0) n = val;
             }
         } else if (child.isElement()) {
@@ -896,7 +896,7 @@ void picture_cmd_multiput(PictureState* state, const ElementReader& elem) {
                 // This is either the count or the content
                 const char* inner_text = extract_first_text(el);
                 if (inner_text) {
-                    int val = (int)str_to_int64_or(inner_text, strlen(inner_text), 0);
+                    int val = (int)str_to_int64_default(inner_text, strlen(inner_text), 0);
                     if (val > 0 && content_elem == nullptr) {
                         n = val;
                     }

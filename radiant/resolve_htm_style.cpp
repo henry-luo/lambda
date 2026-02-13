@@ -286,7 +286,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // size="4" = large (18px), size="5" = x-large (24px), size="6" = xx-large (32px), size="7" = 48px
         const char* size_attr = span->get_attribute("size");
         if (size_attr) {
-            int size_value = (int)str_to_int64_or(size_attr, strlen(size_attr), 0);
+            int size_value = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
             float font_size = 16;  // default medium
             // CSS absolute-size keywords mapped to pixels (based on 16px base)
             switch (size_value) {
@@ -300,7 +300,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 default:
                     // Handle relative sizes: +1, -1, etc.
                     if (size_attr[0] == '+' || size_attr[0] == '-') {
-                        int delta = (int)str_to_int64_or(size_attr, strlen(size_attr), 0);
+                        int delta = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
                         // Map current font size to approximate level and apply delta
                         float current = lycon->font.style->font_size;
                         int level = 3;  // assume medium
@@ -753,7 +753,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Parse size attribute for text inputs
             const char* size_attr = block->get_attribute("size");
             if (size_attr) {
-                block->form->size = (int)str_to_int64_or(size_attr, strlen(size_attr), 0);
+                block->form->size = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
                 if (block->form->size <= 0) block->form->size = FormDefaults::TEXT_SIZE_CHARS;
             }
 
@@ -800,11 +800,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             const char* min_attr = block->get_attribute("min");
             const char* max_attr = block->get_attribute("max");
             const char* step_attr = block->get_attribute("step");
-            if (min_attr) block->form->range_min = str_to_double_or(min_attr, strlen(min_attr), 0.0);
-            if (max_attr) block->form->range_max = str_to_double_or(max_attr, strlen(max_attr), 0.0);
-            if (step_attr) block->form->range_step = str_to_double_or(step_attr, strlen(step_attr), 0.0);
+            if (min_attr) block->form->range_min = str_to_double_default(min_attr, strlen(min_attr), 0.0);
+            if (max_attr) block->form->range_max = str_to_double_default(max_attr, strlen(max_attr), 0.0);
+            if (step_attr) block->form->range_step = str_to_double_default(step_attr, strlen(step_attr), 0.0);
             if (block->form->value) {
-                float val = (float)str_to_double_or(block->form->value, strlen(block->form->value), 0.0);
+                float val = (float)str_to_double_default(block->form->value, strlen(block->form->value), 0.0);
                 block->form->range_value = (val - block->form->range_min) /
                     (block->form->range_max - block->form->range_min);
             }
@@ -912,8 +912,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Parse cols/rows
             const char* cols_attr = block->get_attribute("cols");
             const char* rows_attr = block->get_attribute("rows");
-            if (cols_attr) block->form->cols = (int)str_to_int64_or(cols_attr, strlen(cols_attr), 0);
-            if (rows_attr) block->form->rows = (int)str_to_int64_or(rows_attr, strlen(rows_attr), 0);
+            if (cols_attr) block->form->cols = (int)str_to_int64_default(cols_attr, strlen(cols_attr), 0);
+            if (rows_attr) block->form->rows = (int)str_to_int64_default(rows_attr, strlen(rows_attr), 0);
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         // Intrinsic size based on cols/rows - computed in layout with font metrics
