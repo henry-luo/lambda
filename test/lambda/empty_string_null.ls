@@ -22,12 +22,12 @@ let data = [
 ]
 
 "7. Filter non-empty values:"
-let non_empty = data where (~.value != "")
+let non_empty = data that (~.value != "")
 for (x in non_empty) x.name
 
 // 4. Compound boolean with empty string
 "8. Compound filter (value != '' and name != 'Alice'):"
-let filtered = data where (~.value != "" and ~.name != "Alice")
+let filtered = data that (~.value != "" and ~.name != "Alice")
 for (x in filtered) x.name
 
 // 5. Empty string comparison with other types

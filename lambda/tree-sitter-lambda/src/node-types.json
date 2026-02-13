@@ -570,11 +570,11 @@
             "named": false
           },
           {
-            "type": "to",
+            "type": "that",
             "named": false
           },
           {
-            "type": "where",
+            "type": "to",
             "named": false
           },
           {
@@ -5215,11 +5215,11 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
@@ -5234,12 +5234,16 @@
     "named": false
   },
   {
-    "type": "time",
+    "type": "that",
     "named": false
   },
   {
     "type": "time",
     "named": true
+  },
+  {
+    "type": "time",
+    "named": false
   },
   {
     "type": "to",
