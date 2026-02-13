@@ -2080,7 +2080,7 @@ DocElement* build_inline_content(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "penalty")) {
         const char* val_str = extract_text_content(item, arena);
         if (val_str) {
-            int penalty = (int)str_to_int64_or(val_str, strlen(val_str), 0);
+            int penalty = (int)str_to_int64_default(val_str, strlen(val_str), 0);
             return doc_create_prim_penalty(arena, penalty);
         }
         return nullptr;
@@ -5328,7 +5328,7 @@ DocElement* build_doc_element(const ItemReader& item, Arena* arena,
     if (tag_eq(tag, "penalty")) {
         const char* val_str = extract_text_content(item, arena);
         if (val_str) {
-            int penalty = (int)str_to_int64_or(val_str, strlen(val_str), 0);
+            int penalty = (int)str_to_int64_default(val_str, strlen(val_str), 0);
             if (penalty <= -10000) {
                 return doc_create_raw_html_cstr(arena, "<br class=\"penalty-break\">");
             } else if (penalty >= 10000) {
