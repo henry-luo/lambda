@@ -3345,11 +3345,6 @@
     }
   },
   {
-    "type": "null",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "object_type",
     "named": true,
     "fields": {
@@ -3820,10 +3815,6 @@
         },
         {
           "type": "nan",
-          "named": true
-        },
-        {
-          "type": "null",
           "named": true
         },
         {
@@ -5020,11 +5011,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "default",
@@ -5064,11 +5055,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -5224,19 +5215,19 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
-  },
-  {
-    "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
     "named": true
+  },
+  {
+    "type": "symbol",
+    "named": false
   },
   {
     "type": "t'",
