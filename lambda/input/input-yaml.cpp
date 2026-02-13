@@ -219,24 +219,36 @@ static Item resolve_alias(YamlParser* p, const char* name) {
 // Scalar value parsing
 // ============================================================================
 
-// empty string maps to null in Lambda data model
+// empty string in YAML → actual empty string (e.g., block scalar with strip/clip)
+// note: createStringItem("") returns null due to Lambda's empty-string-is-null semantics,
+// so we directly allocate a String with len=0 to represent a genuine empty string.
 static Item make_empty_string(YamlParser* p) {
-    return p->ctx->builder.createNull();
+    Arena* arena = p->ctx->builder.arena();
+    String* s = (String*)arena_alloc(arena, sizeof(String) + 1);
+    s->ref_cnt = 1;
+    s->len = 0;
+    s->chars[0] = '\0';
+    return (Item){.item = s2it(s)};
 }
 
 // put a key-value pair into a map, using composite key encoding for non-string keys.
 // non-string keys (null, int, bool, etc.) are encoded as: {"?": {"key": key_item, "value": value_item}}
-// empty string keys are treated as null keys and also go through composite encoding.
 static void put_key_value(YamlParser* p, MapBuilder& map, Item key_item, Item value_item) {
     TypeId ktid = get_type_id(key_item);
     if (ktid == LMD_TYPE_STRING) {
         String* s = (String*)(key_item.item & 0x00FFFFFFFFFFFFFFULL);
         if (s->len > 0) {
             map.put(p->ctx->builder.createName(s->chars), value_item);
-            return;
+        } else {
+            // empty string key: createName("") returns null, so allocate directly
+            Arena* arena = p->ctx->builder.arena();
+            String* name = (String*)arena_alloc(arena, sizeof(String) + 1);
+            name->ref_cnt = 1;
+            name->len = 0;
+            name->chars[0] = '\0';
+            map.put(name, value_item);
         }
-        // empty string key → treat as null key
-        key_item = p->ctx->builder.createNull();
+        return;
     }
     // composite key: {"?": {"key": key_item, "value": value_item}}
     MapBuilder inner = p->ctx->builder.map();
@@ -250,8 +262,12 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
 
     int tag = p->tag;
 
-    if (tag == TAG_STR || tag == TAG_NON_SPECIFIC) {
-        if (str[0] == '\0') return p->ctx->builder.createNull(); // empty string → null
+    if (tag == TAG_STR) {
+        if (str[0] == '\0') return make_empty_string(p); // !!str with empty value → ""
+        return p->ctx->builder.createStringItem(str);
+    }
+    if (tag == TAG_NON_SPECIFIC) {
+        if (str[0] == '\0') return p->ctx->builder.createNull();
         return p->ctx->builder.createStringItem(str);
     }
     if (tag == TAG_INT) {
@@ -274,7 +290,7 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
     }
 
     if (quoted) {
-        if (str[0] == '\0') return p->ctx->builder.createNull(); // empty quoted string → null
+        if (str[0] == '\0') return make_empty_string(p); // quoted "" or '' → empty string
         return p->ctx->builder.createStringItem(str);
     }
 
@@ -356,6 +372,10 @@ static Item make_scalar(YamlParser* p, const char* str, bool quoted) {
 static Item parse_double_quoted(YamlParser* p) {
     advance(p); // skip opening "
     StrBuf* sb = strbuf_new_cap(64);
+    // safe_length tracks the buffer position after the last escape-produced character.
+    // when trimming for line folding, we must not trim past this point to preserve
+    // characters produced by escape sequences (e.g., \t should not be trimmed).
+    int safe_length = 0;
 
     while (!at_end(p) && peek(p) != '"') {
         if (peek(p) == '\\') {
@@ -421,11 +441,14 @@ static Item parse_double_quoted(YamlParser* p) {
                     strbuf_append_char(sb, c);
                     break;
             }
+            // mark: everything up to here is safe content from escape sequences
+            safe_length = sb->length;
         } else if (peek(p) == '\n') {
-            // line folding in double-quoted: trim trailing ws, fold
+            // line folding in double-quoted: trim trailing LITERAL whitespace only
+            // do not trim past safe_length (escape-produced characters)
             {
                 int blen = sb->length;
-                while (blen > 0 && (sb->str[blen - 1] == ' ' || sb->str[blen - 1] == '\t')) blen--;
+                while (blen > safe_length && (sb->str[blen - 1] == ' ' || sb->str[blen - 1] == '\t')) blen--;
                 sb->length = blen; sb->str[blen] = '\0';
             }
             advance(p);
@@ -445,14 +468,18 @@ static Item parse_double_quoted(YamlParser* p) {
             } else {
                 strbuf_append_char(sb, ' ');
             }
+            safe_length = 0; // reset after fold
         } else {
             strbuf_append_char(sb, peek(p));
+            // non-whitespace regular chars also advance the safe boundary
+            char ch = peek(p);
+            if (ch != ' ' && ch != '\t') safe_length = sb->length;
             advance(p);
         }
     }
 
     if (!at_end(p) && peek(p) == '"') advance(p);
-    Item result = p->ctx->builder.createStringItem(sb->str);
+    Item result = (sb->length == 0) ? make_empty_string(p) : p->ctx->builder.createStringItem(sb->str);
     strbuf_free(sb);
     return result;
 }
@@ -504,7 +531,7 @@ static Item parse_single_quoted(YamlParser* p) {
         }
     }
 
-    Item result = p->ctx->builder.createStringItem(sb->str);
+    Item result = (sb->length == 0) ? make_empty_string(p) : p->ctx->builder.createStringItem(sb->str);
     strbuf_free(sb);
     return result;
 }
@@ -897,6 +924,7 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
         int saved = p->pos;
         int saved_line = p->line;
         int saved_col = p->col;
+        bool found_content_line = false;
         while (!at_end(p)) {
             int spaces = 0;
             while (!at_end(p) && peek(p) == ' ') { advance(p); spaces++; }
@@ -907,15 +935,24 @@ static Item parse_block_scalar(YamlParser* p, int base_indent) {
             // handle tab-started lines
             if (peek(p) == '\t' && spaces > base_indent) {
                 content_indent = spaces;
+                found_content_line = true;
                 break;
             }
             content_indent = spaces;
+            found_content_line = true;
             break;
         }
         p->pos = saved;
         p->line = saved_line;
         p->col = saved_col;
-        if (content_indent <= base_indent) content_indent = base_indent + 1;
+        if (!found_content_line) {
+            // no non-empty content line: block scalar is empty.
+            // set content_indent very high so whitespace-only lines are treated as
+            // empty lines (contributing only newlines, not space content).
+            content_indent = p->len;
+        } else if (content_indent <= base_indent) {
+            content_indent = base_indent + 1;
+        }
     }
 
     StrBuf* sb = strbuf_new_cap(64);
@@ -1246,8 +1283,12 @@ static Item parse_flow_mapping(YamlParser* p) {
 
         // check if tag/anchor is the key itself (empty key with tag)
         if (key_tag != TAG_NONE && !at_end(p) && peek(p) == ':' && is_flow_mapping_indicator(p)) {
-            // tag like !!str acts as an empty key → null
-            key_item = p->ctx->builder.createNull();
+            // tag like !!str acts as an empty key
+            if (key_tag == TAG_STR || key_tag == TAG_NON_SPECIFIC) {
+                key_item = make_empty_string(p);
+            } else {
+                key_item = p->ctx->builder.createNull();
+            }
         } else if (peek(p) == '"') {
             key_item = parse_double_quoted(p);
         } else if (peek(p) == '\'') {
