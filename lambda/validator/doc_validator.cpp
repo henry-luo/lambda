@@ -6,6 +6,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
+#include "../../lib/str.h"
 #include "../transpiler.hpp"
 #include "validator.hpp"
 #include "../schema_ast.hpp"
@@ -405,7 +406,7 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
             if (error->message) {
                 error->message->len = len;
                 error->message->ref_cnt = 1;
-                strcpy(error->message->chars, message);
+                str_copy(error->message->chars, error->message->len + 1, message, error->message->len);
             }
         }
     }

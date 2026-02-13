@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
+#include "../../../lib/str.h"
 
 // Forward declarations
 static void css_property_value_parser_set_default_env_vars(CssPropertyValueParser* parser);
@@ -136,7 +137,7 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
         value->type = CSS_VALUE_TYPE_CUSTOM;
         char* keyword_copy = (char*)pool_alloc(pool, strlen(keyword_to_lookup) + 1);
         if (keyword_copy) {
-            strcpy(keyword_copy, keyword_to_lookup);
+            str_copy(keyword_copy, strlen(keyword_to_lookup) + 1, keyword_to_lookup, strlen(keyword_to_lookup));
             value->data.custom_property.name = keyword_copy;
             value->data.custom_property.fallback = NULL;
         }
@@ -593,14 +594,15 @@ static CssValue* css_parse_font_family_list(CssPropertyValueParser* parser,
                 char* combined = (char*)pool_alloc(parser->pool, total_len + word_count);
                 if (combined) {
                     combined[0] = '\0';
+                    size_t combined_len = 0;
                     int j = start_idx;
                     bool first = true;
                     while (j < i) {
                         if (tokens[j].type == CSS_TOKEN_IDENT) {
                             if (!first) {
-                                strcat(combined, " ");
+                                combined_len = str_cat(combined, combined_len, total_len + word_count, " ", 1);
                             }
-                            strcat(combined, tokens[j].value);
+                            combined_len = str_cat(combined, combined_len, total_len + word_count, tokens[j].value, strlen(tokens[j].value));
                             first = false;
                         }
                         j++;
@@ -823,7 +825,7 @@ void css_property_value_parser_add_error(CssPropertyValueParser* parser, const c
     size_t len = strlen(message);
     char* error_copy = (char*)pool_alloc(parser->pool, len + 1);
     if (error_copy) {
-        strcpy(error_copy, message);
+        str_copy(error_copy, len + 1, message, len);
         parser->error_messages[parser->error_count++] = error_copy;
     }
 }

@@ -15,6 +15,7 @@
 #include "../../lib/log.h"
 #include "../../lib/string.h"
 #include "../../lib/datetime.h"
+#include "../../lib/str.h"
 
 #ifdef __APPLE__
 #include <sys/sysctl.h>
@@ -133,7 +134,7 @@ static const char* get_os_version() {
                 memmove(version_str, version_start, strlen(version_start) + 1);
             }
         } else {
-            strcpy(version_str, "Unknown");
+            str_copy(version_str, sizeof(version_str), "Unknown", 7);
         }
     }
     return version_str;
@@ -183,7 +184,7 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
     char nodename[256];
     DWORD nodename_size = sizeof(nodename);
     if (!GetComputerNameA(nodename, &nodename_size)) {
-        strcpy(nodename, "unknown");
+        str_copy(nodename, sizeof(nodename), "unknown", 7);
     }
 #else
     // Unix/Linux system information using uname
@@ -370,9 +371,10 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
         size_t path_part_len = strlen(path_part);
 
         full_path = (char*)malloc(host_len + 1 + path_part_len + 1);
-        strcpy(full_path, url->host->chars);
-        strcat(full_path, "/");
-        strcat(full_path, path_part);
+        str_copy(full_path, host_len + 1 + path_part_len + 1, url->host->chars, host_len);
+        size_t full_path_len = host_len;
+        full_path_len = str_cat(full_path, full_path_len, host_len + 1 + path_part_len + 1, "/", 1);
+        full_path_len = str_cat(full_path, full_path_len, host_len + 1 + path_part_len + 1, path_part, path_part_len);
 
     } else {
         full_path = strdup(url->pathname->chars);
