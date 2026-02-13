@@ -74,7 +74,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             // Read colspan attribute
             const char* colspan_str = node->get_attribute("colspan");
             if (colspan_str && *colspan_str) {
-                int colspan = (int)str_to_int64_or(colspan_str, strlen(colspan_str), 0);
+                int colspan = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0);
                 cell->td->col_span = (colspan > 0) ? colspan : 1;
             } else {
                 cell->td->col_span = 1;
@@ -82,7 +82,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             // Read rowspan attribute
             const char* rowspan_str = node->get_attribute("rowspan");
             if (rowspan_str && *rowspan_str) {
-                int rowspan = (int)str_to_int64_or(rowspan_str, strlen(rowspan_str), 0);
+                int rowspan = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0);
                 cell->td->row_span = (rowspan > 0) ? rowspan : 1;
             } else {
                 cell->td->row_span = 1;

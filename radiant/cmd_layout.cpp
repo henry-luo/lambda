@@ -434,15 +434,15 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
             log_debug("[viewport] Key='%s' Value='%s'", key, value);
 
             if (strcasecmp(key, "initial-scale") == 0) {
-                doc->viewport_initial_scale = (float)str_to_double_or(value, strlen(value), 0.0);
+                doc->viewport_initial_scale = (float)str_to_double_default(value, strlen(value), 0.0);
                 log_info("[viewport] initial-scale=%.2f", doc->viewport_initial_scale);
             }
             else if (strcasecmp(key, "minimum-scale") == 0) {
-                doc->viewport_min_scale = (float)str_to_double_or(value, strlen(value), 0.0);
+                doc->viewport_min_scale = (float)str_to_double_default(value, strlen(value), 0.0);
                 log_debug("[viewport] minimum-scale=%.2f", doc->viewport_min_scale);
             }
             else if (strcasecmp(key, "maximum-scale") == 0) {
-                doc->viewport_max_scale = (float)str_to_double_or(value, strlen(value), 0.0);
+                doc->viewport_max_scale = (float)str_to_double_default(value, strlen(value), 0.0);
                 log_debug("[viewport] maximum-scale=%.2f", doc->viewport_max_scale);
             }
             else if (strcasecmp(key, "width") == 0) {
@@ -450,7 +450,7 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
                     doc->viewport_width = 0;  // 0 means device-width
                     log_debug("[viewport] width=device-width");
                 } else {
-                    doc->viewport_width = (int)str_to_int64_or(value, strlen(value), 0);
+                    doc->viewport_width = (int)str_to_int64_default(value, strlen(value), 0);
                     log_debug("[viewport] width=%d", doc->viewport_width);
                 }
             }
@@ -459,7 +459,7 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
                     doc->viewport_height = 0;  // 0 means device-height
                     log_debug("[viewport] height=device-height");
                 } else {
-                    doc->viewport_height = (int)str_to_int64_or(value, strlen(value), 0);
+                    doc->viewport_height = (int)str_to_int64_default(value, strlen(value), 0);
                     log_debug("[viewport] height=%d", doc->viewport_height);
                 }
             }
@@ -3631,7 +3631,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
             if (i + 1 < argc) {
                 i++;
-                opts->viewport_width = (int)str_to_int64_or(argv[i], strlen(argv[i]), 0);
+                opts->viewport_width = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
             } else {
                 log_error("Error: -vw/--viewport-width requires an argument");
                 return false;
@@ -3640,7 +3640,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
             if (i + 1 < argc) {
                 i++;
-                opts->viewport_height = (int)str_to_int64_or(argv[i], strlen(argv[i]), 0);
+                opts->viewport_height = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
             } else {
                 log_error("Error: -vh/--viewport-height requires an argument");
                 return false;

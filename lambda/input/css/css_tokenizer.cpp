@@ -1014,9 +1014,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
                         if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
                         } else {
-                            token->data.number_value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
                         }
                     }
                 } else {
@@ -1089,9 +1089,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
                         if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
                         } else {
-                            token->data.number_value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
                         }
                     }
                 }
@@ -1162,9 +1162,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
                         if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
                         } else {
-                            token->data.number_value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
                         }
                     }
                 } else if (ch == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
@@ -1204,9 +1204,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
                         if (token->type == CSS_TOKEN_DIMENSION) {
-                            token->data.dimension.value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.dimension.value = str_to_double_default(num_str, number_end - start, 0.0);
                         } else {
-                            token->data.number_value = str_to_double_or(num_str, number_end - start, 0.0);
+                            token->data.number_value = str_to_double_default(num_str, number_end - start, 0.0);
                         }
                     }
                 } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))) {

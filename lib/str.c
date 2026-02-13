@@ -766,12 +766,12 @@ bool str_to_double(const char* s, size_t len, double* out, const char** end) {
     return ok;
 }
 
-int64_t str_to_int64_or(const char* s, size_t len, int64_t default_val) {
+int64_t str_to_int64_default(const char* s, size_t len, int64_t default_val) {
     int64_t v;
     return str_to_int64(s, len, &v, NULL) ? v : default_val;
 }
 
-double str_to_double_or(const char* s, size_t len, double default_val) {
+double str_to_double_default(const char* s, size_t len, double default_val) {
     double v;
     return str_to_double(s, len, &v, NULL) ? v : default_val;
 }

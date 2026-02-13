@@ -1794,7 +1794,7 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
     bool has_sign = false;
     if (num_str[0] == '-') { has_sign = true;  num_str++; } // skip the sign
     while (*num_str == ' ' || *num_str == '\t' || *num_str == '\n' || *num_str == '\r') { num_str++; } // skip leading spaces
-    // str_to_double_or() does not handle 'inf', 'nan' — add special handling
+    // str_to_double_default() does not handle 'inf', 'nan' — add special handling
     log_debug("build lit float: %s", num_str);
     // add special handling for "inf", "-inf", "nan"
     if (strncasecmp(num_str, "inf", 3) == 0) {
@@ -1807,7 +1807,7 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
         log_debug("build lit float: nan");
     }
     else { // normal float parsing
-        item_type->double_val = str_to_double_or(num_str, strlen(num_str), 0.0);
+        item_type->double_val = str_to_double_default(num_str, strlen(num_str), 0.0);
         log_debug("build lit float: %s, value: %f", num_str, item_type->double_val);
         if (has_sign) { item_type->double_val = -item_type->double_val; }
     }

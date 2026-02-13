@@ -222,7 +222,7 @@ public:
             if ((*p == '.' || *p == ')') &&
                 (*(p+1) == ' ' || *(p+1) == '\t' || *(p+1) == '\0' || *(p+1) == '\r' || *(p+1) == '\n')) {
                 info.marker = *p;
-                info.number = (int)str_to_int64_or(num_start, strlen(num_start), 0);
+                info.number = (int)str_to_int64_default(num_start, strlen(num_start), 0);
                 info.is_ordered = true;
                 info.marker_end = p + 1;
 
