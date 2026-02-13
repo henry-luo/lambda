@@ -13,6 +13,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/file.h"
+#include "../../lib/str.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -72,7 +73,7 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document,
 // =============================================================================
 // Lambda Source File Validation (AST-based)
 // =============================================================================
-// 
+//
 // This section handles validation of Lambda source files (.ls).
 // Currently provides basic parse-level validation - checks that the file can
 // be parsed into a valid AST. More sophisticated semantic validation could be
@@ -351,7 +352,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             if (type_string) {
                 type_string->len = strlen(input_format);
                 type_string->ref_cnt = 0;
-                strcpy(type_string->chars, input_format);
+                str_copy(type_string->chars, type_string->len + 1, input_format, type_string->len);
             }
         }
 
@@ -359,7 +360,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         if (url_string) {
             url_string->len = strlen(file_url);
             url_string->ref_cnt = 0;
-            strcpy(url_string->chars, file_url);
+            str_copy(url_string->chars, url_string->len + 1, file_url, url_string->len);
 
             Input* input = input_from_url(url_string, type_string, nullptr, nullptr);
             if (input && input->root.item != ITEM_ERROR) {
@@ -460,11 +461,11 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--strict") == 0) {
             strict_mode = true;
         } else if (strcmp(argv[i], "--max-errors") == 0 && i + 1 < argc) {
-            max_errors = atoi(argv[i + 1]);
+            max_errors = (int)str_to_int64_default(argv[i + 1], strlen(argv[i + 1]), 0);
             if (max_errors <= 0) max_errors = 100;
             i++;
         } else if (strcmp(argv[i], "--max-depth") == 0 && i + 1 < argc) {
-            max_depth = atoi(argv[i + 1]);
+            max_depth = (int)str_to_int64_default(argv[i + 1], strlen(argv[i + 1]), 0);
             if (max_depth <= 0) max_depth = 100;
             i++;
         } else if (strcmp(argv[i], "--allow-unknown") == 0) {

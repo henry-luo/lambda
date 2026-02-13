@@ -4,6 +4,7 @@
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"  // For string buffer
+#include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
@@ -1328,7 +1329,8 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
                 if (i + 1 < argc) {
-                    viewport_width = atoi(argv[++i]);
+                    i++;
+                    viewport_width = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
                     if (viewport_width <= 0) {
                         printf("Error: Invalid viewport width '%s'. Must be a positive integer.\n", argv[i]);
                         log_finish();
@@ -1341,7 +1343,8 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
                 if (i + 1 < argc) {
-                    viewport_height = atoi(argv[++i]);
+                    i++;
+                    viewport_height = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
                     if (viewport_height <= 0) {
                         printf("Error: Invalid viewport height '%s'. Must be a positive integer.\n", argv[i]);
                         log_finish();
@@ -1354,7 +1357,8 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--scale") == 0) {
                 if (i + 1 < argc) {
-                    render_scale = (float)atof(argv[++i]);
+                    i++;
+                    render_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
                     if (render_scale <= 0.0f) {
                         printf("Error: Invalid scale '%s'. Must be a positive number.\n", argv[i]);
                         log_finish();
@@ -1367,7 +1371,8 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(argv[i], "--pixel-ratio") == 0) {
                 if (i + 1 < argc) {
-                    pixel_ratio = (float)atof(argv[++i]);
+                    i++;
+                    pixel_ratio = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
                     if (pixel_ratio <= 0.0f) {
                         printf("Error: Invalid pixel-ratio '%s'. Must be a positive number.\n", argv[i]);
                         log_finish();
@@ -2004,7 +2009,8 @@ int main(int argc, char *argv[]) {
             if ((strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) && i + 1 < argc) {
                 output_file = argv[++i];
             } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--timeout") == 0) && i + 1 < argc) {
-                timeout_ms = atoi(argv[++i]);
+                i++;
+                timeout_ms = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
             } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
                 verbose = true;
             } else if (argv[i][0] != '-') {
@@ -2199,7 +2205,8 @@ int main(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "--max-errors") == 0) {
             if (i + 1 < argc) {
-                max_errors = atoi(argv[++i]);
+                i++;
+                max_errors = (int)str_to_int64_default(argv[i], strlen(argv[i]), 0);
                 if (max_errors < 0) max_errors = 0;
             } else {
                 printf("Error: --max-errors requires a number argument\n");
@@ -2209,7 +2216,7 @@ int main(int argc, char *argv[]) {
         }
         else if (strncmp(argv[i], "--optimize=", 11) == 0) {
             // Parse --optimize=N format
-            optimize_level = atoi(argv[i] + 11);
+            optimize_level = (int)str_to_int64_default(argv[i] + 11, strlen(argv[i] + 11), 0);
             if (optimize_level < 0 || optimize_level > 3) {
                 printf("Error: --optimize level must be 0-3 (got %d)\n", optimize_level);
                 help_only = true;

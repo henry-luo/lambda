@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include "log.h"
+#include "str.h"
 #include <stdlib.h>
 
 /* Explicit strdup declaration for compatibility */
@@ -1271,7 +1272,7 @@ int log_parse_config_file(const char *filename) {
             fclose(file);
             return LOG_INIT_FAIL;
         }
-        strcpy(config_string + config_len, buffer);
+        str_copy(config_string + config_len, line_len + 1, buffer, line_len);
         config_len += line_len;
     }
 

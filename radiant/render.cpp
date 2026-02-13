@@ -12,6 +12,7 @@
 #include "../lib/log.h"
 #include "../lib/avl_tree.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
@@ -1139,8 +1140,9 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
                     // (workaround for CSS-relative URLs that need res/ subdirectory)
                     if (result != TVG_RESULT_SUCCESS && image_url[0] == '.' && image_url[1] == '/') {
                         log_debug("[RENDER] background-image: trying with res/ prefix");
-                        char* res_url = (char*)mem_alloc(strlen(image_url) + 5, MEM_CAT_RENDER);
-                        sprintf(res_url, "./res/%s", image_url + 2);
+                        size_t res_url_cap = strlen(image_url) + 5;
+                        char* res_url = (char*)mem_alloc(res_url_cap, MEM_CAT_RENDER);
+                        str_fmt(res_url, res_url_cap, "./res/%s", image_url + 2);
                         url_destroy(abs_url);
                         abs_url = parse_url(rdcon->ui_context->document->url, res_url);
                         mem_free(res_url);

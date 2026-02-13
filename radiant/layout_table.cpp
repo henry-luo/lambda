@@ -758,7 +758,7 @@ static void layout_column_elements(ViewTable* table, float* col_widths, float* c
             if (col_count == 0) {
                 // Check span attribute
                 const char* span_str = child->get_attribute("span");
-                col_count = (span_str && *span_str) ? atoi(span_str) : 1;
+                col_count = (span_str && *span_str) ? (int)str_to_int64_default(span_str, strlen(span_str), 0) : 1;
                 if (col_count <= 0) col_count = 1;
             }
 
@@ -1499,7 +1499,7 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
             // This overrides the UA default but can be overridden by CSS border-spacing
             const char* cellspacing_attr = dom_elem->get_attribute("cellspacing");
             if (cellspacing_attr) {
-                float spacing = (float)atof(cellspacing_attr);
+                float spacing = (float)str_to_double_default(cellspacing_attr, strlen(cellspacing_attr), 0.0);
                 table->tb->border_spacing_h = spacing;
                 table->tb->border_spacing_v = spacing;
                 log_debug("[HTML] TABLE cellspacing attribute: %.0fpx", spacing);
@@ -1667,7 +1667,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
         const char* colspan_str = dom_element_get_attribute(dom_elem, "colspan");
         log_debug("Lambda CSS: colspan_str = %s", colspan_str ? colspan_str : "NULL");
         if (colspan_str && colspan_str[0] != '\0') {
-            int span = atoi(colspan_str);
+            int span = (int)str_to_int64_default(colspan_str, strlen(colspan_str), 0);
             if (span > 0 && span <= 1000) {
                 cell->td->col_span = span;
                 log_debug("Lambda CSS: Parsed colspan=%d", span);
@@ -1678,7 +1678,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
         const char* rowspan_str = dom_element_get_attribute(dom_elem, "rowspan");
         log_debug("Lambda CSS: rowspan_str = %s", rowspan_str ? rowspan_str : "NULL");
         if (rowspan_str && rowspan_str[0] != '\0') {
-            int span = atoi(rowspan_str);
+            int span = (int)str_to_int64_default(rowspan_str, strlen(rowspan_str), 0);
             if (span > 0 && span <= 65534) {
                 cell->td->row_span = span;
                 log_debug("Lambda CSS: Parsed rowspan=%d from attribute value '%s'", span, rowspan_str);

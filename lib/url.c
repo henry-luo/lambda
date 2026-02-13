@@ -10,6 +10,7 @@
 #include <unistd.h>  // for getcwd and chdir
 #include "url.h"
 #include "log.h"
+#include "str.h"
 
 // String allocation helper
 String* url_create_string(const char* value) {
@@ -22,7 +23,7 @@ String* url_create_string(const char* value) {
 
     str->len = len;
     str->ref_cnt = 1;
-    strcpy(str->chars, value);
+    str_copy(str->chars, len + 1, value, len);
     return str;
 }
 
@@ -266,12 +267,13 @@ String* url_construct_href(const Url* url) {
     // Build URL string
     // Protocol
     if (url->protocol) {
-        strcpy(buffer + pos, url->protocol->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->protocol->chars, url->protocol->len);
         pos += url->protocol->len;
     } else if (url->scheme != URL_SCHEME_UNKNOWN) {
         const char* scheme_str = url_scheme_to_string(url->scheme);
-        strcpy(buffer + pos, scheme_str);
-        pos += strlen(scheme_str);
+        size_t scheme_len = strlen(scheme_str);
+        str_copy(buffer + pos, total_size + 1 - pos, scheme_str, scheme_len);
+        pos += scheme_len;
         buffer[pos++] = ':';
     }
 
@@ -282,12 +284,12 @@ String* url_construct_href(const Url* url) {
 
         // Credentials
         if (url->username && url->username->len > 0) {
-            strcpy(buffer + pos, url->username->chars);
+            str_copy(buffer + pos, total_size + 1 - pos, url->username->chars, url->username->len);
             pos += url->username->len;
 
             if (url->password && url->password->len > 0) {
                 buffer[pos++] = ':';
-                strcpy(buffer + pos, url->password->chars);
+                str_copy(buffer + pos, total_size + 1 - pos, url->password->chars, url->password->len);
                 pos += url->password->len;
             }
             buffer[pos++] = '@';
@@ -295,10 +297,10 @@ String* url_construct_href(const Url* url) {
 
         // Host
         if (url->host && url->host->len > 0) {
-            strcpy(buffer + pos, url->host->chars);
+            str_copy(buffer + pos, total_size + 1 - pos, url->host->chars, url->host->len);
             pos += url->host->len;
         } else if (url->hostname && url->hostname->len > 0) {
-            strcpy(buffer + pos, url->hostname->chars);
+            str_copy(buffer + pos, total_size + 1 - pos, url->hostname->chars, url->hostname->len);
             pos += url->hostname->len;
 
             // Port (only if not default for scheme)
@@ -306,7 +308,7 @@ String* url_construct_href(const Url* url) {
                 uint16_t default_port = url_default_port_for_scheme(url->scheme);
                 if (url->port_number != default_port || default_port == 0) {
                     buffer[pos++] = ':';
-                    strcpy(buffer + pos, url->port->chars);
+                    str_copy(buffer + pos, total_size + 1 - pos, url->port->chars, url->port->len);
                     pos += url->port->len;
                 }
             }
@@ -315,7 +317,7 @@ String* url_construct_href(const Url* url) {
 
     // Path
     if (url->pathname && url->pathname->len > 0) {
-        strcpy(buffer + pos, url->pathname->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->pathname->chars, url->pathname->len);
         pos += url->pathname->len;
     } else if (has_authority) {
         buffer[pos++] = '/';
@@ -323,13 +325,13 @@ String* url_construct_href(const Url* url) {
 
     // Query
     if (url->search && url->search->len > 0) {
-        strcpy(buffer + pos, url->search->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->search->chars, url->search->len);
         pos += url->search->len;
     }
 
     // Fragment
     if (url->hash && url->hash->len > 0) {
-        strcpy(buffer + pos, url->hash->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->hash->chars, url->hash->len);
         pos += url->hash->len;
     }
 
@@ -385,12 +387,13 @@ String* url_serialize_origin(const Url* url) {
 
     // Protocol
     if (url->protocol) {
-        strcpy(buffer + pos, url->protocol->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->protocol->chars, url->protocol->len);
         pos += url->protocol->len;
     } else if (url->scheme != URL_SCHEME_UNKNOWN) {
         const char* scheme_str = url_scheme_to_string(url->scheme);
-        strcpy(buffer + pos, scheme_str);
-        pos += strlen(scheme_str);
+        size_t scheme_len = strlen(scheme_str);
+        str_copy(buffer + pos, total_size + 1 - pos, scheme_str, scheme_len);
+        pos += scheme_len;
         buffer[pos++] = ':';
     }
 
@@ -398,19 +401,19 @@ String* url_serialize_origin(const Url* url) {
     if (url->hostname && url->hostname->len > 0) {
         buffer[pos++] = '/';
         buffer[pos++] = '/';
-        strcpy(buffer + pos, url->hostname->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->hostname->chars, url->hostname->len);
         pos += url->hostname->len;
 
         // For origin, include port if it was explicitly specified
         if (url->port && url->port->len > 0) {
             buffer[pos++] = ':';
-            strcpy(buffer + pos, url->port->chars);
+            str_copy(buffer + pos, total_size + 1 - pos, url->port->chars, url->port->len);
             pos += url->port->len;
         }
     } else if (url->host && url->host->len > 0) {
         buffer[pos++] = '/';
         buffer[pos++] = '/';
-        strcpy(buffer + pos, url->host->chars);
+        str_copy(buffer + pos, total_size + 1 - pos, url->host->chars, url->host->len);
         pos += url->host->len;
     }
 
@@ -434,7 +437,7 @@ String* url_serialize_scheme(const Url* url) {
 
         result->len = len + 1;
         result->ref_cnt = 1;
-        strcpy(result->chars, scheme_str);
+        str_copy(result->chars, len + 2, scheme_str, len);
         result->chars[len] = ':';
         result->chars[len + 1] = '\0';
 
@@ -460,9 +463,9 @@ String* url_serialize_host(const Url* url) {
 
                 result->len = total_len;
                 result->ref_cnt = 1;
-                strcpy(result->chars, url->hostname->chars);
+                str_copy(result->chars, total_len + 1, url->hostname->chars, url->hostname->len);
                 result->chars[url->hostname->len] = ':';
-                strcpy(result->chars + url->hostname->len + 1, url->port->chars);
+                str_copy(result->chars + url->hostname->len + 1, url->port->len + 1, url->port->chars, url->port->len);
 
                 return result;
             }
