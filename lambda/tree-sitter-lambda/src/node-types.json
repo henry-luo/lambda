@@ -3509,7 +3509,7 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
@@ -3517,31 +3517,15 @@
           "named": true
         },
         {
-          "type": "identifier",
+          "type": "constrained_type",
           "named": true
         },
         {
-          "type": "pattern_any",
+          "type": "error_union_type",
           "named": true
         },
         {
-          "type": "pattern_char_class",
-          "named": true
-        },
-        {
-          "type": "pattern_group",
-          "named": true
-        },
-        {
-          "type": "pattern_seq",
-          "named": true
-        },
-        {
-          "type": "range_type",
-          "named": true
-        },
-        {
-          "type": "string",
+          "type": "primary_type",
           "named": true
         },
         {
@@ -3551,44 +3535,9 @@
         {
           "type": "type_occurrence",
           "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "pattern_seq",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "identifier",
-          "named": true
         },
         {
-          "type": "pattern_any",
-          "named": true
-        },
-        {
-          "type": "pattern_char_class",
-          "named": true
-        },
-        {
-          "type": "pattern_group",
-          "named": true
-        },
-        {
-          "type": "range_type",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        },
-        {
-          "type": "type_occurrence",
+          "type": "type_seq_multiline",
           "named": true
         }
       ]
@@ -4315,15 +4264,11 @@
             "named": true
           },
           {
-            "type": "identifier",
+            "type": "constrained_type",
             "named": true
           },
           {
-            "type": "pattern_any",
-            "named": true
-          },
-          {
-            "type": "pattern_char_class",
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -4331,15 +4276,7 @@
             "named": true
           },
           {
-            "type": "pattern_seq",
-            "named": true
-          },
-          {
-            "type": "range_type",
-            "named": true
-          },
-          {
-            "type": "string",
+            "type": "primary_type",
             "named": true
           },
           {
@@ -4348,6 +4285,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -4377,15 +4318,11 @@
             "named": true
           },
           {
-            "type": "identifier",
+            "type": "constrained_type",
             "named": true
           },
           {
-            "type": "pattern_any",
-            "named": true
-          },
-          {
-            "type": "pattern_char_class",
+            "type": "error_union_type",
             "named": true
           },
           {
@@ -4393,15 +4330,7 @@
             "named": true
           },
           {
-            "type": "pattern_seq",
-            "named": true
-          },
-          {
-            "type": "range_type",
-            "named": true
-          },
-          {
-            "type": "string",
+            "type": "primary_type",
             "named": true
           },
           {
@@ -4410,6 +4339,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -4453,31 +4386,7 @@
             "named": true
           },
           {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "pattern_any",
-            "named": true
-          },
-          {
-            "type": "pattern_char_class",
-            "named": true
-          },
-          {
-            "type": "pattern_group",
-            "named": true
-          },
-          {
             "type": "primary_type",
-            "named": true
-          },
-          {
-            "type": "range_type",
-            "named": true
-          },
-          {
-            "type": "string",
             "named": true
           },
           {
@@ -4500,6 +4409,60 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "type_seq",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "pattern_group",
+          "named": true
+        },
+        {
+          "type": "primary_type",
+          "named": true
+        },
+        {
+          "type": "type_occurrence",
+          "named": true
+        },
+        {
+          "type": "type_seq",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "type_seq_multiline",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "pattern_group",
+          "named": true
+        },
+        {
+          "type": "primary_type",
+          "named": true
+        },
+        {
+          "type": "type_occurrence",
+          "named": true
+        },
+        {
+          "type": "type_seq_multiline",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -4864,11 +4827,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -4916,11 +4879,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -5076,11 +5039,11 @@
   },
   {
     "type": "string",
-    "named": true
+    "named": false
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
@@ -5100,11 +5063,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",
