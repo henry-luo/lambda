@@ -16,7 +16,7 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
 AstNode* build_pattern_char_class(Transpiler* tp, TSNode node);
-AstNode* build_pattern_seq(Transpiler* tp, TSNode node);
+AstNode* build_type_seq(Transpiler* tp, TSNode node);
 AstNode* build_type_negation(Transpiler* tp, TSNode node);
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
 AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
@@ -5137,10 +5137,15 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_range_type(tp, expr_node);
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
-    case SYM_PATTERN_SEQ:
-        return build_pattern_seq(tp, expr_node);
-    case SYM_PATTERN_GROUP:
-        return build_list_type(tp, expr_node);
+    case SYM_TYPE_SEQ:
+    case SYM_TYPE_SEQ_MULTILINE:  // same handling as type_seq
+        return build_type_seq(tp, expr_node);
+    case SYM_PATTERN_GROUP: {
+        // Pattern group is just parentheses around a pattern expression
+        // Unwrap and build the inner expression
+        TSNode inner = ts_node_named_child(expr_node, 0);
+        return build_expr(tp, inner);
+    }
     case SYM_TYPE_NEGATION:
         return build_type_negation(tp, expr_node);
     case SYM_PATTERN_CHAR_CLASS:
@@ -5305,28 +5310,45 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
     return (AstNode*)ast_node;
 }
 
-// Build pattern_seq node — concatenation of pattern terms (for string/symbol patterns)
+// Build type_seq node — concatenation of type terms (for string/symbol patterns)
 // e.g. \d[3] "-" \d[3] "-" \d[4]
-AstNode* build_pattern_seq(Transpiler* tp, TSNode node) {
-    log_debug("build pattern_seq (pattern concatenation)");
+// With recursive grammar: type_seq -> type_term type_term | type_seq type_term
+AstNode* build_type_seq(Transpiler* tp, TSNode node) {
+    log_debug("build type_seq (pattern concatenation)");
     AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
         alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
     seq_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
 
     uint32_t child_count = ts_node_named_child_count(node);
-    log_debug("build_pattern_seq: %d children", child_count);
+    log_debug("build_type_seq: %d children", child_count);
 
     AstNode* prev = nullptr;
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         AstNode* child_node = build_expr(tp, child);
         if (child_node) {
-            if (prev) {
-                prev->next = child_node;
+            // Flatten nested type_seq nodes (due to recursive grammar)
+            if (child_node->node_type == AST_NODE_PATTERN_SEQ) {
+                AstPatternSeqNode* nested = (AstPatternSeqNode*)child_node;
+                if (prev) {
+                    prev->next = nested->first;
+                } else {
+                    seq_node->first = nested->first;
+                }
+                // Find the last node in the nested sequence
+                AstNode* last = nested->first;
+                while (last && last->next) {
+                    last = last->next;
+                }
+                prev = last;
             } else {
-                seq_node->first = child_node;
+                if (prev) {
+                    prev->next = child_node;
+                } else {
+                    seq_node->first = child_node;
+                }
+                prev = child_node;
             }
-            prev = child_node;
         }
     }
     return (AstNode*)seq_node;
