@@ -9,7 +9,7 @@
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
 #include "../lib/log.h"
-#include "../lib/utf.h"     // For utf8_to_codepoint
+// str.h included via view.hpp
 #include <cmath>
 #include <cstring>
 
@@ -140,7 +140,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         // Decode UTF-8 codepoint
         uint32_t codepoint;
-        int bytes = utf8_to_codepoint(&str[i], &codepoint);
+        int bytes = str_utf8_decode((const char*)&str[i], length - i, &codepoint);
         if (bytes <= 0) {
             // Invalid UTF-8, skip byte - use 11.0 to match font fallback
             current_word += 11.0f;
