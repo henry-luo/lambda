@@ -9,6 +9,8 @@
 // 1. Parse structural elements (fractions, radicals, scripts) precisely
 // 2. Leave symbol semantic interpretation to runtime (atom types)
 // 3. Handle common LaTeX math commands with proper argument binding
+// 4. Use regex patterns to consolidate keyword groups and reduce parser size
+//    Runtime reads actual text content to determine specific commands.
 
 module.exports = grammar({
   name: 'latex_math',
@@ -84,38 +86,84 @@ module.exports = grammar({
       $.command,  // Generic fallback for unknown commands
     ),
 
-    // Symbol commands that could conflict with big operator prefixes
-    // Must be listed before big_operator to take precedence
-    // Also includes symbols that are prefixes of other commands (e.g., \nexists before \ne)
-    symbol_command: $ => choice(
-      '\\infty',     // Must match before \inf (big_operator)
-      '\\infinity',
-      '\\nexists',   // Must match before \ne (relation)
-      '\\exists',    // Logic quantifier
-      '\\forall',    // Universal quantifier
-      '\\imath',     // Dotless i
-      '\\jmath',     // Dotless j
-      '\\ell',       // Script l
-      '\\Re',        // Real part
-      '\\Im',        // Imaginary part
-      '\\partial',   // Partial derivative
-      '\\nabla',     // Nabla/del
-      '\\aleph',     // Aleph
-      '\\hbar',      // h-bar
-      '\\emptyset',  // Empty set
-      '\\varnothing', // Empty set variant
-      // Dots commands (must match before \cdot)
-      '\\cdots',     // Center dots (horizontal ellipsis)
-      '\\ldots',     // Lower dots
-      '\\vdots',     // Vertical dots
-      '\\ddots',     // Diagonal dots
-      '\\dots',      // Generic dots
-      '\\dotsb',     // Binary dots
-      '\\dotsc',     // Comma dots
-      '\\dotsi',     // Integral dots
-      '\\dotsm',     // Multiplication dots
-      '\\dotso',     // Other dots
-    ),
+    // ========================================================================
+    // Regex-based command tokens (consolidated to reduce parser size)
+    // Each category uses a single regex token instead of many string literals.
+    // The runtime reads the actual text content to determine the specific command.
+    // ========================================================================
+
+    // Symbol commands: \infty, \exists, \forall, \cdots, \ldots, etc.
+    // prec(1) ensures these match before operator/relation/big_operator prefixes
+    _symbol_cmd: $ => token(prec(1, /\\(infinity|varnothing|emptyset|nexists|partial|exists|forall|cdots|ldots|vdots|ddots|infty|imath|jmath|nabla|aleph|dotsb|dotsc|dotsi|dotsm|dotso|dots|hbar|ell|Re|Im)/)),
+
+    // Operator commands: \pm, \mp, \times, \cdot, etc.
+    _operator_cmd: $ => token(/\\(pm|mp|times|div|cdot|ast|star|circ|bullet|oplus|ominus|otimes|oslash|odot|cup|cap|sqcup|sqcap|vee|wedge|setminus)/),
+
+    // Relation commands (non-arrow): \leq, \geq, \equiv, \subset, etc.
+    _relation_cmd: $ => token(/\\(leq|le|geq|ge|neq|ne|equiv|sim|simeq|approx|cong|propto|asymp|subset|supset|subseteq|supseteq|in|ni|notin|ll|gg|prec|succ|preceq|succeq|perp|parallel|mid|vdash|dashv|models)/),
+
+    // Arrow commands: \leftarrow, \rightarrow, \Rightarrow, \mapsto, etc.
+    // Note: \uparrow, \downarrow, \updownarrow and their uppercase variants are
+    // kept as string literals because they're shared with the delimiter rule.
+    _arrow_cmd: $ => token(/\\(leftrightarrows|leftleftarrows|leftrightsquigarrow|longleftrightarrow|Longleftrightarrow|nleftrightarrow|nLeftrightarrow|leftrightharpoons|rightleftharpoons|leftrightarrow|Leftrightarrow|leftharpoondown|longleftarrow|Longleftarrow|leftharpoonup|hookleftarrow|leftarrow|Leftarrow|curvearrowright|curvearrowleft|rightrightarrows|rightharpoondown|circlearrowright|circlearrowleft|looparrowright|looparrowleft|rightharpoonup|hookrightarrow|longrightarrow|Longrightarrow|nRightarrow|nrightarrow|rightarrow|Rightarrow|longmapsto|nearrow|searrow|nwarrow|swarrow|mapsto|gets|to)/),
+
+    // Delimiter commands: \lbrace, \rbrace, \langle, \rangle, \vert, etc.
+    // Note: \uparrow etc. kept as string literals (shared with relation rule)
+    _delimiter_cmd: $ => token(/\\(lmoustache|rmoustache|backslash|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|vert|Vert)/),
+
+    // Big operator commands: \sum, \prod, \int, \lim, etc.
+    _big_operator_cmd: $ => token(/\\(bigsqcup|bigotimes|bigoplus|bigwedge|bigvee|bigcap|bigcup|coprod|liminf|limsup|iiint|iint|oint|prod|sum|lim|max|min|sup|inf|int|det|gcd|Pr)/),
+
+    // Accent commands: \hat, \bar, \vec, \widehat, \overline, etc.
+    _accent_cmd: $ => token(/\\(overleftrightarrow|underleftrightarrow|overrightarrow|underrightarrow|overleftarrow|underleftarrow|widetilde|underbrace|underline|overbrace|overline|widehat|ddddot|dddot|acute|breve|check|grave|tilde|ddot|dot|hat|bar|vec)/),
+
+    // Sized delimiter commands: \big, \Big, \bigl, \Bigl, etc.
+    _sized_delim_cmd: $ => token(/\\(biggl|Biggl|biggr|Biggr|biggm|Biggm|bigg|Bigg|bigl|Bigl|bigr|Bigr|bigm|Bigm|big|Big)/),
+
+    // Style commands: \mathrm, \mathbb, \displaystyle, etc.
+    _style_cmd: $ => token(/\\(scriptscriptstyle|operatorname|displaystyle|mathnormal|scriptstyle|textstyle|mathfrak|mathscr|mathcal|mathrm|mathit|mathbf|mathsf|mathtt|mathbb)/),
+
+    // Extensible arrow commands: \xrightarrow, \xleftarrow, etc.
+    _extensible_arrow_cmd: $ => token(/\\(xLeftrightarrow|xleftrightarrow|xhookrightarrow|xhookleftarrow|xRightarrow|xrightarrow|xLeftarrow|xleftarrow|xmapsto)/),
+
+    // Text commands: \text, \textrm, \mbox, etc.
+    _text_cmd: $ => token(/\\(textrm|textit|textbf|textsf|texttt|text|mbox|hbox)/),
+
+    // Box commands: \bbox, \fbox, \boxed, \llap, \rlap, etc.
+    _box_cmd: $ => token(/\\(mathllap|mathrlap|mathclap|boxed|bbox|fbox|llap|rlap|clap)/),
+
+    // Fraction commands: \frac, \dfrac, \tfrac, \cfrac
+    _frac_cmd: $ => token(/\\[dtc]?frac/),
+
+    // Binomial commands: \binom, \dbinom, \tbinom
+    _binom_cmd: $ => token(/\\[dt]?binom/),
+
+    // Over/under set commands: \overset, \underset, \stackrel
+    _overunder_cmd: $ => token(/\\(overset|underset|stackrel)/),
+
+    // Color commands: \textcolor, \color, \colorbox
+    _color_cmd: $ => token(/\\(textcolor|colorbox|color)/),
+
+    // Phantom commands: \phantom, \hphantom, \vphantom, \smash
+    _phantom_cmd: $ => token(/\\(hphantom|vphantom|phantom|smash)/),
+
+    // Matrix commands (plain TeX): \matrix, \pmatrix, \bordermatrix
+    _matrix_cmd: $ => token(/\\(bordermatrix|pmatrix|matrix)/),
+
+    // Skip/kern commands: \hskip, \kern, \mskip, \mkern
+    _skip_cmd: $ => token(/\\(hskip|kern|mskip|mkern)/),
+
+    // Environment names (inside \begin{...} and \end{...})
+    // Note: these don't start with \ so they don't conflict with command_name
+    _env_name_token: $ => token(/smallmatrix|equation\*?|multline\*?|subarray|gathered|Vmatrix|Bmatrix|bmatrix|vmatrix|pmatrix|aligned|matrix|gather\*?|align\*?|rcases|dcases|split|cases|array/),
+
+    // ========================================================================
+    // Atoms using the consolidated tokens
+    // ========================================================================
+
+    // Symbol commands that need higher precedence than operators/relations
+    // (e.g., \cdots before \cdot, \infty before \inf, \nexists before \ne)
+    symbol_command: $ => $._symbol_cmd,
 
     // Single letter variable (a-z, A-Z, Greek via commands, @ symbol)
     symbol: $ => /[a-zA-Z@]/,
@@ -123,57 +171,24 @@ module.exports = grammar({
     // Numeric literal - lower precedence so 'digit' can match first in _frac_arg
     number: $ => token(prec(-1, /[0-9]+\.?[0-9]*/)),
 
-    // Binary operators: +, -, *, etc.
+    // Binary operators: +, -, *, etc. and command operators via regex
     operator: $ => choice(
       '+', '-', '*', '/',
-      '\\pm', '\\mp', '\\times', '\\div', '\\cdot',
-      '\\ast', '\\star', '\\circ', '\\bullet',
-      '\\oplus', '\\ominus', '\\otimes', '\\oslash', '\\odot',
-      '\\cup', '\\cap', '\\sqcup', '\\sqcap',
-      '\\vee', '\\wedge', '\\setminus',
+      $._operator_cmd,
     ),
 
-    // Relations: =, <, >, etc.
+    // Relations: =, <, >, etc. and command relations/arrows via regex
     relation: $ => choice(
       '=', '<', '>', '!',
-      '\\leq', '\\le', '\\geq', '\\ge',
-      '\\neq', '\\ne', '\\equiv', '\\sim', '\\simeq',
-      '\\approx', '\\cong', '\\propto', '\\asymp',
-      '\\subset', '\\supset', '\\subseteq', '\\supseteq',
-      '\\in', '\\ni', '\\notin',
-      '\\ll', '\\gg', '\\prec', '\\succ', '\\preceq', '\\succeq',
-      '\\perp', '\\parallel', '\\mid',
-      '\\vdash', '\\dashv', '\\models',
-      // Arrows that start with \left - MUST be before \left is seen by delimiter_group
-      '\\leftrightarrows', '\\leftleftarrows',
-      '\\leftrightarrow', '\\Leftrightarrow',
-      '\\nleftrightarrow', '\\nLeftrightarrow',
-      '\\leftrightharpoons', '\\rightleftharpoons',
-      '\\leftrightsquigarrow',
-      '\\leftharpoonup', '\\leftharpoondown',
-      '\\leftarrow', '\\Leftarrow',
-      '\\longleftarrow', '\\Longleftarrow',
-      '\\longleftrightarrow', '\\Longleftrightarrow',
-      '\\hookleftarrow',
-      // Arrows - important arrows that are commonly used
-      '\\rightarrow', '\\Rightarrow', '\\nrightarrow', '\\nRightarrow',
-      '\\nearrow', '\\searrow', '\\nwarrow', '\\swarrow',
+      $._relation_cmd,
+      $._arrow_cmd,
+      // Shared with delimiter rule - must remain as string literals
       '\\uparrow', '\\downarrow', '\\updownarrow',
       '\\Uparrow', '\\Downarrow', '\\Updownarrow',
-      '\\hookrightarrow',
-      '\\mapsto', '\\longmapsto',
-      '\\to', '\\gets',
-      '\\curvearrowright', '\\curvearrowleft',
-      '\\looparrowright', '\\looparrowleft',
-      '\\circlearrowright', '\\circlearrowleft',
-      '\\rightrightarrows', '\\rightharpoonup', '\\rightharpoondown',
-      '\\longrightarrow', '\\Longrightarrow',
     ),
 
     // Punctuation (including standalone delimiters)
     // Lower precedence than brack_group so optional args parse correctly
-    // Note: \lbrace and \rbrace are NOT included here - they should be treated
-    // as delimiters via the command fallback, not punctuation
     punctuation: $ => prec(-1, choice(
       ',', ';', ':', '.', '?',
       '(', ')',                    // Parentheses
@@ -194,7 +209,6 @@ module.exports = grammar({
     brack_group: $ => seq('[', repeat($._expression), ']'),
 
     // Infix fraction commands: x \over y, n \choose k, etc.
-    // These split the content at the command, with left becoming numerator and right denominator
     infix_frac: $ => seq(
       field('numer', repeat1($._expression)),
       field('cmd', choice('\\over', '\\atop', '\\above', '\\choose', '\\brace', '\\brack')),
@@ -210,21 +224,15 @@ module.exports = grammar({
 
     subsup: $ => prec.right(10, seq(
       field('base', $._atom),
-      // Optional limits modifier (for \sum\limits or \mathop{X}\nolimits)
       optional(field('modifier', $.limits_modifier)),
       choice(
-        // Both sub and sup with optional second modifier - check these FIRST
-        // x_1^2 or x_1\limits^2 or x_1\nolimits^2 (sub then sup)
         seq('_', field('sub', $._script_arg),
             optional(field('sup_modifier', $.limits_modifier)),
             '^', field('sup', $._script_arg)),
-        // x^2_1 or x^2\limits_1 or x^2\nolimits_1 (sup then sub)
         seq('^', field('sup', $._script_arg),
             optional(field('sub_modifier', $.limits_modifier)),
             '_', field('sub', $._script_arg)),
-        // subscript only: x_1
         seq('_', field('sub', $._script_arg)),
-        // superscript only: x^2
         seq('^', field('sup', $._script_arg)),
       ),
     )),
@@ -240,24 +248,16 @@ module.exports = grammar({
     // Fractions (TeXBook Rule 15)
     // ========================================================================
 
-    // Note: arguments can be braced groups {x} or single tokens like \frac12
     fraction: $ => seq(
-      field('cmd', choice(
-        '\\frac',     // Standard fraction
-        '\\dfrac',    // Display style fraction
-        '\\tfrac',    // Text style fraction
-        '\\cfrac',    // Continued fraction
-      )),
+      field('cmd', $._frac_cmd),
       field('numer', $._frac_arg),
       field('denom', $._frac_arg),
     ),
 
-    // Fraction argument: either a braced group or a single token
-    // Note: digit is used for \frac12 cases; number would be too greedy
     _frac_arg: $ => choice(
       $.group,
       $.symbol,
-      $.digit,  // Single digit for \frac12
+      $.digit,
       $.command,
     ),
 
@@ -266,7 +266,7 @@ module.exports = grammar({
 
     // Binomial coefficients
     binomial: $ => seq(
-      field('cmd', choice('\\binom', '\\dbinom', '\\tbinom')),
+      field('cmd', $._binom_cmd),
       field('top', $._frac_arg),
       field('bottom', $._frac_arg),
     ),
@@ -274,22 +274,21 @@ module.exports = grammar({
     // \genfrac{left}{right}{thickness}{style}{numer}{denom}
     genfrac: $ => seq(
       '\\genfrac',
-      field('left_delim', $.group),      // Left delimiter (can be empty {})
-      field('right_delim', $.group),     // Right delimiter (can be empty {})
-      field('thickness', $.group),       // Rule thickness (can be empty {})
-      field('style', $.group),           // Math style (can be empty {})
-      field('numer', $._frac_arg),       // Numerator
-      field('denom', $._frac_arg),       // Denominator
+      field('left_delim', $.group),
+      field('right_delim', $.group),
+      field('thickness', $.group),
+      field('style', $.group),
+      field('numer', $._frac_arg),
+      field('denom', $._frac_arg),
     ),
 
     // ========================================================================
     // Radicals (Square roots, etc.)
     // ========================================================================
 
-    // Note: radicand can be braced group {x} or single token like \sqrt2
     radical: $ => seq(
       '\\sqrt',
-      optional(field('index', $.brack_group)),  // Optional root index
+      optional(field('index', $.brack_group)),
       field('radicand', $._frac_arg),
     ),
 
@@ -303,44 +302,27 @@ module.exports = grammar({
       '\\right', field('right_delim', $.delimiter),
     )),
 
-    // \middle delimiter inside \left...\right
     middle_delim: $ => seq(
       '\\middle',
       field('delim', $.delimiter),
     ),
 
-    // Sized delimiters: \big, \Big, \bigg, \Bigg
-    // Note: delimiter is optional - bare \bigl, \bigr, etc. are valid
-    // Use prec.right to prefer consuming the delimiter when present
+    // Sized delimiters: \big, \Big, \bigg, \Bigg with optional delimiter
     sized_delimiter: $ => prec.right(1, seq(
-      field('size', choice(
-        '\\big', '\\Big', '\\bigg', '\\Bigg',
-        '\\bigl', '\\Bigl', '\\biggl', '\\Biggl',
-        '\\bigr', '\\Bigr', '\\biggr', '\\Biggr',
-        '\\bigm', '\\Bigm', '\\biggm', '\\Biggm',
-      )),
+      field('size', $._sized_delim_cmd),
       optional(field('delim', $.delimiter)),
     )),
 
-    // Delimiter token: command delimiters are keywords via the word setting
+    // Delimiter token: ASCII delimiters, special sequences, and command delimiters
     delimiter: $ => choice(
       '(', ')', '[', ']',
       '\\{', '\\}',
-      '\\lbrace', '\\rbrace',  // Brace aliases
-      '\\lbrack', '\\rbrack',  // Bracket aliases
       '|', '\\|',
-      '\\vert', '\\Vert',      // Vertical bar commands
-      '\\langle', '\\rangle',
-      '\\lfloor', '\\rfloor',
-      '\\lceil', '\\rceil',
-      '\\lvert', '\\rvert',
-      '\\lVert', '\\rVert',
-      '\\lgroup', '\\rgroup',
-      '\\lmoustache', '\\rmoustache',
-      '\\backslash',
+      '.',  // Null delimiter
+      $._delimiter_cmd,
+      // Shared with relation rule - must remain as string literals
       '\\uparrow', '\\downarrow', '\\updownarrow',
       '\\Uparrow', '\\Downarrow', '\\Updownarrow',
-      '.',  // Null delimiter
     ),
 
     // ========================================================================
@@ -348,50 +330,24 @@ module.exports = grammar({
     // ========================================================================
 
     overunder_command: $ => seq(
-      field('cmd', choice(
-        '\\overset',     // Place first arg over second
-        '\\underset',    // Place first arg under second
-        '\\stackrel',    // Like overset with relation spacing
-      )),
-      field('annotation', $.group),  // What goes over/under
-      field('base', $.group),        // The base symbol
+      field('cmd', $._overunder_cmd),
+      field('annotation', $.group),
+      field('base', $.group),
     ),
 
     // Extensible arrows with optional annotations
     extensible_arrow: $ => seq(
-      field('cmd', choice(
-        '\\xrightarrow', '\\xleftarrow',
-        '\\xRightarrow', '\\xLeftarrow',
-        '\\xleftrightarrow', '\\xLeftrightarrow',
-        '\\xhookleftarrow', '\\xhookrightarrow',
-        '\\xmapsto',
-      )),
-      optional(field('below', $.brack_group)),  // Optional subscript annotation
-      field('above', $.group),                   // Superscript annotation
+      field('cmd', $._extensible_arrow_cmd),
+      optional(field('below', $.brack_group)),
+      field('above', $.group),
     ),
 
     // ========================================================================
     // Accents
     // ========================================================================
 
-    // Note: base is optional - bare \vec, \hat, etc. are valid (per MathLive)
     accent: $ => prec.right(1, seq(
-      field('cmd', choice(
-        // Standard accents
-        '\\hat', '\\check', '\\tilde', '\\acute', '\\grave',
-        '\\dot', '\\ddot', '\\dddot', '\\ddddot',
-        '\\breve', '\\bar', '\\vec',
-        // Wide accents
-        '\\widehat', '\\widetilde',
-        // Over/under
-        '\\overline', '\\underline',
-        '\\overbrace', '\\underbrace',
-        '\\overrightarrow', '\\overleftarrow',
-        '\\overleftrightarrow',
-        '\\underrightarrow', '\\underleftarrow',
-        '\\underleftrightarrow',
-        // NOTE: \xleftarrow, \xrightarrow are in extensible_arrow rule, not here
-      )),
+      field('cmd', $._accent_cmd),
       optional(field('base', choice($.group, $.symbol))),
     )),
 
@@ -400,17 +356,8 @@ module.exports = grammar({
     // ========================================================================
 
     big_operator: $ => prec.right(seq(
-      field('op', choice(
-        '\\sum', '\\prod', '\\coprod',
-        '\\int', '\\iint', '\\iiint', '\\oint',
-        '\\bigcup', '\\bigcap', '\\bigsqcup',
-        '\\bigvee', '\\bigwedge', '\\bigoplus', '\\bigotimes',
-        '\\liminf', '\\limsup', '\\lim',  // liminf/limsup before lim
-        '\\max', '\\min', '\\sup', '\\inf',
-        '\\det', '\\gcd', '\\Pr',
-      )),
+      field('op', $._big_operator_cmd),
       optional(choice(
-        // Limits notation: \sum_{i=1}^{n}
         seq('_', field('lower', $._script_arg), optional(seq('^', field('upper', $._script_arg)))),
         seq('^', field('upper', $._script_arg), optional(seq('_', field('lower', $._script_arg)))),
       )),
@@ -422,7 +369,7 @@ module.exports = grammar({
 
     environment: $ => seq(
       $.begin_cmd, '{', field('name', $.env_name), '}',
-      optional(field('columns', $.env_columns)),  // For array: {ccc}
+      optional(field('columns', $.env_columns)),
       field('body', $.env_body),
       $.end_cmd, '{', field('end_name', $.env_name), '}',
     ),
@@ -430,50 +377,32 @@ module.exports = grammar({
     begin_cmd: $ => '\\begin',
     end_cmd: $ => '\\end',
 
-    // Environment name
-    env_name: $ => choice(
-      // Matrix environments
-      'matrix', 'pmatrix', 'bmatrix', 'vmatrix', 'Vmatrix', 'Bmatrix', 'smallmatrix',
-      // Alignment environments
-      'aligned', 'align', 'align*', 'gathered', 'gather', 'gather*',
-      'split', 'multline', 'multline*',
-      // Cases
-      'cases', 'rcases', 'dcases',
-      // Arrays
-      'array', 'subarray',
-      // Equation environments
-      'equation', 'equation*',
-    ),
+    // Environment name - consolidated into single regex token
+    env_name: $ => $._env_name_token,
 
     // Column spec for arrays: {ccc} or {|c|c|c|}
-    // Regex matches: l/c/r for alignment, | for borders, @{} for custom separators, p/m/b for fixed-width
     env_columns: $ => seq('{', /[lcr|@{pmb\d.]+/, '}'),
 
-    // Environment body - content between \begin and \end
-    // Can contain expressions, row separators (\\), and column separators (&)
+    // Environment body
     env_body: $ => repeat1(choice(
       $._expression,
       $.row_sep,
       $.col_sep,
     )),
 
-    // Row separator: \\, \cr, or \\[spacing] where spacing is like 5pt, 1em, etc.
-    // Use prec.right to prefer consuming [spacing] when present
     row_sep: $ => prec.right(choice(
       seq('\\\\', optional(field('spacing', $.row_spacing))),
       '\\cr'
     )),
-    // Row spacing: [dimension] where dimension is like 5pt, 1em, 0.5ex, etc.
     row_spacing: $ => seq('[', /[^\]]+/, ']'),
     col_sep: $ => '&',
 
-    // Plain TeX \matrix{...} command (uses \cr as row separator)
+    // Plain TeX \matrix{...} command
     matrix_command: $ => seq(
-      field('cmd', choice('\\matrix', '\\pmatrix', '\\bordermatrix')),
-      '{', optional(field('body', $.matrix_body)), '}',  // Body with & and \cr separators (optional for empty matrix)
+      field('cmd', $._matrix_cmd),
+      '{', optional(field('body', $.matrix_body)), '}',
     ),
 
-    // Matrix body - like env_body but for plain TeX \matrix{...}
     matrix_body: $ => repeat1(choice(
       $._expression,
       $.row_sep,
@@ -485,14 +414,10 @@ module.exports = grammar({
     // ========================================================================
 
     text_command: $ => seq(
-      field('cmd', choice(
-        '\\text', '\\textrm', '\\textit', '\\textbf', '\\textsf', '\\texttt',
-        '\\mbox', '\\hbox',
-      )),
+      field('cmd', $._text_cmd),
       field('content', $.text_group),
     ),
 
-    // Text inside \text{} - different from math group
     text_group: $ => seq('{', optional($.text_content), '}'),
     text_content: $ => /[^{}]+/,
 
@@ -501,16 +426,7 @@ module.exports = grammar({
     // ========================================================================
 
     style_command: $ => prec.right(seq(
-      field('cmd', choice(
-        // Math variants
-        '\\mathrm', '\\mathit', '\\mathbf', '\\mathsf', '\\mathtt',
-        '\\mathcal', '\\mathfrak', '\\mathbb', '\\mathscr',
-        '\\mathnormal',  // Normal math font (italic for letters)
-        // Sizing
-        '\\displaystyle', '\\textstyle', '\\scriptstyle', '\\scriptscriptstyle',
-        // Operator name
-        '\\operatorname',
-      )),
+      field('cmd', $._style_cmd),
       optional(field('arg', $.group)),
     )),
 
@@ -528,18 +444,8 @@ module.exports = grammar({
     // ========================================================================
 
     box_command: $ => seq(
-      field('cmd', choice(
-        '\\bbox',   // AMS box with optional styling
-        '\\fbox',   // Framed box
-        '\\boxed',  // AMS boxed (like fbox)
-        '\\llap',   // Left overlap
-        '\\rlap',   // Right overlap
-        '\\clap',   // Center overlap (mathtools)
-        '\\mathllap', // Math mode left overlap
-        '\\mathrlap', // Math mode right overlap
-        '\\mathclap', // Math mode center overlap
-      )),
-      optional(field('options', $.brack_group)),  // Optional [color] for bbox
+      field('cmd', $._box_cmd),
+      optional(field('options', $.brack_group)),
       field('content', $.group),
     ),
 
@@ -548,9 +454,9 @@ module.exports = grammar({
     // ========================================================================
 
     color_command: $ => prec.right(seq(
-      field('cmd', choice('\\textcolor', '\\color', '\\colorbox')),
-      field('color', $.group),           // Color specification {red} or {rgb}{...}
-      optional(field('content', $.group)),  // Content to color (for \textcolor, \colorbox)
+      field('cmd', $._color_cmd),
+      field('color', $.group),
+      optional(field('content', $.group)),
     )),
 
     // ========================================================================
@@ -559,7 +465,7 @@ module.exports = grammar({
 
     rule_command: $ => seq(
       '\\rule',
-      optional(field('raise', $.brack_group)),  // Optional raise amount
+      optional(field('raise', $.brack_group)),
       field('width', $.group),
       field('height', $.group),
     ),
@@ -569,13 +475,8 @@ module.exports = grammar({
     // ========================================================================
 
     phantom_command: $ => seq(
-      field('cmd', choice(
-        '\\phantom',   // Full phantom
-        '\\hphantom',  // Horizontal phantom (width only)
-        '\\vphantom',  // Vertical phantom (height/depth only)
-        '\\smash',     // Smash height/depth
-      )),
-      optional(field('options', $.brack_group)),  // [t] or [b] for smash
+      field('cmd', $._phantom_cmd),
+      optional(field('options', $.brack_group)),
       field('content', $.group),
     ),
 
@@ -588,7 +489,7 @@ module.exports = grammar({
       '\\quad', '\\qquad',
     ),
 
-    // \hspace{dim} and \hspace*{dim} - horizontal space with braced dimension
+    // \hspace{dim} and \hspace*{dim}
     hspace_command: $ => seq(
       field('cmd', choice('\\hspace', '\\hspace*')),
       '{',
@@ -598,9 +499,9 @@ module.exports = grammar({
       '}',
     ),
 
-    // Skip/kern commands with dimensions: \hskip 3em, \kern 2pt, \mskip 3mu
+    // Skip/kern commands with dimensions
     skip_command: $ => seq(
-      field('cmd', choice('\\hskip', '\\kern', '\\mskip', '\\mkern')),
+      field('cmd', $._skip_cmd),
       optional(field('sign', choice('+', '-'))),
       field('value', $.number),
       field('unit', $.dimension_unit),
@@ -623,8 +524,6 @@ module.exports = grammar({
     )),
 
     // Command name: backslash followed by letters
-    // Note: This regex should not match command keywords like \left, \right, etc.
-    // But tree-sitter handles this through explicit string literals taking precedence
     command_name: $ => token(prec(-1, /\\[a-zA-Z@]+\*?/)),
   },
 });
