@@ -11,10 +11,10 @@
 (5 < 10 < 10)            // expected: false
 
 // Using in where clause
-[1, 5, 7, 10, 15] where (5 < ~ < 10)   // expected: [7]
+[1, 5, 7, 10, 15] that (5 < ~ < 10)   // expected: [7]
 
 // Multiple items in range
-[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] where (3 < ~ < 8)  // expected: [4, 5, 6, 7]
+[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] that (3 < ~ < 8)  // expected: [4, 5, 6, 7]
 
 // <= and >= style chains
 (1 <= 1 <= 3)            // expected: true
@@ -30,5 +30,5 @@
   (1 < 2 < 3),           // true
   (5 < 7 < 10),          // true
   (5 < 5 < 10),          // false
-  [1, 5, 7, 10, 15] where (5 < ~ < 10)  // [7]
+  [1, 5, 7, 10, 15] that (5 < ~ < 10)  // [7]
 ]
