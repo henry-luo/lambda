@@ -4,7 +4,7 @@
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
-#include "../lib/utf.h"
+// str.h included via view.hpp
 #include "../lib/memtrack.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -284,9 +284,10 @@ static bool is_cell_empty(ViewTableCell* cell) {
             const char* text = ((DomText*)child)->text;
             if (text) {
                 const unsigned char* p = (const unsigned char*)text;
-                while (*p) {
+                const unsigned char* p_end = p + strlen(text);
+                while (p < p_end) {
                     uint32_t codepoint;
-                    int bytes = utf8_to_codepoint(p, &codepoint);
+                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
                     if (bytes <= 0) break;  // Invalid UTF-8
 
                     // Check for Unicode whitespace
@@ -4344,10 +4345,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         if (caption->blk && caption->blk->given_width > 0) {
             caption_specified_width = (int)caption->blk->given_width;
             log_debug("Caption has explicit CSS width: %dpx", caption_specified_width);
-            
+
             // Table minimum width must accommodate caption's explicit width
             if (caption_specified_width > pref_table_width) {
-                log_debug("Caption wider than table content: caption=%dpx > table=%dpx", 
+                log_debug("Caption wider than table content: caption=%dpx > table=%dpx",
                          caption_specified_width, pref_table_width);
                 pref_table_width = caption_specified_width;
                 // Also expand min_table_width if needed
@@ -4383,30 +4384,30 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             log_debug("Container width from parent element: %dpx (parent->width=%.1f)", container_width, parent->width);
         }
-        
+
         // Fallback to line bounds
         if (container_width <= 0) {
             container_width = lycon->line.right - lycon->line.left;
         }
-        
+
         // Fallback to available_space
         if (container_width <= 0 && lycon->available_space.width.is_definite()) {
             container_width = (int)lycon->available_space.width.to_px_or_zero();
         }
-        
+
         // Subtract table margins
         int margin_left = 0, margin_right = 0;
         if (table->bound) {
             margin_left = (int)table->bound->margin.left;
             margin_right = (int)table->bound->margin.right;
         }
-        
+
         max_available_width = container_width - margin_left - margin_right;
         if (max_available_width < 0) max_available_width = 0;
-        
+
         log_debug("Auto table width constraint: container=%dpx, margin_left=%dpx, margin_right=%dpx, max_available=%dpx",
                  container_width, margin_left, margin_right, max_available_width);
-        
+
         // Constrain preferred width to available space
         // But never go below minimum content width (table will overflow)
         if (max_available_width > 0 && pref_table_width > max_available_width) {

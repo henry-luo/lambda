@@ -537,6 +537,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     if (!text) return RDT_LINE_NOT_FILLED;  // null check
 
     unsigned char* str = (unsigned char*)text;
+    unsigned char* text_end = str + strlen(text);
     float text_width = 0.0f;
     CssEnum text_transform = get_text_transform(lycon);
     bool is_word_start = true;  // First character is always word start
@@ -547,7 +548,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // Get the codepoint and apply text-transform
         uint32_t codepoint = *str;
         if (codepoint >= 128) {
-            int bytes = utf8_to_codepoint(str, &codepoint);
+            int bytes = str_utf8_decode((const char*)str, (size_t)(text_end - str), &codepoint);
             if (bytes <= 0) codepoint = *str;
         }
         codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
@@ -698,6 +699,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;
+    unsigned char* text_end = text_start + strlen((const char*)text_start);
 
     // Clear any existing text rects from previous layout passes (e.g., table measurement)
     // This prevents accumulation of duplicate rects when the same node is laid out multiple times
@@ -881,7 +883,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         else {
             if (codepoint >= 128) { // unicode char
-                int bytes = utf8_to_codepoint(str, &codepoint);
+                int bytes = str_utf8_decode((const char*)str, (size_t)(text_end - str), &codepoint);
                 if (bytes <= 0) { // invalid utf8 char
                     next_ch = str + 1;  codepoint = 0;
                 }

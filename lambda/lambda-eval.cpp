@@ -1544,7 +1544,7 @@ String* fn_format1(Item item) {
     return fn_format2(item, ItemNull);
 }
 
-#include "../lib/utf.h"
+#include "../lib/str.h"
 
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
@@ -1825,7 +1825,7 @@ int64_t fn_len(Item item) {
         // returns the length of the string
         // todo: binary length
         const char* chars = item.get_chars();
-        size = chars ? utf8_char_count(chars) : 0;
+        size = chars ? (int64_t)str_utf8_count(chars, item.get_len()) : 0;
         break;
     }
     case LMD_TYPE_PATH: {
@@ -1891,7 +1891,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     int64_t end = it2l(end_item);
 
     // handle negative indices (count from end)
-    int64_t char_len = utf8_char_count(str->chars);
+    int64_t char_len = (int64_t)str_utf8_count(str->chars, str->len);
     if (start < 0) start = char_len + start;
     if (end < 0) end = char_len + end;
 
@@ -1907,8 +1907,8 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
     }
 
     // convert char indices to byte indices
-    long byte_start = utf8_char_to_byte_offset(str->chars, start);
-    long byte_end = utf8_char_to_byte_offset(str->chars, end);
+    long byte_start = (long)str_utf8_char_to_byte(str->chars, str->len, (size_t)start);
+    long byte_end = (long)str_utf8_char_to_byte(str->chars, str->len, (size_t)end);
 
     if (byte_start >= str->len || byte_end < 0) {
         // return empty string
@@ -2076,7 +2076,7 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     for (size_t i = 0; i <= str_len - sub_len; i++) {
         if (memcmp(str_chars + i, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
-            int64_t char_index = utf8_char_count_n(str_chars, i);
+            int64_t char_index = (int64_t)str_utf8_count(str_chars, i);
             return char_index;
         }
     }
@@ -2110,7 +2110,7 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
 
     if (sub_len == 0) {
         // empty substring is at the end
-        int64_t char_len = utf8_char_count(str_chars);
+        int64_t char_len = (int64_t)str_utf8_count(str_chars, str_len);
         return char_len;
     }
 
@@ -2123,7 +2123,7 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
         size_t pos = i - 1;
         if (memcmp(str_chars + pos, sub_chars, sub_len) == 0) {
             // convert byte offset to character offset
-            int64_t char_index = utf8_char_count_n(str_chars, pos);
+            int64_t char_index = (int64_t)str_utf8_count(str_chars, pos);
             return char_index;
         }
     }
@@ -2416,7 +2416,7 @@ Item fn_split(Item str_item, Item sep_item) {
         const char* p = str_chars;
         const char* end = str_chars + str_len;
         while (p < end) {
-            int char_len = utf8_char_len(*p);
+            int char_len = (int)str_utf8_char_len((unsigned char)*p);
             if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
 
             String* part = (String *)heap_alloc(sizeof(String) + char_len + 1, LMD_TYPE_STRING);

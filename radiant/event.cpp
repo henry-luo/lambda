@@ -3,7 +3,7 @@
 #include "form_control.hpp"
 
 #include "../lib/log.h"
-#include "../lib/utf.h"
+// str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -718,7 +718,7 @@ static bool is_select(View* view) {
  */
 static View* find_select_element(View* target) {
     if (!target) return nullptr;
-    
+
     View* current = target;
     while (current) {
         if (is_select(current)) return current;
@@ -733,7 +733,7 @@ static View* find_select_element(View* target) {
  */
 static DomElement* get_option_at_index(ViewBlock* select, int index) {
     if (!select || index < 0) return nullptr;
-    
+
     int current_idx = 0;
     DomNode* child = select->first_child;
     while (child) {
@@ -767,11 +767,11 @@ static DomElement* get_option_at_index(ViewBlock* select, int index) {
  */
 static const char* get_option_text(DomElement* option) {
     if (!option) return nullptr;
-    
+
     // First check for value attribute
     // Actually for display, we want the text content, not value
     // Value is for form submission
-    
+
     // Find first text node child
     DomNode* child = option->first_child;
     while (child) {
@@ -789,7 +789,7 @@ static const char* get_option_text(DomElement* option) {
  */
 static const char* get_selected_option_text(ViewBlock* select) {
     if (!select || !select->form) return nullptr;
-    
+
     DomElement* option = get_option_at_index(select, select->form->selected_index);
     return get_option_text(option);
 }
@@ -799,17 +799,17 @@ static const char* get_selected_option_text(ViewBlock* select) {
  */
 static void calculate_dropdown_dimensions(ViewBlock* select, RadiantState* state, float scale) {
     if (!select || !state || !select->form) return;
-    
+
     int option_count = select->form->option_count;
     if (option_count <= 0) option_count = 1;
-    
+
     // Maximum visible options
     int max_visible = 10;
     int visible_count = (option_count < max_visible) ? option_count : max_visible;
-    
+
     // Option height based on select height (each option same height as closed select)
     float option_height = select->height;
-    
+
     // Calculate popup dimensions
     state->dropdown_width = select->width * scale;
     state->dropdown_height = visible_count * option_height * scale;
@@ -819,23 +819,23 @@ static void calculate_dropdown_dimensions(ViewBlock* select, RadiantState* state
  * Handle click on select to toggle dropdown
  */
 static bool handle_select_click(EventContext* evcon, View* target) {
-    log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target, 
+    log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target,
         (target && target->is_element()) ? ((ViewElement*)target)->tag() : -1);
-    
+
     View* select_view = find_select_element(target);
     log_debug("handle_select_click: select_view=%p", (void*)select_view);
     if (!select_view) return false;
-    
+
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state) return false;
-    
+
     ViewBlock* select = (ViewBlock*)select_view;
-    log_debug("handle_select_click: select->form=%p, disabled=%d", 
+    log_debug("handle_select_click: select->form=%p, disabled=%d",
         (void*)select->form, select->form ? select->form->disabled : -1);
     if (!select->form || select->form->disabled) return false;
-    
+
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-    
+
     if (state->open_dropdown == select_view) {
         // Close the dropdown
         log_info("handle_select_click: closing dropdown");
@@ -845,7 +845,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
         state->needs_repaint = true;
         return true;
     }
-    
+
     // Close any other open dropdown first
     if (state->open_dropdown) {
         ViewBlock* prev_select = (ViewBlock*)state->open_dropdown;
@@ -854,13 +854,13 @@ static bool handle_select_click(EventContext* evcon, View* target) {
             prev_select->form->hover_index = -1;
         }
     }
-    
+
     // Open this dropdown
     log_info("handle_select_click: opening dropdown with %d options", select->form->option_count);
     state->open_dropdown = select_view;
     select->form->dropdown_open = 1;
     select->form->hover_index = select->form->selected_index;
-    
+
     // Calculate position (below the select, in absolute screen coords)
     // Walk up parent chain to get absolute position
     float abs_x = select->x;
@@ -874,11 +874,11 @@ static bool handle_select_click(EventContext* evcon, View* target) {
         }
         parent = parent->parent;
     }
-    
+
     state->dropdown_x = abs_x * scale;
     state->dropdown_y = abs_y * scale;
     calculate_dropdown_dimensions(select, state, scale);
-    
+
     state->needs_repaint = true;
     return true;
 }
@@ -891,16 +891,16 @@ static bool handle_select_click(EventContext* evcon, View* target) {
 static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return false;
-    
+
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
     if (!select->form) return false;
-    
+
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-    
+
     log_info("handle_dropdown_option_click: mouse=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
-             mouse_x, mouse_y, state->dropdown_x, state->dropdown_y, 
+             mouse_x, mouse_y, state->dropdown_x, state->dropdown_y,
              state->dropdown_width, state->dropdown_height);
-    
+
     // Check if click is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width) {
         log_info("handle_dropdown_option_click: click outside X bounds");
@@ -910,18 +910,18 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
         log_info("handle_dropdown_option_click: click outside Y bounds");
         return false;
     }
-    
+
     // Calculate which option was clicked
     float option_height = select->height * scale;
     int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height);
-    
+
     log_info("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
              option_height, clicked_index, select->form->option_count);
-    
+
     if (clicked_index >= 0 && clicked_index < select->form->option_count) {
         log_info("handle_dropdown_option_click: selecting option %d", clicked_index);
         select->form->selected_index = clicked_index;
-        
+
         // Close dropdown
         state->open_dropdown = nullptr;
         select->form->dropdown_open = 0;
@@ -929,7 +929,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
         state->needs_repaint = true;
         return true;
     }
-    
+
     log_info("handle_dropdown_option_click: clicked_index out of range");
     return false;
 }
@@ -940,12 +940,12 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
 static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mouse_y) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return;
-    
+
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
     if (!select->form) return;
-    
+
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-    
+
     // Check if mouse is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
         mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
@@ -955,11 +955,11 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
         }
         return;
     }
-    
+
     // Calculate which option is hovered
     float option_height = select->height * scale;
     int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
-    
+
     if (hover_index >= 0 && hover_index < select->form->option_count) {
         if (select->form->hover_index != hover_index) {
             select->form->hover_index = hover_index;
@@ -974,13 +974,13 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
 static bool handle_dropdown_key(EventContext* evcon, int key) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return false;
-    
+
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
     if (!select->form) return false;
-    
+
     int hover = select->form->hover_index;
     int count = select->form->option_count;
-    
+
     switch (key) {
     case RDT_KEY_UP:
         if (hover > 0) {
@@ -988,14 +988,14 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
             state->needs_repaint = true;
         }
         return true;
-        
+
     case RDT_KEY_DOWN:
         if (hover < count - 1) {
             select->form->hover_index = hover + 1;
             state->needs_repaint = true;
         }
         return true;
-        
+
     case RDT_KEY_ENTER:
         if (hover >= 0 && hover < count) {
             select->form->selected_index = hover;
@@ -1005,7 +1005,7 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
             state->needs_repaint = true;
         }
         return true;
-        
+
     case RDT_KEY_ESCAPE:
         state->open_dropdown = nullptr;
         select->form->dropdown_open = 0;
@@ -1013,7 +1013,7 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
         state->needs_repaint = true;
         return true;
     }
-    
+
     return false;
 }
 
@@ -1023,12 +1023,12 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
 static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float mouse_y) {
     RadiantState* state = (RadiantState*)evcon->ui_context->document->state;
     if (!state || !state->open_dropdown) return;
-    
+
     ViewBlock* select = (ViewBlock*)state->open_dropdown;
     if (!select->form) return;
-    
+
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-    
+
     // Calculate select box absolute position
     float select_abs_x = select->x;
     float select_abs_y = select->y;
@@ -1045,19 +1045,19 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     select_abs_y *= scale;
     float select_w = select->width * scale;
     float select_h = select->height * scale;
-    
+
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
         mouse_y >= select_abs_y && mouse_y <= select_abs_y + select_h) {
         return;  // Click on select box, let handle_select_click deal with it
     }
-    
+
     // Check if click is on dropdown popup
     if (mouse_x >= state->dropdown_x && mouse_x <= state->dropdown_x + state->dropdown_width &&
         mouse_y >= state->dropdown_y && mouse_y <= state->dropdown_y + state->dropdown_height) {
         return;  // Click on dropdown, let handle_dropdown_option_click deal with it
     }
-    
+
     // Click outside - close dropdown
     log_info("close_dropdown_if_outside: closing dropdown");
     state->open_dropdown = nullptr;
@@ -1360,7 +1360,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
             has_space = false;
             // Decode UTF-8 codepoint to handle multi-byte characters
             uint32_t codepoint;
-            bytes = utf8_to_codepoint(p, &codepoint);
+            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
             if (bytes <= 0) {
                 // Invalid UTF-8 sequence, skip single byte
                 bytes = 1;
@@ -1426,11 +1426,11 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, pixel_ratio=%.1f, y_ppem=%d",
         target_offset, rect->x, rect->start_index, pixel_ratio,
         evcon->font.ft_face ? evcon->font.ft_face->size->metrics.y_ppem : -1);
-    
+
     while (p < end && byte_offset < target_offset) {
         float wd = 0;
         int bytes = 1;  // number of bytes for current character
-        
+
         if (is_space(*p)) {
             if (has_space) {
                 p++;
@@ -1444,7 +1444,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
             has_space = false;
             // Decode UTF-8 codepoint to handle multi-byte characters
             uint32_t codepoint;
-            bytes = utf8_to_codepoint(p, &codepoint);
+            bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
             if (bytes <= 0) {
                 // Invalid UTF-8 sequence, skip single byte
                 bytes = 1;
@@ -1457,7 +1457,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
                 continue;
             }
             wd = evcon->font.ft_face->glyph->advance.x / 64.0f / pixel_ratio;
-            
+
             // Debug: log per-character advance for first 15 chars
             if (byte_offset - rect->start_index < 30) {
                 log_debug("[CALC-POS] byte_offset=%d codepoint=U+%04X x=%.1f wd=%.1f (raw advance=%.1f)",
@@ -1482,23 +1482,23 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
  */
 TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
     if (!text || !text->rect) return nullptr;
-    
+
     TextRect* rect = text->rect;
     TextRect* prev_rect = rect;
-    
+
     while (rect) {
         int rect_start = rect->start_index;
         int rect_end = rect->start_index + rect->length;
-        
+
         // Check if offset is within this rect
         if (char_offset >= rect_start && char_offset <= rect_end) {
             return rect;
         }
-        
+
         prev_rect = rect;
         rect = rect->next;
     }
-    
+
     // If offset is beyond all rects, return the last one
     return prev_rect;
 }
@@ -1510,12 +1510,12 @@ TextRect* find_text_rect_for_offset(ViewText* text, int char_offset) {
  */
 void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
     if (!uicon || !state || !state->caret || !state->caret->view) return;
-    
+
     CaretState* caret = state->caret;
     View* view = caret->view;
-    
+
     float caret_x = 0, caret_y = 0, caret_height = 16;
-    
+
     // Handle different view types
     if (view->is_text()) {
         ViewText* text = (ViewText*)view;
@@ -1523,19 +1523,19 @@ void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
             log_debug("[CARET-VISUAL] Text view has no rect");
             return;
         }
-        
+
         // Find the TextRect containing the current offset
         TextRect* rect = find_text_rect_for_offset(text, caret->char_offset);
         if (!rect) {
             log_debug("[CARET-VISUAL] Could not find rect for offset %d", caret->char_offset);
             return;
         }
-        
+
         // Setup event context for font access
         EventContext evcon;
         memset(&evcon, 0, sizeof(EventContext));
         evcon.ui_context = uicon;
-        
+
         // Setup font from text view
         if (text->font) {
             setup_font(uicon, &evcon.font, text->font);
@@ -1543,16 +1543,16 @@ void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
             // Fall back to default font
             DomDocument* doc = uicon->document;
             if (doc && doc->view_tree) {
-                FontProp* default_font = doc->view_tree->html_version == HTML5 
+                FontProp* default_font = doc->view_tree->html_version == HTML5
                     ? &uicon->default_font : &uicon->legacy_default_font;
                 setup_font(uicon, &evcon.font, default_font);
             }
         }
-        
+
         // Calculate visual position for text
         calculate_position_from_char_offset(&evcon, text, rect, caret->char_offset,
             &caret_x, &caret_y, &caret_height);
-            
+
     } else if (view->view_type == RDT_VIEW_MARKER) {
         // For markers: caret is at left edge (offset 0) or right edge (offset 1)
         ViewMarker* marker = (ViewMarker*)view;
@@ -1565,23 +1565,23 @@ void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
         caret_height = marker->height;
         log_debug("[CARET-VISUAL] Marker view: x=%.1f y=%.1f height=%.1f",
             caret_x, caret_y, caret_height);
-            
+
     } else {
         // Unsupported view type
         log_debug("[CARET-VISUAL] Unsupported view type %d", view->view_type);
         return;
     }
-    
+
     // Update caret visual position
     caret->x = caret_x;
     caret->y = caret_y;
     caret->height = caret_height;
-    
+
     // Preserve the existing iframe offset - it was correctly calculated when
     // the caret was initially placed via mouse click. During keyboard navigation,
     // we stay in the same iframe context, so the offset remains valid.
     // Note: chain_x/chain_y calculation above is for debugging only
-    
+
     log_debug("[CARET-VISUAL] Updated caret: view_type=%d offset=%d x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
         view->view_type, caret->char_offset, caret_x, caret_y, caret_height,
         caret->iframe_offset_x, caret->iframe_offset_y);
@@ -1624,7 +1624,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Update hover state based on new target
         update_hover_state(&evcon, evcon.target);
-        
+
         // Update dropdown hover if open
         update_dropdown_hover(&evcon, (float)mouse_x, (float)mouse_y);
 
@@ -1647,10 +1647,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         if (state && state->selection && state->selection->is_selecting) {
             View* anchor_view = state->selection->anchor_view;
             View* current_target = evcon.target;
-            
-            log_debug("[SELECTION DRAG] is_selecting=true, anchor_view=%p, current_target=%p (type=%d)", 
+
+            log_debug("[SELECTION DRAG] is_selecting=true, anchor_view=%p, current_target=%p (type=%d)",
                 anchor_view, current_target, current_target ? current_target->view_type : -1);
-            
+
             // Check if we're dragging over a text view (could be the same or different)
             View* drag_target_view = nullptr;
             if (current_target && current_target->view_type == RDT_VIEW_TEXT) {
@@ -1659,7 +1659,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Mouse is not over a text view, stay with the anchor view
                 drag_target_view = anchor_view;
             }
-            
+
             if (drag_target_view && drag_target_view->view_type == RDT_VIEW_TEXT) {
                 ViewText* text = (ViewText*)drag_target_view;
                 TextRect* rect = text->rect;
@@ -1669,7 +1669,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (text->font) {
                     setup_font(evcon.ui_context, &evcon.font, text->font);
                 }
-                
+
                 // Calculate the correct block position for the drag target view
                 // by walking up ITS parent chain
                 float sel_block_x = 0, sel_block_y = 0;
@@ -1705,7 +1705,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (drag_target_view != anchor_view) {
                     // Cross-view selection: update focus_view
                     selection_extend_to_view(state, drag_target_view, char_offset);
-                    log_debug("[CROSS-VIEW SEL] Extending from anchor_view=%p to focus_view=%p", 
+                    log_debug("[CROSS-VIEW SEL] Extending from anchor_view=%p to focus_view=%p",
                         anchor_view, drag_target_view);
                 } else {
                     // Same view selection
@@ -1720,7 +1720,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 log_debug("[CARET DRAG] char_offset=%d, calc pos: (%.1f, %.1f) height=%.1f, sel_block: (%.1f, %.1f)",
                     char_offset, caret_x, caret_y, caret_height, sel_block_x, sel_block_y);
-                
+
                 // Restore evcon.block and evcon.font
                 evcon.block = saved_block;
                 evcon.font = saved_font;
@@ -1902,7 +1902,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     dropdown_handled = true;  // Still handled - don't re-open dropdown
                 }
             }
-            
+
             // Only process other click handlers if dropdown wasn't involved
             if (!dropdown_handled) {
                 // Handle checkbox/radio click toggle
@@ -1910,7 +1910,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (evcon.target) {
                     handle_checkbox_radio_click(&evcon, evcon.target);
                 }
-                
+
                 // Handle click on select element to toggle dropdown
                 if (evcon.target) {
                     handle_select_click(&evcon, evcon.target);
@@ -2050,7 +2050,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         KeyEvent* key_event = &event->key;
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
         if (!state) break;
-        
+
         // Handle dropdown keyboard navigation first (if dropdown is open)
         if (state->open_dropdown) {
             if (handle_dropdown_key(&evcon, key_event->key)) {
@@ -2079,7 +2079,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
             bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
             bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-            
+
             // Get text data for UTF-8 aware navigation
             unsigned char* text_data = nullptr;
             if (caret_view->is_text()) {
@@ -2093,7 +2093,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         if (!state->selection || state->selection->is_collapsed) {
                             selection_start(state, caret_view, state->caret->char_offset);
                         }
-                        int new_offset = text_data 
+                        int new_offset = text_data
                             ? utf8_offset_by_chars(text_data, state->caret->char_offset, -1)
                             : state->caret->char_offset - 1;
                         selection_extend(state, new_offset);
