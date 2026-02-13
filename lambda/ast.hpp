@@ -114,7 +114,8 @@ extern "C" {
 #define SYM_PATTERN_ANY sym_pattern_any
 #define SYM_OCCURRENCE_COUNT sym_occurrence_count
 // Unified type/pattern symbols
-#define SYM_PATTERN_SEQ sym_pattern_seq
+#define SYM_TYPE_SEQ sym_type_seq
+#define SYM_TYPE_SEQ_MULTILINE sym_type_seq_multiline
 #define SYM_PATTERN_GROUP sym_pattern_group
 #define SYM_TYPE_NEGATION sym_type_negation
 
