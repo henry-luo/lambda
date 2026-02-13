@@ -2,7 +2,7 @@
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
-#include "../lib/utf.h"
+#include "../lib/str.h"
 #include "../lib/url.h"
 #include "../lib/mempool.h"
 #include "../lambda/lambda-data.hpp"

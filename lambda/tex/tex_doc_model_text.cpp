@@ -7,6 +7,7 @@
 
 #include "tex_document_model.hpp"
 #include "lib/strbuf.h"
+#include "lib/str.h"
 #include "lib/arena.h"
 #include <cstdlib>
 #include <cstring>
@@ -18,21 +19,21 @@ namespace tex {
 // ============================================================================
 
 // Normalize LaTeX whitespace: collapse consecutive whitespace to single space
-// This preserves leading and trailing whitespace (single space at most) 
+// This preserves leading and trailing whitespace (single space at most)
 // since inter-element spacing is meaningful in inline context.
 // Returns the normalized string allocated in arena, or nullptr if result is empty
 const char* normalize_latex_whitespace(const char* text, Arena* arena) {
     if (!text) return nullptr;
-    
+
     size_t len = strlen(text);
     if (len == 0) return nullptr;
-    
+
     // Allocate buffer (can't be larger than original)
     char* buf = (char*)arena_alloc(arena, len + 1);
     char* out = buf;
-    
+
     bool in_whitespace = false;
-    
+
     for (const char* p = text; *p; p++) {
         if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
             // Collapse consecutive whitespace to single space
@@ -45,12 +46,12 @@ const char* normalize_latex_whitespace(const char* text, Arena* arena) {
             in_whitespace = false;
         }
     }
-    
+
     *out = '\0';
-    
+
     size_t result_len = out - buf;
     if (result_len == 0) return nullptr;
-    
+
     return buf;
 }
 
@@ -67,17 +68,17 @@ const char* normalize_latex_whitespace(const char* text, Arena* arena) {
 // Returns a dynamically allocated string that must be freed by caller.
 char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
     if (!text || len == 0) return nullptr;
-    
+
     // Allocate buffer with room for UTF-8 expansion (3x worst case)
     size_t buf_size = len * 4 + 1;
     char* result = (char*)malloc(buf_size);
     if (!result) return nullptr;
-    
+
     size_t out_pos = 0;
-    
+
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
-        
+
         // Ensure we have room (conservative check)
         if (out_pos + 8 >= buf_size) {
             buf_size *= 2;
@@ -85,13 +86,13 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             if (!new_buf) { free(result); return nullptr; }
             result = new_buf;
         }
-        
+
         if (in_monospace) {
             // In monospace mode, keep all characters as literal ASCII
             result[out_pos++] = c;
             continue;
         }
-        
+
         // Check for dash ligatures
         if (c == '-') {
             // Check for --- (em-dash)
@@ -119,7 +120,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             result[out_pos++] = '\x90';
             continue;
         }
-        
+
         // Check for quote ligatures
         if (c == '`') {
             // Check for `` (opening double quote)
@@ -138,7 +139,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             result[out_pos++] = '\x98';
             continue;
         }
-        
+
         if (c == '\'') {
             // Check for '' (closing double quote)
             if (i + 1 < len && text[i+1] == '\'') {
@@ -156,7 +157,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             result[out_pos++] = '\x99';
             continue;
         }
-        
+
         // Check for f-ligatures
         if (c == 'f') {
             // Check for ffi
@@ -205,7 +206,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
                 continue;
             }
         }
-        
+
         // Check for << (left guillemet)
         if (c == '<' && i + 1 < len && text[i+1] == '<') {
             // « (U+00AB) = C2 AB
@@ -214,7 +215,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             i += 1;
             continue;
         }
-        
+
         // Check for >> (right guillemet)
         if (c == '>' && i + 1 < len && text[i+1] == '>') {
             // » (U+00BB) = C2 BB
@@ -223,7 +224,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             i += 1;
             continue;
         }
-        
+
         // Check for !´ (inverted exclamation) - ´ is U+00B4 = C2 B4 in UTF-8
         if (c == '!' && i + 2 < len && (unsigned char)text[i+1] == 0xC2 && (unsigned char)text[i+2] == 0xB4) {
             // ¡ (U+00A1) = C2 A1
@@ -232,7 +233,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             i += 2;
             continue;
         }
-        
+
         // Check for ?´ (inverted question) - ´ is U+00B4 = C2 B4 in UTF-8
         if (c == '?' && i + 2 < len && (unsigned char)text[i+1] == 0xC2 && (unsigned char)text[i+2] == 0xB4) {
             // ¿ (U+00BF) = C2 BF
@@ -241,11 +242,11 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
             i += 2;
             continue;
         }
-        
+
         // Default: copy character as-is
         result[out_pos++] = c;
     }
-    
+
     result[out_pos] = '\0';
     return result;
 }
@@ -254,7 +255,7 @@ char* transform_latex_text(const char* text, size_t len, bool in_monospace) {
 // Handles dash ligatures, quote ligatures, and f-ligatures
 void html_escape_append_transformed(StrBuf* out, const char* text, size_t len, bool in_monospace) {
     if (!text || len == 0) return;
-    
+
     char* transformed = transform_latex_text(text, len, in_monospace);
     if (transformed) {
         // HTML escape the transformed text
@@ -328,13 +329,9 @@ static int utf8_encode(uint32_t cp, char* out) {
     }
 }
 
-// Get UTF-8 character length from first byte
+// Get UTF-8 character length from first byte (delegates to str.h)
 int utf8_char_len(unsigned char first_byte) {
-    if (first_byte < 0x80) return 1;
-    if ((first_byte & 0xE0) == 0xC0) return 2;
-    if ((first_byte & 0xF0) == 0xE0) return 3;
-    if ((first_byte & 0xF8) == 0xF0) return 4;
-    return 1;
+    return (int)str_utf8_char_len(first_byte);
 }
 
 // Apply diacritic command to base character, returning combined result
@@ -343,26 +340,26 @@ const char* apply_diacritic(char diacritic_cmd, const char* base_char, Arena* ar
     if (!base_char || base_char[0] == '\0') {
         return nullptr;
     }
-    
+
     uint32_t combining = get_diacritic_combining(diacritic_cmd);
     if (combining == 0) {
         // Unknown diacritic, just return base
         return base_char;
     }
-    
+
     // Get base character length
     int base_len = utf8_char_len((unsigned char)base_char[0]);
-    
+
     // Allocate buffer: base + combining (up to 4 bytes each) + null
     char* result = (char*)arena_alloc(arena, base_len + 4 + 1);
-    
+
     // Copy base character
     memcpy(result, base_char, base_len);
-    
+
     // Add combining character
     int comb_len = utf8_encode(combining, result + base_len);
     result[base_len + comb_len] = '\0';
-    
+
     return result;
 }
 

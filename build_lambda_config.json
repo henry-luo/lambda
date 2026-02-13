@@ -247,6 +247,7 @@
                 "lib/arraylist.c",
                 "lib/pdf_writer.c",
                 "lib/strbuf.c",
+                "lib/str.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
                 "lib/string.c",
@@ -337,7 +338,7 @@
                 "lib/file.c",
                 "lib/log.c",
                 "lib/memtrack.c",
-                "lib/utf.c"
+                "lib/str.c"
             ],
             "libraries": [
                 "lambda-lib",
@@ -2915,6 +2916,7 @@
                             "lib/mempool.c",
                             "lib/log.c",
                             "lib/memtrack.c",
+                            "lib/str.c",
                             "lib/strbuf.c",
                             "lib/hashmap.c"
                         ],

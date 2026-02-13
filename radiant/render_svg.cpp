@@ -93,7 +93,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
             int bytes = 1;
 
             if (codepoint >= 128) {
-                bytes = utf8_to_codepoint(src, &codepoint);
+                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
                 if (bytes <= 0) bytes = 1;
             }
 
@@ -155,7 +155,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
             }
             else {
                 uint32_t codepoint;
-                int bytes = utf8_to_codepoint(scan, &codepoint);
+                int bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &codepoint);
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
