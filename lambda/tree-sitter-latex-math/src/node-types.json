@@ -16,108 +16,6 @@
             "named": true
           }
         ]
-      },
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\acute",
-            "named": false
-          },
-          {
-            "type": "\\bar",
-            "named": false
-          },
-          {
-            "type": "\\breve",
-            "named": false
-          },
-          {
-            "type": "\\check",
-            "named": false
-          },
-          {
-            "type": "\\ddddot",
-            "named": false
-          },
-          {
-            "type": "\\dddot",
-            "named": false
-          },
-          {
-            "type": "\\ddot",
-            "named": false
-          },
-          {
-            "type": "\\dot",
-            "named": false
-          },
-          {
-            "type": "\\grave",
-            "named": false
-          },
-          {
-            "type": "\\hat",
-            "named": false
-          },
-          {
-            "type": "\\overbrace",
-            "named": false
-          },
-          {
-            "type": "\\overleftarrow",
-            "named": false
-          },
-          {
-            "type": "\\overleftrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\overline",
-            "named": false
-          },
-          {
-            "type": "\\overrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\tilde",
-            "named": false
-          },
-          {
-            "type": "\\underbrace",
-            "named": false
-          },
-          {
-            "type": "\\underleftarrow",
-            "named": false
-          },
-          {
-            "type": "\\underleftrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\underline",
-            "named": false
-          },
-          {
-            "type": "\\underrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\vec",
-            "named": false
-          },
-          {
-            "type": "\\widehat",
-            "named": false
-          },
-          {
-            "type": "\\widetilde",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -144,108 +42,6 @@
           {
             "type": "symbol",
             "named": true
-          }
-        ]
-      },
-      "op": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\Pr",
-            "named": false
-          },
-          {
-            "type": "\\bigcap",
-            "named": false
-          },
-          {
-            "type": "\\bigcup",
-            "named": false
-          },
-          {
-            "type": "\\bigoplus",
-            "named": false
-          },
-          {
-            "type": "\\bigotimes",
-            "named": false
-          },
-          {
-            "type": "\\bigsqcup",
-            "named": false
-          },
-          {
-            "type": "\\bigvee",
-            "named": false
-          },
-          {
-            "type": "\\bigwedge",
-            "named": false
-          },
-          {
-            "type": "\\coprod",
-            "named": false
-          },
-          {
-            "type": "\\det",
-            "named": false
-          },
-          {
-            "type": "\\gcd",
-            "named": false
-          },
-          {
-            "type": "\\iiint",
-            "named": false
-          },
-          {
-            "type": "\\iint",
-            "named": false
-          },
-          {
-            "type": "\\inf",
-            "named": false
-          },
-          {
-            "type": "\\int",
-            "named": false
-          },
-          {
-            "type": "\\lim",
-            "named": false
-          },
-          {
-            "type": "\\liminf",
-            "named": false
-          },
-          {
-            "type": "\\limsup",
-            "named": false
-          },
-          {
-            "type": "\\max",
-            "named": false
-          },
-          {
-            "type": "\\min",
-            "named": false
-          },
-          {
-            "type": "\\oint",
-            "named": false
-          },
-          {
-            "type": "\\prod",
-            "named": false
-          },
-          {
-            "type": "\\sum",
-            "named": false
-          },
-          {
-            "type": "\\sup",
-            "named": false
           }
         ]
       },
@@ -299,24 +95,6 @@
           }
         ]
       },
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\binom",
-            "named": false
-          },
-          {
-            "type": "\\dbinom",
-            "named": false
-          },
-          {
-            "type": "\\tbinom",
-            "named": false
-          }
-        ]
-      },
       "top": {
         "multiple": false,
         "required": true,
@@ -345,48 +123,6 @@
     "type": "box_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\bbox",
-            "named": false
-          },
-          {
-            "type": "\\boxed",
-            "named": false
-          },
-          {
-            "type": "\\clap",
-            "named": false
-          },
-          {
-            "type": "\\fbox",
-            "named": false
-          },
-          {
-            "type": "\\llap",
-            "named": false
-          },
-          {
-            "type": "\\mathclap",
-            "named": false
-          },
-          {
-            "type": "\\mathllap",
-            "named": false
-          },
-          {
-            "type": "\\mathrlap",
-            "named": false
-          },
-          {
-            "type": "\\rlap",
-            "named": false
-          }
-        ]
-      },
       "content": {
         "multiple": false,
         "required": true,
@@ -548,24 +284,6 @@
     "type": "color_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\color",
-            "named": false
-          },
-          {
-            "type": "\\colorbox",
-            "named": false
-          },
-          {
-            "type": "\\textcolor",
-            "named": false
-          }
-        ]
-      },
       "color": {
         "multiple": false,
         "required": true,
@@ -1024,48 +742,6 @@
             "named": true
           }
         ]
-      },
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\xLeftarrow",
-            "named": false
-          },
-          {
-            "type": "\\xLeftrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\xRightarrow",
-            "named": false
-          },
-          {
-            "type": "\\xhookleftarrow",
-            "named": false
-          },
-          {
-            "type": "\\xhookrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\xleftarrow",
-            "named": false
-          },
-          {
-            "type": "\\xleftrightarrow",
-            "named": false
-          },
-          {
-            "type": "\\xmapsto",
-            "named": false
-          },
-          {
-            "type": "\\xrightarrow",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -1073,28 +749,6 @@
     "type": "fraction",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\cfrac",
-            "named": false
-          },
-          {
-            "type": "\\dfrac",
-            "named": false
-          },
-          {
-            "type": "\\frac",
-            "named": false
-          },
-          {
-            "type": "\\tfrac",
-            "named": false
-          }
-        ]
-      },
       "denom": {
         "multiple": false,
         "required": true,
@@ -1374,20 +1028,6 @@
     "type": "hspace_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\hspace",
-            "named": false
-          },
-          {
-            "type": "\\hspace*",
-            "named": false
-          }
-        ]
-      },
       "sign": {
         "multiple": false,
         "required": false,
@@ -1428,36 +1068,6 @@
     "type": "infix_frac",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\above",
-            "named": false
-          },
-          {
-            "type": "\\atop",
-            "named": false
-          },
-          {
-            "type": "\\brace",
-            "named": false
-          },
-          {
-            "type": "\\brack",
-            "named": false
-          },
-          {
-            "type": "\\choose",
-            "named": false
-          },
-          {
-            "type": "\\over",
-            "named": false
-          }
-        ]
-      },
       "denom": {
         "multiple": true,
         "required": false,
@@ -2037,24 +1647,6 @@
             "named": true
           }
         ]
-      },
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\bordermatrix",
-            "named": false
-          },
-          {
-            "type": "\\matrix",
-            "named": false
-          },
-          {
-            "type": "\\pmatrix",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -2102,24 +1694,6 @@
             "named": true
           }
         ]
-      },
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\overset",
-            "named": false
-          },
-          {
-            "type": "\\stackrel",
-            "named": false
-          },
-          {
-            "type": "\\underset",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -2127,28 +1701,6 @@
     "type": "phantom_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\hphantom",
-            "named": false
-          },
-          {
-            "type": "\\phantom",
-            "named": false
-          },
-          {
-            "type": "\\smash",
-            "named": false
-          },
-          {
-            "type": "\\vphantom",
-            "named": false
-          }
-        ]
-      },
       "content": {
         "multiple": false,
         "required": true,
@@ -2289,76 +1841,6 @@
             "named": true
           }
         ]
-      },
-      "size": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\Big",
-            "named": false
-          },
-          {
-            "type": "\\Bigg",
-            "named": false
-          },
-          {
-            "type": "\\Biggl",
-            "named": false
-          },
-          {
-            "type": "\\Biggm",
-            "named": false
-          },
-          {
-            "type": "\\Biggr",
-            "named": false
-          },
-          {
-            "type": "\\Bigl",
-            "named": false
-          },
-          {
-            "type": "\\Bigm",
-            "named": false
-          },
-          {
-            "type": "\\Bigr",
-            "named": false
-          },
-          {
-            "type": "\\big",
-            "named": false
-          },
-          {
-            "type": "\\bigg",
-            "named": false
-          },
-          {
-            "type": "\\biggl",
-            "named": false
-          },
-          {
-            "type": "\\biggm",
-            "named": false
-          },
-          {
-            "type": "\\biggr",
-            "named": false
-          },
-          {
-            "type": "\\bigl",
-            "named": false
-          },
-          {
-            "type": "\\bigm",
-            "named": false
-          },
-          {
-            "type": "\\bigr",
-            "named": false
-          }
-        ]
       }
     }
   },
@@ -2366,28 +1848,6 @@
     "type": "skip_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\hskip",
-            "named": false
-          },
-          {
-            "type": "\\kern",
-            "named": false
-          },
-          {
-            "type": "\\mkern",
-            "named": false
-          },
-          {
-            "type": "\\mskip",
-            "named": false
-          }
-        ]
-      },
       "sign": {
         "multiple": false,
         "required": false,
@@ -2440,72 +1900,6 @@
           {
             "type": "group",
             "named": true
-          }
-        ]
-      },
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\displaystyle",
-            "named": false
-          },
-          {
-            "type": "\\mathbb",
-            "named": false
-          },
-          {
-            "type": "\\mathbf",
-            "named": false
-          },
-          {
-            "type": "\\mathcal",
-            "named": false
-          },
-          {
-            "type": "\\mathfrak",
-            "named": false
-          },
-          {
-            "type": "\\mathit",
-            "named": false
-          },
-          {
-            "type": "\\mathnormal",
-            "named": false
-          },
-          {
-            "type": "\\mathrm",
-            "named": false
-          },
-          {
-            "type": "\\mathscr",
-            "named": false
-          },
-          {
-            "type": "\\mathsf",
-            "named": false
-          },
-          {
-            "type": "\\mathtt",
-            "named": false
-          },
-          {
-            "type": "\\operatorname",
-            "named": false
-          },
-          {
-            "type": "\\scriptscriptstyle",
-            "named": false
-          },
-          {
-            "type": "\\scriptstyle",
-            "named": false
-          },
-          {
-            "type": "\\textstyle",
-            "named": false
           }
         ]
       }
@@ -2726,44 +2120,6 @@
     "type": "text_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\hbox",
-            "named": false
-          },
-          {
-            "type": "\\mbox",
-            "named": false
-          },
-          {
-            "type": "\\text",
-            "named": false
-          },
-          {
-            "type": "\\textbf",
-            "named": false
-          },
-          {
-            "type": "\\textit",
-            "named": false
-          },
-          {
-            "type": "\\textrm",
-            "named": false
-          },
-          {
-            "type": "\\textsf",
-            "named": false
-          },
-          {
-            "type": "\\texttt",
-            "named": false
-          }
-        ]
-      },
       "content": {
         "multiple": false,
         "required": true,
@@ -2856,115 +2212,7 @@
     "named": false
   },
   {
-    "type": "Bmatrix",
-    "named": false
-  },
-  {
-    "type": "Vmatrix",
-    "named": false
-  },
-  {
     "type": "[",
-    "named": false
-  },
-  {
-    "type": "\\!",
-    "named": false
-  },
-  {
-    "type": "\\,",
-    "named": false
-  },
-  {
-    "type": "\\:",
-    "named": false
-  },
-  {
-    "type": "\\;",
-    "named": false
-  },
-  {
-    "type": "\\Big",
-    "named": false
-  },
-  {
-    "type": "\\Bigg",
-    "named": false
-  },
-  {
-    "type": "\\Biggl",
-    "named": false
-  },
-  {
-    "type": "\\Biggm",
-    "named": false
-  },
-  {
-    "type": "\\Biggr",
-    "named": false
-  },
-  {
-    "type": "\\Bigl",
-    "named": false
-  },
-  {
-    "type": "\\Bigm",
-    "named": false
-  },
-  {
-    "type": "\\Bigr",
-    "named": false
-  },
-  {
-    "type": "\\Downarrow",
-    "named": false
-  },
-  {
-    "type": "\\Im",
-    "named": false
-  },
-  {
-    "type": "\\Leftarrow",
-    "named": false
-  },
-  {
-    "type": "\\Leftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\Longleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\Longleftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\Longrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\Pr",
-    "named": false
-  },
-  {
-    "type": "\\Re",
-    "named": false
-  },
-  {
-    "type": "\\Rightarrow",
-    "named": false
-  },
-  {
-    "type": "\\Uparrow",
-    "named": false
-  },
-  {
-    "type": "\\Updownarrow",
-    "named": false
-  },
-  {
-    "type": "\\Vert",
     "named": false
   },
   {
@@ -2972,295 +2220,7 @@
     "named": false
   },
   {
-    "type": "\\above",
-    "named": false
-  },
-  {
-    "type": "\\acute",
-    "named": false
-  },
-  {
-    "type": "\\aleph",
-    "named": false
-  },
-  {
-    "type": "\\approx",
-    "named": false
-  },
-  {
-    "type": "\\ast",
-    "named": false
-  },
-  {
-    "type": "\\asymp",
-    "named": false
-  },
-  {
-    "type": "\\atop",
-    "named": false
-  },
-  {
-    "type": "\\backslash",
-    "named": false
-  },
-  {
-    "type": "\\bar",
-    "named": false
-  },
-  {
-    "type": "\\bbox",
-    "named": false
-  },
-  {
-    "type": "\\big",
-    "named": false
-  },
-  {
-    "type": "\\bigcap",
-    "named": false
-  },
-  {
-    "type": "\\bigcup",
-    "named": false
-  },
-  {
-    "type": "\\bigg",
-    "named": false
-  },
-  {
-    "type": "\\biggl",
-    "named": false
-  },
-  {
-    "type": "\\biggm",
-    "named": false
-  },
-  {
-    "type": "\\biggr",
-    "named": false
-  },
-  {
-    "type": "\\bigl",
-    "named": false
-  },
-  {
-    "type": "\\bigm",
-    "named": false
-  },
-  {
-    "type": "\\bigoplus",
-    "named": false
-  },
-  {
-    "type": "\\bigotimes",
-    "named": false
-  },
-  {
-    "type": "\\bigr",
-    "named": false
-  },
-  {
-    "type": "\\bigsqcup",
-    "named": false
-  },
-  {
-    "type": "\\bigvee",
-    "named": false
-  },
-  {
-    "type": "\\bigwedge",
-    "named": false
-  },
-  {
-    "type": "\\binom",
-    "named": false
-  },
-  {
-    "type": "\\bordermatrix",
-    "named": false
-  },
-  {
-    "type": "\\boxed",
-    "named": false
-  },
-  {
-    "type": "\\brace",
-    "named": false
-  },
-  {
-    "type": "\\brack",
-    "named": false
-  },
-  {
-    "type": "\\breve",
-    "named": false
-  },
-  {
-    "type": "\\bullet",
-    "named": false
-  },
-  {
-    "type": "\\cap",
-    "named": false
-  },
-  {
-    "type": "\\cdot",
-    "named": false
-  },
-  {
-    "type": "\\cdots",
-    "named": false
-  },
-  {
-    "type": "\\cfrac",
-    "named": false
-  },
-  {
-    "type": "\\check",
-    "named": false
-  },
-  {
-    "type": "\\choose",
-    "named": false
-  },
-  {
-    "type": "\\circ",
-    "named": false
-  },
-  {
-    "type": "\\circlearrowleft",
-    "named": false
-  },
-  {
-    "type": "\\circlearrowright",
-    "named": false
-  },
-  {
-    "type": "\\clap",
-    "named": false
-  },
-  {
-    "type": "\\color",
-    "named": false
-  },
-  {
-    "type": "\\colorbox",
-    "named": false
-  },
-  {
-    "type": "\\cong",
-    "named": false
-  },
-  {
-    "type": "\\coprod",
-    "named": false
-  },
-  {
     "type": "\\cr",
-    "named": false
-  },
-  {
-    "type": "\\cup",
-    "named": false
-  },
-  {
-    "type": "\\curvearrowleft",
-    "named": false
-  },
-  {
-    "type": "\\curvearrowright",
-    "named": false
-  },
-  {
-    "type": "\\dashv",
-    "named": false
-  },
-  {
-    "type": "\\dbinom",
-    "named": false
-  },
-  {
-    "type": "\\ddddot",
-    "named": false
-  },
-  {
-    "type": "\\dddot",
-    "named": false
-  },
-  {
-    "type": "\\ddot",
-    "named": false
-  },
-  {
-    "type": "\\ddots",
-    "named": false
-  },
-  {
-    "type": "\\det",
-    "named": false
-  },
-  {
-    "type": "\\dfrac",
-    "named": false
-  },
-  {
-    "type": "\\displaystyle",
-    "named": false
-  },
-  {
-    "type": "\\div",
-    "named": false
-  },
-  {
-    "type": "\\dot",
-    "named": false
-  },
-  {
-    "type": "\\dots",
-    "named": false
-  },
-  {
-    "type": "\\dotsb",
-    "named": false
-  },
-  {
-    "type": "\\dotsc",
-    "named": false
-  },
-  {
-    "type": "\\dotsi",
-    "named": false
-  },
-  {
-    "type": "\\dotsm",
-    "named": false
-  },
-  {
-    "type": "\\dotso",
-    "named": false
-  },
-  {
-    "type": "\\downarrow",
-    "named": false
-  },
-  {
-    "type": "\\ell",
-    "named": false
-  },
-  {
-    "type": "\\emptyset",
-    "named": false
-  },
-  {
-    "type": "\\equiv",
-    "named": false
-  },
-  {
-    "type": "\\exists",
-    "named": false
-  },
-  {
-    "type": "\\fbox",
     "named": false
   },
   {
@@ -3268,143 +2228,7 @@
     "named": false
   },
   {
-    "type": "\\forall",
-    "named": false
-  },
-  {
-    "type": "\\frac",
-    "named": false
-  },
-  {
-    "type": "\\gcd",
-    "named": false
-  },
-  {
-    "type": "\\ge",
-    "named": false
-  },
-  {
     "type": "\\genfrac",
-    "named": false
-  },
-  {
-    "type": "\\geq",
-    "named": false
-  },
-  {
-    "type": "\\gets",
-    "named": false
-  },
-  {
-    "type": "\\gg",
-    "named": false
-  },
-  {
-    "type": "\\grave",
-    "named": false
-  },
-  {
-    "type": "\\hat",
-    "named": false
-  },
-  {
-    "type": "\\hbar",
-    "named": false
-  },
-  {
-    "type": "\\hbox",
-    "named": false
-  },
-  {
-    "type": "\\hookleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\hookrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\hphantom",
-    "named": false
-  },
-  {
-    "type": "\\hskip",
-    "named": false
-  },
-  {
-    "type": "\\hspace",
-    "named": false
-  },
-  {
-    "type": "\\hspace*",
-    "named": false
-  },
-  {
-    "type": "\\iiint",
-    "named": false
-  },
-  {
-    "type": "\\iint",
-    "named": false
-  },
-  {
-    "type": "\\imath",
-    "named": false
-  },
-  {
-    "type": "\\in",
-    "named": false
-  },
-  {
-    "type": "\\inf",
-    "named": false
-  },
-  {
-    "type": "\\infinity",
-    "named": false
-  },
-  {
-    "type": "\\infty",
-    "named": false
-  },
-  {
-    "type": "\\int",
-    "named": false
-  },
-  {
-    "type": "\\jmath",
-    "named": false
-  },
-  {
-    "type": "\\kern",
-    "named": false
-  },
-  {
-    "type": "\\lVert",
-    "named": false
-  },
-  {
-    "type": "\\langle",
-    "named": false
-  },
-  {
-    "type": "\\lbrace",
-    "named": false
-  },
-  {
-    "type": "\\lbrack",
-    "named": false
-  },
-  {
-    "type": "\\lceil",
-    "named": false
-  },
-  {
-    "type": "\\ldots",
-    "named": false
-  },
-  {
-    "type": "\\le",
     "named": false
   },
   {
@@ -3412,179 +2236,7 @@
     "named": false
   },
   {
-    "type": "\\leftarrow",
-    "named": false
-  },
-  {
-    "type": "\\leftharpoondown",
-    "named": false
-  },
-  {
-    "type": "\\leftharpoonup",
-    "named": false
-  },
-  {
-    "type": "\\leftleftarrows",
-    "named": false
-  },
-  {
-    "type": "\\leftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\leftrightarrows",
-    "named": false
-  },
-  {
-    "type": "\\leftrightharpoons",
-    "named": false
-  },
-  {
-    "type": "\\leftrightsquigarrow",
-    "named": false
-  },
-  {
-    "type": "\\leq",
-    "named": false
-  },
-  {
-    "type": "\\lfloor",
-    "named": false
-  },
-  {
-    "type": "\\lgroup",
-    "named": false
-  },
-  {
-    "type": "\\lim",
-    "named": false
-  },
-  {
-    "type": "\\liminf",
-    "named": false
-  },
-  {
-    "type": "\\limits",
-    "named": false
-  },
-  {
-    "type": "\\limsup",
-    "named": false
-  },
-  {
-    "type": "\\ll",
-    "named": false
-  },
-  {
-    "type": "\\llap",
-    "named": false
-  },
-  {
-    "type": "\\lmoustache",
-    "named": false
-  },
-  {
-    "type": "\\longleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\longleftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\longmapsto",
-    "named": false
-  },
-  {
-    "type": "\\longrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\looparrowleft",
-    "named": false
-  },
-  {
-    "type": "\\looparrowright",
-    "named": false
-  },
-  {
-    "type": "\\lvert",
-    "named": false
-  },
-  {
-    "type": "\\mapsto",
-    "named": false
-  },
-  {
-    "type": "\\mathbb",
-    "named": false
-  },
-  {
-    "type": "\\mathbf",
-    "named": false
-  },
-  {
-    "type": "\\mathcal",
-    "named": false
-  },
-  {
-    "type": "\\mathclap",
-    "named": false
-  },
-  {
-    "type": "\\mathfrak",
-    "named": false
-  },
-  {
-    "type": "\\mathit",
-    "named": false
-  },
-  {
-    "type": "\\mathllap",
-    "named": false
-  },
-  {
-    "type": "\\mathnormal",
-    "named": false
-  },
-  {
     "type": "\\mathop",
-    "named": false
-  },
-  {
-    "type": "\\mathrlap",
-    "named": false
-  },
-  {
-    "type": "\\mathrm",
-    "named": false
-  },
-  {
-    "type": "\\mathscr",
-    "named": false
-  },
-  {
-    "type": "\\mathsf",
-    "named": false
-  },
-  {
-    "type": "\\mathtt",
-    "named": false
-  },
-  {
-    "type": "\\matrix",
-    "named": false
-  },
-  {
-    "type": "\\max",
-    "named": false
-  },
-  {
-    "type": "\\mbox",
-    "named": false
-  },
-  {
-    "type": "\\mid",
     "named": false
   },
   {
@@ -3592,239 +2244,7 @@
     "named": false
   },
   {
-    "type": "\\min",
-    "named": false
-  },
-  {
-    "type": "\\mkern",
-    "named": false
-  },
-  {
-    "type": "\\models",
-    "named": false
-  },
-  {
-    "type": "\\mp",
-    "named": false
-  },
-  {
-    "type": "\\mskip",
-    "named": false
-  },
-  {
-    "type": "\\nLeftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\nRightarrow",
-    "named": false
-  },
-  {
-    "type": "\\nabla",
-    "named": false
-  },
-  {
-    "type": "\\ne",
-    "named": false
-  },
-  {
-    "type": "\\nearrow",
-    "named": false
-  },
-  {
-    "type": "\\neq",
-    "named": false
-  },
-  {
-    "type": "\\nexists",
-    "named": false
-  },
-  {
-    "type": "\\ni",
-    "named": false
-  },
-  {
-    "type": "\\nleftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\nolimits",
-    "named": false
-  },
-  {
-    "type": "\\notin",
-    "named": false
-  },
-  {
-    "type": "\\nrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\nwarrow",
-    "named": false
-  },
-  {
-    "type": "\\odot",
-    "named": false
-  },
-  {
-    "type": "\\oint",
-    "named": false
-  },
-  {
-    "type": "\\ominus",
-    "named": false
-  },
-  {
-    "type": "\\operatorname",
-    "named": false
-  },
-  {
-    "type": "\\oplus",
-    "named": false
-  },
-  {
-    "type": "\\oslash",
-    "named": false
-  },
-  {
-    "type": "\\otimes",
-    "named": false
-  },
-  {
-    "type": "\\over",
-    "named": false
-  },
-  {
-    "type": "\\overbrace",
-    "named": false
-  },
-  {
-    "type": "\\overleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\overleftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\overline",
-    "named": false
-  },
-  {
-    "type": "\\overrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\overset",
-    "named": false
-  },
-  {
-    "type": "\\parallel",
-    "named": false
-  },
-  {
-    "type": "\\partial",
-    "named": false
-  },
-  {
-    "type": "\\perp",
-    "named": false
-  },
-  {
-    "type": "\\phantom",
-    "named": false
-  },
-  {
-    "type": "\\pm",
-    "named": false
-  },
-  {
-    "type": "\\pmatrix",
-    "named": false
-  },
-  {
-    "type": "\\prec",
-    "named": false
-  },
-  {
-    "type": "\\preceq",
-    "named": false
-  },
-  {
-    "type": "\\prod",
-    "named": false
-  },
-  {
-    "type": "\\propto",
-    "named": false
-  },
-  {
-    "type": "\\qquad",
-    "named": false
-  },
-  {
-    "type": "\\quad",
-    "named": false
-  },
-  {
-    "type": "\\rVert",
-    "named": false
-  },
-  {
-    "type": "\\rangle",
-    "named": false
-  },
-  {
-    "type": "\\rbrace",
-    "named": false
-  },
-  {
-    "type": "\\rbrack",
-    "named": false
-  },
-  {
-    "type": "\\rceil",
-    "named": false
-  },
-  {
-    "type": "\\rfloor",
-    "named": false
-  },
-  {
-    "type": "\\rgroup",
-    "named": false
-  },
-  {
     "type": "\\right",
-    "named": false
-  },
-  {
-    "type": "\\rightarrow",
-    "named": false
-  },
-  {
-    "type": "\\rightharpoondown",
-    "named": false
-  },
-  {
-    "type": "\\rightharpoonup",
-    "named": false
-  },
-  {
-    "type": "\\rightleftharpoons",
-    "named": false
-  },
-  {
-    "type": "\\rightrightarrows",
-    "named": false
-  },
-  {
-    "type": "\\rlap",
-    "named": false
-  },
-  {
-    "type": "\\rmoustache",
     "named": false
   },
   {
@@ -3832,251 +2252,7 @@
     "named": false
   },
   {
-    "type": "\\rvert",
-    "named": false
-  },
-  {
-    "type": "\\scriptscriptstyle",
-    "named": false
-  },
-  {
-    "type": "\\scriptstyle",
-    "named": false
-  },
-  {
-    "type": "\\searrow",
-    "named": false
-  },
-  {
-    "type": "\\setminus",
-    "named": false
-  },
-  {
-    "type": "\\sim",
-    "named": false
-  },
-  {
-    "type": "\\simeq",
-    "named": false
-  },
-  {
-    "type": "\\smash",
-    "named": false
-  },
-  {
-    "type": "\\sqcap",
-    "named": false
-  },
-  {
-    "type": "\\sqcup",
-    "named": false
-  },
-  {
     "type": "\\sqrt",
-    "named": false
-  },
-  {
-    "type": "\\stackrel",
-    "named": false
-  },
-  {
-    "type": "\\star",
-    "named": false
-  },
-  {
-    "type": "\\subset",
-    "named": false
-  },
-  {
-    "type": "\\subseteq",
-    "named": false
-  },
-  {
-    "type": "\\succ",
-    "named": false
-  },
-  {
-    "type": "\\succeq",
-    "named": false
-  },
-  {
-    "type": "\\sum",
-    "named": false
-  },
-  {
-    "type": "\\sup",
-    "named": false
-  },
-  {
-    "type": "\\supset",
-    "named": false
-  },
-  {
-    "type": "\\supseteq",
-    "named": false
-  },
-  {
-    "type": "\\swarrow",
-    "named": false
-  },
-  {
-    "type": "\\tbinom",
-    "named": false
-  },
-  {
-    "type": "\\text",
-    "named": false
-  },
-  {
-    "type": "\\textbf",
-    "named": false
-  },
-  {
-    "type": "\\textcolor",
-    "named": false
-  },
-  {
-    "type": "\\textit",
-    "named": false
-  },
-  {
-    "type": "\\textrm",
-    "named": false
-  },
-  {
-    "type": "\\textsf",
-    "named": false
-  },
-  {
-    "type": "\\textstyle",
-    "named": false
-  },
-  {
-    "type": "\\texttt",
-    "named": false
-  },
-  {
-    "type": "\\tfrac",
-    "named": false
-  },
-  {
-    "type": "\\tilde",
-    "named": false
-  },
-  {
-    "type": "\\times",
-    "named": false
-  },
-  {
-    "type": "\\to",
-    "named": false
-  },
-  {
-    "type": "\\underbrace",
-    "named": false
-  },
-  {
-    "type": "\\underleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\underleftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\underline",
-    "named": false
-  },
-  {
-    "type": "\\underrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\underset",
-    "named": false
-  },
-  {
-    "type": "\\uparrow",
-    "named": false
-  },
-  {
-    "type": "\\updownarrow",
-    "named": false
-  },
-  {
-    "type": "\\varnothing",
-    "named": false
-  },
-  {
-    "type": "\\vdash",
-    "named": false
-  },
-  {
-    "type": "\\vdots",
-    "named": false
-  },
-  {
-    "type": "\\vec",
-    "named": false
-  },
-  {
-    "type": "\\vee",
-    "named": false
-  },
-  {
-    "type": "\\vert",
-    "named": false
-  },
-  {
-    "type": "\\vphantom",
-    "named": false
-  },
-  {
-    "type": "\\wedge",
-    "named": false
-  },
-  {
-    "type": "\\widehat",
-    "named": false
-  },
-  {
-    "type": "\\widetilde",
-    "named": false
-  },
-  {
-    "type": "\\xLeftarrow",
-    "named": false
-  },
-  {
-    "type": "\\xLeftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\xRightarrow",
-    "named": false
-  },
-  {
-    "type": "\\xhookleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\xhookrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\xleftarrow",
-    "named": false
-  },
-  {
-    "type": "\\xleftrightarrow",
-    "named": false
-  },
-  {
-    "type": "\\xmapsto",
-    "named": false
-  },
-  {
-    "type": "\\xrightarrow",
     "named": false
   },
   {
@@ -4104,35 +2280,11 @@
     "named": false
   },
   {
-    "type": "align",
-    "named": false
-  },
-  {
-    "type": "align*",
-    "named": false
-  },
-  {
-    "type": "aligned",
-    "named": false
-  },
-  {
-    "type": "array",
-    "named": false
-  },
-  {
     "type": "begin_cmd",
     "named": true
   },
   {
-    "type": "bmatrix",
-    "named": false
-  },
-  {
     "type": "bp",
-    "named": false
-  },
-  {
-    "type": "cases",
     "named": false
   },
   {
@@ -4152,10 +2304,6 @@
     "named": true
   },
   {
-    "type": "dcases",
-    "named": false
-  },
-  {
     "type": "dd",
     "named": false
   },
@@ -4172,35 +2320,11 @@
     "named": true
   },
   {
-    "type": "equation",
-    "named": false
-  },
-  {
-    "type": "equation*",
-    "named": false
-  },
-  {
     "type": "ex",
     "named": false
   },
   {
-    "type": "gather",
-    "named": false
-  },
-  {
-    "type": "gather*",
-    "named": false
-  },
-  {
-    "type": "gathered",
-    "named": false
-  },
-  {
     "type": "in",
-    "named": false
-  },
-  {
-    "type": "matrix",
     "named": false
   },
   {
@@ -4212,14 +2336,6 @@
     "named": false
   },
   {
-    "type": "multline",
-    "named": false
-  },
-  {
-    "type": "multline*",
-    "named": false
-  },
-  {
     "type": "number",
     "named": true
   },
@@ -4228,31 +2344,11 @@
     "named": false
   },
   {
-    "type": "pmatrix",
-    "named": false
-  },
-  {
     "type": "pt",
     "named": false
   },
   {
-    "type": "rcases",
-    "named": false
-  },
-  {
-    "type": "smallmatrix",
-    "named": false
-  },
-  {
     "type": "sp",
-    "named": false
-  },
-  {
-    "type": "split",
-    "named": false
-  },
-  {
-    "type": "subarray",
     "named": false
   },
   {
@@ -4262,10 +2358,6 @@
   {
     "type": "text_content",
     "named": true
-  },
-  {
-    "type": "vmatrix",
-    "named": false
   },
   {
     "type": "{",
