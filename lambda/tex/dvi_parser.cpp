@@ -5,6 +5,7 @@
 #include "dvi_parser.hpp"
 #include "lib/log.h"
 #include "lib/memtrack.h"
+#include "lib/str.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -170,7 +171,7 @@ char* DVIParser::read_string(int len) {
 
 void DVIParser::set_error(const char* msg) {
     error_ = (char*)arena_alloc(arena_, strlen(msg) + 1);
-    strcpy(error_, msg);
+    str_copy(error_, strlen(msg) + 1, msg, strlen(msg));
     log_error("DVI parser: %s at position %zu", msg, pos_);
 }
 

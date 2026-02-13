@@ -12,6 +12,7 @@
  */
 #include "inline_common.hpp"
 #include "lib/log.h"
+#include "lib/str.h"
 #include <cstring>
 #include <cctype>
 
@@ -431,8 +432,8 @@ Item parse_autolink(MarkupParser* parser, const char** text) {
     String* href_val;
     if (is_email) {
         char* mailto = (char*)arena_alloc(parser->input()->arena, url_len + 8);
-        strcpy(mailto, "mailto:");
-        strcat(mailto, url_buf);
+        str_copy(mailto, url_len + 8, "mailto:", 7);
+        str_cat(mailto, 7, url_len + 8, url_buf, url_len);
         href_val = parser->builder.createString(mailto);
     } else {
         href_val = parser->builder.createString(url_buf);

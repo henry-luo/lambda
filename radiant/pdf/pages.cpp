@@ -8,6 +8,7 @@ extern "C" {
 #include "pages.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/str.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -17,7 +18,7 @@ static String* create_string_key(Pool* pool, const char* str) {
     String* key = (String*)pool_calloc(pool, sizeof(String) + len + 1);
     if (!key) return nullptr;
 
-    strcpy(key->chars, str);
+    str_copy(key->chars, len + 1, str, len);
     key->len = len;
     key->ref_cnt = 0;
     return key;

@@ -57,7 +57,7 @@ static int key_name_to_glfw(const char* name) {
 
     // Function keys
     if (name[0] == 'f' || name[0] == 'F') {
-        int num = atoi(name + 1);
+        int num = (int)str_to_int64_or(name + 1, strlen(name + 1), 0);
         if (num >= 1 && num <= 12) return GLFW_KEY_F1 + (num - 1);
     }
 

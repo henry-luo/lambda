@@ -16,6 +16,7 @@
 #include "mark_builder.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
+#include "../lib/str.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -113,7 +114,7 @@ extern "C" void sysinfo_set_args(int argc, char** argv) {
 
 extern "C" void sysinfo_init(void) {
     if (g_cache && g_cache->initialized) return;
-    
+
     if (!g_cache) {
         g_cache = (SysinfoCache*)calloc(1, sizeof(SysinfoCache));
     }
@@ -177,11 +178,11 @@ static bool cache_valid(time_t cached_at, int ttl) {
  */
 static int collect_path_segments(Path* path, const char** segments, int max_segments) {
     int count = 0;
-    
+
     // Collect segments in reverse order (leaf to root)
     const char* temp[32];
     int temp_count = 0;
-    
+
     Path* p = path;
     while (p && temp_count < 32) {
         const char* name = p->name;
@@ -193,12 +194,12 @@ static int collect_path_segments(Path* path, const char** segments, int max_segm
         }
         p = p->parent;
     }
-    
+
     // Reverse to get root-to-leaf order
     for (int i = temp_count - 1; i >= 0 && count < max_segments; i--) {
         segments[count++] = temp[i];
     }
-    
+
     return count;
 }
 
@@ -211,7 +212,7 @@ static Input* get_input(void) {
         sysinfo_init();
     }
     if (!g_cache) return nullptr;
-    
+
     // Re-create Input if context changed
     if (!g_cache->input && context) {
         Pool* pool = eval_context_get_pool(context);
@@ -219,7 +220,7 @@ static Input* get_input(void) {
             g_cache->input = Input::create(pool, nullptr, nullptr);
         }
     }
-    
+
     return g_cache->input;
 }
 
@@ -229,21 +230,21 @@ static Input* get_input(void) {
 
 extern "C" Item sysinfo_resolve_path(Path* path) {
     if (!path) return ItemNull;
-    
+
     log_debug("sysinfo_resolve_path: resolving path %p", path);
-    
+
     // Collect path segments
     const char* segments[16];
     int seg_count = collect_path_segments(path, segments, 16);
-    
+
     if (seg_count == 0) {
         // Just "sys" - return root map
         return resolve_root();
     }
-    
+
     // First segment determines category
     const char* category = segments[0];
-    
+
     if (strcmp(category, "os") == 0) {
         if (seg_count == 1) return resolve_os();
         // sys.os.* - get field from os map
@@ -294,7 +295,7 @@ extern "C" Item sysinfo_resolve_path(Path* path) {
     else if (strcmp(category, "temp") == 0) {
         return resolve_temp();
     }
-    
+
     log_warn("sysinfo_resolve_path: unknown category '%s'", category);
     return ItemNull;
 }
@@ -321,7 +322,7 @@ static const char* get_os_version(void) {
     if (version[0] == 0) {
         size_t size = sizeof(version);
         if (sysctlbyname("kern.osrelease", version, &size, NULL, 0) != 0) {
-            strcpy(version, "Unknown");
+            str_copy(version, sizeof(version), "Unknown", 7);
         }
     }
     return version;
@@ -343,7 +344,7 @@ static const char* get_kernel_version(void) {
     if (kernel[0] == 0) {
         size_t size = sizeof(kernel);
         if (sysctlbyname("kern.version", kernel, &size, NULL, 0) != 0) {
-            strcpy(kernel, "Unknown");
+            str_copy(kernel, sizeof(kernel), "Unknown", 7);
         }
         // Trim newline
         char* nl = strchr(kernel, '\n');
@@ -368,7 +369,7 @@ static const char* get_machine_arch(void) {
     if (machine[0] == 0) {
         size_t size = sizeof(machine);
         if (sysctlbyname("hw.machine", machine, &size, NULL, 0) != 0) {
-            strcpy(machine, "Unknown");
+            str_copy(machine, sizeof(machine), "Unknown", 7);
         }
     }
     return machine;
@@ -397,11 +398,11 @@ static const char* get_hostname(void) {
 #ifdef _WIN32
         DWORD size = sizeof(hostname);
         if (!GetComputerNameA(hostname, &size)) {
-            strcpy(hostname, "Unknown");
+            str_copy(hostname, sizeof(hostname), "Unknown", 7);
         }
 #else
         if (gethostname(hostname, sizeof(hostname)) != 0) {
-            strcpy(hostname, "Unknown");
+            str_copy(hostname, sizeof(hostname), "Unknown", 7);
         }
 #endif
     }
@@ -470,7 +471,7 @@ static int64_t get_memory_free(void) {
 #ifdef __APPLE__
     vm_statistics64_data_t vm_stat;
     mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
-    if (host_statistics64(mach_host_self(), HOST_VM_INFO64, 
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
                           (host_info64_t)&vm_stat, &count) == KERN_SUCCESS) {
         int64_t page_size = 0;
         size_t size = sizeof(page_size);
@@ -527,10 +528,10 @@ static const char* get_home_dir(void) {
 #else
     const char* home = getenv("HOME");
     if (home) return home;
-    
+
     struct passwd* pw = getpwuid(getuid());
     if (pw) return pw->pw_dir;
-    
+
     return "/";
 #endif
 }
@@ -556,18 +557,18 @@ static const char* get_temp_dir(void) {
 static Item resolve_root(void) {
     if (!g_cache) sysinfo_init();
     if (!g_cache) return ItemNull;
-    
+
     // Root map is always valid (sub-maps have their own TTLs)
     if (get_type_id(g_cache->root) == LMD_TYPE_MAP) {
         return g_cache->root;
     }
-    
+
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     MarkBuilder builder(input);
     MapBuilder root = builder.map();
-    
+
     // Add category maps - resolve them directly for now
     root.put("os", resolve_os());
     root.put("cpu", resolve_cpu());
@@ -577,34 +578,34 @@ static Item resolve_root(void) {
     root.put("lambda", resolve_lambda());
     root.put("home", resolve_home());
     root.put("temp", resolve_temp());
-    
+
     g_cache->root = root.final();
     g_cache->root_time = time(nullptr);
-    
+
     return g_cache->root;
 }
 
 static Item resolve_os(void) {
     if (!g_cache) sysinfo_init();
     if (!g_cache) return ItemNull;
-    
-    if (cache_valid(g_cache->os_time, TTL_STATIC) && 
+
+    if (cache_valid(g_cache->os_time, TTL_STATIC) &&
         get_type_id(g_cache->os_info) == LMD_TYPE_MAP) {
         return g_cache->os_info;
     }
-    
+
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     MarkBuilder builder(input);
     MapBuilder os = builder.map();
-    
+
     os.put("name", get_os_name());
     os.put("version", get_os_version());
     os.put("kernel", get_kernel_version());
     os.put("machine", get_machine_arch());
     os.put("hostname", get_hostname());
-    
+
 #ifdef __APPLE__
     os.put("platform", "darwin");
 #elif defined(__linux__)
@@ -614,10 +615,10 @@ static Item resolve_os(void) {
 #else
     os.put("platform", "unknown");
 #endif
-    
+
     g_cache->os_info = os.final();
     g_cache->os_time = time(nullptr);
-    
+
     log_debug("sysinfo_resolve_os: resolved os map");
     return g_cache->os_info;
 }
@@ -625,25 +626,25 @@ static Item resolve_os(void) {
 static Item resolve_cpu(void) {
     if (!g_cache) sysinfo_init();
     if (!g_cache) return ItemNull;
-    
-    if (cache_valid(g_cache->cpu_time, TTL_STATIC) && 
+
+    if (cache_valid(g_cache->cpu_time, TTL_STATIC) &&
         get_type_id(g_cache->cpu_info) == LMD_TYPE_MAP) {
         return g_cache->cpu_info;
     }
-    
+
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     MarkBuilder builder(input);
     MapBuilder cpu = builder.map();
-    
+
     cpu.put("cores", (int64_t)get_cpu_cores());
     cpu.put("threads", (int64_t)get_cpu_threads());
     cpu.put("arch", get_machine_arch());
-    
+
     g_cache->cpu_info = cpu.final();
     g_cache->cpu_time = time(nullptr);
-    
+
     log_debug("sysinfo_resolve_cpu: resolved cpu map");
     return g_cache->cpu_info;
 }
@@ -651,29 +652,29 @@ static Item resolve_cpu(void) {
 static Item resolve_memory(void) {
     if (!g_cache) sysinfo_init();
     if (!g_cache) return ItemNull;
-    
-    if (cache_valid(g_cache->memory_time, TTL_MEMORY) && 
+
+    if (cache_valid(g_cache->memory_time, TTL_MEMORY) &&
         get_type_id(g_cache->memory_info) == LMD_TYPE_MAP) {
         return g_cache->memory_info;
     }
-    
+
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     MarkBuilder builder(input);
     MapBuilder mem = builder.map();
-    
+
     int64_t total = get_memory_total();
     int64_t free_mem = get_memory_free();
     int64_t used = total - free_mem;
-    
+
     mem.put("total", total);
     mem.put("free", free_mem);
     mem.put("used", used);
-    
+
     g_cache->memory_info = mem.final();
     g_cache->memory_time = time(nullptr);
-    
+
     log_debug("sysinfo_resolve_memory: resolved memory map");
     return g_cache->memory_info;
 }
@@ -681,36 +682,36 @@ static Item resolve_memory(void) {
 static Item resolve_proc(const char** segments, int count) {
     if (!g_cache) sysinfo_init();
     if (!g_cache) return ItemNull;
-    
+
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     // sys.proc - return map with "self" sub-path
     if (count == 0) {
-        if (cache_valid(g_cache->proc_time, TTL_PROC) && 
+        if (cache_valid(g_cache->proc_time, TTL_PROC) &&
             get_type_id(g_cache->proc_info) == LMD_TYPE_MAP) {
             return g_cache->proc_info;
         }
-        
+
         MarkBuilder builder(input);
         MapBuilder proc = builder.map();
-        
+
         // Add self info directly for now
         MapBuilder self = builder.map();
         self.put("pid", (int64_t)getpid());
-        
+
         char cwd[1024];
         if (getcwd(cwd, sizeof(cwd))) {
             self.put("cwd", cwd);
         }
-        
+
         proc.put("self", self.final());
-        
+
         g_cache->proc_info = proc.final();
         g_cache->proc_time = time(nullptr);
         return g_cache->proc_info;
     }
-    
+
     // sys.proc.self
     if (count >= 1 && strcmp(segments[0], "self") == 0) {
         if (count == 1) {
@@ -718,23 +719,23 @@ static Item resolve_proc(const char** segments, int count) {
             MarkBuilder builder(input);
             MapBuilder self = builder.map();
             self.put("pid", (int64_t)getpid());
-            
+
             char cwd[1024];
             if (getcwd(cwd, sizeof(cwd))) {
                 self.put("cwd", cwd);
             }
-            
+
             return self.final();
         }
-        
+
         // sys.proc.self.pid, sys.proc.self.cwd, sys.proc.self.env
         if (count >= 2) {
             const char* field = segments[1];
-            
+
             if (strcmp(field, "pid") == 0) {
                 return Item{.item = i2it(getpid())};
             }
-            
+
             if (strcmp(field, "cwd") == 0) {
                 char cwd[1024];
                 if (getcwd(cwd, sizeof(cwd))) {
@@ -743,28 +744,28 @@ static Item resolve_proc(const char** segments, int count) {
                 }
                 return ItemNull;
             }
-            
+
             if (strcmp(field, "args") == 0) {
                 // sys.proc.self.args - return command line arguments as array
                 MarkBuilder builder(input);
                 ArrayBuilder args = builder.array();
-                
+
                 if (g_argv) {
                     for (int i = 0; i < g_argc; i++) {
                         args.append(builder.createStringItem(g_argv[i]));
                     }
                 }
-                
+
                 return args.final();
             }
-            
+
             if (strcmp(field, "env") == 0) {
                 // sys.proc.self.env or sys.proc.self.env.VARNAME
                 if (count == 2) {
                     // Return all env vars as a map
                     MarkBuilder builder(input);
                     MapBuilder env = builder.map();
-                    
+
                     extern char** environ;
                     for (char** e = environ; *e; e++) {
                         char* eq = strchr(*e, '=');
@@ -778,7 +779,7 @@ static Item resolve_proc(const char** segments, int count) {
                             }
                         }
                     }
-                    
+
                     return env.final();
                 }
                 else if (count >= 3) {
@@ -793,7 +794,7 @@ static Item resolve_proc(const char** segments, int count) {
             }
         }
     }
-    
+
     return ItemNull;
 }
 
@@ -801,16 +802,16 @@ static Item resolve_time(void) {
     // Time info is always fresh (TTL_TIME = 0)
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     MarkBuilder builder(input);
     MapBuilder tm = builder.map();
-    
+
     time_t now = time(nullptr);
     tm.put("now", (int64_t)now);
-    
+
     double uptime = get_system_uptime();
     tm.put("uptime", uptime);
-    
+
     log_debug("sysinfo_resolve_time: resolved time map");
     return tm.final();
 }
@@ -818,23 +819,23 @@ static Item resolve_time(void) {
 static Item resolve_lambda(void) {
     if (!g_cache) sysinfo_init();
     if (!g_cache) return ItemNull;
-    
-    if (cache_valid(g_cache->lambda_time, TTL_STATIC) && 
+
+    if (cache_valid(g_cache->lambda_time, TTL_STATIC) &&
         get_type_id(g_cache->lambda_info) == LMD_TYPE_MAP) {
         return g_cache->lambda_info;
     }
-    
+
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     MarkBuilder builder(input);
     MapBuilder lambda = builder.map();
-    
+
     lambda.put("version", "0.1.0");  // TODO: get from config
-    
+
     g_cache->lambda_info = lambda.final();
     g_cache->lambda_time = time(nullptr);
-    
+
     log_debug("sysinfo_resolve_lambda: resolved lambda map");
     return g_cache->lambda_info;
 }
@@ -842,10 +843,10 @@ static Item resolve_lambda(void) {
 static Item resolve_home(void) {
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     const char* home = get_home_dir();
     if (!home || home[0] == '\0') return ItemNull;
-    
+
     // Return as string path for now
     // TODO: Return as actual Path object
     MarkBuilder builder(input);
@@ -855,10 +856,10 @@ static Item resolve_home(void) {
 static Item resolve_temp(void) {
     Input* input = get_input();
     if (!input) return ItemNull;
-    
+
     const char* temp = get_temp_dir();
     if (!temp || temp[0] == '\0') return ItemNull;
-    
+
     // Return as string path for now
     MarkBuilder builder(input);
     return builder.createStringItem(temp);

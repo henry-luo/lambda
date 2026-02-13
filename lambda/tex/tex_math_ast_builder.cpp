@@ -11,6 +11,7 @@
 #include "tex_math_ast.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <tree_sitter/api.h>
 #include <cstring>
 #include <cstdlib>
@@ -82,7 +83,7 @@ static float parse_dimension_to_pt(const char* dim, int len) {
     }
     buf[i] = '\0';
 
-    float value = (float)atof(buf);
+    float value = (float)str_to_double_or(buf, strlen(buf), 0.0);
     if (value == 0.0f && buf[0] != '0') return 0.0f;  // Parse error
 
     // Skip whitespace
@@ -2580,7 +2581,7 @@ MathASTNode* MathASTBuilder::build_hspace_command(TSNode node) {
         int len;
         const char* text = node_text(value_node, &len);
         if (text && len > 0) {
-            value = atof(text);
+            value = (float)str_to_double_or(text, len, 0.0);
         }
     }
 
@@ -2660,7 +2661,7 @@ MathASTNode* MathASTBuilder::build_skip_command(TSNode node) {
         int len;
         const char* text = node_text(value_node, &len);
         if (text && len > 0) {
-            value = atof(text);
+            value = (float)str_to_double_or(text, len, 0.0);
         }
     }
 

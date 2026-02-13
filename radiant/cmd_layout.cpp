@@ -27,6 +27,7 @@ extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
 #include "../lib/string.h"
+#include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
@@ -433,15 +434,15 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
             log_debug("[viewport] Key='%s' Value='%s'", key, value);
 
             if (strcasecmp(key, "initial-scale") == 0) {
-                doc->viewport_initial_scale = (float)atof(value);
+                doc->viewport_initial_scale = (float)str_to_double_or(value, strlen(value), 0.0);
                 log_info("[viewport] initial-scale=%.2f", doc->viewport_initial_scale);
             }
             else if (strcasecmp(key, "minimum-scale") == 0) {
-                doc->viewport_min_scale = (float)atof(value);
+                doc->viewport_min_scale = (float)str_to_double_or(value, strlen(value), 0.0);
                 log_debug("[viewport] minimum-scale=%.2f", doc->viewport_min_scale);
             }
             else if (strcasecmp(key, "maximum-scale") == 0) {
-                doc->viewport_max_scale = (float)atof(value);
+                doc->viewport_max_scale = (float)str_to_double_or(value, strlen(value), 0.0);
                 log_debug("[viewport] maximum-scale=%.2f", doc->viewport_max_scale);
             }
             else if (strcasecmp(key, "width") == 0) {
@@ -449,7 +450,7 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
                     doc->viewport_width = 0;  // 0 means device-width
                     log_debug("[viewport] width=device-width");
                 } else {
-                    doc->viewport_width = atoi(value);
+                    doc->viewport_width = (int)str_to_int64_or(value, strlen(value), 0);
                     log_debug("[viewport] width=%d", doc->viewport_width);
                 }
             }
@@ -458,7 +459,7 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
                     doc->viewport_height = 0;  // 0 means device-height
                     log_debug("[viewport] height=device-height");
                 } else {
-                    doc->viewport_height = atoi(value);
+                    doc->viewport_height = (int)str_to_int64_or(value, strlen(value), 0);
                     log_debug("[viewport] height=%d", doc->viewport_height);
                 }
             }
@@ -683,7 +684,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             // Resolve relative path using base_path (supports file:// and http:// URLs)
             char css_path[1024];
             bool is_http_css = false;
-            
+
             if (href[0] == '/' && href[1] != '/') {
                 // Absolute local path - use as-is
                 strncpy(css_path, href, sizeof(css_path) - 1);
@@ -764,7 +765,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                 size_t css_len = strlen(css_content);
                 char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
                 if (css_pool_copy) {
-                    strcpy(css_pool_copy, css_content);
+                    str_copy(css_pool_copy, css_len + 1, css_content, css_len);
                     free(css_content);
 
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_pool_copy, css_path);
@@ -1017,7 +1018,7 @@ struct SelectorIndex {
 static void add_rule_to_map(HashMap* map, const char* key, IndexedRule* entry, Pool* pool) {
     RuleListEntry search = { .key = key, .rules = nullptr };
     RuleListEntry* existing = (RuleListEntry*)hashmap_get(map, &search);
-    
+
     if (existing) {
         // Add to existing list
         arraylist_append(existing->rules, entry);
@@ -1086,7 +1087,7 @@ static void extract_index_keys(CssCompoundSelector* compound,
 static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool) {
     SelectorIndex* index = (SelectorIndex*)mem_calloc(1, sizeof(SelectorIndex), MEM_CAT_LAYOUT);
     if (!index) return nullptr;
-    
+
     index->pool = pool;
     index->by_tag = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
     index->by_class = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
@@ -1113,7 +1114,7 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
         // Collect selectors to index (use fixed array instead of std::vector)
         CssSelector* selectors_to_index[64];
         int selector_count = 0;
-        
+
         if (group && group->selector_count > 0) {
             for (size_t i = 0; i < group->selector_count && selector_count < 64; i++) {
                 if (group->selectors[i]) {
@@ -1183,7 +1184,7 @@ static bool free_rule_list_cb(const void* item, void* udata) {
 // Free selector index
 static void free_selector_index(SelectorIndex* index) {
     if (!index) return;
-    
+
     if (index->by_tag) {
         hashmap_scan(index->by_tag, free_rule_list_cb, nullptr);
         hashmap_free(index->by_tag);
@@ -1198,7 +1199,7 @@ static void free_selector_index(SelectorIndex* index) {
     }
     if (index->universal) arraylist_free(index->universal);
     if (index->media_rules) arraylist_free(index->media_rules);
-    
+
     mem_free(index);
 }
 
@@ -1214,7 +1215,7 @@ static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
                                 ArrayList* candidates) {
     // Clear candidates
     candidates->length = 0;
-    
+
     // Use hashmap for seen rules (deduplication)
     HashMap* seen = hashmap_new(sizeof(CssRule*), 64, 0, 0, rule_ptr_hash, rule_ptr_compare, nullptr, nullptr);
 
@@ -1557,7 +1558,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     char* html_filepath = url_to_local_path(html_url);
     log_debug("[Lambda CSS] Loading HTML document: %s", html_filepath);
-    
+
     // Step 1: Parse HTML with Lambda parser
     // Check if URL is HTTP/HTTPS and download, otherwise read local file
     char* html_content = nullptr;
@@ -1584,7 +1585,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // Create type string for HTML
     String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     type_str->len = 4;
-    strcpy(type_str->chars, "html");
+    str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
     Input* input = input_from_source(html_content, html_url, type_str, nullptr);
     free(html_content);  // from read_text_file, uses stdlib
@@ -1685,7 +1686,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             size_t css_len = strlen(css_content);
             char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
             if (css_pool_copy) {
-                strcpy(css_pool_copy, css_content);
+                str_copy(css_pool_copy, css_len + 1, css_content, css_len);
                 free(css_content);
                 external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
                 if (external_stylesheet) {
@@ -2433,7 +2434,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 
     String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     type_str->len = 4;
-    strcpy(type_str->chars, "html");
+    str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
     Input* input = input_from_source(html_content, text_url, type_str, nullptr);
     mem_free(html_content);
@@ -2542,7 +2543,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     // Create type string for markdown
     String* type_str = (String*)mem_alloc(sizeof(String) + 9, MEM_CAT_LAYOUT);
     type_str->len = 8;
-    strcpy(type_str->chars, "markdown");
+    str_copy(type_str->chars, type_str->len + 1, "markdown", 8);
 
     // Parse markdown to Lambda Element tree
     Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
@@ -2618,7 +2619,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         size_t css_len = strlen(css_content);
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (css_pool_copy) {
-            strcpy(css_pool_copy, css_content);
+            str_copy(css_pool_copy, css_len + 1, css_content, css_len);
             free(css_content);
             markdown_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
             if (markdown_stylesheet) {
@@ -2696,7 +2697,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     // Create type string for wiki
     String* type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     type_str->len = 4;
-    strcpy(type_str->chars, "wiki");
+    str_copy(type_str->chars, type_str->len + 1, "wiki", 4);
 
     // Parse wiki to Lambda Element tree
     Input* input = input_from_source(wiki_content, wiki_url, type_str, nullptr);
@@ -2772,7 +2773,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         size_t css_len = strlen(css_content);
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (css_pool_copy) {
-            strcpy(css_pool_copy, css_content);
+            str_copy(css_pool_copy, css_len + 1, css_content, css_len);
             free(css_content);
             wiki_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
             if (wiki_stylesheet) {
@@ -2847,7 +2848,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Create type string for LaTeX
     String* type_str = (String*)mem_alloc(sizeof(String) + 6, MEM_CAT_LAYOUT);
     type_str->len = 5;
-    strcpy(type_str->chars, "latex");
+    str_copy(type_str->chars, type_str->len + 1, "latex", 5);
 
     // Parse LaTeX to Lambda Element tree using input_from_source
     Input* latex_input = input_from_source(latex_content, latex_url, type_str, nullptr);
@@ -2885,7 +2886,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     opts.standalone = true;
     opts.pretty_print = true;
     opts.include_css = true;
-    
+
     bool success = tex::doc_model_to_html(doc_model, html_buf, opts);
     if (!success || html_buf->length == 0) {
         log_error("Failed to generate HTML document from LaTeX");
@@ -2907,7 +2908,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Create new input for HTML parsing
     String* html_type_str = (String*)mem_alloc(sizeof(String) + 5, MEM_CAT_LAYOUT);
     html_type_str->len = 4;
-    strcpy(html_type_str->chars, "html");
+    str_copy(html_type_str->chars, html_type_str->len + 1, "html", 4);
 
     Input* html_input = input_from_source(html_doc, latex_url, html_type_str, nullptr);
     if (!html_input) {
@@ -2962,7 +2963,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         size_t css_len = strlen(css_content);
         char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
         if (css_pool_copy) {
-            strcpy(css_pool_copy, css_content);
+            str_copy(css_pool_copy, css_len + 1, css_content, css_len);
             free(css_content);
             latex_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
             if (latex_stylesheet) {
@@ -3115,7 +3116,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     // Step 2: Parse XML into Lambda elements using input_from_source
     String* type_str = (String*)mem_alloc(sizeof(String) + 4, MEM_CAT_LAYOUT);
     type_str->len = 3;
-    strcpy(type_str->chars, "xml");
+    str_copy(type_str->chars, type_str->len + 1, "xml", 3);
 
     Input* xml_input = input_from_source(xml_content, xml_url, type_str, nullptr);
     free(xml_content);  // from read_text_file, uses stdlib
@@ -3481,7 +3482,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             size_t css_len = strlen(css_content);
             char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
             if (css_pool_copy) {
-                strcpy(css_pool_copy, css_content);
+                str_copy(css_pool_copy, css_len + 1, css_content, css_len);
                 free(css_content);
                 script_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
                 if (script_stylesheet) {
@@ -3629,7 +3630,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         }
         else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
             if (i + 1 < argc) {
-                opts->viewport_width = atoi(argv[++i]);
+                i++;
+                opts->viewport_width = (int)str_to_int64_or(argv[i], strlen(argv[i]), 0);
             } else {
                 log_error("Error: -vw/--viewport-width requires an argument");
                 return false;
@@ -3637,7 +3639,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         }
         else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
             if (i + 1 < argc) {
-                opts->viewport_height = atoi(argv[++i]);
+                i++;
+                opts->viewport_height = (int)str_to_int64_or(argv[i], strlen(argv[i]), 0);
             } else {
                 log_error("Error: -vh/--viewport-height requires an argument");
                 return false;
@@ -3723,7 +3726,7 @@ static bool layout_single_file(
     // For HTTP URLs without clear extension, fetch and determine type from Content-Type
     const char* effective_ext = nullptr;
     bool is_http_url = (input_url->scheme == URL_SCHEME_HTTP || input_url->scheme == URL_SCHEME_HTTPS);
-    
+
     // Detect file type by extension and load appropriate document
     DomDocument* doc = nullptr;
     const char* ext = strrchr(input_file, '.');
@@ -3744,10 +3747,10 @@ static bool layout_single_file(
     if (is_http_url && !has_valid_ext) {
         const char* url_str = url_get_href(input_url);
         log_info("[Layout] HTTP URL without extension, fetching to determine type: %s", url_str);
-        
+
         FetchResponse* response = http_fetch(url_str, nullptr);
         if (!response || !response->data || response->status_code >= 400) {
-            log_error("Failed to fetch URL: %s (HTTP %ld)", url_str, 
+            log_error("Failed to fetch URL: %s (HTTP %ld)", url_str,
                       response ? response->status_code : 0);
             if (response) free_fetch_response(response);
             pool_destroy(pool);
@@ -3759,10 +3762,10 @@ static bool layout_single_file(
         log_info("[Layout] HTTP Content-Type: %s -> extension: %s",
                  response->content_type ? response->content_type : "(none)",
                  effective_ext ? effective_ext : ".html");
-        
+
         // Use the effective extension for routing
         ext = effective_ext;
-        
+
         free_fetch_response(response);
     }
 

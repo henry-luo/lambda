@@ -15,6 +15,7 @@
 #include "css_parser.hpp"
 #include "css_style.hpp"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -148,14 +149,15 @@ static CssValue* css_parse_font_family_values(const CssToken* tokens, int value_
                 char* combined = (char*)pool_alloc(pool, total_len + word_count);
                 if (combined) {
                     combined[0] = '\0';
+                    size_t combined_len = 0;
                     int j = start_idx;
                     bool first = true;
                     while (j < i) {
                         if (tokens[j].type == CSS_TOKEN_IDENT) {
                             if (!first) {
-                                strcat(combined, " ");
+                                combined_len = str_cat(combined, combined_len, total_len + word_count, " ", 1);
                             }
-                            strcat(combined, tokens[j].value);
+                            combined_len = str_cat(combined, combined_len, total_len + word_count, tokens[j].value, strlen(tokens[j].value));
                             first = false;
                         }
                         j++;
@@ -1804,10 +1806,11 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 char* condition = (char*)pool_alloc(pool, cond_length + 1);
                 if (condition) {
                     condition[0] = '\0';
+                    size_t condition_len = 0;
                     for (int i = cond_start; i < pos; i++) {
                         if (tokens[i].value) {
-                            if (condition[0] != '\0') strcat(condition, " ");
-                            strcat(condition, tokens[i].value);
+                            if (condition_len > 0) condition_len = str_cat(condition, condition_len, cond_length + 1, " ", 1);
+                            condition_len = str_cat(condition, condition_len, cond_length + 1, tokens[i].value, strlen(tokens[i].value));
                         }
                     }
                     rule->data.conditional_rule.condition = condition;
@@ -1949,22 +1952,23 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
                 char* content = (char*)pool_alloc(pool, content_length + 1);
                 content[0] = '\0';
+                size_t content_len = 0;
 
                 // Build prefix (e.g., "fadeIn")
                 for (int i = prefix_start; i < prefix_end; i++) {
                     if (tokens[i].value && tokens[i].type != CSS_TOKEN_WHITESPACE) {
-                        if (content[0] != '\0') {
-                            strcat(content, " ");
+                        if (content_len > 0) {
+                            content_len = str_cat(content, content_len, content_length + 1, " ", 1);
                         }
-                        strcat(content, tokens[i].value);
+                        content_len = str_cat(content, content_len, content_length + 1, tokens[i].value, strlen(tokens[i].value));
                     }
                 }
 
                 // Add opening brace
-                if (content[0] != '\0') {
-                    strcat(content, " ");
+                if (content_len > 0) {
+                    content_len = str_cat(content, content_len, content_length + 1, " ", 1);
                 }
-                strcat(content, "{");
+                content_len = str_cat(content, content_len, content_length + 1, "{", 1);
 
                 // Build body content
                 // Track if we're inside a function like url() to avoid adding spaces
@@ -1984,28 +1988,28 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
                             // Only preserve whitespace outside of function calls
                             if (paren_depth == 0) {
-                                strcat(content, " ");
+                                content_len = str_cat(content, content_len, content_length + 1, " ", 1);
                             }
                         } else {
                             // Add space before tokens that need it - but not inside function calls
                             if (paren_depth == 0 &&
-                                strlen(content) > 0 && content[strlen(content)-1] != '{' &&
-                                content[strlen(content)-1] != ' ' &&
-                                content[strlen(content)-1] != '(' &&
+                                content_len > 0 && content[content_len-1] != '{' &&
+                                content[content_len-1] != ' ' &&
+                                content[content_len-1] != '(' &&
                                 tokens[i].type != CSS_TOKEN_SEMICOLON &&
                                 tokens[i].type != CSS_TOKEN_COLON &&
                                 tokens[i].type != CSS_TOKEN_COMMA &&
                                 tokens[i].type != CSS_TOKEN_RIGHT_BRACE &&
                                 tokens[i].type != CSS_TOKEN_RIGHT_PAREN) {
-                                strcat(content, " ");
+                                content_len = str_cat(content, content_len, content_length + 1, " ", 1);
                             }
-                            strcat(content, tokens[i].value);
+                            content_len = str_cat(content, content_len, content_length + 1, tokens[i].value, strlen(tokens[i].value));
                         }
                     }
                 }
 
                 // Add closing brace
-                strcat(content, " }");
+                content_len = str_cat(content, content_len, content_length + 1, " }", 2);
 
                 rule->data.generic_rule.content = content;
                 log_debug(" Stored content for %s: '%s'", keyword_name, content);
