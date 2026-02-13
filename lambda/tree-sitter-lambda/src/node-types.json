@@ -90,6 +90,10 @@
           "named": true
         },
         {
+          "type": "type_negation",
+          "named": true
+        },
+        {
           "type": "type_occurrence",
           "named": true
         }
@@ -157,6 +161,10 @@
             "named": true
           },
           {
+            "type": "type_negation",
+            "named": true
+          },
+          {
             "type": "type_occurrence",
             "named": true
           },
@@ -218,6 +226,10 @@
           },
           {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -332,6 +344,10 @@
           },
           {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -740,62 +756,6 @@
     }
   },
   {
-    "type": "binary_pattern",
-    "named": true,
-    "fields": {
-      "left": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "pattern_negation",
-            "named": true
-          },
-          {
-            "type": "pattern_occurrence",
-            "named": true
-          },
-          {
-            "type": "pattern_range",
-            "named": true
-          },
-          {
-            "type": "primary_pattern",
-            "named": true
-          }
-        ]
-      },
-      "operator": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "&",
-            "named": false
-          },
-          {
-            "type": "|",
-            "named": false
-          }
-        ]
-      },
-      "right": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_pattern",
-            "named": true
-          },
-          {
-            "type": "pattern_seq",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "binary_type",
     "named": true,
     "fields": {
@@ -816,7 +776,39 @@
             "named": true
           },
           {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pattern_any",
+            "named": true
+          },
+          {
+            "type": "pattern_char_class",
+            "named": true
+          },
+          {
+            "type": "pattern_group",
+            "named": true
+          },
+          {
+            "type": "pattern_seq",
+            "named": true
+          },
+          {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "range_type",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -860,7 +852,39 @@
             "named": true
           },
           {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pattern_any",
+            "named": true
+          },
+          {
+            "type": "pattern_char_class",
+            "named": true
+          },
+          {
+            "type": "pattern_group",
+            "named": true
+          },
+          {
+            "type": "pattern_seq",
+            "named": true
+          },
+          {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "range_type",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -1174,6 +1198,10 @@
           "named": true
         },
         {
+          "type": "type_negation",
+          "named": true
+        },
+        {
           "type": "type_occurrence",
           "named": true
         }
@@ -1339,6 +1367,10 @@
           },
           {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -1603,6 +1635,10 @@
             "named": true
           },
           {
+            "type": "type_negation",
+            "named": true
+          },
+          {
             "type": "type_occurrence",
             "named": true
           }
@@ -1712,6 +1748,10 @@
           },
           {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -2619,6 +2659,10 @@
           "named": true
         },
         {
+          "type": "type_negation",
+          "named": true
+        },
+        {
           "type": "type_occurrence",
           "named": true
         }
@@ -2826,6 +2870,10 @@
             "named": true
           },
           {
+            "type": "type_negation",
+            "named": true
+          },
+          {
             "type": "type_occurrence",
             "named": true
           }
@@ -2918,6 +2966,10 @@
             "named": true
           },
           {
+            "type": "type_negation",
+            "named": true
+          },
+          {
             "type": "type_occurrence",
             "named": true
           }
@@ -2957,6 +3009,10 @@
           },
           {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -3482,6 +3538,10 @@
             "named": true
           },
           {
+            "type": "type_negation",
+            "named": true
+          },
+          {
             "type": "type_occurrence",
             "named": true
           }
@@ -3565,12 +3625,7 @@
     "fields": {}
   },
   {
-    "type": "pattern_any_star",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "pattern_count",
+    "type": "pattern_group",
     "named": true,
     "fields": {},
     "children": {
@@ -3578,94 +3633,46 @@
       "required": true,
       "types": [
         {
-          "type": "integer",
+          "type": "binary_type",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "pattern_any",
+          "named": true
+        },
+        {
+          "type": "pattern_char_class",
+          "named": true
+        },
+        {
+          "type": "pattern_group",
+          "named": true
+        },
+        {
+          "type": "pattern_seq",
+          "named": true
+        },
+        {
+          "type": "range_type",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "type_negation",
+          "named": true
+        },
+        {
+          "type": "type_occurrence",
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "pattern_negation",
-    "named": true,
-    "fields": {
-      "operand": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_pattern",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "pattern_occurrence",
-    "named": true,
-    "fields": {
-      "operand": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "pattern_negation",
-            "named": true
-          },
-          {
-            "type": "primary_pattern",
-            "named": true
-          }
-        ]
-      },
-      "operator": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "*",
-            "named": false
-          },
-          {
-            "type": "+",
-            "named": false
-          },
-          {
-            "type": "?",
-            "named": false
-          },
-          {
-            "type": "pattern_count",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "pattern_range",
-    "named": true,
-    "fields": {
-      "left": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "string",
-            "named": true
-          }
-        ]
-      },
-      "right": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "string",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -3677,19 +3684,31 @@
       "required": true,
       "types": [
         {
-          "type": "pattern_negation",
+          "type": "identifier",
           "named": true
         },
         {
-          "type": "pattern_occurrence",
+          "type": "pattern_any",
           "named": true
         },
         {
-          "type": "pattern_range",
+          "type": "pattern_char_class",
           "named": true
         },
         {
-          "type": "primary_pattern",
+          "type": "pattern_group",
+          "named": true
+        },
+        {
+          "type": "range_type",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "type_occurrence",
           "named": true
         }
       ]
@@ -3847,41 +3866,6 @@
     }
   },
   {
-    "type": "primary_pattern",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "binary_pattern",
-          "named": true
-        },
-        {
-          "type": "pattern_any",
-          "named": true
-        },
-        {
-          "type": "pattern_any_star",
-          "named": true
-        },
-        {
-          "type": "pattern_char_class",
-          "named": true
-        },
-        {
-          "type": "pattern_seq",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "primary_type",
     "named": true,
     "fields": {},
@@ -3939,6 +3923,14 @@
         },
         {
           "type": "map_type",
+          "named": true
+        },
+        {
+          "type": "pattern_any",
+          "named": true
+        },
+        {
+          "type": "pattern_char_class",
           "named": true
         },
         {
@@ -4300,6 +4292,10 @@
             "named": true
           },
           {
+            "type": "type_negation",
+            "named": true
+          },
+          {
             "type": "type_occurrence",
             "named": true
           }
@@ -4439,11 +4435,43 @@
         "required": true,
         "types": [
           {
-            "type": "binary_pattern",
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pattern_any",
+            "named": true
+          },
+          {
+            "type": "pattern_char_class",
+            "named": true
+          },
+          {
+            "type": "pattern_group",
             "named": true
           },
           {
             "type": "pattern_seq",
+            "named": true
+          },
+          {
+            "type": "range_type",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "type_negation",
+            "named": true
+          },
+          {
+            "type": "type_occurrence",
             "named": true
           }
         ]
@@ -4469,11 +4497,83 @@
         "required": true,
         "types": [
           {
-            "type": "binary_pattern",
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pattern_any",
+            "named": true
+          },
+          {
+            "type": "pattern_char_class",
+            "named": true
+          },
+          {
+            "type": "pattern_group",
             "named": true
           },
           {
             "type": "pattern_seq",
+            "named": true
+          },
+          {
+            "type": "range_type",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "type_negation",
+            "named": true
+          },
+          {
+            "type": "type_occurrence",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_negation",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pattern_any",
+            "named": true
+          },
+          {
+            "type": "pattern_char_class",
+            "named": true
+          },
+          {
+            "type": "pattern_group",
+            "named": true
+          },
+          {
+            "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "range_type",
+            "named": true
+          },
+          {
+            "type": "string",
             "named": true
           }
         ]
@@ -4501,7 +4601,35 @@
             "named": true
           },
           {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "pattern_any",
+            "named": true
+          },
+          {
+            "type": "pattern_char_class",
+            "named": true
+          },
+          {
+            "type": "pattern_group",
+            "named": true
+          },
+          {
             "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "range_type",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "type_negation",
             "named": true
           },
           {
@@ -4936,11 +5064,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -5096,19 +5224,19 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "symbol",
     "named": false
+  },
+  {
+    "type": "symbol",
+    "named": true
   },
   {
     "type": "t'",
@@ -5116,11 +5244,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
