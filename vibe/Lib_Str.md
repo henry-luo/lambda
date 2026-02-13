@@ -721,10 +721,16 @@ existing code. The key insight is to **consolidate the secondary string utility
 libraries first**, since they are small, self-contained, and their callers will
 automatically benefit from the improved internals.
 
-### Phase 1: Integration (immediate)
-- Add `str.c` to the Premake build (`build_lambda_config.json`)
-- Include `str.h` in new code; use it for all new string operations
-- Write unit tests (`test/test_str.cpp` using GTest)
+### Phase 1: Integration (completed)
+- `str.c` added to the Premake build (`build_lambda_config.json`) — compiled into
+  `lambda-lib`, main executable, and test targets
+- `str.h` included in new code; used for all new string operations
+- Unit tests written: `test/test_str_gtest.cpp` (158 tests across 16 test suites,
+  covering all API categories, NULL safety, SWAR paths, edge cases)
+- Added `test_str_gtest` to `build_lambda_config.json` test suites
+- Fixed SWAR bug in `str_count_byte`: `_swar_has_byte` + `popcount` produces false
+  positives due to borrow propagation; replaced with XOR + OR-cascade + multiply
+  horizontal-sum technique
 
 ### Phase 2: Secondary String Library Migration (high priority)
 
