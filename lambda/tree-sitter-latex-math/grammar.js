@@ -157,6 +157,21 @@ module.exports = grammar({
     // Note: these don't start with \ so they don't conflict with command_name
     _env_name_token: $ => token(/smallmatrix|equation\*?|multline\*?|subarray|gathered|Vmatrix|Bmatrix|bmatrix|vmatrix|pmatrix|aligned|matrix|gather\*?|align\*?|rcases|dcases|split|cases|array/),
 
+    // Vertical arrow commands shared between relation and delimiter rules
+    _updown_arrow_cmd: $ => token(/\\(updownarrow|Updownarrow|downarrow|Downarrow|uparrow|Uparrow)/),
+
+    // Infix fraction commands: \over, \atop, \above, \choose, \brace, \brack
+    _infix_frac_cmd: $ => token(/\\(choose|above|brack|brace|over|atop)/),
+
+    // Space commands: \, \: \; \! \quad \qquad
+    _space_cmd: $ => token(/\\([,:;!]|qquad|quad)/),
+
+    // Limits modifier: \limits, \nolimits
+    _limits_mod: $ => token(/\\(no)?limits/),
+
+    // Hspace commands: \hspace, \hspace*
+    _hspace_cmd: $ => token(/\\hspace\*?/),
+
     // ========================================================================
     // Atoms using the consolidated tokens
     // ========================================================================
@@ -182,9 +197,7 @@ module.exports = grammar({
       '=', '<', '>', '!',
       $._relation_cmd,
       $._arrow_cmd,
-      // Shared with delimiter rule - must remain as string literals
-      '\\uparrow', '\\downarrow', '\\updownarrow',
-      '\\Uparrow', '\\Downarrow', '\\Updownarrow',
+      $._updown_arrow_cmd,
     ),
 
     // Punctuation (including standalone delimiters)
@@ -211,7 +224,7 @@ module.exports = grammar({
     // Infix fraction commands: x \over y, n \choose k, etc.
     infix_frac: $ => seq(
       field('numer', repeat1($._expression)),
-      field('cmd', choice('\\over', '\\atop', '\\above', '\\choose', '\\brace', '\\brack')),
+      field('cmd', $._infix_frac_cmd),
       field('denom', repeat($._expression)),
     ),
 
@@ -220,7 +233,7 @@ module.exports = grammar({
     // ========================================================================
 
     // Limits modifier: \limits forces above/below, \nolimits forces inline scripts
-    limits_modifier: $ => choice('\\limits', '\\nolimits'),
+    limits_modifier: $ => $._limits_mod,
 
     subsup: $ => prec.right(10, seq(
       field('base', $._atom),
@@ -320,9 +333,7 @@ module.exports = grammar({
       '|', '\\|',
       '.',  // Null delimiter
       $._delimiter_cmd,
-      // Shared with relation rule - must remain as string literals
-      '\\uparrow', '\\downarrow', '\\updownarrow',
-      '\\Uparrow', '\\Downarrow', '\\Updownarrow',
+      $._updown_arrow_cmd,
     ),
 
     // ========================================================================
@@ -484,14 +495,11 @@ module.exports = grammar({
     // Spacing commands
     // ========================================================================
 
-    space_command: $ => choice(
-      '\\,', '\\:', '\\;', '\\!',  // Thin, medium, thick, negative thin
-      '\\quad', '\\qquad',
-    ),
+    space_command: $ => $._space_cmd,
 
     // \hspace{dim} and \hspace*{dim}
     hspace_command: $ => seq(
-      field('cmd', choice('\\hspace', '\\hspace*')),
+      field('cmd', $._hspace_cmd),
       '{',
       optional(field('sign', choice('+', '-'))),
       field('value', $.number),
@@ -509,9 +517,9 @@ module.exports = grammar({
 
     // Dimension units for spacing commands
     dimension_unit: $ => choice(
-      'pt', 'mm', 'cm', 'in', 'ex', 'em', 'bp', 'pc', 'dd', 'cc', 'sp',
-      'mu',  // math units
-      '\\fill',  // flexible fill
+      'pt', 'mm', 'cm', 'in', 'ex', 'em',
+      'bp', 'pc', 'dd', 'cc', 'sp', 'mu',
+      '\\fill',
     ),
 
     // ========================================================================

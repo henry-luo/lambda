@@ -1028,20 +1028,6 @@
     "type": "hspace_command",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\hspace",
-            "named": false
-          },
-          {
-            "type": "\\hspace*",
-            "named": false
-          }
-        ]
-      },
       "sign": {
         "multiple": false,
         "required": false,
@@ -1082,36 +1068,6 @@
     "type": "infix_frac",
     "named": true,
     "fields": {
-      "cmd": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "\\above",
-            "named": false
-          },
-          {
-            "type": "\\atop",
-            "named": false
-          },
-          {
-            "type": "\\brace",
-            "named": false
-          },
-          {
-            "type": "\\brack",
-            "named": false
-          },
-          {
-            "type": "\\choose",
-            "named": false
-          },
-          {
-            "type": "\\over",
-            "named": false
-          }
-        ]
-      },
       "denom": {
         "multiple": true,
         "required": false,
@@ -2260,63 +2216,11 @@
     "named": false
   },
   {
-    "type": "\\!",
-    "named": false
-  },
-  {
-    "type": "\\,",
-    "named": false
-  },
-  {
-    "type": "\\:",
-    "named": false
-  },
-  {
-    "type": "\\;",
-    "named": false
-  },
-  {
-    "type": "\\Downarrow",
-    "named": false
-  },
-  {
-    "type": "\\Uparrow",
-    "named": false
-  },
-  {
-    "type": "\\Updownarrow",
-    "named": false
-  },
-  {
     "type": "\\\\",
     "named": false
   },
   {
-    "type": "\\above",
-    "named": false
-  },
-  {
-    "type": "\\atop",
-    "named": false
-  },
-  {
-    "type": "\\brace",
-    "named": false
-  },
-  {
-    "type": "\\brack",
-    "named": false
-  },
-  {
-    "type": "\\choose",
-    "named": false
-  },
-  {
     "type": "\\cr",
-    "named": false
-  },
-  {
-    "type": "\\downarrow",
     "named": false
   },
   {
@@ -2328,19 +2232,7 @@
     "named": false
   },
   {
-    "type": "\\hspace",
-    "named": false
-  },
-  {
-    "type": "\\hspace*",
-    "named": false
-  },
-  {
     "type": "\\left",
-    "named": false
-  },
-  {
-    "type": "\\limits",
     "named": false
   },
   {
@@ -2349,22 +2241,6 @@
   },
   {
     "type": "\\middle",
-    "named": false
-  },
-  {
-    "type": "\\nolimits",
-    "named": false
-  },
-  {
-    "type": "\\over",
-    "named": false
-  },
-  {
-    "type": "\\qquad",
-    "named": false
-  },
-  {
-    "type": "\\quad",
     "named": false
   },
   {
@@ -2377,14 +2253,6 @@
   },
   {
     "type": "\\sqrt",
-    "named": false
-  },
-  {
-    "type": "\\uparrow",
-    "named": false
-  },
-  {
-    "type": "\\updownarrow",
     "named": false
   },
   {
