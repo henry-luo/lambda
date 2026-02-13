@@ -7,6 +7,7 @@
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
 #include "../../../lib/hashmap.h"
+#include "../../../lib/str.h"
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 #include "../../../radiant/symbol_resolver.h"  // For symbol resolution
 #include <strings.h>  // For strcasecmp
@@ -167,7 +168,7 @@ static int html_element_compare(const void* a, const void* b, void* udata) {
     const HtmlElementInfo* elem_a = (const HtmlElementInfo*)a;
     const HtmlElementInfo* elem_b = (const HtmlElementInfo*)b;
     // case-insensitive comparison of tag names
-    return strcasecmp(elem_a->tag_name, elem_b->tag_name);
+    return str_icmp(elem_a->tag_name, strlen(elem_a->tag_name), elem_b->tag_name, strlen(elem_b->tag_name));
 }
 
 /**

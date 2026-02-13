@@ -192,7 +192,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
         // rgb() and rgba() functions
         // Modern syntax: rgb(r g b) or rgb(r g b / alpha) - parsed as 1 arg (list)
         // Legacy syntax: rgb(r, g, b) or rgba(r, g, b, a) - parsed as 3-4 args
-        if (strcasecmp(func->name, "rgb") == 0 || strcasecmp(func->name, "rgba") == 0) {
+        if (str_ieq_const(func->name, strlen(func->name), "rgb") || str_ieq_const(func->name, strlen(func->name), "rgba")) {
             // Check for modern syntax: single list argument with space-separated values
             if (func->arg_count == 1 && func->args[0] && func->args[0]->type == CSS_VALUE_TYPE_LIST) {
                 const CssValue* list = func->args[0];
@@ -270,7 +270,7 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
             }
         }
         // hsl() and hsla() functions - TODO: implement HSL to RGB conversion
-        else if (strcasecmp(func->name, "hsl") == 0 || strcasecmp(func->name, "hsla") == 0) {
+        else if (str_ieq_const(func->name, strlen(func->name), "hsl") || str_ieq_const(func->name, strlen(func->name), "hsla")) {
             // TODO: implement HSL to RGB conversion
             log_debug("[CSS] resolve_color_value: hsl() not yet implemented");
         }
@@ -2501,7 +2501,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (lycon->ui_context && lycon->ui_context->font_faces && lycon->ui_context->font_face_count > 0) {
                     for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
                         FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
-                        if (desc && desc->family_name && strcasecmp(desc->family_name, family) == 0) {
+                        if (desc && desc->family_name && str_ieq(desc->family_name, strlen(desc->family_name), family, strlen(family))) {
                             return true;  // Found in @font-face declarations
                         }
                     }
@@ -3385,7 +3385,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 tf->translate_y_percent = NAN;
 
                 // Parse function name and arguments
-                if (strcasecmp(func->name, "translate") == 0) {
+                if (str_ieq_const(func->name, strlen(func->name), "translate")) {
                     tf->type = TRANSFORM_TRANSLATE;
                     if (func->arg_count >= 1 && func->args[0]) {
                         // Check if X is a percentage (needs deferred resolution)
@@ -3409,7 +3409,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: translate(%g, %g)", tf->params.translate.x, tf->params.translate.y);
                 }
-                else if (strcasecmp(func->name, "translateX") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "translateX")) {
                     tf->type = TRANSFORM_TRANSLATEX;
                     if (func->arg_count >= 1 && func->args[0]) {
                         if (func->args[0]->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -3421,7 +3421,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: translateX(%g)", tf->params.translate.x);
                 }
-                else if (strcasecmp(func->name, "translateY") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "translateY")) {
                     tf->type = TRANSFORM_TRANSLATEY;
                     if (func->arg_count >= 1 && func->args[0]) {
                         if (func->args[0]->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -3433,7 +3433,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: translateY(%g)", tf->params.translate.y);
                 }
-                else if (strcasecmp(func->name, "scale") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "scale")) {
                     tf->type = TRANSFORM_SCALE;
                     tf->params.scale.x = 1.0f;
                     tf->params.scale.y = 1.0f;
@@ -3446,7 +3446,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: scale(%g, %g)", tf->params.scale.x, tf->params.scale.y);
                 }
-                else if (strcasecmp(func->name, "scaleX") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "scaleX")) {
                     tf->type = TRANSFORM_SCALEX;
                     tf->params.scale.x = 1.0f;
                     tf->params.scale.y = 1.0f;
@@ -3455,7 +3455,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: scaleX(%g)", tf->params.scale.x);
                 }
-                else if (strcasecmp(func->name, "scaleY") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "scaleY")) {
                     tf->type = TRANSFORM_SCALEY;
                     tf->params.scale.x = 1.0f;
                     tf->params.scale.y = 1.0f;
@@ -3464,7 +3464,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: scaleY(%g)", tf->params.scale.y);
                 }
-                else if (strcasecmp(func->name, "rotate") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "rotate")) {
                     tf->type = TRANSFORM_ROTATE;
                     if (func->arg_count >= 1 && func->args[0]) {
                         const CssValue* angle_val = func->args[0];
@@ -3491,7 +3491,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: rotate(%g rad)", tf->params.angle);
                 }
-                else if (strcasecmp(func->name, "skew") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "skew")) {
                     tf->type = TRANSFORM_SKEW;
                     // Parse skew angles
                     if (func->arg_count >= 1 && func->args[0]) {
@@ -3516,7 +3516,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: skew(%g, %g rad)", tf->params.skew.x, tf->params.skew.y);
                 }
-                else if (strcasecmp(func->name, "skewX") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "skewX")) {
                     tf->type = TRANSFORM_SKEWX;
                     if (func->arg_count >= 1 && func->args[0]) {
                         const CssValue* angle_val = func->args[0];
@@ -3530,7 +3530,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: skewX(%g rad)", tf->params.angle);
                 }
-                else if (strcasecmp(func->name, "skewY") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "skewY")) {
                     tf->type = TRANSFORM_SKEWY;
                     if (func->arg_count >= 1 && func->args[0]) {
                         const CssValue* angle_val = func->args[0];
@@ -3544,7 +3544,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: skewY(%g rad)", tf->params.angle);
                 }
-                else if (strcasecmp(func->name, "matrix") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "matrix")) {
                     tf->type = TRANSFORM_MATRIX;
                     // matrix(a, b, c, d, e, f) = [a c e; b d f; 0 0 1]
                     // Default to identity
@@ -3564,7 +3564,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         tf->params.matrix.d, tf->params.matrix.e, tf->params.matrix.f);
                 }
                 // 3D transforms
-                else if (strcasecmp(func->name, "translate3d") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "translate3d")) {
                     tf->type = TRANSFORM_TRANSLATE3D;
                     if (func->arg_count >= 1 && func->args[0]) {
                         tf->params.translate3d.x = resolve_length_value(lycon, prop_id, func->args[0]);
@@ -3578,14 +3578,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] transform: translate3d(%g, %g, %g)",
                         tf->params.translate3d.x, tf->params.translate3d.y, tf->params.translate3d.z);
                 }
-                else if (strcasecmp(func->name, "translateZ") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "translateZ")) {
                     tf->type = TRANSFORM_TRANSLATEZ;
                     if (func->arg_count >= 1 && func->args[0]) {
                         tf->params.translate3d.z = resolve_length_value(lycon, prop_id, func->args[0]);
                     }
                     log_debug("[CSS] transform: translateZ(%g)", tf->params.translate3d.z);
                 }
-                else if (strcasecmp(func->name, "rotateX") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "rotateX")) {
                     tf->type = TRANSFORM_ROTATEX;
                     if (func->arg_count >= 1 && func->args[0]) {
                         const CssValue* angle_val = func->args[0];
@@ -3599,7 +3599,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: rotateX(%g rad)", tf->params.angle);
                 }
-                else if (strcasecmp(func->name, "rotateY") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "rotateY")) {
                     tf->type = TRANSFORM_ROTATEY;
                     if (func->arg_count >= 1 && func->args[0]) {
                         const CssValue* angle_val = func->args[0];
@@ -3613,7 +3613,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: rotateY(%g rad)", tf->params.angle);
                 }
-                else if (strcasecmp(func->name, "rotateZ") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "rotateZ")) {
                     tf->type = TRANSFORM_ROTATEZ;
                     if (func->arg_count >= 1 && func->args[0]) {
                         const CssValue* angle_val = func->args[0];
@@ -3627,7 +3627,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                     log_debug("[CSS] transform: rotateZ(%g rad)", tf->params.angle);
                 }
-                else if (strcasecmp(func->name, "perspective") == 0) {
+                else if (str_ieq_const(func->name, strlen(func->name), "perspective")) {
                     tf->type = TRANSFORM_PERSPECTIVE;
                     if (func->arg_count >= 1 && func->args[0]) {
                         tf->params.perspective = resolve_length_value(lycon, prop_id, func->args[0]);
@@ -7704,8 +7704,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         last_layer->type == CSS_VALUE_TYPE_KEYWORD ||
                         (last_layer->type == CSS_VALUE_TYPE_FUNCTION && last_layer->data.function &&
                          last_layer->data.function->name &&
-                         (strcasecmp(last_layer->data.function->name, "rgb") == 0 ||
-                          strcasecmp(last_layer->data.function->name, "rgba") == 0))) {
+                         (str_ieq_const(last_layer->data.function->name, strlen(last_layer->data.function->name), "rgb") ||
+                          str_ieq_const(last_layer->data.function->name, strlen(last_layer->data.function->name), "rgba")))) {
                         // Set base background color
                         bg->color = resolve_color_value(lycon, last_layer);
                         log_debug("[Lambda CSS Background] Base layer color: #%02x%02x%02x%02x",
@@ -7719,8 +7719,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     CssValue* layer = layers[i];
                     if (layer && layer->type == CSS_VALUE_TYPE_FUNCTION &&
                         layer->data.function && layer->data.function->name &&
-                        (strcasecmp(layer->data.function->name, "radial-gradient") == 0 ||
-                         strcasecmp(layer->data.function->name, "repeating-radial-gradient") == 0)) {
+                        (str_ieq_const(layer->data.function->name, strlen(layer->data.function->name), "radial-gradient") ||
+                         str_ieq_const(layer->data.function->name, strlen(layer->data.function->name), "repeating-radial-gradient"))) {
                         radial_count++;
                     }
                 }
@@ -7737,8 +7737,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             layer->data.function && layer->data.function->name) {
                             const char* func_name = layer->data.function->name;
 
-                            if (strcasecmp(func_name, "radial-gradient") == 0 ||
-                                strcasecmp(func_name, "repeating-radial-gradient") == 0) {
+                            if (str_ieq_const(func_name, strlen(func_name), "radial-gradient") ||
+                                str_ieq_const(func_name, strlen(func_name), "repeating-radial-gradient")) {
                                 // Parse this radial gradient into a new layer
                                 CssDeclaration gradient_decl = *decl;
                                 gradient_decl.value = layer;
@@ -7751,8 +7751,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                                     bg->radial_layers[bg->radial_layer_count++] = bg->radial_gradient;
                                     bg->radial_gradient = nullptr;  // will be set again by next parse
                                 }
-                            } else if (strcasecmp(func_name, "linear-gradient") == 0 ||
-                                       strcasecmp(func_name, "conic-gradient") == 0) {
+                            } else if (str_ieq_const(func_name, strlen(func_name), "linear-gradient") ||
+                                       str_ieq_const(func_name, strlen(func_name), "conic-gradient")) {
                                 // For now, only handle the first non-radial gradient
                                 if (!bg->linear_gradient && !bg->conic_gradient) {
                                     CssDeclaration gradient_decl = *decl;
@@ -7791,8 +7791,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Handle color functions like rgb(), rgba() as background color
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
                 const char* func_name = value->data.function->name;
-                if (strcasecmp(func_name, "rgb") == 0 || strcasecmp(func_name, "rgba") == 0 ||
-                    strcasecmp(func_name, "hsl") == 0 || strcasecmp(func_name, "hsla") == 0) {
+                if (str_ieq_const(func_name, strlen(func_name), "rgb") || str_ieq_const(func_name, strlen(func_name), "rgba") ||
+                    str_ieq_const(func_name, strlen(func_name), "hsl") || str_ieq_const(func_name, strlen(func_name), "hsla")) {
                     // Color function - treat as background-color
                     if (!span->bound) {
                         span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));

@@ -1,5 +1,6 @@
 #include "base64.h"
 #include "log.h"
+#include "str.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -153,7 +154,7 @@ uint8_t* parse_data_uri(const char* uri, char* mime_type, size_t mime_type_size,
     const char* meta_end = comma;
     if (meta_end - ptr >= (ptrdiff_t)marker_len) {
         const char* base64_pos = meta_end - marker_len;
-        if (strncasecmp(base64_pos, base64_marker, marker_len) == 0) {
+        if (str_ieq(base64_pos, marker_len, base64_marker, marker_len)) {
             is_base64 = true;
             meta_end = base64_pos;
         }

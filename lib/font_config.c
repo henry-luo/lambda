@@ -331,13 +331,13 @@ static int font_family_compare(const void *a, const void *b, void *udata) {
     if (!fa->family_name) return -1;
     if (!fb->family_name) return 1;
 
-    return strcasecmp(fa->family_name, fb->family_name);
+    return str_icmp(fa->family_name, strlen(fa->family_name), fb->family_name, strlen(fb->family_name));
 }
 
 // Case-insensitive string comparison for font matching
 static bool string_match_ignore_case(const char *a, const char *b) {
     if (!a || !b) return false;
-    return strcasecmp(a, b) == 0;
+    return str_ieq(a, strlen(a), b, strlen(b));
 }
 
 // Calculate simple hash for Unicode coverage (for quick comparison)
@@ -1292,7 +1292,7 @@ static bool is_priority_font_family(const char* family_name) {
     if (!family_name) return false;
 
     for (int i = 0; priority_font_families[i]; i++) {
-        if (strcasecmp(family_name, priority_font_families[i]) == 0) {
+        if (str_ieq(family_name, strlen(family_name), priority_font_families[i], strlen(priority_font_families[i]))) {
             return true;
         }
     }
@@ -1759,7 +1759,7 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
         // Bonus for exact filename matches (e.g., "Arial.ttf" for "Arial")
         char expected_filename[256];
         snprintf(expected_filename, sizeof(expected_filename), "%s.ttf", criteria->family_name);
-        if (strcasecmp(filename, expected_filename) == 0) {
+        if (str_ieq(filename, strlen(filename), expected_filename, strlen(expected_filename))) {
             score += 10.0f;  // Bonus for exact filename match
         }
     }
@@ -2054,8 +2054,8 @@ const char* font_style_to_string(FontStyle style) {
 FontStyle font_style_from_string(const char* style_str) {
     if (!style_str) return FONT_STYLE_NORMAL;
 
-    if (strcasecmp(style_str, "italic") == 0) return FONT_STYLE_ITALIC;
-    if (strcasecmp(style_str, "oblique") == 0) return FONT_STYLE_OBLIQUE;
+    if (str_ieq_const(style_str, strlen(style_str), "italic")) return FONT_STYLE_ITALIC;
+    if (str_ieq_const(style_str, strlen(style_str), "oblique")) return FONT_STYLE_OBLIQUE;
     return FONT_STYLE_NORMAL;
 }
 
