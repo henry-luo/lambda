@@ -179,7 +179,8 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         break;
     }
 
-    case AST_NODE_BINARY: {
+    case AST_NODE_BINARY:
+    case AST_NODE_BINARY_TYPE: {
         AstBinaryNode* bin = (AstBinaryNode*)node;
         if (bin->op == OPERATOR_UNION) {
             // a | b -> (?:a|b)
@@ -218,7 +219,8 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         break;
     }
 
-    case AST_NODE_UNARY: {
+    case AST_NODE_UNARY:
+    case AST_NODE_UNARY_TYPE: {
         AstUnaryNode* unary = (AstUnaryNode*)node;
         if (unary->op == OPERATOR_OPTIONAL) {
             // a? -> (?:a)?
@@ -264,6 +266,49 @@ void compile_pattern_to_regex(StrBuf* regex, AstNode* node) {
         while (child) {
             compile_pattern_to_regex(regex, child);
             child = child->next;
+        }
+        break;
+    }
+
+    case AST_NODE_LIST_TYPE: {
+        // Parenthesized type expression in pattern context: (pattern)
+        // list_type can contain one or more items separated by commas.
+        // In pattern context, a single item is a group; multiple items form alternatives.
+        AstListNode* list = (AstListNode*)node;
+        AstNode* item = list->item;
+        if (item && !item->next) {
+            // Single item — just a grouping parenthesis
+            strbuf_append_str(regex, "(?:");
+            compile_pattern_to_regex(regex, item);
+            strbuf_append_char(regex, ')');
+        } else if (item) {
+            // Multiple items — treat as alternatives (union)
+            strbuf_append_str(regex, "(?:");
+            compile_pattern_to_regex(regex, item);
+            item = item->next;
+            while (item) {
+                strbuf_append_char(regex, '|');
+                compile_pattern_to_regex(regex, item);
+                item = item->next;
+            }
+            strbuf_append_char(regex, ')');
+        }
+        break;
+    }
+
+    case AST_NODE_ARRAY_TYPE: {
+        // Array type in pattern context: [pattern] — treat as character class or group
+        AstArrayNode* arr = (AstArrayNode*)node;
+        if (arr->item) {
+            strbuf_append_str(regex, "(?:");
+            compile_pattern_to_regex(regex, arr->item);
+            AstNode* item = arr->item->next;
+            while (item) {
+                strbuf_append_char(regex, '|');
+                compile_pattern_to_regex(regex, item);
+                item = item->next;
+            }
+            strbuf_append_char(regex, ')');
         }
         break;
     }
