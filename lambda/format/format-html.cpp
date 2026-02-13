@@ -3,6 +3,7 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/str.h"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
@@ -36,7 +37,7 @@ static const char* boolean_attributes[] = {
 static bool is_void_element(const char* tag_name, size_t tag_len) {
     for (int i = 0; void_elements[i]; i++) {
         size_t void_len = strlen(void_elements[i]);
-        if (tag_len == void_len && strncasecmp(tag_name, void_elements[i], tag_len) == 0) {
+        if (tag_len == void_len && str_ieq(tag_name, tag_len, void_elements[i], void_len)) {
             return true;
         }
     }
@@ -47,7 +48,7 @@ static bool is_void_element(const char* tag_name, size_t tag_len) {
 static bool is_boolean_attribute(const char* attr_name, size_t attr_len) {
     for (int i = 0; boolean_attributes[i]; i++) {
         size_t bool_len = strlen(boolean_attributes[i]);
-        if (attr_len == bool_len && strncasecmp(attr_name, boolean_attributes[i], attr_len) == 0) {
+        if (attr_len == bool_len && str_ieq(attr_name, attr_len, boolean_attributes[i], bool_len)) {
             return true;
         }
     }
@@ -58,7 +59,7 @@ static bool is_boolean_attribute(const char* attr_name, size_t attr_len) {
 static bool is_raw_text_element(const char* tag_name, size_t tag_len) {
     for (int i = 0; raw_text_elements[i]; i++) {
         size_t raw_len = strlen(raw_text_elements[i]);
-        if (tag_len == raw_len && strncasecmp(tag_name, raw_text_elements[i], tag_len) == 0) {
+        if (tag_len == raw_len && str_ieq(tag_name, tag_len, raw_text_elements[i], raw_len)) {
             return true;
         }
     }

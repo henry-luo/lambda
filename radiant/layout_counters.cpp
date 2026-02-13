@@ -4,6 +4,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -392,9 +393,7 @@ static int int_to_upper_roman(int value, char* buffer, size_t buffer_size) {
     int len = int_to_lower_roman(value, buffer, buffer_size);
 
     // Convert to uppercase
-    for (int i = 0; i < len; i++) {
-        buffer[i] = toupper(buffer[i]);
-    }
+    str_upper_inplace(buffer, len);
 
     return len;
 }
@@ -433,9 +432,7 @@ static int int_to_upper_latin(int value, char* buffer, size_t buffer_size) {
     int len = int_to_lower_latin(value, buffer, buffer_size);
 
     // Convert to uppercase
-    for (int i = 0; i < len; i++) {
-        buffer[i] = toupper(buffer[i]);
-    }
+    str_upper_inplace(buffer, len);
 
     return len;
 }

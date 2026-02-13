@@ -2120,7 +2120,7 @@ static uint32_t get_canvas_background(View* root_view) {
         if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* child_block = (ViewBlock*)child;
             const char* name = child_block->node_name();
-            if (name && strcasecmp(name, "body") == 0) {
+            if (name && str_ieq_const(name, strlen(name), "body")) {
                 // Found body element
                 if (child_block->bound && child_block->bound->background &&
                     child_block->bound->background->color.a > 0) {

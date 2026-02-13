@@ -9,6 +9,7 @@
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "layout.hpp"
 #include "font_face.h"
 #include "state_store.hpp"
@@ -61,33 +62,34 @@ static DocFormat detect_doc_format(const char* filename) {
     if (!ext) return DOC_FORMAT_UNKNOWN;
 
     ext++; // skip the '.'
+    size_t ext_len = strlen(ext);
 
-    if (strcasecmp(ext, "html") == 0 || strcasecmp(ext, "htm") == 0) {
+    if (str_ieq_const(ext, ext_len, "html") || str_ieq_const(ext, ext_len, "htm")) {
         return DOC_FORMAT_HTML;
-    } else if (strcasecmp(ext, "md") == 0 || strcasecmp(ext, "markdown") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "md") || str_ieq_const(ext, ext_len, "markdown")) {
         return DOC_FORMAT_MARKDOWN;
-    } else if (strcasecmp(ext, "tex") == 0 || strcasecmp(ext, "latex") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "tex") || str_ieq_const(ext, ext_len, "latex")) {
         return DOC_FORMAT_LATEX;
-    } else if (strcasecmp(ext, "xml") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "xml")) {
         return DOC_FORMAT_XML;
-    } else if (strcasecmp(ext, "rst") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "rst")) {
         return DOC_FORMAT_RST;
-    } else if (strcasecmp(ext, "wiki") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "wiki")) {
         return DOC_FORMAT_WIKI;
-    } else if (strcasecmp(ext, "ls") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "ls")) {
         return DOC_FORMAT_LAMBDA_SCRIPT;
-    } else if (strcasecmp(ext, "pdf") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "pdf")) {
         return DOC_FORMAT_PDF;
-    } else if (strcasecmp(ext, "svg") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "svg")) {
         return DOC_FORMAT_SVG;
-    } else if (strcasecmp(ext, "png") == 0 || strcasecmp(ext, "jpg") == 0 ||
-               strcasecmp(ext, "jpeg") == 0 || strcasecmp(ext, "gif") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "png") || str_ieq_const(ext, ext_len, "jpg") ||
+               str_ieq_const(ext, ext_len, "jpeg") || str_ieq_const(ext, ext_len, "gif")) {
         return DOC_FORMAT_IMAGE;
-    } else if (strcasecmp(ext, "json") == 0 || strcasecmp(ext, "yaml") == 0 ||
-               strcasecmp(ext, "yml") == 0 || strcasecmp(ext, "toml") == 0 ||
-               strcasecmp(ext, "txt") == 0 || strcasecmp(ext, "csv") == 0 ||
-               strcasecmp(ext, "ini") == 0 || strcasecmp(ext, "conf") == 0 ||
-               strcasecmp(ext, "cfg") == 0 || strcasecmp(ext, "log") == 0) {
+    } else if (str_ieq_const(ext, ext_len, "json") || str_ieq_const(ext, ext_len, "yaml") ||
+               str_ieq_const(ext, ext_len, "yml") || str_ieq_const(ext, ext_len, "toml") ||
+               str_ieq_const(ext, ext_len, "txt") || str_ieq_const(ext, ext_len, "csv") ||
+               str_ieq_const(ext, ext_len, "ini") || str_ieq_const(ext, ext_len, "conf") ||
+               str_ieq_const(ext, ext_len, "cfg") || str_ieq_const(ext, ext_len, "log")) {
         return DOC_FORMAT_TEXT;
     }
 

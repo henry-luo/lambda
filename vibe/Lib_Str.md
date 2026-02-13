@@ -86,8 +86,8 @@ if (strncmp(tag, "http://", 7) == 0) ...
 if (strcmp(tag + len - 4, ".css") == 0) ...
 
 // proposed:
-if (str_starts_with_lit(tag, len, "http://")) ...
-if (str_ends_with_lit(tag, len, ".css")) ...
+if (str_starts_with_const(tag, len, "http://")) ...
+if (str_ends_with_const(tag, len, ".css")) ...
 ```
 
 #### B. Tag Name / Keyword Matching (~2,000+ sites)
@@ -97,7 +97,7 @@ if (strcmp(tag, "div") == 0) ...
 else if (strcmp(tag, "span") == 0) ...
 
 // proposed: same pattern but safer (length-bounded)
-if (str_eq_lit(tag, tag_len, "div")) ...
+if (str_eq_const(tag, tag_len, "div")) ...
 ```
 
 #### C. Case-Insensitive Comparison (~90 sites)
@@ -107,7 +107,7 @@ if (strcasecmp(name, "content-type") == 0) ...
 for (int i = 0; i < len; i++) buf[i] = tolower(s[i]);
 
 // proposed:
-if (str_ieq_lit(name, name_len, "content-type")) ...
+if (str_ieq_const(name, name_len, "content-type")) ...
 str_to_lower(buf, s, len);  // SWAR-accelerated
 ```
 
@@ -130,7 +130,7 @@ if (dot && strcmp(dot, ".json") == 0) ...
 // proposed:
 size_t ext_len;
 const char* ext = str_file_ext(path, path_len, &ext_len);
-if (str_eq_lit(ext, ext_len, ".json")) ...
+if (str_eq_const(ext, ext_len, ".json")) ...
 ```
 
 #### F. String Escaping (duplicated across 5+ formatters)
@@ -171,7 +171,7 @@ if (str_to_int64(s, len, &val, NULL)) { ... }
 | # | Problem | Impact | `str_` solution |
 |---|---------|--------|-----------------|
 | 1 | No centralized `starts_with`/`ends_with` for `(ptr, len)` | Hundreds of manual `strncmp` | `str_starts_with`, `str_ends_with`, `_lit` variants |
-| 2 | Repetitive `strcmp` chains for tag matching | 2000+ fragile sites | `str_eq_lit`, `str_ieq_lit` |
+| 2 | Repetitive `strcmp` chains for tag matching | 2000+ fragile sites | `str_eq_const`, `str_ieq_const` |
 | 3 | Duplicate escape routines (JSON, XML, HTML, YAML, SVG) | ~150 LOC duplicated 5× | `str_escape(mode)` |
 | 4 | No `str_contains`/`str_indexof` for C callers | Runtime has `fn_*` but no C utility | `str_find`, `str_contains` |
 | 5 | `strcpy`/`strcat`/`sprintf` unsafe | 92 buffer-overflow-risk sites | `str_copy`, `str_cat`, `str_fmt` |
@@ -325,8 +325,8 @@ int  str_cmp(a, a_len, b, b_len);      // lexicographic, like strcmp but length-
 int  str_icmp(a, a_len, b, b_len);     // case-insensitive (ASCII)
 bool str_eq(a, a_len, b, b_len);       // exact equality (SWAR-accelerated)
 bool str_ieq(a, a_len, b, b_len);      // case-insensitive equality
-bool str_eq_lit(s, len, "literal");     // compare with NUL-terminated literal
-bool str_ieq_lit(s, len, "literal");    // case-insensitive literal compare
+bool str_eq_const(s, len, "literal");     // compare with NUL-terminated literal
+bool str_ieq_const(s, len, "literal");    // case-insensitive literal compare
 ```
 
 **Rationale**: `strcmp` is the #1 most-called function (2,020 sites). The `_lit`
@@ -338,14 +338,14 @@ computes it once internally. `str_eq` uses SWAR 8-byte comparison for long strin
 ```c
 bool str_starts_with(s, s_len, prefix, prefix_len);
 bool str_ends_with(s, s_len, suffix, suffix_len);
-bool str_starts_with_lit(s, s_len, "prefix");
-bool str_ends_with_lit(s, s_len, "suffix");
+bool str_starts_with_const(s, s_len, "prefix");
+bool str_ends_with_const(s, s_len, "suffix");
 bool str_istarts_with(s, s_len, prefix, prefix_len);  // case-insensitive
 bool str_iends_with(s, s_len, suffix, suffix_len);
 ```
 
 **Rationale**: The second most common pattern (~625 `strncmp` sites). The `_lit`
-variants replace `strncmp(s, "http://", 7)` with `str_starts_with_lit(s, len, "http://")`,
+variants replace `strncmp(s, "http://", 7)` with `str_starts_with_const(s, len, "http://")`,
 eliminating error-prone manual length constants.
 
 ### 4.3 Search (§3)
@@ -775,12 +775,53 @@ equivalents:
 **Total: 213 unsafe calls eliminated.** Baselines verified: Lambda 223/223,
 Radiant 1972/1972, str unit tests 158/158.
 
-### Phase 4: Convenience Adoption (ongoing)
-- Replace `strncmp(s, "prefix", N)` → `str_starts_with_lit(s, len, "prefix")`
-- Replace manual `tolower` loops → `str_to_lower` / `str_dup_lower`
-- Replace manual trim loops → `str_trim`
-- Consolidate escape routines → `str_escape(mode)`
-- Replace `strrchr(path, '.')` → `str_file_ext`
+### Phase 4: Convenience Adoption (completed)
+
+**Rename pass** (library-wide):
+- `str_to_int64_or` → `str_to_int64_default`, `str_to_double_or` → `str_to_double_default` (27 files)
+- `str_*_lit` → `str_*_const` for 4 functions: `str_eq_const`, `str_ieq_const`,
+  `str_starts_with_const`, `str_ends_with_const` (6 files)
+
+**New API**: `str_istarts_with_const`, `str_iends_with_const` — case-insensitive
+  convenience overloads for NUL-terminated prefix/suffix (str.h/str.c + 10 unit tests).
+
+**Manual `tolower`/`toupper` loops** replaced (7 files):
+- `css_value.cpp`, `format_registry.cpp`, `tex_hyphen.cpp` → `str_to_lower`
+- `input-eml.cpp`, `input-vcf.cpp` → `str_lower_inplace`
+- `layout_counters.cpp` → `str_upper_inplace` (×2)
+- `lib/url.c` → `str_to_lower`
+
+**Hand-rolled case-insensitive helpers** replaced (5 files):
+- `selector_matcher.cpp`: `strcasecmp_local` body → `str_icmp`,
+  `contains_substring_case_insensitive` body → `str_ifind`,
+  23 pseudo-class checks → `str_ieq_const`
+- `html5_tree_builder.cpp`: `strcasecmp_eq` → `str_ieq`, `strcasecmp_prefix` → `str_istarts_with`
+- `html5_tokenizer.cpp`: `html5_is_appropriate_end_tag` → `str_ieq`,
+  `html5_match_string_ci` → `str_ieq`
+- `input-utils.cpp`: `input_strncasecmp` body → `str_icmp`, 9 call sites → `str_ieq_const`
+- `lib/serve/utils.c`: `serve_strcasecmp` body → `str_icmp`
+
+**`strcasecmp` elimination** — 220 calls across 24 files:
+- `strcasecmp(x, "literal") == 0` → `str_ieq_const(x, strlen(x), "literal")`
+  (or `str_ieq_const(x, len, "literal")` when length is already known)
+- `strcasecmp(a, b) == 0` → `str_ieq(a, strlen(a), b, strlen(b))`
+- `return strcasecmp(a, b);` → `return str_icmp(a, strlen(a), b, strlen(b));`
+- Key files: `input_http.cpp` (28), `resolve_css_style.cpp` (34),
+  `cmd_layout.cpp` (31), `ast_validate.cpp` (21), `resolve_htm_style.cpp` (20),
+  `event_sim.cpp` (18), `window.cpp` (17), `log.c` (8), `font_config.c` (6)
+
+**`strncasecmp` elimination** — 21 calls across 8 files:
+- `strncasecmp(s, "lit", N) == 0` → `str_istarts_with_const(s, len, "lit")`
+  or `str_ieq_const(s, N, "lit")` depending on intent
+- `strncasecmp(a, b, n) == 0` → `str_ieq(a, n, b, n)`
+- Key files: `build_ast.cpp`, `html5_tokenizer.cpp`, `input_http.cpp`,
+  `selector_matcher.cpp`, `format-html.cpp`, `cmd_layout.cpp`, `base64.c`
+
+**Deferred** (safe standard C patterns, no safety benefit from replacement):
+- `strrchr` (42 sites) — pointer-returning semantics, would need `str_file_ext`
+- `strstr` (181 sites), `strchr` (76 sites) — safe, offset semantics more verbose
+- Manual trim loops — parser-internal patterns, not standalone trim operations
+- `strcmp`/`strncmp` (3260 sites) — mostly NUL-terminated patterns without known lengths
 
 ### Phase 5: UTF-8 Unification (completed)
 
@@ -830,8 +871,8 @@ Radiant 1972/1972, str unit tests 158/158.
 
 | File | Lines | Description |
 |------|------:|-------------|
-| `lib/str.h` | ~380 | Header with all declarations, doc comments, `extern "C"` |
-| `lib/str.c` | ~1,284 | Full implementation with SWAR optimizations |
+| `lib/str.h` | ~406 | Header with all declarations, doc comments, `extern "C"` |
+| `lib/str.c` | ~1,400 | Full implementation with SWAR optimizations |
 
 Both files compile cleanly under:
 - `cc -std=c99 -Wall -Wextra -Wpedantic` (zero warnings)
@@ -841,19 +882,21 @@ Both files compile cleanly under:
 
 `lib/str.h` provides Lambda with a **safe, convenient, and fast** C string foundation:
 
-- **86 functions** across 16 categories — covering comparison, search, prefix/suffix,
+- **~90 functions** across 16 categories — covering comparison, search, prefix/suffix,
   trim, case conversion, copy, parsing, split, replace, file paths, hashing, UTF-8,
   escaping, predicates, and formatting.
 - **Zero unsafe patterns** — all length-bounded, NULL-tolerant, NUL-terminating.
 - **NUL-terminated output** — every output buffer is NUL-terminated for seamless
   interop with legacy C APIs during incremental migration.
-- **Built-in UTF-8** — SWAR-accelerated counting/validation, with a clear path to
-  absorb `utf.h`/`utf.c` and provide full decode/encode/index-conversion primitives.
+- **Built-in UTF-8** — SWAR-accelerated counting/validation, with decode/encode/
+  index-conversion primitives (absorbed from `lib/utf.h`/`lib/utf.c`).
 - **SWAR acceleration** — 4-8× speedup on hot paths (byte search, equality, case
   conversion, ASCII check, UTF-8 counting).
 - **Zero external dependencies** — pure C99 with optional GCC/Clang attributes.
-- **~1,660 LOC total** — minimal footprint, easy to audit.
+- **~1,806 LOC total** — minimal footprint, easy to audit.
 - Directly addresses **10 identified pain points** from the codebase survey.
-- **5-phase incremental migration** — starting with build integration, then
-  consolidating secondary string libraries (StrView, StrBuf, String, StringBuf),
-  then unsafe call replacement, convenience adoption, and UTF-8 unification.
+- **All 5 migration phases completed** — build integration, secondary library
+  consolidation, unsafe call replacement (213 sites), convenience adoption
+  (262 sites: `strcasecmp`/`strncasecmp`/`tolower` loops), and UTF-8 unification.
+- **Deferred**: `strrchr` (42), `strstr` (181), `strchr` (76), `strcmp`/`strncmp`
+  (3,260) — pointer-returning semantics, no buffer safety concerns.

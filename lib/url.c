@@ -138,9 +138,7 @@ UrlScheme url_scheme_from_string(const char* scheme) {
     size_t len = strlen(scheme);
     if (len >= sizeof(lower)) return URL_SCHEME_UNKNOWN;
 
-    for (size_t i = 0; i < len; i++) {
-        lower[i] = tolower(scheme[i]);
-    }
+    str_to_lower(lower, scheme, len);
     lower[len] = '\0';
 
     if (strcmp(lower, "http") == 0) return URL_SCHEME_HTTP;

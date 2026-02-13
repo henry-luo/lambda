@@ -22,17 +22,17 @@ bool strview_eq(const StrView* a, const StrView* b) {
 
 bool strview_equal(const StrView* a, const char* b) {
     if (!a || !b) return false;
-    return str_eq_lit(a->str, a->length, b);
+    return str_eq_const(a->str, a->length, b);
 }
 
 bool strview_start_with(const StrView* s, const char* prefix) {
     if (!s || !prefix) return false;
-    return str_starts_with_lit(s->str, s->length, prefix);
+    return str_starts_with_const(s->str, s->length, prefix);
 }
 
 bool strview_end_with(const StrView* s, const char* suffix) {
     if (!s || !suffix) return false;
-    return str_ends_with_lit(s->str, s->length, suffix);
+    return str_ends_with_const(s->str, s->length, suffix);
 }
 
 // fixed: old impl used strstr() which requires NUL-terminated haystack;

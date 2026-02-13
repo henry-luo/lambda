@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "form_control.hpp"
+#include "../lib/str.h"
 #include <cstdlib>  // for strtol
 #include <new>      // for placement new
 
@@ -139,13 +140,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             const char* align_attr = elmt->get_attribute("align");
             if (align_attr) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-                if (strcasecmp(align_attr, "left") == 0) {
+                if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
                     block->blk->text_align = CSS_VALUE_LEFT;
-                } else if (strcasecmp(align_attr, "right") == 0) {
+                } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
                     block->blk->text_align = CSS_VALUE_RIGHT;
-                } else if (strcasecmp(align_attr, "center") == 0) {
+                } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
                     block->blk->text_align = CSS_VALUE_CENTER;
-                } else if (strcasecmp(align_attr, "justify") == 0) {
+                } else if (str_ieq_const(align_attr, strlen(align_attr), "justify")) {
                     block->blk->text_align = CSS_VALUE_JUSTIFY;
                 }
             }
@@ -161,13 +162,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         const char* align_attr = elmt->get_attribute("align");
         if (align_attr) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            if (strcasecmp(align_attr, "left") == 0) {
+            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
                 block->blk->text_align = CSS_VALUE_LEFT;
-            } else if (strcasecmp(align_attr, "right") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
                 block->blk->text_align = CSS_VALUE_RIGHT;
-            } else if (strcasecmp(align_attr, "center") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
                 block->blk->text_align = CSS_VALUE_CENTER;
-            } else if (strcasecmp(align_attr, "justify") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "justify")) {
                 block->blk->text_align = CSS_VALUE_JUSTIFY;
             }
         }
@@ -580,11 +581,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Handle HTML align attribute (e.g., align="left", align="right", align="center")
         const char* align_attr = elmt->get_attribute("align");
         if (align_attr) {
-            if (strcasecmp(align_attr, "left") == 0) {
+            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
                 block->blk->text_align = CSS_VALUE_LEFT;
-            } else if (strcasecmp(align_attr, "right") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
                 block->blk->text_align = CSS_VALUE_RIGHT;
-            } else if (strcasecmp(align_attr, "center") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
                 block->blk->text_align = CSS_VALUE_CENTER;
             }
         }
@@ -595,11 +596,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             valign_attr = get_parent_tr_valign(elmt);
         }
         if (valign_attr) {
-            if (strcasecmp(valign_attr, "top") == 0) {
+            if (str_ieq_const(valign_attr, strlen(valign_attr), "top")) {
                 block->in_line->vertical_align = CSS_VALUE_TOP;
-            } else if (strcasecmp(valign_attr, "middle") == 0) {
+            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "middle")) {
                 block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-            } else if (strcasecmp(valign_attr, "bottom") == 0) {
+            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "bottom")) {
                 block->in_line->vertical_align = CSS_VALUE_BOTTOM;
             }
         }
@@ -646,11 +647,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Handle HTML align attribute (e.g., align="left", align="right", align="center")
         const char* align_attr = elmt->get_attribute("align");
         if (align_attr) {
-            if (strcasecmp(align_attr, "left") == 0) {
+            if (str_ieq_const(align_attr, strlen(align_attr), "left")) {
                 block->blk->text_align = CSS_VALUE_LEFT;
-            } else if (strcasecmp(align_attr, "right") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "right")) {
                 block->blk->text_align = CSS_VALUE_RIGHT;
-            } else if (strcasecmp(align_attr, "center") == 0) {
+            } else if (str_ieq_const(align_attr, strlen(align_attr), "center")) {
                 block->blk->text_align = CSS_VALUE_CENTER;
             }
         }
@@ -661,11 +662,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             valign_attr = get_parent_tr_valign(elmt);
         }
         if (valign_attr) {
-            if (strcasecmp(valign_attr, "top") == 0) {
+            if (str_ieq_const(valign_attr, strlen(valign_attr), "top")) {
                 block->in_line->vertical_align = CSS_VALUE_TOP;
-            } else if (strcasecmp(valign_attr, "middle") == 0) {
+            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "middle")) {
                 block->in_line->vertical_align = CSS_VALUE_MIDDLE;
-            } else if (strcasecmp(valign_attr, "bottom") == 0) {
+            } else if (str_ieq_const(valign_attr, strlen(valign_attr), "bottom")) {
                 block->in_line->vertical_align = CSS_VALUE_BOTTOM;
             }
         }

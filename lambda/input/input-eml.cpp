@@ -4,6 +4,10 @@
 #include "source_tracker.hpp"
 #include <ctype.h>
 
+extern "C" {
+#include "../../lib/str.h"
+}
+
 using namespace lambda;
 
 // Helper function to skip whitespace at the beginning of a line
@@ -99,9 +103,7 @@ static String* parse_header_value(InputContext& ctx, const char **eml) {
 
 // Helper function to normalize header name to lowercase
 static void normalize_header_name(char* name) {
-    for (int i = 0; name[i]; i++) {
-        name[i] = tolower(name[i]);
-    }
+    str_lower_inplace(name, strlen(name));
 }
 
 // Helper function to parse email addresses from a header value
