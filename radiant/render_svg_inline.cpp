@@ -12,6 +12,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
+#include "../lib/str.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -107,25 +108,25 @@ static Element* get_child_element_at(Element* parent, int index) {
 SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
     SvgViewBox vb = {0, 0, 0, 0, false};
     if (!viewbox_attr || !*viewbox_attr) return vb;
-    
+
     // parse "min-x min-y width height"
     // separators can be comma or whitespace
     float values[4];
     int count = 0;
     const char* p = viewbox_attr;
-    
+
     while (*p && count < 4) {
         // skip whitespace and commas
         while (*p && (isspace(*p) || *p == ',')) p++;
         if (!*p) break;
-        
+
         char* end;
         values[count] = strtof(p, &end);
         if (end == p) break;  // parsing failed
         count++;
         p = end;
     }
-    
+
     if (count == 4) {
         vb.min_x = values[0];
         vb.min_y = values[1];
@@ -133,7 +134,7 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
         vb.height = values[3];
         vb.has_viewbox = true;
     }
-    
+
     return vb;
 }
 
@@ -143,14 +144,14 @@ SvgViewBox parse_svg_viewbox(const char* viewbox_attr) {
 
 float parse_svg_length(const char* value, float default_value) {
     if (!value || !*value) return default_value;
-    
+
     char* end;
     float num = strtof(value, &end);
     if (end == value) return default_value;
-    
+
     // skip whitespace after number
     while (*end && isspace(*end)) end++;
-    
+
     // check for unit suffix
     if (*end == '\0') {
         return num;  // unitless = user units (pixels)
@@ -174,7 +175,7 @@ float parse_svg_length(const char* value, float default_value) {
         // return percentage as-is, caller must handle
         return num;
     }
-    
+
     return num;  // unknown unit, use numeric value
 }
 
@@ -259,27 +260,27 @@ Color parse_svg_color(const char* value) {
     Color c;
     c.r = 0; c.g = 0; c.b = 0; c.a = 255;  // default black
     if (!value || !*value) return c;
-    
+
     // skip whitespace
     while (*value && isspace(*value)) value++;
-    
+
     // check for "none"
     if (strcmp(value, "none") == 0) {
         c.a = 0;
         return c;
     }
-    
+
     // check for "transparent"
     if (strcmp(value, "transparent") == 0) {
         c.a = 0;
         return c;
     }
-    
+
     // hex color: #rgb, #rrggbb, #rgba, #rrggbbaa
     if (*value == '#') {
         value++;
         int len = strlen(value);
-        
+
         if (len == 3) {
             // #rgb
             int r = hex_digit(value[0]);
@@ -313,7 +314,7 @@ Color parse_svg_color(const char* value) {
         }
         return c;
     }
-    
+
     // rgb() or rgba()
     if (strncmp(value, "rgb", 3) == 0) {
         const char* p = strchr(value, '(');
@@ -332,10 +333,10 @@ Color parse_svg_color(const char* value) {
         }
         return c;
     }
-    
+
     // named color lookup
     for (int i = 0; svg_named_colors[i].name != nullptr; i++) {
-        if (strcasecmp(value, svg_named_colors[i].name) == 0) {
+        if (str_ieq(value, strlen(value), svg_named_colors[i].name, strlen(svg_named_colors[i].name))) {
             uint32_t rgb = svg_named_colors[i].rgb;
             c.r = (rgb >> 16) & 0xFF;
             c.g = (rgb >> 8) & 0xFF;
@@ -346,7 +347,7 @@ Color parse_svg_color(const char* value) {
             return c;
         }
     }
-    
+
     return c;  // default black
 }
 
@@ -356,21 +357,21 @@ Color parse_svg_color(const char* value) {
 
 bool parse_svg_transform(const char* transform_str, float matrix[6]) {
     if (!transform_str || !matrix) return false;
-    
+
     // initialize to identity matrix: [a, b, c, d, e, f] = [1, 0, 0, 1, 0, 0]
     matrix[0] = 1; matrix[1] = 0;  // a, b
     matrix[2] = 0; matrix[3] = 1;  // c, d
     matrix[4] = 0; matrix[5] = 0;  // e, f (translation)
-    
+
     const char* p = transform_str;
-    
+
     while (*p) {
         // skip whitespace
         while (*p && isspace(*p)) p++;
         if (!*p) break;
-        
+
         float local[6] = {1, 0, 0, 1, 0, 0};
-        
+
         if (strncmp(p, "translate", 9) == 0) {
             p += 9;
             while (*p && *p != '(') p++;
@@ -446,11 +447,11 @@ bool parse_svg_transform(const char* transform_str, float matrix[6]) {
             // unknown transform, skip to next
             while (*p && *p != ')') p++;
         }
-        
+
         // skip closing paren
         while (*p && *p != ')') p++;
         if (*p == ')') p++;
-        
+
         // multiply: result = matrix * local
         float result[6];
         result[0] = matrix[0] * local[0] + matrix[2] * local[1];
@@ -459,10 +460,10 @@ bool parse_svg_transform(const char* transform_str, float matrix[6]) {
         result[3] = matrix[1] * local[2] + matrix[3] * local[3];
         result[4] = matrix[0] * local[4] + matrix[2] * local[5] + matrix[4];
         result[5] = matrix[1] * local[4] + matrix[3] * local[5] + matrix[5];
-        
+
         memcpy(matrix, result, sizeof(result));
     }
-    
+
     return true;
 }
 
@@ -472,15 +473,15 @@ bool parse_svg_transform(const char* transform_str, float matrix[6]) {
 
 SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
     SvgIntrinsicSize size = {300, 150, 2.0f, false, false};  // HTML default
-    
+
     if (!svg_element) return size;
-    
+
     const char* width_attr = get_svg_attr(svg_element, "width");
     const char* height_attr = get_svg_attr(svg_element, "height");
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
-    
+
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
-    
+
     // determine width
     if (width_attr && *width_attr) {
         size.width = parse_svg_length(width_attr, 300);
@@ -489,7 +490,7 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
         size.width = vb.width;
         size.has_intrinsic_width = true;
     }
-    
+
     // determine height
     if (height_attr && *height_attr) {
         size.height = parse_svg_length(height_attr, 150);
@@ -498,12 +499,12 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element) {
         size.height = vb.height;
         size.has_intrinsic_height = true;
     }
-    
+
     // calculate aspect ratio
     if (size.height > 0) {
         size.aspect_ratio = size.width / size.height;
     }
-    
+
     return size;
 }
 
@@ -522,14 +523,14 @@ bool is_inline_svg_element(DomElement* elem) {
 
 static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem) {
     if (!shape || !elem) return;
-    
+
     // get fill attribute - inherit from context if not specified
     const char* fill = get_svg_attr(elem, "fill");
-    
+
     // determine effective fill (element attribute → inherited from context → default black)
     Color fc;
     bool has_fill = true;
-    
+
     if (fill) {
         // element has explicit fill attribute
         if (strcmp(fill, "none") == 0) {
@@ -548,7 +549,7 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
         // context has fill_none set
         has_fill = false;
     }
-    
+
     if (has_fill) {
         // apply fill-opacity if present
         const char* fill_opacity = get_svg_attr(elem, "fill-opacity");
@@ -556,22 +557,22 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
             float opacity = strtof(fill_opacity, nullptr);
             fc.a = (uint8_t)(fc.a * opacity);
         }
-        
+
         // apply general opacity
         const char* opacity = get_svg_attr(elem, "opacity");
         if (opacity) {
             float op = strtof(opacity, nullptr);
             fc.a = (uint8_t)(fc.a * op);
         }
-        
+
         tvg_shape_set_fill_color(shape, fc.r, fc.g, fc.b, fc.a);
     }
-    
+
     // get stroke - inherit from context if not specified
     const char* stroke = get_svg_attr(elem, "stroke");
     bool has_stroke = false;
     Color sc;
-    
+
     if (stroke) {
         // element has explicit stroke attribute
         if (strcmp(stroke, "none") != 0) {
@@ -583,22 +584,22 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
         has_stroke = true;
         sc = ctx->stroke_color;
     }
-    
+
     if (has_stroke) {
         // stroke width - inherit from context if not specified
         const char* stroke_width_str = get_svg_attr(elem, "stroke-width");
         float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : ctx->stroke_width;
         tvg_shape_set_stroke_width(shape, stroke_width);
-        
+
         // apply stroke-opacity
         const char* stroke_opacity = get_svg_attr(elem, "stroke-opacity");
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
         }
-        
+
         tvg_shape_set_stroke_color(shape, sc.r, sc.g, sc.b, sc.a);
-        
+
         // stroke-linecap
         const char* linecap = get_svg_attr(elem, "stroke-linecap");
         if (linecap) {
@@ -610,7 +611,7 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
                 tvg_shape_set_stroke_cap(shape, TVG_STROKE_CAP_BUTT);
             }
         }
-        
+
         // stroke-linejoin
         const char* linejoin = get_svg_attr(elem, "stroke-linejoin");
         if (linejoin) {
@@ -622,7 +623,7 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
                 tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_MITER);
             }
         }
-        
+
         // stroke-dasharray
         const char* dasharray = get_svg_attr(elem, "stroke-dasharray");
         if (dasharray && strcmp(dasharray, "none") != 0) {
@@ -650,7 +651,7 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
 static void apply_svg_transform(SvgRenderContext* ctx, Tvg_Paint paint, Element* elem) {
     const char* transform_str = get_svg_attr(elem, "transform");
     if (!transform_str) return;
-    
+
     float m[6];
     if (parse_svg_transform(transform_str, m)) {
         Tvg_Matrix matrix = {
@@ -673,15 +674,15 @@ static Tvg_Paint render_svg_rect(SvgRenderContext* ctx, Element* elem) {
     float height = parse_svg_length(get_svg_attr(elem, "height"), 0);
     float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
     float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);  // default to rx
-    
+
     if (width <= 0 || height <= 0) return nullptr;
-    
+
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_rect(shape, x, y, width, height, rx, ry, true);
-    
+
     apply_svg_fill_stroke(ctx, shape, elem);
     apply_svg_transform(ctx, shape, elem);
-    
+
     log_debug("[SVG] rect: x=%.1f y=%.1f w=%.1f h=%.1f rx=%.1f", x, y, width, height, rx);
     return shape;
 }
@@ -690,15 +691,15 @@ static Tvg_Paint render_svg_circle(SvgRenderContext* ctx, Element* elem) {
     float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0);
     float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
     float r = parse_svg_length(get_svg_attr(elem, "r"), 0);
-    
+
     if (r <= 0) return nullptr;
-    
+
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_circle(shape, cx, cy, r, r, true);
-    
+
     apply_svg_fill_stroke(ctx, shape, elem);
     apply_svg_transform(ctx, shape, elem);
-    
+
     log_debug("[SVG] circle: cx=%.1f cy=%.1f r=%.1f", cx, cy, r);
     return shape;
 }
@@ -708,15 +709,15 @@ static Tvg_Paint render_svg_ellipse(SvgRenderContext* ctx, Element* elem) {
     float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0);
     float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0);
     float ry = parse_svg_length(get_svg_attr(elem, "ry"), 0);
-    
+
     if (rx <= 0 || ry <= 0) return nullptr;
-    
+
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_circle(shape, cx, cy, rx, ry, true);
-    
+
     apply_svg_fill_stroke(ctx, shape, elem);
     apply_svg_transform(ctx, shape, elem);
-    
+
     log_debug("[SVG] ellipse: cx=%.1f cy=%.1f rx=%.1f ry=%.1f", cx, cy, rx, ry);
     return shape;
 }
@@ -726,11 +727,11 @@ static Tvg_Paint render_svg_line(SvgRenderContext* ctx, Element* elem) {
     float y1 = parse_svg_length(get_svg_attr(elem, "y1"), 0);
     float x2 = parse_svg_length(get_svg_attr(elem, "x2"), 0);
     float y2 = parse_svg_length(get_svg_attr(elem, "y2"), 0);
-    
+
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_move_to(shape, x1, y1);
     tvg_shape_line_to(shape, x2, y2);
-    
+
     // lines have stroke only, no fill by default
     const char* stroke = get_svg_attr(elem, "stroke");
     if (!stroke) {
@@ -741,7 +742,7 @@ static Tvg_Paint render_svg_line(SvgRenderContext* ctx, Element* elem) {
     }
     apply_svg_fill_stroke(ctx, shape, elem);
     apply_svg_transform(ctx, shape, elem);
-    
+
     log_debug("[SVG] line: (%.1f,%.1f) -> (%.1f,%.1f)", x1, y1, x2, y2);
     return shape;
 }
@@ -749,31 +750,31 @@ static Tvg_Paint render_svg_line(SvgRenderContext* ctx, Element* elem) {
 // helper: parse points attribute for polyline/polygon
 static bool parse_points(const char* points_str, Tvg_Paint shape, bool close_path) {
     if (!points_str || !shape) return false;
-    
+
     const char* p = points_str;
     float x, y;
     bool first = true;
-    
+
     while (*p) {
         // skip whitespace and commas
         while (*p && (isspace(*p) || *p == ',')) p++;
         if (!*p) break;
-        
+
         // parse x
         char* end;
         x = strtof(p, &end);
         if (end == p) break;
         p = end;
-        
+
         // skip separator
         while (*p && (isspace(*p) || *p == ',')) p++;
         if (!*p) break;
-        
+
         // parse y
         y = strtof(p, &end);
         if (end == p) break;
         p = end;
-        
+
         if (first) {
             tvg_shape_move_to(shape, x, y);
             first = false;
@@ -781,27 +782,27 @@ static bool parse_points(const char* points_str, Tvg_Paint shape, bool close_pat
             tvg_shape_line_to(shape, x, y);
         }
     }
-    
+
     if (close_path && !first) {
         tvg_shape_close(shape);
     }
-    
+
     return !first;  // return true if at least one point was parsed
 }
 
 static Tvg_Paint render_svg_polyline(SvgRenderContext* ctx, Element* elem, bool close_path) {
     const char* points = get_svg_attr(elem, "points");
     if (!points) return nullptr;
-    
+
     Tvg_Paint shape = tvg_shape_new();
     if (!parse_points(points, shape, close_path)) {
         tvg_paint_unref(shape, true);
         return nullptr;
     }
-    
+
     apply_svg_fill_stroke(ctx, shape, elem);
     apply_svg_transform(ctx, shape, elem);
-    
+
     log_debug("[SVG] %s: points=%s", close_path ? "polygon" : "polyline", points);
     return shape;
 }
@@ -839,7 +840,7 @@ static int parse_flag(const char** p) {
 }
 
 // arc to bezier conversion helper
-static void arc_to_beziers(Tvg_Paint shape, float x1, float y1, 
+static void arc_to_beziers(Tvg_Paint shape, float x1, float y1,
                            float rx, float ry, float rotation,
                            int large_arc, int sweep, float x2, float y2) {
     // simplified arc: just draw line for now
@@ -850,23 +851,23 @@ static void arc_to_beziers(Tvg_Paint shape, float x1, float y1,
 static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
     const char* d = get_svg_attr(elem, "d");
     if (!d || !*d) return nullptr;
-    
+
     Tvg_Paint shape = tvg_shape_new();
-    
+
     float cur_x = 0, cur_y = 0;
     float start_x = 0, start_y = 0;
     float last_ctrl_x = 0, last_ctrl_y = 0;
     char last_cmd = 0;
-    
+
     const char* p = d;
-    
+
     while (*p) {
         skip_wsp_comma(&p);
         if (!*p) break;
-        
+
         char cmd = *p;
         bool is_cmd = isalpha(cmd);
-        
+
         if (is_cmd) {
             p++;
             last_cmd = cmd;
@@ -877,10 +878,10 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
             if (cmd == 'M') cmd = 'L';
             if (cmd == 'm') cmd = 'l';
         }
-        
+
         bool relative = islower(cmd);
         cmd = toupper(cmd);
-        
+
         switch (cmd) {
             case 'M': {  // moveto
                 float x = parse_number(&p);
@@ -1023,7 +1024,7 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                     float x = parse_number(&p);
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    
+
                     arc_to_beziers(shape, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
                     cur_x = x; cur_y = y;
                 }
@@ -1044,10 +1045,10 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
                 break;
         }
     }
-    
+
     apply_svg_fill_stroke(ctx, shape, elem);
     apply_svg_transform(ctx, shape, elem);
-    
+
     log_debug("[SVG] path: d=%s", d);
     return shape;
 }
@@ -1064,28 +1065,28 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
 static char* resolve_svg_font_path(const char* font_family, const char** out_font_name) {
     // default font name
     const char* used_font_name = font_family;
-    
+
     if (!font_family || !*font_family) {
         // default to a common sans-serif font
         font_family = "Arial";
         used_font_name = "Arial";
     }
-    
+
     // try platform font lookup
     char* path = find_font_path_fallback(font_family);
-    
+
     // check if path is a TTC file - ThorVG TTF loader doesn't support TTC (TrueType Collection)
     if (path && strstr(path, ".ttc")) {
         log_debug("[SVG] skipping TTC file (not supported by ThorVG TTF loader): %s", path);
         free(path);
         path = nullptr;
     }
-    
+
     if (path) {
         if (out_font_name) *out_font_name = used_font_name;
         return path;
     }
-    
+
     // try common fallbacks - prefer simple TTF files that ThorVG can load
     // avoid fonts that are typically in TTC format
     static const char* fallbacks[] = {
@@ -1098,11 +1099,11 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         "Noto Sans",         // Linux
         nullptr
     };
-    
+
     for (int i = 0; fallbacks[i]; i++) {
         if (strcmp(fallbacks[i], font_family) != 0) {
             path = find_font_path_fallback(fallbacks[i]);
-            
+
             // skip TTC files
             if (path && strstr(path, ".ttc")) {
                 log_debug("[SVG] skipping TTC file (not supported): %s", path);
@@ -1110,7 +1111,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                 path = nullptr;
                 continue;
             }
-            
+
             if (path) {
                 log_debug("[SVG] font fallback: %s -> %s", font_family, fallbacks[i]);
                 used_font_name = fallbacks[i];
@@ -1119,7 +1120,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
             }
         }
     }
-    
+
     log_debug("[SVG] no font found for: %s", font_family);
     if (out_font_name) *out_font_name = nullptr;
     return nullptr;
@@ -1141,21 +1142,21 @@ static bool is_whitespace_only(const char* str, size_t len) {
  */
 static char* trim_whitespace(const char* str, size_t len) {
     if (!str || len == 0) return nullptr;
-    
+
     // skip leading whitespace
     size_t start = 0;
     while (start < len && isspace((unsigned char)str[start])) start++;
-    
+
     // skip trailing whitespace
     size_t end = len;
     while (end > start && isspace((unsigned char)str[end - 1])) end--;
-    
+
     if (end <= start) return nullptr;  // all whitespace
-    
+
     size_t trimmed_len = end - start;
     char* result = (char*)malloc(trimmed_len + 1);
     if (!result) return nullptr;
-    
+
     memcpy(result, str + start, trimmed_len);
     result[trimmed_len] = '\0';
     return result;
@@ -1168,11 +1169,11 @@ static char* trim_whitespace(const char* str, size_t len) {
  */
 static const char* get_direct_text_content(Element* elem) {
     if (!elem || elem->length == 0) return nullptr;
-    
+
     for (int64_t i = 0; i < elem->length; i++) {
         Item child = elem->items[i];
         TypeId type = get_type_id(child);
-        
+
         if (type == LMD_TYPE_STRING) {
             String* str = (String*)child.item;
             if (str && str->chars && str->len > 0) {
@@ -1194,15 +1195,15 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
                                      const char* font_path, const char* font_name,
                                      float font_size_px, Color fill_color) {
     if (!text || !*text || !font_path) return nullptr;
-    
+
     // convert CSS pixels to points for ThorVG
     // 1 CSS pixel = 1/96 inch, 1 point = 1/72 inch
     // points = pixels * 72 / 96 = pixels * 0.75
     float font_size_pt = font_size_px * 0.75f;
-    
+
     Tvg_Paint tvg_text = tvg_text_new();
     if (!tvg_text) return nullptr;
-    
+
     // load font (ThorVG caches it)
     Tvg_Result load_result = tvg_font_load(font_path);
     if (load_result != TVG_RESULT_SUCCESS) {
@@ -1210,9 +1211,9 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
         tvg_paint_unref(tvg_text, true);
         return nullptr;
     }
-    
+
     log_debug("[SVG TEXT] loaded font file: %s, setting font name: '%s'", font_path, font_name ? font_name : "null");
-    
+
     // set font by name - ThorVG matches the font name from the loaded font file
     // common font names: "Arial", "Helvetica", "SF NS", "Geneva", etc.
     Tvg_Result result = tvg_text_set_font(tvg_text, font_name);
@@ -1228,19 +1229,19 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
     } else {
         log_debug("[SVG TEXT] successfully set font name: '%s'", font_name);
     }
-    
+
     result = tvg_text_set_size(tvg_text, font_size_pt);
     if (result != TVG_RESULT_SUCCESS) {
         tvg_paint_unref(tvg_text, true);
         return nullptr;
     }
-    
+
     result = tvg_text_set_text(tvg_text, text);
     if (result != TVG_RESULT_SUCCESS) {
         tvg_paint_unref(tvg_text, true);
         return nullptr;
     }
-    
+
     // set fill color
     if (fill_color.a > 0) {
         tvg_text_set_color(tvg_text, fill_color.r, fill_color.g, fill_color.b);
@@ -1248,13 +1249,13 @@ static Tvg_Paint create_text_segment(const char* text, float x, float y,
             tvg_paint_set_opacity(tvg_text, fill_color.a);
         }
     }
-    
+
     // position the text
     tvg_paint_translate(tvg_text, x, y);
-    
+
     log_debug("[SVG] text segment: '%s' at (%.1f, %.1f) size=%.1fpx (%.1fpt) color=rgb(%d,%d,%d)",
               text, x, y, font_size_px, font_size_pt, fill_color.r, fill_color.g, fill_color.b);
-    
+
     return tvg_text;
 }
 
@@ -1275,19 +1276,19 @@ static float estimate_text_width(const char* text, float font_size) {
  */
 static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return nullptr;
-    
+
     // parse parent text attributes
     float base_x = parse_svg_length(get_svg_attr(elem, "x"), 0);
     float base_y = parse_svg_length(get_svg_attr(elem, "y"), 0);
-    
+
     const char* font_family = get_svg_attr(elem, "font-family");
     float font_size = parse_svg_length(get_svg_attr(elem, "font-size"), 16);
-    
+
     // get default fill from parent
     const char* parent_fill = get_svg_attr(elem, "fill");
     if (!parent_fill) parent_fill = "black";
     Color default_fill = parse_svg_color(parent_fill);
-    
+
     // resolve font path and name
     const char* font_name = nullptr;
     char* font_path = resolve_svg_font_path(font_family, &font_name);
@@ -1295,11 +1296,11 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return nullptr;
     }
-    
+
     // count children to see if we need a scene
     int text_segments = 0;
     bool has_tspan = false;
-    
+
     for (int64_t i = 0; i < elem->length; i++) {
         Item child = elem->items[i];
         TypeId type = get_type_id(child);
@@ -1316,12 +1317,12 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
             }
         }
     }
-    
+
     if (text_segments == 0) {
         free(font_path);
         return nullptr;
     }
-    
+
     // if single text with no tspan, use simple rendering
     if (text_segments == 1 && !has_tspan) {
         const char* text_content = get_direct_text_content(elem);
@@ -1336,21 +1337,21 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
             return text;
         }
     }
-    
+
     // multiple segments - create a scene
     Tvg_Paint scene = tvg_scene_new();
     if (!scene) {
         free(font_path);
         return nullptr;
     }
-    
+
     float cur_x = base_x;
     float cur_y = base_y;
-    
+
     for (int64_t i = 0; i < elem->length; i++) {
         Item child = elem->items[i];
         TypeId type = get_type_id(child);
-        
+
         if (type == LMD_TYPE_STRING) {
             // direct text node - skip whitespace-only
             String* str = (String*)child.item;
@@ -1370,37 +1371,37 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
         } else if (type == LMD_TYPE_ELEMENT) {
             Element* child_elem = child.element;
             if (!child_elem || !child_elem->type) continue;
-            
+
             TypeElmt* child_type = (TypeElmt*)child_elem->type;
             const char* tag = child_type->name.str;
-            
+
             if (tag && strcmp(tag, "tspan") == 0) {
                 // get tspan-specific attributes
                 const char* tspan_x = get_svg_attr(child_elem, "x");
                 const char* tspan_y = get_svg_attr(child_elem, "y");
                 const char* tspan_dx = get_svg_attr(child_elem, "dx");
                 const char* tspan_dy = get_svg_attr(child_elem, "dy");
-                
+
                 // update position
                 if (tspan_x) cur_x = parse_svg_length(tspan_x, cur_x);
                 if (tspan_y) cur_y = parse_svg_length(tspan_y, cur_y);
                 if (tspan_dx) cur_x += parse_svg_length(tspan_dx, 0);
                 if (tspan_dy) cur_y += parse_svg_length(tspan_dy, 0);
-                
+
                 // get tspan fill color (inherit from parent if not specified)
                 const char* tspan_fill = get_svg_attr(child_elem, "fill");
                 Color fill = tspan_fill ? parse_svg_color(tspan_fill) : default_fill;
-                
+
                 // check for fill="none"
                 if (tspan_fill && strcmp(tspan_fill, "none") == 0) {
                     fill.a = 0;
                 }
-                
+
                 // get tspan font-size (inherit from parent if not specified)
                 const char* tspan_font_size_str = get_svg_attr(child_elem, "font-size");
-                float tspan_font_size = tspan_font_size_str ? 
+                float tspan_font_size = tspan_font_size_str ?
                     parse_svg_length(tspan_font_size_str, font_size) : font_size;
-                
+
                 // get text content
                 const char* text_content = get_direct_text_content(child_elem);
                 if (text_content && *text_content) {
@@ -1415,15 +1416,15 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
             }
         }
     }
-    
+
     // apply parent transform to the scene
     apply_svg_transform(ctx, scene, elem);
-    
+
     free(font_path);
-    
-    log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)", 
+
+    log_debug("[SVG] <text> rendered with %d segments at base (%.1f, %.1f)",
               text_segments, base_x, base_y);
-    
+
     return scene;
 }
 
@@ -1437,7 +1438,7 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
  */
 static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return nullptr;
-    
+
     // get href attribute (SVG 2 uses href, SVG 1.1 uses xlink:href)
     const char* href = get_svg_attr(elem, "href");
     if (!href) href = get_svg_attr(elem, "xlink:href");
@@ -1445,46 +1446,46 @@ static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
         log_debug("[SVG] <image> missing href attribute");
         return nullptr;
     }
-    
+
     // parse position and size
     float x = parse_svg_length(get_svg_attr(elem, "x"), 0);
     float y = parse_svg_length(get_svg_attr(elem, "y"), 0);
     float width = parse_svg_length(get_svg_attr(elem, "width"), 0);
     float height = parse_svg_length(get_svg_attr(elem, "height"), 0);
-    
+
     // TODO: integrate with Radiant's load_image() when UiContext is available
     // For now, use ThorVG's picture loading for SVG images
     Tvg_Paint pic = tvg_picture_new();
     if (!pic) return nullptr;
-    
+
     Tvg_Result result = tvg_picture_load(pic, href);
     if (result != TVG_RESULT_SUCCESS) {
         log_debug("[SVG] <image> failed to load: %s", href);
         tvg_paint_unref(pic, true);
         return nullptr;
     }
-    
+
     // set size if specified
     if (width > 0 && height > 0) {
         tvg_picture_set_size(pic, width, height);
     }
-    
+
     // position the image
     tvg_paint_translate(pic, x, y);
-    
+
     // apply transform if present
     apply_svg_transform(ctx, pic, elem);
-    
+
     // apply opacity if present
     const char* opacity = get_svg_attr(elem, "opacity");
     if (opacity) {
         float op = strtof(opacity, nullptr);
         tvg_paint_set_opacity(pic, (uint8_t)(op * 255));
     }
-    
+
     log_debug("[SVG] <image> loaded: %s at (%.1f, %.1f) size %.1fx%.1f",
               href, x, y, width, height);
-    
+
     return pic;
 }
 
@@ -1494,14 +1495,14 @@ static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem) {
 
 static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return nullptr;
-    
+
     // save current inherited state
     Color saved_fill = ctx->fill_color;
     Color saved_stroke = ctx->stroke_color;
     float saved_stroke_width = ctx->stroke_width;
     bool saved_fill_none = ctx->fill_none;
     bool saved_stroke_none = ctx->stroke_none;
-    
+
     // update inherited state from group attributes
     const char* fill = get_svg_attr(elem, "fill");
     if (fill) {
@@ -1512,7 +1513,7 @@ static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
             ctx->fill_none = false;
         }
     }
-    
+
     const char* stroke = get_svg_attr(elem, "stroke");
     if (stroke) {
         if (strcmp(stroke, "none") == 0) {
@@ -1522,50 +1523,50 @@ static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem) {
             ctx->stroke_none = false;
         }
     }
-    
+
     const char* stroke_width = get_svg_attr(elem, "stroke-width");
     if (stroke_width) {
         ctx->stroke_width = parse_svg_length(stroke_width, 1.0f);
     }
-    
+
     // render children with updated inherited state
     Tvg_Paint scene = render_svg_children_as_scene(ctx, elem);
-    
+
     // restore inherited state
     ctx->fill_color = saved_fill;
     ctx->stroke_color = saved_stroke;
     ctx->stroke_width = saved_stroke_width;
     ctx->fill_none = saved_fill_none;
     ctx->stroke_none = saved_stroke_none;
-    
+
     return scene;
 }
 
 static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* elem) {
     if (!elem || elem->length == 0) return nullptr;
-    
+
     Tvg_Paint scene = tvg_scene_new();
     int child_count = 0;
-    
+
     for (int64_t i = 0; i < elem->length; i++) {
         Element* child = get_child_element_at(elem, i);
         if (!child) continue;
-        
+
         Tvg_Paint child_paint = render_svg_element(ctx, child);
         if (child_paint) {
             tvg_scene_push(scene, child_paint);
             child_count++;
         }
     }
-    
+
     if (child_count == 0) {
         tvg_paint_unref(scene, true);
         return nullptr;
     }
-    
+
     // apply group transform
     apply_svg_transform(ctx, scene, elem);
-    
+
     return scene;
 }
 
@@ -1585,12 +1586,12 @@ static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
 
 static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
     if (!elem) return nullptr;
-    
+
     const char* tag = get_element_tag_name(elem);
     if (!tag) return nullptr;
-    
+
     log_debug("[SVG] rendering element: %s", tag);
-    
+
     if (strcmp(tag, "rect") == 0) {
         return render_svg_rect(ctx, elem);
     } else if (strcmp(tag, "circle") == 0) {
@@ -1638,9 +1639,9 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
 
 Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio) {
     if (!svg_element) return nullptr;
-    
+
     log_debug("[SVG] build_svg_scene: viewport %.0fx%.0f pixel_ratio=%.2f", viewport_width, viewport_height, pixel_ratio);
-    
+
     // initialize render context
     SvgRenderContext ctx = {};
     ctx.svg_root = svg_element;
@@ -1652,11 +1653,11 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
     ctx.opacity = 1.0f;
     ctx.fill_none = false;
     ctx.stroke_none = true;
-    
+
     // parse viewBox
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
-    
+
     if (vb.has_viewbox && vb.width > 0 && vb.height > 0) {
         ctx.viewbox_x = vb.min_x;
         ctx.viewbox_y = vb.min_y;
@@ -1673,10 +1674,10 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
         ctx.scale_x = ctx.scale_y = 1.0f;
         ctx.translate_x = ctx.translate_y = 0;
     }
-    
+
     // create root scene
     Tvg_Paint scene = tvg_scene_new();
-    
+
     // apply viewBox transform
     if (vb.has_viewbox) {
         Tvg_Matrix matrix = {
@@ -1686,18 +1687,18 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
         };
         tvg_paint_set_transform(scene, &matrix);
     }
-    
+
     // render children
     for (int64_t i = 0; i < svg_element->length; i++) {
         Element* child = get_child_element_at(svg_element, i);
         if (!child) continue;
-        
+
         Tvg_Paint child_paint = render_svg_element(&ctx, child);
         if (child_paint) {
             tvg_scene_push(scene, child_paint);
         }
     }
-    
+
     log_debug("[SVG] build_svg_scene complete");
     return scene;
 }
@@ -1708,47 +1709,47 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
 
 void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
-    
+
     // ViewBlock inherits from DomElement, so we can cast directly
     DomElement* dom_elem = static_cast<DomElement*>(view);
     if (!dom_elem->native_element) {
         log_debug("[SVG] render_inline_svg: no native element");
         return;
     }
-    
+
     Element* svg_elem = dom_elem->native_element;
     float scale = rdcon->scale;
-    
+
     log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f) pixel_ratio=%.2f",
               view->x, view->y, view->width, view->height, scale);
-    
+
     // build ThorVG scene from SVG element tree
     // pass pixel_ratio so text sizes can be adjusted (divided by pixel_ratio)
     // since the entire scene will be scaled by pixel_ratio after building
-    Tvg_Paint svg_scene = build_svg_scene(svg_elem, view->width, view->height, 
+    Tvg_Paint svg_scene = build_svg_scene(svg_elem, view->width, view->height,
                                             rdcon->ui_context->document->pool, scale);
     if (!svg_scene) {
         log_debug("[SVG] render_inline_svg: failed to build scene");
         return;
     }
-    
+
     // position in document coordinates
     float x = rdcon->block.x + view->x * scale;
     float y = rdcon->block.y + view->y * scale;
-    
+
     tvg_paint_translate(svg_scene, x, y);
     tvg_paint_scale(svg_scene, scale);
-    
+
     // apply document transform if any
     if (rdcon->has_transform) {
         tvg_paint_set_transform(svg_scene, &rdcon->transform);
     }
-    
+
     // render immediately to buffer (same pattern as SVG images)
     tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
     tvg_canvas_push(rdcon->canvas, svg_scene);
     tvg_canvas_reset_and_draw(rdcon, false);
     tvg_canvas_remove(rdcon->canvas, NULL);  // clear shapes after rendering
-    
+
     log_debug("[SVG] render_inline_svg: rendered to buffer");
 }

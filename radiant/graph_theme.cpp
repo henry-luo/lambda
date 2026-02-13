@@ -1,4 +1,5 @@
 #include "graph_theme.hpp"
+#include "../lib/str.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -424,7 +425,7 @@ const DiagramTheme* get_theme_by_name(const char* name) {
 
     // case-insensitive search
     for (int i = 0; THEME_REGISTRY[i].name != NULL; i++) {
-        if (strcasecmp(name, THEME_REGISTRY[i].name) == 0) {
+        if (str_ieq(name, strlen(name), THEME_REGISTRY[i].name, strlen(THEME_REGISTRY[i].name))) {
             return THEME_REGISTRY[i].theme;
         }
     }

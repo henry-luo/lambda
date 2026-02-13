@@ -4,6 +4,7 @@
 #include "tex_node.hpp"
 #include "tex_tfm.hpp"
 #include "lib/log.h"
+#include "lib/str.h"
 #include <cstring>
 #include <cctype>
 
@@ -187,9 +188,7 @@ HyphenResult HyphenEngine::hyphenate_word(const char* word, size_t len) const {
         return result;
     }
 
-    for (size_t i = 0; i < len; i++) {
-        lower[i] = tolower((unsigned char)word[i]);
-    }
+    str_to_lower(lower, word, len);
 
     HyphenResult result = hyphenate(lower, len);
     result.word = word;  // Keep original word pointer

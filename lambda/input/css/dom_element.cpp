@@ -2005,7 +2005,7 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
 
     // Determine node type
     DomNodeType node_type;
-    if (strcasecmp(tag_name, "!DOCTYPE") == 0) {
+    if (str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
         node_type = DOM_NODE_DOCTYPE;
     } else if (strcmp(tag_name, "!--") == 0) {
         node_type = DOM_NODE_COMMENT;
@@ -2323,7 +2323,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
               parent ? parent->tag_name : "none");
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
-    if (strcmp(tag_name, "!--") == 0 || strcasecmp(tag_name, "!DOCTYPE") == 0) {
+    if (strcmp(tag_name, "!--") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
         return nullptr;  // Not a layout element, processed as child below
     }
 
@@ -2334,7 +2334,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // skip script elements - they should not participate in layout
     // script elements have display: none by default in browser user-agent stylesheets
-    if (strcasecmp(tag_name, "script") == 0) {
+    if (str_ieq_const(tag_name, strlen(tag_name), "script")) {
         return nullptr;  // Skip script elements during DOM tree building
     }
 
@@ -2373,7 +2373,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
 
     // extract rowspan and colspan attributes for table cells (td, th)
-    if (strcasecmp(tag_name, "td") == 0 || strcasecmp(tag_name, "th") == 0) {
+    if (str_ieq_const(tag_name, strlen(tag_name), "td") || str_ieq_const(tag_name, strlen(tag_name), "th")) {
         const char* rowspan_value = extract_element_attribute(elem, "rowspan", doc->arena);
         if (rowspan_value) {
             dom_element_set_attribute(dom_elem, "rowspan", rowspan_value);
@@ -2387,7 +2387,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Set :link pseudo-state for anchor and area elements with href attribute
     // Per HTML spec: :link matches <a> and <area> elements with href that haven't been visited
-    if (strcasecmp(tag_name, "a") == 0 || strcasecmp(tag_name, "area") == 0) {
+    if (str_ieq_const(tag_name, strlen(tag_name), "a") || str_ieq_const(tag_name, strlen(tag_name), "area")) {
         const char* href_value = extract_element_attribute(elem, "href", doc->arena);
         if (href_value && strlen(href_value) > 0) {
             dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_LINK);
@@ -2398,7 +2398,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Set :checked, :disabled pseudo-states for input elements
     // These boolean attributes set the initial state from HTML
-    if (strcasecmp(tag_name, "input") == 0) {
+    if (str_ieq_const(tag_name, strlen(tag_name), "input")) {
         // Store the type attribute for later use
         const char* type_value = extract_element_attribute(elem, "type", doc->arena);
         if (type_value) {
@@ -2443,7 +2443,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
             // Check if this is a comment or DOCTYPE
-            if (strcmp(child_tag_name, "!--") == 0 || strcasecmp(child_tag_name, "!DOCTYPE") == 0) {
+            if (strcmp(child_tag_name, "!--") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = dom_comment_create(child_elem, dom_elem);
                 if (comment_node) {

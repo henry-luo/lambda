@@ -6,6 +6,7 @@
 #include <turbojpeg.h>
 #include <gif_lib.h>
 #include "log.h"
+#include "str.h"
 
 // Helper function to determine image format from file extension
 typedef enum {
@@ -22,23 +23,23 @@ static ImageType get_image_type(const char* filename) {
     if (len < 4) return IMAGE_TYPE_UNKNOWN;
 
     const char* ext = filename + len - 4;
-    if (strcasecmp(ext, ".png") == 0) {
+    if (str_ieq_const(ext, strlen(ext), ".png")) {
         return IMAGE_TYPE_PNG;
     }
 
-    if (strcasecmp(ext, ".jpg") == 0) {
+    if (str_ieq_const(ext, strlen(ext), ".jpg")) {
         return IMAGE_TYPE_JPEG;
     }
 
     if (len >= 5) {
         ext = filename + len - 5;
-        if (strcasecmp(ext, ".jpeg") == 0) {
+        if (str_ieq_const(ext, strlen(ext), ".jpeg")) {
             return IMAGE_TYPE_JPEG;
         }
     }
 
     ext = filename + len - 4;
-    if (strcasecmp(ext, ".gif") == 0) {
+    if (str_ieq_const(ext, strlen(ext), ".gif")) {
         return IMAGE_TYPE_GIF;
     }
 
