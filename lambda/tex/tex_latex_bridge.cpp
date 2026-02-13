@@ -14,6 +14,7 @@
 #include "../../lib/log.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/str.h"
 #include <cstring>
 #include <cstdlib>
 #include <cctype>
@@ -145,7 +146,7 @@ const char* LaTeXContext::resolve_ref(const char* label) {
 // Check if tag matches (case-insensitive)
 static bool tag_eq(const char* tag, const char* expected) {
     if (!tag || !expected) return false;
-    return strcasecmp(tag, expected) == 0;
+    return str_ieq(tag, strlen(tag), expected, strlen(expected));
 }
 
 // Get tag name from element
