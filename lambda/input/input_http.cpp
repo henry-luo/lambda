@@ -84,29 +84,29 @@ const char* content_type_to_extension(const char* content_type) {
     }
 
     // Map common MIME types to extensions
-    if (strcasecmp(main_type, "text/html") == 0) return ".html";
-    if (strcasecmp(main_type, "application/xhtml+xml") == 0) return ".html";
-    if (strcasecmp(main_type, "text/plain") == 0) return ".txt";
-    if (strcasecmp(main_type, "text/css") == 0) return ".css";
-    if (strcasecmp(main_type, "text/javascript") == 0) return ".js";
-    if (strcasecmp(main_type, "application/javascript") == 0) return ".js";
-    if (strcasecmp(main_type, "application/json") == 0) return ".json";
-    if (strcasecmp(main_type, "text/xml") == 0) return ".xml";
-    if (strcasecmp(main_type, "application/xml") == 0) return ".xml";
-    if (strcasecmp(main_type, "text/markdown") == 0) return ".md";
-    if (strcasecmp(main_type, "text/x-markdown") == 0) return ".md";
-    if (strcasecmp(main_type, "application/pdf") == 0) return ".pdf";
-    if (strcasecmp(main_type, "image/svg+xml") == 0) return ".svg";
-    if (strcasecmp(main_type, "image/png") == 0) return ".png";
-    if (strcasecmp(main_type, "image/jpeg") == 0) return ".jpg";
-    if (strcasecmp(main_type, "image/gif") == 0) return ".gif";
-    if (strcasecmp(main_type, "image/webp") == 0) return ".webp";
-    if (strcasecmp(main_type, "application/x-latex") == 0) return ".tex";
-    if (strcasecmp(main_type, "text/x-tex") == 0) return ".tex";
-    if (strcasecmp(main_type, "application/x-yaml") == 0) return ".yaml";
-    if (strcasecmp(main_type, "text/yaml") == 0) return ".yaml";
-    if (strcasecmp(main_type, "application/toml") == 0) return ".toml";
-    if (strcasecmp(main_type, "text/csv") == 0) return ".csv";
+    if (str_ieq_const(main_type, len, "text/html")) return ".html";
+    if (str_ieq_const(main_type, len, "application/xhtml+xml")) return ".html";
+    if (str_ieq_const(main_type, len, "text/plain")) return ".txt";
+    if (str_ieq_const(main_type, len, "text/css")) return ".css";
+    if (str_ieq_const(main_type, len, "text/javascript")) return ".js";
+    if (str_ieq_const(main_type, len, "application/javascript")) return ".js";
+    if (str_ieq_const(main_type, len, "application/json")) return ".json";
+    if (str_ieq_const(main_type, len, "text/xml")) return ".xml";
+    if (str_ieq_const(main_type, len, "application/xml")) return ".xml";
+    if (str_ieq_const(main_type, len, "text/markdown")) return ".md";
+    if (str_ieq_const(main_type, len, "text/x-markdown")) return ".md";
+    if (str_ieq_const(main_type, len, "application/pdf")) return ".pdf";
+    if (str_ieq_const(main_type, len, "image/svg+xml")) return ".svg";
+    if (str_ieq_const(main_type, len, "image/png")) return ".png";
+    if (str_ieq_const(main_type, len, "image/jpeg")) return ".jpg";
+    if (str_ieq_const(main_type, len, "image/gif")) return ".gif";
+    if (str_ieq_const(main_type, len, "image/webp")) return ".webp";
+    if (str_ieq_const(main_type, len, "application/x-latex")) return ".tex";
+    if (str_ieq_const(main_type, len, "text/x-tex")) return ".tex";
+    if (str_ieq_const(main_type, len, "application/x-yaml")) return ".yaml";
+    if (str_ieq_const(main_type, len, "text/yaml")) return ".yaml";
+    if (str_ieq_const(main_type, len, "application/toml")) return ".toml";
+    if (str_ieq_const(main_type, len, "text/csv")) return ".csv";
 
     log_debug("HTTP: Unknown content-type '%s', defaulting to .html", content_type);
     return ".html";  // Default to HTML for unknown types
@@ -347,7 +347,7 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
     }
 
     // Extract Content-Type header
-    if (strncasecmp(buffer, "content-type:", 13) == 0) {
+    if (str_istarts_with_const(buffer, header_size, "content-type:")) {
         char* value_start = buffer + 13;
         while (*value_start == ' ' || *value_start == '\t') value_start++;
 
@@ -439,27 +439,28 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
 
     // Method configuration
     if (config && config->method) {
-        if (strcasecmp(config->method, "POST") == 0) {
+        size_t method_len = strlen(config->method);
+        if (str_ieq_const(config->method, method_len, "POST")) {
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
             if (config->body) {
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
             }
-        } else if (strcasecmp(config->method, "PUT") == 0) {
+        } else if (str_ieq_const(config->method, method_len, "PUT")) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
             if (config->body) {
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
             }
-        } else if (strcasecmp(config->method, "DELETE") == 0) {
+        } else if (str_ieq_const(config->method, method_len, "DELETE")) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-        } else if (strcasecmp(config->method, "PATCH") == 0) {
+        } else if (str_ieq_const(config->method, method_len, "PATCH")) {
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PATCH");
             if (config->body) {
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
                 curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
             }
-        } else if (strcasecmp(config->method, "HEAD") == 0) {
+        } else if (str_ieq_const(config->method, method_len, "HEAD")) {
             curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
         }
         // GET is default, no special handling needed

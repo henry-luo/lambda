@@ -64,5 +64,5 @@ uint64_t string_hash(const String* s) {
 bool string_eq_cstr(const String* s, const char* cstr) {
     if (!s) return (!cstr || *cstr == '\0');
     if (!cstr) return s->len == 0;
-    return str_eq_lit(s->chars, s->len, cstr);
+    return str_eq_const(s->chars, s->len, cstr);
 }

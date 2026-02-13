@@ -1797,12 +1797,12 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
     // str_to_double_default() does not handle 'inf', 'nan' — add special handling
     log_debug("build lit float: %s", num_str);
     // add special handling for "inf", "-inf", "nan"
-    if (strncasecmp(num_str, "inf", 3) == 0) {
+    if (str_istarts_with_const(num_str, strlen(num_str), "inf")) {
         item_type->double_val = INFINITY;
         log_debug("build lit float: inf");
         if (has_sign) { item_type->double_val = -item_type->double_val; }
     }
-    else if (strncasecmp(num_str, "nan", 3) == 0) {
+    else if (str_istarts_with_const(num_str, strlen(num_str), "nan")) {
         item_type->double_val = NAN;
         log_debug("build lit float: nan");
     }

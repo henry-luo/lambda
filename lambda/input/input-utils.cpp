@@ -6,6 +6,7 @@
 #include "input-utils.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -103,12 +104,7 @@ bool try_parse_double(const char* str, size_t len, double* out) {
 // ── String Classification ──────────────────────────────────────────
 
 int input_strncasecmp(const char* s1, const char* s2, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        char c1 = tolower((unsigned char)s1[i]);
-        char c2 = tolower((unsigned char)s2[i]);
-        if (c1 != c2) return c1 - c2;
-    }
-    return 0;
+    return str_icmp(s1, n, s2, n) != 0;
 }
 
 // ── C++ Typed Value Parsing ────────────────────────────────────────
@@ -123,23 +119,23 @@ Item parse_typed_value(InputContext& ctx, const char* str, size_t len) {
     Input* input = ctx.input();
 
     // check for boolean values (case insensitive)
-    if ((len == 4 && input_strncasecmp(str, "true", 4) == 0) ||
-        (len == 3 && input_strncasecmp(str, "yes", 3) == 0) ||
-        (len == 2 && input_strncasecmp(str, "on", 2) == 0) ||
+    if ((len == 4 && str_ieq_const(str, len, "true")) ||
+        (len == 3 && str_ieq_const(str, len, "yes")) ||
+        (len == 2 && str_ieq_const(str, len, "on")) ||
         (len == 1 && str[0] == '1')) {
         return {.item = b2it(true)};
     }
-    if ((len == 5 && input_strncasecmp(str, "false", 5) == 0) ||
-        (len == 2 && input_strncasecmp(str, "no", 2) == 0) ||
-        (len == 3 && input_strncasecmp(str, "off", 3) == 0) ||
+    if ((len == 5 && str_ieq_const(str, len, "false")) ||
+        (len == 2 && str_ieq_const(str, len, "no")) ||
+        (len == 3 && str_ieq_const(str, len, "off")) ||
         (len == 1 && str[0] == '0')) {
         return {.item = b2it(false)};
     }
 
     // check for null/empty values
-    if ((len == 4 && input_strncasecmp(str, "null", 4) == 0) ||
-        (len == 3 && input_strncasecmp(str, "nil", 3) == 0) ||
-        (len == 5 && input_strncasecmp(str, "empty", 5) == 0)) {
+    if ((len == 4 && str_ieq_const(str, len, "null")) ||
+        (len == 3 && str_ieq_const(str, len, "nil")) ||
+        (len == 5 && str_ieq_const(str, len, "empty"))) {
         return {.item = ITEM_NULL};
     }
 

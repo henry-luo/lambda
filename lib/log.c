@@ -180,12 +180,12 @@ static bool should_use_colors_for_file(log_category_t *category) {
     size_t len = strlen(filename);
 
     // Check for .log extension (use colors)
-    if (len > 4 && strcasecmp(filename + len - 4, ".log") == 0) {
+    if (len > 4 && str_ieq_const(filename + len - 4, strlen(filename + len - 4), ".log")) {
         return true;
     }
 
     // Check for .txt extension (no colors)
-    if (len > 4 && strcasecmp(filename + len - 4, ".txt") == 0) {
+    if (len > 4 && str_ieq_const(filename + len - 4, strlen(filename + len - 4), ".txt")) {
         return false;
     }
 
@@ -1025,12 +1025,12 @@ void log_default_finish(void) {
 static int parse_log_level(const char *level_str) {
     if (!level_str) return LOG_LEVEL_DEBUG;
 
-    if (strcasecmp(level_str, "FATAL") == 0) return LOG_LEVEL_FATAL;
-    if (strcasecmp(level_str, "ERROR") == 0) return LOG_LEVEL_ERROR;
-    if (strcasecmp(level_str, "WARN") == 0) return LOG_LEVEL_WARN;
-    if (strcasecmp(level_str, "NOTICE") == 0) return LOG_LEVEL_NOTICE;
-    if (strcasecmp(level_str, "INFO") == 0) return LOG_LEVEL_INFO;
-    if (strcasecmp(level_str, "DEBUG") == 0) return LOG_LEVEL_DEBUG;
+    if (str_ieq_const(level_str, strlen(level_str), "FATAL")) return LOG_LEVEL_FATAL;
+    if (str_ieq_const(level_str, strlen(level_str), "ERROR")) return LOG_LEVEL_ERROR;
+    if (str_ieq_const(level_str, strlen(level_str), "WARN")) return LOG_LEVEL_WARN;
+    if (str_ieq_const(level_str, strlen(level_str), "NOTICE")) return LOG_LEVEL_NOTICE;
+    if (str_ieq_const(level_str, strlen(level_str), "INFO")) return LOG_LEVEL_INFO;
+    if (str_ieq_const(level_str, strlen(level_str), "DEBUG")) return LOG_LEVEL_DEBUG;
 
     return LOG_LEVEL_DEBUG;
 }
