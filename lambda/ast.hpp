@@ -112,15 +112,11 @@ extern "C" {
 #define SYM_SYMBOL_PATTERN sym_symbol_pattern
 #define SYM_PATTERN_CHAR_CLASS sym_pattern_char_class
 #define SYM_PATTERN_ANY sym_pattern_any
-#define SYM_PATTERN_ANY_STAR sym_pattern_any_star
-#define SYM_PATTERN_COUNT sym_pattern_count
-#define SYM_PRIMARY_PATTERN sym_primary_pattern
-#define SYM_PATTERN_OCCURRENCE sym_pattern_occurrence
-#define SYM_PATTERN_NEGATION sym_pattern_negation
-#define SYM_PATTERN_RANGE sym_pattern_range
-#define SYM_BINARY_PATTERN sym_binary_pattern
-#define SYM_PATTERN_SEQ sym_pattern_seq
 #define SYM_OCCURRENCE_COUNT sym_occurrence_count
+// Unified type/pattern symbols
+#define SYM_PATTERN_SEQ sym_pattern_seq
+#define SYM_PATTERN_GROUP sym_pattern_group
+#define SYM_TYPE_NEGATION sym_type_negation
 
 #define SYM_COMMENT sym_comment
 #define SYM_NAMED_ARGUMENT sym_named_argument

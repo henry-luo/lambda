@@ -56,13 +56,13 @@ string whitespace = \s+
 "4.3"; ("a" is whitespace)           // false - not whitespace
 
 // ============================================================
-// Test 5: Any Character (\.) and Ellipsis (...)
+// Test 5: Any Character (\.) and Zero-More (\.\*)
 // ============================================================
-'Test 5: Any Character (\\.) and Ellipsis (...)'
+'Test 5: Any Character (\\.) and Zero-More (\\.\\*)'
 
 string any_char = \.
 string any_three = \. \. \.
-string any_star = ...
+string any_star = \.*
 
 "5.1"; ("x" is any_char)             // true
 "5.2"; ("abc" is any_three)          // true
@@ -70,7 +70,7 @@ string any_star = ...
 "5.4"; ("x" is any_star)             // true - single char matches .*
 "5.5"; ("anything goes here!" is any_star)  // true - any chars
 
-string h_any_o = "h" ... "o"
+string h_any_o = "h" \.* "o"
 "5.6"; ("hello" is h_any_o)          // true - h followed by anything followed by o
 "5.7"; ("ho" is h_any_o)             // true - h immediately followed by o
 
