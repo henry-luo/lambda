@@ -1,4 +1,5 @@
 #include "strbuf.h"
+#include "str.h"
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -29,8 +30,8 @@ StrBuf* strbuf_create(const char *str) {
     size_t str_len = strlen(str);
     StrBuf *sbuf = strbuf_new_cap(str_len + 1);
     if (!sbuf) return NULL;
-    memcpy(sbuf->str, str, str_len);
-    sbuf->str[sbuf->length = str_len] = '\0';
+    str_copy(sbuf->str, str_len + 1, str, str_len);
+    sbuf->length = str_len;
     return sbuf;
 }
 
@@ -54,25 +55,25 @@ void strbuf_full_reset(StrBuf *sb) {
 
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     if (min_capacity <= sb->capacity) return true;
-    
+
     // Check for unreasonable allocation sizes to prevent overflow
     // Use >= instead of > to catch SIZE_MAX/2 exactly
     if (min_capacity >= SIZE_MAX / 2) {
         return false; // Refuse to allocate more than half of address space
     }
-    
+
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
-    
-    while (new_capacity < min_capacity) { 
+
+    while (new_capacity < min_capacity) {
         // Check for overflow before doubling
         if (new_capacity > SIZE_MAX / 2) {
-            printf("DEBUG: Overflow detected in doubling loop - new_capacity=%zu, min_capacity=%zu\n", 
+            printf("DEBUG: Overflow detected in doubling loop - new_capacity=%zu, min_capacity=%zu\n",
                    new_capacity, min_capacity);
             new_capacity = min_capacity; // Use minimum required instead of doubling
             break;
         }
         // log_debug("doubling strbuf new_capacity: %zu -> %zu", new_capacity, new_capacity * 2);
-        new_capacity *= 2; 
+        new_capacity *= 2;
     }
     char *new_s = (char*)realloc(sb->str, new_capacity);
     if (!new_s) return false;
@@ -84,7 +85,7 @@ void strbuf_append_str(StrBuf *sb, const char *str) {
     if (!str) return;
     size_t str_len = strlen(str);
     if (!strbuf_ensure_cap(sb, sb->length + str_len + 1)) return;
-    memcpy(sb->str + sb->length, str, str_len + 1);
+    str_copy(sb->str + sb->length, str_len + 1, str, str_len);
     sb->length += str_len;
 }
 
@@ -93,11 +94,9 @@ void strbuf_append_str(StrBuf *sb, const char *str) {
 void strbuf_append_str_n(StrBuf *sb, const char *str, size_t len) {
     if (!str) return;
     if (!strbuf_ensure_cap(sb, sb->length + len + 1)) return;
-    memcpy(sb->str + sb->length, str, len);
+    str_copy(sb->str + sb->length, len + 1, str, len);
     sb->length += len;
-    sb->str[sb->length] = '\0';
 }
-
 void strbuf_append_char(StrBuf *sb, char c) {
     if (!strbuf_ensure_cap(sb, sb->length + 2)) return;
     sb->str[sb->length] = c;
@@ -108,7 +107,7 @@ void strbuf_append_char(StrBuf *sb, char c) {
 // append char `c` `n` times
 void strbuf_append_char_n(StrBuf *buf, char c, size_t n) {
     if (!strbuf_ensure_cap(buf, buf->length + n + 1)) return;
-    memset(buf->str + buf->length, c, n);
+    str_fill(buf->str + buf->length, n, c);
     buf->length += n;
     buf->str[buf->length] = '\0';
 }
@@ -137,16 +136,16 @@ void strbuf_append_format(StrBuf *sb, const char *format, ...) {
 }
 
 void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
-    if (!format) return; 
+    if (!format) return;
     va_list args_copy;
     va_copy(args_copy, args);
-    
+
     int size = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
-    
-    if (size < 0) return;    
+
+    if (size < 0) return;
     if (!strbuf_ensure_cap(sb, sb->length + size + 1)) return;
-    
+
     size = vsnprintf(sb->str + sb->length, sb->capacity - sb->length, format, args);
     if (size < 0) return;
     sb->length += size;
@@ -157,7 +156,7 @@ void strbuf_copy(StrBuf *dst, const StrBuf *src) {
     if (!dst || !src) return;
     strbuf_reset(dst);
     if (!strbuf_ensure_cap(dst, src->length + 1)) return;
-    memcpy(dst->str, src->str, src->length + 1);
+    str_copy(dst->str, src->length + 1, src->str, src->length);
     dst->length = src->length;
 }
 
@@ -258,8 +257,8 @@ void strbuf_append_int(StrBuf *buf, int value) {
 }
 
 void strbuf_append_int64(StrBuf *buf, int64_t value) {
-    if (value < 0) { 
-        strbuf_append_char(buf, '-'); 
+    if (value < 0) {
+        strbuf_append_char(buf, '-');
         // Handle INT64_MIN correctly to avoid overflow
         if (value == INT64_MIN) {
             strbuf_append_uint64(buf, (uint64_t)INT64_MAX + 1);
@@ -286,10 +285,10 @@ bool strbuf_append_file(StrBuf *sb, FILE *file) {
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
+
     if (size < 0) return false;
     if (!strbuf_ensure_cap(sb, sb->length + size + 1)) return false;
-    
+
     size_t read = fread(sb->str + sb->length, 1, size, file);
     sb->length += read;
     sb->str[sb->length] = '\0';
@@ -299,7 +298,7 @@ bool strbuf_append_file(StrBuf *sb, FILE *file) {
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n) {
     if (!file) return false;
     if (!strbuf_ensure_cap(sb, sb->length + n + 1)) return false;
-    
+
     size_t read = fread(sb->str + sb->length, 1, n, file);
     sb->length += read;
     sb->str[sb->length] = '\0';

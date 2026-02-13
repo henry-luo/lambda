@@ -686,14 +686,14 @@ TEST_F(StrNumericTest, DoubleEmpty) {
 }
 
 TEST_F(StrNumericTest, Int64OrDefault) {
-    EXPECT_EQ(str_to_int64_or("42", 2, -1), 42);
-    EXPECT_EQ(str_to_int64_or("abc", 3, -1), -1);
-    EXPECT_EQ(str_to_int64_or("", 0, 99), 99);
+    EXPECT_EQ(str_to_int64_default("42", 2, -1), 42);
+    EXPECT_EQ(str_to_int64_default("abc", 3, -1), -1);
+    EXPECT_EQ(str_to_int64_default("", 0, 99), 99);
 }
 
 TEST_F(StrNumericTest, DoubleOrDefault) {
-    EXPECT_NEAR(str_to_double_or("3.14", 4, 0.0), 3.14, 1e-10);
-    EXPECT_NEAR(str_to_double_or("abc", 3, -1.0), -1.0, 1e-10);
+    EXPECT_NEAR(str_to_double_default("3.14", 4, 0.0), 3.14, 1e-10);
+    EXPECT_NEAR(str_to_double_default("abc", 3, -1.0), -1.0, 1e-10);
 }
 
 /* ================================================================== *

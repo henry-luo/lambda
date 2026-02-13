@@ -8,6 +8,7 @@ extern "C" {
 #include "../lib/memtrack.h"
 }
 #include "../lib/strbuf.h"
+#include "../lib/str.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -50,11 +51,11 @@ void svg_indent(SvgRenderContext* ctx) {
 
 void svg_color_to_string(Color color, char* result) {
     if (color.a == 0) {
-        strcpy(result, "transparent");
+        str_copy(result, 32, "transparent", 11);
     } else if (color.a == 255) {
-        sprintf(result, "rgb(%d,%d,%d)", color.r, color.g, color.b);
+        str_fmt(result, 32, "rgb(%d,%d,%d)", color.r, color.g, color.b);
     } else {
-        sprintf(result, "rgba(%d,%d,%d,%.3f)", color.r, color.g, color.b, color.a / 255.0f);
+        str_fmt(result, 32, "rgba(%d,%d,%d,%.3f)", color.r, color.g, color.b, color.a / 255.0f);
     }
 }
 

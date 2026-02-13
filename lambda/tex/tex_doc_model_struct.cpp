@@ -9,6 +9,7 @@
 
 #include "tex_document_model.hpp"
 #include "tex_doc_model_internal.hpp"
+#include "../../lib/str.h"
 
 namespace tex {
 
@@ -21,17 +22,17 @@ namespace tex {
 // Check if an item is a line break command (\\, \newline)
 static bool is_linebreak_item(const ItemReader& item) {
     if (!item.isElement()) return false;
-    
+
     ElementReader elem = item.asElement();
     const char* tag = elem.tagName();
     if (!tag) return false;
-    
+
     // linebreak_command tag from \\
     if (tag_eq(tag, "linebreak_command")) return true;
-    
+
     // \newline command
     if (tag_eq(tag, "newline")) return true;
-    
+
     return false;
 }
 
@@ -68,20 +69,20 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
     heading->heading.title = nullptr;
     heading->heading.number = nullptr;
     heading->heading.label = nullptr;
-    
+
     // Check for starred variant (unnumbered)
     bool is_starred = false;
-    
+
     // Collect label names found inside the section for later registration
     const char* found_labels[16];  // Up to 16 labels (should be enough)
     int found_label_count = 0;
-    
+
     // First check for title as an attribute (new AST format)
     ItemReader title_attr = elem.get_attr("title");
     if (!title_attr.isNull()) {
         heading->heading.title = render_brack_group_to_html(title_attr, arena, doc);
     }
-    
+
     // Process children to find title (old AST format), labels, and star
     auto iter = elem.children();
     ItemReader child;
@@ -89,7 +90,7 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* child_tag = child_elem.tagName();
-            
+
             if (child_tag) {
                 // Optional argument (short title for TOC)
                 if (tag_eq(child_tag, "brack_group") || tag_eq(child_tag, "optional")) {
@@ -153,12 +154,12 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
             }
         }
     }
-    
+
     // Assign section number if not starred
     if (!is_starred && doc) {
         int level = heading->heading.level;
         bool has_chapters = doc_class_has_chapters(doc->document_class);
-        
+
         // Increment counter at this level, reset deeper levels
         // Use document model counters instead of static variables
         switch (level) {
@@ -192,10 +193,10 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
             default:
                 break;
         }
-        
+
         // Build number string based on document class
         StrBuf* num_buf = strbuf_new_cap(32);
-        
+
         if (has_chapters) {
             // book/report class: chapter.section.subsection...
             switch (level) {
@@ -230,7 +231,7 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
                     break;
             }
         }
-        
+
         // Copy number to arena
         if (num_buf->length > 0) {
             char* num_str = (char*)arena_alloc(arena, num_buf->length + 1);
@@ -238,19 +239,19 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
             heading->heading.number = num_str;
         }
         strbuf_free(num_buf);
-        
+
         // Create sequential label for cross-references (sec-1, sec-2, etc.)
         doc->section_id_counter++;
         char label_buf[64];
         snprintf(label_buf, sizeof(label_buf), "sec-%d", doc->section_id_counter);
         char* label_str = (char*)arena_alloc(arena, strlen(label_buf) + 1);
-        strcpy(label_str, label_buf);
+        str_copy(label_str, strlen(label_buf) + 1, label_buf, strlen(label_buf));
         heading->heading.label = label_str;
-        
+
         // Register with document for cross-referencing
         doc->current_ref_id = heading->heading.label;
         doc->current_ref_text = heading->heading.number;
-        
+
         // Now register any labels that were found inside this section
         for (int i = 0; i < found_label_count; i++) {
             log_debug("build_section_command: registering label '%s' -> ref_id='%s', ref_text='%s'",
@@ -258,7 +259,7 @@ DocElement* build_section_command(const char* cmd_name, const ElementReader& ele
             doc->add_label_with_id(found_labels[i], heading->heading.label, heading->heading.number);
         }
     }
-    
+
     return heading;
 }
 
@@ -293,14 +294,14 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
     DocElement* current_para = nullptr;  // Current paragraph within item
     int item_number = 0;
     bool is_centered = false;  // Track centering state from \centering command
-    
+
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* child_tag = child_elem.tagName();
-            
+
             if (child_tag) {
                 // Check for \centering command - applies to all following content
                 if (tag_eq(child_tag, "centering")) {
@@ -308,7 +309,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     list->flags |= DocElement::FLAG_CENTERED;
                     continue;
                 }
-                
+
                 // \item command starts a new list item
                 if (tag_eq(child_tag, "item") || tag_eq(child_tag, "item_command")) {
                     // Finalize previous item's paragraph and item itself
@@ -318,7 +319,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                             doc_append_child(list, current_item);
                         }
                     }
-                    
+
                     // Create new item
                     current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
                     current_item->list_item.label = nullptr;
@@ -329,22 +330,22 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                         current_item->flags |= DocElement::FLAG_CENTERED;
                     }
                     current_para = nullptr;  // Reset paragraph
-                    
+
                     if (list_type == ListType::ENUMERATE) {
                         item_number++;
                         current_item->list_item.item_number = item_number;
-                        
+
                         // Update current referable context for \label commands in this item
                         // Format: ref_id = "item-N", ref_text = "N"
                         char ref_id_buf[64];
                         snprintf(ref_id_buf, sizeof(ref_id_buf), "item-%d", item_number);
                         doc->current_ref_id = arena_strdup(arena, ref_id_buf);
-                        
+
                         char ref_text_buf[32];
                         snprintf(ref_text_buf, sizeof(ref_text_buf), "%d", item_number);
                         doc->current_ref_text = arena_strdup(arena, ref_text_buf);
                     }
-                    
+
                     // Check for optional label [...]
                     auto item_iter = child_elem.children();
                     ItemReader item_child;
@@ -352,7 +353,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                         if (item_child.isElement()) {
                             ElementReader ic_elem = item_child.asElement();
                             const char* ic_tag = ic_elem.tagName();
-                            if (ic_tag && (tag_eq(ic_tag, "brack_group") || 
+                            if (ic_tag && (tag_eq(ic_tag, "brack_group") ||
                                           tag_eq(ic_tag, "optional"))) {
                                 current_item->list_item.has_custom_label = true;
                                 // Render label to HTML for styled labels
@@ -364,7 +365,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     }
                     continue;
                 }
-                
+
                 // Nested list - finalize current paragraph, add list directly to item
                 if (tag_eq(child_tag, "itemize") || tag_eq(child_tag, "enumerate") ||
                     tag_eq(child_tag, "description")) {
@@ -385,7 +386,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     }
                     continue;
                 }
-                
+
                 // Handle paragraph container - items may be inside
                 // The AST often wraps list content in a paragraph element
                 if (tag_eq(child_tag, "paragraph") || tag_eq(child_tag, "par")) {
@@ -396,14 +397,14 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                         if (para_child.isElement()) {
                             ElementReader pc_elem = para_child.asElement();
                             const char* pc_tag = pc_elem.tagName();
-                            
+
                             // Check for \centering inside paragraph
                             if (pc_tag && tag_eq(pc_tag, "centering")) {
                                 is_centered = true;
                                 list->flags |= DocElement::FLAG_CENTERED;
                                 continue;
                             }
-                            
+
                             // Check for \item inside paragraph
                             if (pc_tag && (tag_eq(pc_tag, "item") || tag_eq(pc_tag, "item_command"))) {
                                 // Finalize previous item
@@ -413,7 +414,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                         doc_append_child(list, current_item);
                                     }
                                 }
-                                
+
                                 // Create new item
                                 current_item = doc_alloc_element(arena, DocElemType::LIST_ITEM);
                                 current_item->list_item.label = nullptr;
@@ -424,22 +425,22 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                     current_item->flags |= DocElement::FLAG_CENTERED;
                                 }
                                 current_para = nullptr;  // Reset paragraph
-                                
+
                                 if (list_type == ListType::ENUMERATE) {
                                     item_number++;
                                     current_item->list_item.item_number = item_number;
-                                    
+
                                     // Update current referable context for \label commands in this item
                                     // Format: ref_id = "item-N", ref_text = "N"
                                     char ref_id_buf[64];
                                     snprintf(ref_id_buf, sizeof(ref_id_buf), "item-%d", item_number);
                                     doc->current_ref_id = arena_strdup(arena, ref_id_buf);
-                                    
+
                                     char ref_text_buf[32];
                                     snprintf(ref_text_buf, sizeof(ref_text_buf), "%d", item_number);
                                     doc->current_ref_text = arena_strdup(arena, ref_text_buf);
                                 }
-                                
+
                                 // Check for optional label [...]
                                 auto item_iter = pc_elem.children();
                                 ItemReader item_child;
@@ -447,7 +448,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                     if (item_child.isElement()) {
                                         ElementReader ic_elem = item_child.asElement();
                                         const char* ic_tag = ic_elem.tagName();
-                                        if (ic_tag && (tag_eq(ic_tag, "brack_group") || 
+                                        if (ic_tag && (tag_eq(ic_tag, "brack_group") ||
                                                       tag_eq(ic_tag, "optional"))) {
                                             current_item->list_item.has_custom_label = true;
                                             current_item->list_item.html_label = render_brack_group_to_html(item_child, arena, doc);
@@ -457,7 +458,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 }
                                 continue;
                             }
-                            
+
                             // Check for nested list inside paragraph
                             if (pc_tag && (tag_eq(pc_tag, "itemize") || tag_eq(pc_tag, "enumerate") ||
                                           tag_eq(pc_tag, "description"))) {
@@ -478,7 +479,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                                 continue;
                             }
                         }
-                        
+
                         // Other content in paragraph goes to current item's current paragraph
                         if (current_item) {
                             DocElement* content = build_doc_element(para_child, arena, doc);
@@ -499,7 +500,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
                     }
                     continue;
                 }
-                
+
                 // Other element content goes into current item's paragraph
                 if (current_item) {
                     DocElement* content = build_doc_element(child, arena, doc);
@@ -538,7 +539,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
             }
         }
     }
-    
+
     // Finalize last item
     if (current_item) {
         finalize_item_paragraph(current_item, &current_para, arena);
@@ -552,7 +553,7 @@ static void process_list_content(DocElement* list, const ElementReader& elem,
 DocElement* build_list_environment(const char* env_name, const ElementReader& elem,
                                     Arena* arena, TexDocumentModel* doc) {
     DocElement* list = doc_alloc_element(arena, DocElemType::LIST);
-    
+
     // Determine list type
     ListType list_type = ListType::ITEMIZE;
     if (tag_eq(env_name, "enumerate")) {
@@ -560,14 +561,14 @@ DocElement* build_list_environment(const char* env_name, const ElementReader& el
     } else if (tag_eq(env_name, "description")) {
         list_type = ListType::DESCRIPTION;
     }
-    
+
     list->list.list_type = list_type;
     list->list.start_num = 1;
     list->list.nesting_level = 0;
-    
+
     // Process list content
     process_list_content(list, elem, arena, doc, list_type);
-    
+
     return list;
 }
 
@@ -596,7 +597,7 @@ static int count_columns_from_spec(const char* spec) {
     for (const char* p = spec; *p; p++) {
         if (*p == '{') in_brace = true;
         else if (*p == '}') in_brace = false;
-        else if (!in_brace && (*p == 'l' || *p == 'r' || *p == 'c' || 
+        else if (!in_brace && (*p == 'l' || *p == 'r' || *p == 'c' ||
                                *p == 'p' || *p == 'm' || *p == 'b')) {
             count++;
         }
@@ -612,7 +613,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
     table->table.column_spec = nullptr;
     table->table.num_columns = 0;
     table->table.num_rows = 0;
-    
+
     // First pass: find column specification
     auto spec_iter = elem.children();
     ItemReader spec_child;
@@ -627,7 +628,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
             }
         }
     }
-    
+
     // Parse column spec for alignments
     char* col_aligns = nullptr;
     if (table->table.num_columns > 0 && table->table.column_spec) {
@@ -637,32 +638,32 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
         for (const char* p = table->table.column_spec; *p && col_idx < table->table.num_columns; p++) {
             if (*p == '{') in_brace = true;
             else if (*p == '}') in_brace = false;
-            else if (!in_brace && (*p == 'l' || *p == 'r' || *p == 'c' || 
+            else if (!in_brace && (*p == 'l' || *p == 'r' || *p == 'c' ||
                                    *p == 'p' || *p == 'm' || *p == 'b')) {
                 col_aligns[col_idx++] = get_column_alignment(*p);
             }
         }
     }
-    
+
     // Second pass: process rows
     DocElement* current_row = nullptr;
     DocElement* current_cell = nullptr;
     int row_count = 0;
     int col_idx = 0;
-    
+
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
             const char* child_tag = child_elem.tagName();
-            
+
             if (child_tag) {
                 // Skip column spec
                 if (tag_eq(child_tag, "curly_group") || tag_eq(child_tag, "column_spec")) {
                     continue;
                 }
-                
+
                 // Row element
                 if (tag_eq(child_tag, "row") || tag_eq(child_tag, "table_row")) {
                     // Finalize previous row
@@ -670,12 +671,12 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                         doc_append_child(table, current_row);
                         row_count++;
                     }
-                    
+
                     // Create new row
                     current_row = doc_alloc_element(arena, DocElemType::TABLE_ROW);
                     current_cell = nullptr;
                     col_idx = 0;
-                    
+
                     // Process row content
                     auto row_iter = child_elem.children();
                     ItemReader row_child;
@@ -683,17 +684,17 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                         if (row_child.isElement()) {
                             ElementReader rc_elem = row_child.asElement();
                             const char* rc_tag = rc_elem.tagName();
-                            
+
                             if (rc_tag) {
                                 // Cell element
                                 if (tag_eq(rc_tag, "cell") || tag_eq(rc_tag, "table_cell")) {
                                     current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
-                                    
+
                                     current_cell->cell.colspan = 1;
                                     current_cell->cell.rowspan = 1;
-                                    current_cell->cell.alignment = (col_aligns && col_idx < table->table.num_columns) 
+                                    current_cell->cell.alignment = (col_aligns && col_idx < table->table.num_columns)
                                                                 ? col_aligns[col_idx] : 'l';
-                                    
+
                                     // Build cell content
                                     auto cell_iter = rc_elem.children();
                                     ItemReader cell_child;
@@ -703,7 +704,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                                             doc_append_child(current_cell, content);
                                         }
                                     }
-                                    
+
                                     doc_append_child(current_row, current_cell);
                                     col_idx++;
                                 }
@@ -712,7 +713,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                                     if (!current_cell) {
                                         // Create empty cell
                                         current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
-                                        
+
                                         current_cell->cell.colspan = 1;
                                         current_cell->cell.rowspan = 1;
                                         current_cell->cell.alignment = (col_aligns && col_idx < table->table.num_columns)
@@ -726,7 +727,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                                 else {
                                     if (!current_cell) {
                                         current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
-                                        
+
                                         current_cell->cell.colspan = 1;
                                         current_cell->cell.rowspan = 1;
                                         current_cell->cell.alignment = (col_aligns && col_idx < table->table.num_columns)
@@ -743,7 +744,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                             if (text && strlen(text) > 0) {
                                 if (!current_cell) {
                                     current_cell = doc_alloc_element(arena, DocElemType::TABLE_CELL);
-                                    
+
                                     current_cell->cell.colspan = 1;
                                     current_cell->cell.rowspan = 1;
                                     current_cell->cell.alignment = (col_aligns && col_idx < table->table.num_columns)
@@ -756,15 +757,15 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                             }
                         }
                     }
-                    
+
                     // Finalize last cell in row
                     if (current_cell && current_cell->first_child && !current_cell->parent) {
                         doc_append_child(current_row, current_cell);
                     }
-                    
+
                     continue;
                 }
-                
+
                 // Line break (\\) creates new row
                 if (tag_eq(child_tag, "linebreak") || tag_eq(child_tag, "\\\\")) {
                     // Finalize current row
@@ -777,7 +778,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
                     col_idx = 0;
                     continue;
                 }
-                
+
                 // \hline - just skip
                 if (tag_eq(child_tag, "hline") || tag_eq(child_tag, "cline")) {
                     continue;
@@ -785,13 +786,13 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
             }
         }
     }
-    
+
     // Finalize last row
     if (current_row && current_row->first_child) {
         doc_append_child(table, current_row);
         row_count++;
     }
-    
+
     table->table.num_rows = row_count;
     return table;
 }
@@ -804,7 +805,7 @@ DocElement* build_table_environment(const char* env_name, const ElementReader& e
 DocElement* build_blockquote_environment(const ElementReader& elem,
                                           Arena* arena, TexDocumentModel* doc) {
     DocElement* quote = doc_alloc_element(arena, DocElemType::BLOCKQUOTE);
-    
+
     // Process content
     auto iter = elem.children();
     ItemReader child;
@@ -814,7 +815,7 @@ DocElement* build_blockquote_environment(const ElementReader& elem,
             doc_append_child(quote, content);
         }
     }
-    
+
     return quote->first_child ? quote : nullptr;
 }
 
@@ -828,17 +829,17 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
     // Determine element type and alignment
     DocElemType elem_type = DocElemType::ALIGNMENT;
     bool is_quote = false;
-    
+
     if (tag_eq(env_name, "quote") || tag_eq(env_name, "quotation") || tag_eq(env_name, "verse")) {
         elem_type = DocElemType::BLOCKQUOTE;
         is_quote = true;
     }
-    
+
     DocElement* container = doc_alloc_element(arena, elem_type);
-    
+
     // Store environment name for proper HTML class output
     container->alignment.env_name = env_name;
-    
+
     // Set alignment for paragraph-based environments using flags
     if (!is_quote) {
         if (tag_eq(env_name, "center")) {
@@ -849,14 +850,14 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
             container->flags |= DocElement::FLAG_FLUSH_LEFT;
         }
     }
-    
+
     // Process content with proper paragraph grouping
     // Helper lambda to process items and add to current paragraph
     DocElement* current_para = nullptr;
-    
+
     // Verse environment preserves leading whitespace after linebreaks
     bool preserve_ws = tag_eq(env_name, "verse");
-    
+
     // Helper to finalize and emit current paragraph
     auto finalize_para = [&]() {
         if (current_para && current_para->first_child) {
@@ -865,14 +866,14 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
         }
         current_para = nullptr;
     };
-    
+
     auto process_item = [&](const ItemReader& item) {
         // Check for parbreak symbol
         if (is_parbreak_item(item)) {
             finalize_para();
             return;
         }
-        
+
         // Check for linebreak command
         if (is_linebreak_item(item)) {
             // Line break within paragraph
@@ -884,7 +885,7 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
             doc_append_child(current_para, br);
             return;
         }
-        
+
         // Check for block-level elements in AST (lists, nested environments)
         if (item.isElement()) {
             ElementReader elem = item.asElement();
@@ -900,7 +901,7 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
                 return;
             }
         }
-        
+
         DocElement* content = build_doc_element(item, arena, doc);
         if (content == PARBREAK_MARKER) {
             finalize_para();
@@ -920,7 +921,7 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
             doc_append_child(current_para, content);
         }
     };
-    
+
     auto iter = elem.children();
     ItemReader child;
     while (iter.next(&child)) {
@@ -941,10 +942,10 @@ DocElement* build_alignment_environment(const char* env_name, const ElementReade
         // Process non-paragraph children directly
         process_item(child);
     }
-    
+
     // Finalize last paragraph
     finalize_para();
-    
+
     return container;
 }
 
@@ -961,7 +962,7 @@ static void collect_text_recursive(const ItemReader& item, StrBuf* out) {
         }
         return;
     }
-    
+
     if (item.isElement()) {
         ElementReader elem = item.asElement();
         auto iter = elem.children();
@@ -981,7 +982,7 @@ DocElement* build_code_block_environment(const char* env_name, const ElementRead
     code->text.text = nullptr;
     code->text.text_len = 0;
     code->text.style = DocTextStyle::plain();
-    
+
     // Collect all text content
     StrBuf* text_buf = strbuf_new_cap(1024);
     auto iter = elem.children();
@@ -997,7 +998,7 @@ DocElement* build_code_block_environment(const char* env_name, const ElementRead
         }
         collect_text_recursive(child, text_buf);
     }
-    
+
     // Copy to arena
     if (text_buf->length > 0) {
         char* code_text = (char*)arena_alloc(arena, text_buf->length + 1);
@@ -1005,9 +1006,9 @@ DocElement* build_code_block_environment(const char* env_name, const ElementRead
         code->text.text = code_text;
         code->text.text_len = text_buf->length;
     }
-    
+
     strbuf_free(text_buf);
-    
+
     return code;
 }
 

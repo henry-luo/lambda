@@ -9,6 +9,7 @@
 #include "../../../lib/string.h"
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
+#include "../../../lib/str.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/memtrack.h"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
@@ -152,7 +153,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     if (!tag_copy) {
         return false;
     }
-    strcpy(tag_copy, tag_name);
+    str_copy(tag_copy, tag_len + 1, tag_name, tag_len);
     element->tag_name = tag_copy;
 
     // Convert tag name to Lexbor tag ID for fast comparison
@@ -195,7 +196,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
                 // Parse classes - make a copy for strtok
                 char* class_copy = (char*)arena_alloc(doc->arena, strlen(class_str) + 1);
                 if (class_copy) {
-                    strcpy(class_copy, class_str);
+                    str_copy(class_copy, strlen(class_str) + 1, class_str, strlen(class_str));
 
                     int index = 0;
                     char* token = strtok(class_copy, " \t\n\r");
@@ -204,7 +205,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
                         size_t token_len = strlen(token);
                         char* class_perm = (char*)arena_alloc(doc->arena, token_len + 1);
                         if (class_perm) {
-                            strcpy(class_perm, token);
+                            str_copy(class_perm, token_len + 1, token, token_len);
                             element->class_names[index++] = class_perm;
                         }
                         token = strtok(NULL, " \t\n\r");
@@ -300,7 +301,7 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                 if (value && strlen(value) > 0) {
                     char* class_copy = (char*)arena_alloc(element->doc->arena, strlen(value) + 1);
                     if (class_copy) {
-                        strcpy(class_copy, value);
+                        str_copy(class_copy, strlen(value) + 1, value, strlen(value));
 
                         // Split by spaces and add each class
                         char* token = strtok(class_copy, " \t\n\r");
@@ -472,7 +473,7 @@ bool dom_element_add_class(DomElement* element, const char* class_name) {
     if (!class_copy) {
         return false;
     }
-    strcpy(class_copy, class_name);
+    str_copy(class_copy, class_len + 1, class_name, class_len);
 
     new_classes[element->class_count] = class_copy;
     element->class_names = new_classes;
@@ -552,7 +553,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
     if (!text_copy) {
         return 0;
     }
-    strcpy(text_copy, style_text);
+    str_copy(text_copy, strlen(style_text) + 1, style_text, strlen(style_text));
 
     char* saveptr = NULL;
     char* declaration_str = strtok_r(text_copy, ";", &saveptr);
@@ -2352,7 +2353,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         // parse multiple classes separated by spaces
         char* class_copy = (char*)arena_alloc(doc->arena, strlen(class_value) + 1);
         if (class_copy) {
-            strcpy(class_copy, class_value);
+            str_copy(class_copy, strlen(class_value) + 1, class_value, strlen(class_value));
 
             // split by spaces and add each class
             char* token = strtok(class_copy, " \t\n");

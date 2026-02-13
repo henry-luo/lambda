@@ -1,6 +1,7 @@
 #include "selector_matcher.hpp"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/arraylist.h"
+#include "../../../lib/str.h"
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -1283,7 +1284,7 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
         // Check for +b or -b
         while (*p && isspace(*p)) p++;
         if (*p == '+' || *p == '-') {
-            formula->b = atoi(p);
+            formula->b = (int)str_to_int64_default(p, strlen(p), 0);
         }
         return true;
     }
@@ -1296,7 +1297,7 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
         formula->a = 1;
         p++;
     } else if (isdigit(*p)) {
-        formula->a = atoi(p);
+        formula->a = (int)str_to_int64_default(p, strlen(p), 0);
         while (*p && isdigit(*p)) p++;
     } else {
         formula->a = 1;
@@ -1314,7 +1315,7 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
 
         // Parse constant 'b'
         if (*p == '+' || *p == '-') {
-            formula->b = atoi(p);
+            formula->b = (int)str_to_int64_default(p, strlen(p), 0);
         }
     } else {
         // No 'n', so this is just a number (0n+b)
