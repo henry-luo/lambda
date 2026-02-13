@@ -13,8 +13,10 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 
 // Forward declarations for pattern building
-AstNode* build_pattern_expr(Transpiler* tp, TSNode node);
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
+AstNode* build_pattern_char_class(Transpiler* tp, TSNode node);
+AstNode* build_pattern_seq(Transpiler* tp, TSNode node);
+AstNode* build_type_negation(Transpiler* tp, TSNode node);
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
 AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 
@@ -3409,6 +3411,16 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
             return build_func_type(tp, child);
         case SYM_RANGE_TYPE:
             return build_range_type(tp, child);
+        case SYM_PATTERN_CHAR_CLASS:
+            return build_pattern_char_class(tp, child);
+        case SYM_PATTERN_ANY: {
+            // Build a char class node for '\.'
+            AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
+                alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
+            ast_node->char_class = PATTERN_ANY;
+            ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+            return (AstNode*)ast_node;
+        }
         case SYM_COMMENT:
             break; // skip comments
         default: // literal values
@@ -5042,6 +5054,21 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_range_type(tp, expr_node);
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
+    case SYM_PATTERN_SEQ:
+        return build_pattern_seq(tp, expr_node);
+    case SYM_PATTERN_GROUP:
+        return build_list_type(tp, expr_node);
+    case SYM_TYPE_NEGATION:
+        return build_type_negation(tp, expr_node);
+    case SYM_PATTERN_CHAR_CLASS:
+        return build_pattern_char_class(tp, expr_node);
+    case SYM_PATTERN_ANY: {
+        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
+            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, expr_node, sizeof(AstPatternCharClassNode));
+        ast_node->char_class = PATTERN_ANY;
+        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
+        return (AstNode*)ast_node;
+    }
     case SYM_RETURN_TYPE:
         return build_return_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
@@ -5195,112 +5222,41 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
     return (AstNode*)ast_node;
 }
 
-// Build pattern range node ("a" to "z")
-AstNode* build_pattern_range(Transpiler* tp, TSNode node) {
-    log_debug("build pattern range");
-    AstPatternRangeNode* ast_node = (AstPatternRangeNode*)
-        alloc_ast_node(tp, AST_NODE_PATTERN_RANGE, node, sizeof(AstPatternRangeNode));
+// Build pattern_seq node — concatenation of pattern terms (for string/symbol patterns)
+// e.g. \d[3] "-" \d[3] "-" \d[4]
+AstNode* build_pattern_seq(Transpiler* tp, TSNode node) {
+    log_debug("build pattern_seq (pattern concatenation)");
+    AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
+        alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
+    seq_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
 
-    TSNode left_node = ts_node_child_by_field_id(node, FIELD_LEFT);
-    TSNode right_node = ts_node_child_by_field_id(node, FIELD_RIGHT);
+    uint32_t child_count = ts_node_named_child_count(node);
+    log_debug("build_pattern_seq: %d children", child_count);
 
-    ast_node->start = build_lit_node(tp, left_node, true, SYM_STRING);
-    ast_node->end = build_lit_node(tp, right_node, true, SYM_STRING);
-
-    // Type is pattern
-    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-    return (AstNode*)ast_node;
-}
-
-// Build primary pattern expression
-AstNode* build_primary_pattern(Transpiler* tp, TSNode node) {
-    log_debug("build primary pattern");
-    uint32_t child_count = ts_node_child_count(node);
-
-    // Check for parenthesized expression: ( _pattern_expr )
-    if (child_count == 3) {
-        TSNode first = ts_node_child(node, 0);
-        StrView first_src = ts_node_source(tp, first);
-        if (first_src.length == 1 && first_src.str[0] == '(') {
-            return build_pattern_expr(tp, ts_node_child(node, 1));
+    AstNode* prev = nullptr;
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        AstNode* child_node = build_expr(tp, child);
+        if (child_node) {
+            if (prev) {
+                prev->next = child_node;
+            } else {
+                seq_node->first = child_node;
+            }
+            prev = child_node;
         }
     }
-
-    // Single child - delegate to appropriate builder
-    TSNode child = ts_node_child(node, 0);
-    TSSymbol symbol = ts_node_symbol(child);
-
-    if (symbol == SYM_STRING) {
-        return build_lit_node(tp, child, true, SYM_STRING);
-    } else if (symbol == SYM_PATTERN_CHAR_CLASS) {
-        return build_pattern_char_class(tp, child);
-    } else if (symbol == SYM_PATTERN_ANY) {
-        // Build a char class node for '\.'
-        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
-        ast_node->char_class = PATTERN_ANY;
-        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
-    } else if (symbol == SYM_PATTERN_ANY_STAR) {
-        // Build a unary node for '...' (equivalent to \.*)
-        AstUnaryNode* ast_node = (AstUnaryNode*)
-            alloc_ast_node(tp, AST_NODE_UNARY, child, sizeof(AstUnaryNode));
-        // Create the operand (PATTERN_ANY)
-        AstPatternCharClassNode* any_node = (AstPatternCharClassNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, child, sizeof(AstPatternCharClassNode));
-        any_node->char_class = PATTERN_ANY;
-        any_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        ast_node->operand = (AstNode*)any_node;
-        ast_node->op = OPERATOR_ZERO_MORE;
-        ast_node->op_str = {.str = "*", .length = 1};
-        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
-    }
-
-    log_error("build_primary_pattern: unknown child symbol %d", symbol);
-    return nullptr;
+    return (AstNode*)seq_node;
 }
 
-// Build pattern occurrence (pattern with ?, +, *, [n], [n+], [n, m])
-AstNode* build_pattern_occurrence(Transpiler* tp, TSNode node) {
-    log_debug("build pattern occurrence");
+// Build type_negation node — prefix ! operator (for string/symbol patterns)
+// e.g. !\d
+AstNode* build_type_negation(Transpiler* tp, TSNode node) {
+    log_debug("build type_negation (pattern negation)");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
 
     TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
-    TSNode operator_node = ts_node_child_by_field_id(node, FIELD_OPERATOR);
-    TSSymbol op_symbol = ts_node_symbol(operator_node);
-
-    ast_node->operand = build_pattern_expr(tp, operand_node);
-    ast_node->op_str = ts_node_source(tp, operator_node);
-
-    // Determine operator from string or symbol
-    if (op_symbol == SYM_PATTERN_COUNT) {
-        // [n], [n+], [n, m] - treat as OPERATOR_REPEAT
-        ast_node->op = OPERATOR_REPEAT;
-        log_debug("pattern count: %.*s", (int)ast_node->op_str.length, ast_node->op_str.str);
-    } else if (ast_node->op_str.length == 1) {
-        switch (ast_node->op_str.str[0]) {
-        case '?': ast_node->op = OPERATOR_OPTIONAL; break;
-        case '+': ast_node->op = OPERATOR_ONE_MORE; break;
-        case '*': ast_node->op = OPERATOR_ZERO_MORE; break;
-        default: ast_node->op = OPERATOR_REPEAT; break;
-        }
-    } else {
-        // Fallback to OPERATOR_REPEAT for any other format
-        ast_node->op = OPERATOR_REPEAT;
-    }
-
-    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-    return (AstNode*)ast_node;
-}
-
-// Build pattern negation (!pattern)
-AstNode* build_pattern_negation(Transpiler* tp, TSNode node) {
-    log_debug("build pattern negation");
-    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
-
-    TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
-    ast_node->operand = build_pattern_expr(tp, operand_node);
+    ast_node->operand = build_expr(tp, operand_node);
     ast_node->op = OPERATOR_NOT;
     ast_node->op_str = {.str = "!", .length = 1};
 
@@ -5308,123 +5264,8 @@ AstNode* build_pattern_negation(Transpiler* tp, TSNode node) {
     return (AstNode*)ast_node;
 }
 
-// Build binary pattern expression (| or &)
-AstNode* build_binary_pattern(Transpiler* tp, TSNode node) {
-    log_debug("build binary pattern");
-    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, node, sizeof(AstBinaryNode));
-
-    TSNode left_node = ts_node_child_by_field_id(node, FIELD_LEFT);
-    TSNode op_node = ts_node_child_by_field_id(node, FIELD_OPERATOR);
-    TSNode right_node = ts_node_child_by_field_id(node, FIELD_RIGHT);
-
-    ast_node->left = build_pattern_expr(tp, left_node);
-    ast_node->right = build_pattern_expr(tp, right_node);
-    ast_node->op_str = ts_node_source(tp, op_node);
-
-    // Determine operator
-    if (ast_node->op_str.length == 1) {
-        switch (ast_node->op_str.str[0]) {
-        case '|': ast_node->op = OPERATOR_UNION; break;
-        case '&': ast_node->op = OPERATOR_INTERSECT; break;
-        default: ast_node->op = OPERATOR_UNION; break;
-        }
-    }
-
-    ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-    return (AstNode*)ast_node;
-}
-
-// Main pattern expression builder - dispatches to specific builders
-AstNode* build_pattern_expr(Transpiler* tp, TSNode node) {
-    TSSymbol symbol = ts_node_symbol(node);
-    log_debug("build_pattern_expr: symbol=%d (%s)", symbol, ts_node_type(node));
-
-    if (symbol == SYM_STRING) {
-        return build_lit_node(tp, node, true, SYM_STRING);
-    }
-    else if (symbol == SYM_PATTERN_CHAR_CLASS) {
-        return build_pattern_char_class(tp, node);
-    }
-    else if (symbol == SYM_PATTERN_ANY) {
-        AstPatternCharClassNode* ast_node = (AstPatternCharClassNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
-        ast_node->char_class = PATTERN_ANY;
-        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_PATTERN_ANY_STAR) {
-        // Build a unary node for '...' (equivalent to \.*)
-        AstUnaryNode* ast_node = (AstUnaryNode*)
-            alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
-        AstPatternCharClassNode* any_node = (AstPatternCharClassNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_CHAR_CLASS, node, sizeof(AstPatternCharClassNode));
-        any_node->char_class = PATTERN_ANY;
-        any_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        ast_node->operand = (AstNode*)any_node;
-        ast_node->op = OPERATOR_ZERO_MORE;
-        ast_node->op_str = {.str = "*", .length = 1};
-        ast_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_PATTERN_RANGE) {
-        return build_pattern_range(tp, node);
-    }
-    else if (symbol == SYM_PATTERN_OCCURRENCE) {
-        return build_pattern_occurrence(tp, node);
-    }
-    else if (symbol == SYM_PATTERN_NEGATION) {
-        return build_pattern_negation(tp, node);
-    }
-    else if (symbol == SYM_BINARY_PATTERN) {
-        return build_binary_pattern(tp, node);
-    }
-    else if (symbol == SYM_PRIMARY_PATTERN) {
-        return build_primary_pattern(tp, node);
-    }
-    else if (symbol == SYM_PATTERN_SEQ) {
-        // Pattern sequence - concatenation of multiple patterns
-        AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
-            alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
-        seq_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
-
-        uint32_t child_count = ts_node_named_child_count(node);
-        log_debug("build_pattern_seq: %d children", child_count);
-
-        AstNode* prev = nullptr;
-        for (uint32_t i = 0; i < child_count; i++) {
-            TSNode child = ts_node_named_child(node, i);
-            AstNode* child_node = build_pattern_expr(tp, child);
-            if (child_node) {
-                if (prev) {
-                    prev->next = child_node;
-                } else {
-                    seq_node->first = child_node;
-                }
-                prev = child_node;
-            }
-        }
-        return (AstNode*)seq_node;
-    }
-    else if (symbol == SYM_IDENT) {
-        // Pattern reference by identifier
-        return build_identifier(tp, node);
-    }
-
-    // Handle parenthesized expressions
-    uint32_t child_count = ts_node_child_count(node);
-    if (child_count == 3) {
-        TSNode first = ts_node_child(node, 0);
-        StrView first_src = ts_node_source(tp, first);
-        if (first_src.length == 1 && first_src.str[0] == '(') {
-            return build_pattern_expr(tp, ts_node_child(node, 1));
-        }
-    }
-
-    log_error("build_pattern_expr: unknown node symbol %d (%s)", symbol, ts_node_type(node));
-    return nullptr;
-}
-
 // Build string/symbol pattern definition
+// Pattern body now uses _type_expr (unified grammar), built via build_expr()
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     log_debug("build %s pattern definition", is_symbol ? "symbol" : "string");
 
@@ -5439,9 +5280,9 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
-    // Get pattern expression
+    // Get pattern expression — now uses unified _type_expr, built via build_expr()
     TSNode pattern_node = ts_node_child_by_field_id(node, FIELD_PATTERN);
-    ast_node->as = build_pattern_expr(tp, pattern_node);
+    ast_node->as = build_expr(tp, pattern_node);
 
     // Type is pattern type
     TypePattern* pattern_type = (TypePattern*)alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
