@@ -3166,6 +3166,18 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
 
 AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     log_debug("build list type");
+    
+    // Count children first to check for single-element case
+    uint32_t child_count = ts_node_named_child_count(list_node);
+    
+    // If single element, unwrap it - this makes (expr) just return expr
+    // This is important for pattern context where ("a" to "z") should be a range_type
+    if (child_count == 1) {
+        TSNode child = ts_node_named_child(list_node, 0);
+        return build_expr(tp, child);
+    }
+    
+    // Multi-element list type
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     ast_node->type = node_type;
@@ -3191,7 +3203,6 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
 
     arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
-    // todo: if (!ast_node->declare && type->length == 1) { return ast_node->item; }
     return (AstNode*)ast_node;
 }
 
@@ -5138,14 +5149,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
     case SYM_TYPE_SEQ:
-    case SYM_TYPE_SEQ_MULTILINE:  // same handling as type_seq
         return build_type_seq(tp, expr_node);
-    case SYM_PATTERN_GROUP: {
-        // Pattern group is just parentheses around a pattern expression
-        // Unwrap and build the inner expression
-        TSNode inner = ts_node_named_child(expr_node, 0);
-        return build_expr(tp, inner);
-    }
+    // Note: SYM_PATTERN_GROUP removed - use list_type for grouping in patterns
     case SYM_TYPE_NEGATION:
         return build_type_negation(tp, expr_node);
     case SYM_PATTERN_CHAR_CLASS:
