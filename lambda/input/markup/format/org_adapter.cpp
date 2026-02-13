@@ -11,6 +11,7 @@
 #include "../format_adapter.hpp"
 #include <cstring>
 #include <cctype>
+#include "../../../../lib/str.h"
 
 namespace lambda {
 namespace markup {
@@ -120,7 +121,7 @@ public:
             while (isdigit((unsigned char)*p)) p++;
             if ((*p == '.' || *p == ')') && *(p+1) == ' ') {
                 info.marker = *p;
-                info.number = atoi(num_start);
+                info.number = (int)str_to_int64_or(num_start, strlen(num_start), 0);
                 info.is_ordered = true;
                 info.marker_end = p + 1;
                 info.text_start = p + 2;

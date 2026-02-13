@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <assert.h>
+#include "../../../lib/str.h"
 
 // Forward declarations for validator functions
 static bool validate_length(const char* value_str, void** parsed_value, Pool* pool);
@@ -749,7 +750,7 @@ void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool) {
     // this would parse the initial value into the appropriate type.
     size_t len = strlen(prop->initial_value);
     char* value = (char*)pool_calloc(pool, len + 1);
-    strcpy(value, prop->initial_value);
+    str_copy(value, len + 1, prop->initial_value, len);
     return value;
 }
 
@@ -1022,7 +1023,7 @@ static bool validate_url(const char* value_str, void** parsed_value, Pool* pool)
 
     size_t len = strlen(value_str);
     char* url = (char*)pool_calloc(pool, len + 1);
-    strcpy(url, value_str);
+    str_copy(url, len + 1, value_str, len);
     *parsed_value = url;
     return true;
 }
@@ -1032,7 +1033,7 @@ static bool validate_string(const char* value_str, void** parsed_value, Pool* po
 
     size_t len = strlen(value_str);
     char* string = (char*)pool_calloc(pool, len + 1);
-    strcpy(string, value_str);
+    str_copy(string, len + 1, value_str, len);
     *parsed_value = string;
     return true;
 }

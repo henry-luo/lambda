@@ -1,7 +1,7 @@
 /**
  * @file cmd_webdriver.cpp
  * @brief CLI command handler for WebDriver server
- * 
+ *
  * Implements the `lambda webdriver` command to start a W3C WebDriver server
  * for automated testing of Radiant HTML/CSS rendering.
  */
@@ -71,7 +71,7 @@ static void print_help(const char* prog_name) {
 int cmd_webdriver(int argc, char** argv) {
     int port = 4444;
     const char* host = "localhost";
-    
+
     // Parse arguments
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -79,7 +79,8 @@ int cmd_webdriver(int argc, char** argv) {
             return 0;
         } else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) {
             if (i + 1 < argc) {
-                port = atoi(argv[++i]);
+                i++;
+                port = (int)str_to_int64_or(argv[i], strlen(argv[i]), 0);
                 if (port <= 0 || port > 65535) {
                     printf("Error: Invalid port number '%s'\n", argv[i]);
                     return 1;
@@ -101,28 +102,28 @@ int cmd_webdriver(int argc, char** argv) {
             return 1;
         }
     }
-    
+
     // Set up signal handlers for graceful shutdown
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
-    
+
     // Create and start server
     g_server = webdriver_server_create(host, port);
     if (!g_server) {
         printf("Error: Failed to create WebDriver server\n");
         return 1;
     }
-    
+
     printf("Lambda WebDriver Server v1.0\n");
     printf("Listening on http://%s:%d\n", host, port);
     printf("Press Ctrl+C to stop\n\n");
-    
+
     // Run server (blocks until stopped)
     int result = webdriver_server_run(g_server);
-    
+
     // Cleanup
     webdriver_server_destroy(g_server);
     g_server = nullptr;
-    
+
     return result;
 }
