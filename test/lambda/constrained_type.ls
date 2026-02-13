@@ -1,7 +1,7 @@
 // Test constrained types with where clause
 
 // Basic integer range constraint
-type between5and10 = int where (5 < ~ < 10)
+type between5and10 = int that (5 < ~ < 10)
 (6 is between5and10)     // expected: true
 (7 is between5and10)     // expected: true
 (9 is between5and10)     // expected: true
@@ -11,14 +11,14 @@ type between5and10 = int where (5 < ~ < 10)
 (15 is between5and10)    // expected: false
 
 // Positive integer constraint
-type positive = int where (~ > 0)
+type positive = int that (~ > 0)
 (1 is positive)          // expected: true
 (100 is positive)        // expected: true
 (0 is positive)          // expected: false
 (-1 is positive)         // expected: false
 
 // Constraint with <= and >=
-type between1and10 = int where (~ >= 1 and ~ <= 10)
+type between1and10 = int that (~ >= 1 and ~ <= 10)
 (1 is between1and10)     // expected: true
 (5 is between1and10)     // expected: true
 (10 is between1and10)    // expected: true
@@ -37,8 +37,8 @@ type between1and10 = int where (~ >= 1 and ~ <= 10)
 
 // Constrained types in match case expressions
 fn classify(x) => match x {
-  case int where (~ > 0): "positive"
-  case int where (~ < 0): "negative"
+  case int that (~ > 0): "positive"
+  case int that (~ < 0): "negative"
   case 0: "zero"
   default: "other"
 }
@@ -50,11 +50,11 @@ classify("hi")   // expected: "other"
 
 // Match with range constraints
 fn grade(score) => match score {
-  case int where (90 <= ~ <= 100): "A"
-  case int where (80 <= ~ < 90): "B"
-  case int where (70 <= ~ < 80): "C"
-  case int where (60 <= ~ < 70): "D"
-  case int where (0 <= ~ < 60): "F"
+  case int that (90 <= ~ <= 100): "A"
+  case int that (80 <= ~ < 90): "B"
+  case int that (70 <= ~ < 80): "C"
+  case int that (60 <= ~ < 70): "D"
+  case int that (0 <= ~ < 60): "F"
   default: "invalid"
 }
 
