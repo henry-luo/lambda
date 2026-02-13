@@ -96,6 +96,10 @@
         {
           "type": "type_occurrence",
           "named": true
+        },
+        {
+          "type": "type_seq",
+          "named": true
         }
       ]
     }
@@ -169,6 +173,10 @@
             "named": true
           },
           {
+            "type": "type_seq",
+            "named": true
+          },
+          {
             "type": "unary_expr",
             "named": true
           }
@@ -234,6 +242,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -352,6 +364,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           },
           {
@@ -670,6 +686,10 @@
           {
             "type": "type_occurrence",
             "named": true
+          },
+          {
+            "type": "type_seq",
+            "named": true
           }
         ]
       },
@@ -717,6 +737,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -1032,6 +1056,10 @@
         {
           "type": "type_occurrence",
           "named": true
+        },
+        {
+          "type": "type_seq",
+          "named": true
         }
       ]
     }
@@ -1203,6 +1231,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -1418,6 +1450,10 @@
           {
             "type": "type_occurrence",
             "named": true
+          },
+          {
+            "type": "type_seq",
+            "named": true
           }
         ]
       }
@@ -1533,6 +1569,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -2729,6 +2769,10 @@
           {
             "type": "type_occurrence",
             "named": true
+          },
+          {
+            "type": "type_seq",
+            "named": true
           }
         ]
       },
@@ -2825,6 +2869,10 @@
           {
             "type": "type_occurrence",
             "named": true
+          },
+          {
+            "type": "type_seq",
+            "named": true
           }
         ]
       }
@@ -2870,6 +2918,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -3427,6 +3479,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
@@ -4088,6 +4144,10 @@
           {
             "type": "type_occurrence",
             "named": true
+          },
+          {
+            "type": "type_seq",
+            "named": true
           }
         ]
       }
@@ -4352,6 +4412,10 @@
           },
           {
             "type": "type_occurrence",
+            "named": true
+          },
+          {
+            "type": "type_seq",
             "named": true
           }
         ]
