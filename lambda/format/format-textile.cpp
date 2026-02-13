@@ -1,6 +1,6 @@
 /**
  * Textile formatter - converts Lambda document tree to Textile markup
- * 
+ *
  * Textile syntax reference:
  * - Headings: h1. h2. h3. etc.
  * - Bold: *text*
@@ -23,6 +23,7 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/str.h"
 #include "../../lib/log.h"
 #include <string.h>
 #include <ctype.h>
@@ -185,7 +186,7 @@ static void format_heading_reader(TextileContext& ctx, const ElementReader& elem
     if (level_attr.isString()) {
         String* level_str = level_attr.asString();
         if (level_str && level_str->len > 0) {
-            level = atoi(level_str->chars);
+            level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
             if (level < 1) level = 1;
             if (level > 6) level = 6;
         }
@@ -489,7 +490,7 @@ static void format_element_reader(TextileContext& ctx, const ElementReader& elem
     else if (strcmp(tag_name, "table") == 0) {
         format_table_reader(ctx, elem);
     }
-    else if (strcmp(tag_name, "tr") == 0 || strcmp(tag_name, "td") == 0 || 
+    else if (strcmp(tag_name, "tr") == 0 || strcmp(tag_name, "td") == 0 ||
              strcmp(tag_name, "th") == 0 || strcmp(tag_name, "thead") == 0 ||
              strcmp(tag_name, "tbody") == 0) {
         // Table elements are handled by their parent table
@@ -609,19 +610,19 @@ static void format_map_as_element_reader(TextileContext& ctx, const MapReader& m
         int level = tag_name[1] - '0';
         if (level < 1) level = 1;
         if (level > 6) level = 6;
-        
+
         // Check for "level" attribute
         ItemReader level_attr = mp.get("level");
         if (level_attr.isString()) {
             String* level_str = level_attr.asString();
             if (level_str && level_str->len > 0) {
-                int attr_level = atoi(level_str->chars);
+                int attr_level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
                 if (attr_level >= 1 && attr_level <= 6) {
                     level = attr_level;
                 }
             }
         }
-        
+
         ctx.write_heading_prefix(level);
         ItemReader children = mp.get("_");
         if (children.isArray()) {
@@ -697,7 +698,7 @@ static void format_map_as_element_reader(TextileContext& ctx, const MapReader& m
     // Links
     else if (strcmp(tag_name, "a") == 0) {
         ItemReader href = mp.get("href");
-        
+
         ctx.write_link_start();
         ItemReader children = mp.get("_");
         if (children.isArray()) {
@@ -709,7 +710,7 @@ static void format_map_as_element_reader(TextileContext& ctx, const MapReader& m
             }
         }
         ctx.write_link_middle(nullptr);
-        
+
         if (href.isString()) {
             String* href_str = href.asString();
             if (href_str && href_str->len > 0) {
@@ -721,10 +722,10 @@ static void format_map_as_element_reader(TextileContext& ctx, const MapReader& m
     else if (strcmp(tag_name, "img") == 0) {
         ItemReader src = mp.get("src");
         ItemReader alt = mp.get("alt");
-        
+
         const char* src_str = nullptr;
         const char* alt_str = nullptr;
-        
+
         if (src.isString()) {
             String* s = src.asString();
             if (s && s->len > 0) {
@@ -737,7 +738,7 @@ static void format_map_as_element_reader(TextileContext& ctx, const MapReader& m
                 alt_str = a->chars;
             }
         }
-        
+
         if (src_str) {
             ctx.write_image(src_str, alt_str);
         }

@@ -3,6 +3,7 @@
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "../../lib/str.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -26,18 +27,18 @@ static void format_text(WikiContext& ctx, String* str) {
 // Main Wiki formatting function (StrBuf version)
 void format_wiki(StringBuf* sb, Item root_item) {
     if (!sb) return;
-    
+
     // handle null/empty root item
     if (root_item.item == ITEM_NULL) return;
-    
+
     // create context
     Pool* pool = pool_create();
     WikiContext ctx(pool, sb);
-    
+
     // use MarkReader API
     ItemReader root(root_item.to_const());
     format_item_reader(ctx, root);
-    
+
     pool_destroy(pool);
 }
 
@@ -80,13 +81,13 @@ static void format_element_children_raw_reader(WikiContext& ctx, const ElementRe
 static void format_heading_reader(WikiContext& ctx, const ElementReader& elem) {
     const char* tag_name = elem.tagName();
     int level = 1;
-    
+
     // try to get level from attribute (Pandoc schema)
     ItemReader level_attr = elem.get_attr("level");
     if (level_attr.isString()) {
         String* level_str = level_attr.asString();
         if (level_str && level_str->len > 0) {
-            level = atoi(level_str->chars);
+            level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
             if (level < 1) level = 1;
             if (level > 6) level = 6;
         }
@@ -96,7 +97,7 @@ static void format_heading_reader(WikiContext& ctx, const ElementReader& elem) {
         if (level < 1) level = 1;
         if (level > 6) level = 6;
     }
-    
+
     // Wiki heading format: = Level 1 =, == Level 2 ==, etc.
     ctx.write_heading_prefix(level);
     format_element_children_reader(ctx, elem);
@@ -108,7 +109,7 @@ static void format_heading_reader(WikiContext& ctx, const ElementReader& elem) {
 static void format_link_reader(WikiContext& ctx, const ElementReader& elem) {
     ItemReader href = elem.get_attr("href");
     ItemReader title = elem.get_attr("title");
-    
+
     if (href.isString()) {
         String* href_str = href.asString();
         if (href_str && href_str->len > 0) {
@@ -116,7 +117,7 @@ static void format_link_reader(WikiContext& ctx, const ElementReader& elem) {
             ctx.write_char('[');
             ctx.write_text(href_str);
             ctx.write_char(' ');
-            
+
             // use title if available, otherwise use link content
             if (title.isString()) {
                 String* title_str = title.asString();
@@ -132,7 +133,7 @@ static void format_link_reader(WikiContext& ctx, const ElementReader& elem) {
             return;
         }
     }
-    
+
     // internal wiki link format: [[Page Name]]
     ctx.write_text("[[");
     format_element_children_reader(ctx, elem);
@@ -157,7 +158,7 @@ static void format_unordered_list_reader(WikiContext& ctx, const ElementReader& 
             format_list_item_reader(ctx, child_elem, depth + 1, false);
         }
     }
-    
+
     if (depth == 0) ctx.write_char('\n');
 }
 
@@ -171,7 +172,7 @@ static void format_ordered_list_reader(WikiContext& ctx, const ElementReader& el
             format_list_item_reader(ctx, child_elem, depth + 1, true);
         }
     }
-    
+
     if (depth == 0) ctx.write_char('\n');
 }
 
@@ -191,7 +192,7 @@ static void format_wiki_table_row(
 ) {
     WikiTableContext* context = (WikiTableContext*)ctx;
     WikiContext* fmt_ctx = context->formatter_ctx;
-    
+
     // start table on first row
     if (!context->table_started) {
         stringbuf_append_str(sb, "{| class=\"wikitable\"");
@@ -201,23 +202,23 @@ static void format_wiki_table_row(
         stringbuf_append_str(sb, "\n");
         context->table_started = true;
     }
-    
+
     // start row
     stringbuf_append_str(sb, "|-\n");
-    
+
     // format cells
     auto it = row.children();
     ItemReader cell_item;
     while (it.next(&cell_item)) {
         if (cell_item.isElement()) {
             ElementReader cell = cell_item.asElement();
-            
+
             if (is_header) {
                 stringbuf_append_str(sb, "! ");
             } else {
                 stringbuf_append_str(sb, "| ");
             }
-            
+
             format_element_children_reader(*fmt_ctx, cell);
             stringbuf_append_char(sb, '\n');
         }
@@ -228,7 +229,7 @@ static void format_wiki_table_row(
 static void format_table_reader(WikiContext& ctx, const ElementReader& elem) {
     WikiTableContext context = {false, &ctx};
     iterate_table_rows(elem, ctx.output(), format_wiki_table_row, &context);
-    
+
     // close table if it was started
     if (context.table_started) {
         ctx.write_text("|}\n\n");
@@ -243,13 +244,13 @@ static void format_element_reader(WikiContext& ctx, const ElementReader& elem) {
         printf("WARNING: Maximum recursion depth reached in Wiki formatter\n");
         return;
     }
-    
+
     const char* tag_name = elem.tagName();
     if (!tag_name) {
         format_element_children_reader(ctx, elem);
         return;
     }
-    
+
     // handle different element types
     if (strncmp(tag_name, "h", 1) == 0 && strlen(tag_name) == 2 && isdigit(tag_name[1])) {
         format_heading_reader(ctx, elem);

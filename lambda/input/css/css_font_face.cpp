@@ -7,6 +7,7 @@
 #include "css_font_face.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/str.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -345,7 +346,7 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     }
 
     // Append remaining path
-    strcpy(write_pos, rel);
+    str_copy(write_pos, result + result_size - write_pos, rel, strlen(rel));
 
     return result;
 }

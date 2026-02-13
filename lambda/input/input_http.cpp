@@ -12,6 +12,7 @@
 #include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "lib/log.h"
 
 // Structure to hold response data
@@ -309,7 +310,7 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
         if (type_str) {
             type_str->len = strlen(type);
             type_str->ref_cnt = 0;
-            strcpy(type_str->chars, type);
+            str_copy(type_str->chars, type_str->len + 1, type, type_str->len);
         }
     }
 
@@ -318,7 +319,7 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
         if (flavor_str) {
             flavor_str->len = strlen(flavor);
             flavor_str->ref_cnt = 0;
-            strcpy(flavor_str->chars, flavor);
+            str_copy(flavor_str->chars, flavor_str->len + 1, flavor, flavor_str->len);
         }
     }
 
