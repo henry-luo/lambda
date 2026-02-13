@@ -14,6 +14,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
+#include <vector>
+#include <algorithm>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -115,6 +118,57 @@ static char* normalize_json(const char* json) {
     }
     result[out] = '\0';
     return result;
+}
+
+// helper: extract key-value pairs from a normalized JSON object string.
+// returns a sorted set of "key:value" strings for order-independent comparison.
+// only handles top-level objects (not recursive).
+static bool json_objects_equal(const char* a, const char* b) {
+    if (!a || !b) return false;
+    // both must be objects
+    if (a[0] != '{' || b[0] != '{') return false;
+
+    // simple approach: collect "key":value pairs from each, sort, compare
+    // parse each into a vector of key:value strings
+    auto extract_pairs = [](const char* json) -> std::vector<std::string> {
+        std::vector<std::string> pairs;
+        const char* p = json + 1; // skip {
+        while (*p && *p != '}') {
+            // skip whitespace
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (*p == '}') break;
+            if (*p == ',') { p++; continue; }
+
+            // read key:value pair
+            const char* pair_start = p;
+            int depth = 0;
+            bool in_str = false, esc = false;
+            while (*p) {
+                char c = *p;
+                if (esc) { esc = false; p++; continue; }
+                if (c == '\\' && in_str) { esc = true; p++; continue; }
+                if (c == '"') { in_str = !in_str; p++; continue; }
+                if (!in_str) {
+                    if (c == '{' || c == '[') depth++;
+                    else if (c == '}' || c == ']') {
+                        if (depth == 0) break;
+                        depth--;
+                    }
+                    else if (c == ',' && depth == 0) break;
+                }
+                p++;
+            }
+            if (p > pair_start) {
+                pairs.push_back(std::string(pair_start, p - pair_start));
+            }
+        }
+        std::sort(pairs.begin(), pairs.end());
+        return pairs;
+    };
+
+    auto pa = extract_pairs(a);
+    auto pb = extract_pairs(b);
+    return pa == pb;
 }
 
 // test suite directory path
@@ -358,20 +412,18 @@ static bool is_multi_doc_json(const char* json) {
         if (c == '\\' && in_string) { escape = true; p++; continue; }
 
         if (c == '"') {
-            if (!in_string && depth == 0 && !found_first) {
-                in_string = true; p++; continue;
+            // toggle string state at ALL depths so brackets inside strings
+            // (e.g., "bla]keks") don't disrupt depth tracking
+            in_string = !in_string;
+            if (!in_string && depth == 0) {
+                // completed a top-level string, check if there's more
+                found_first = true;
+                p++;
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (*p) return true; // more content after first value
+                return false;
             }
-            if (in_string) {
-                in_string = false;
-                if (depth == 0) {
-                    // completed a top-level string, check if there's more
-                    p++;
-                    while (*p && isspace((unsigned char)*p)) p++;
-                    if (*p) return true; // more content after first value
-                    return false;
-                }
-                p++; continue;
-            }
+            p++; continue;
         }
 
         if (!in_string) {
@@ -511,6 +563,12 @@ TEST_F(YamlSuiteTest, JsonComparisonTests) {
         char* norm_actual = normalize_json(actual_json);
 
         if (norm_expected && norm_actual && strcmp(norm_expected, norm_actual) == 0) {
+            passed++;
+        } else if (norm_expected && norm_expected[0] == '\0' && root_type == LMD_TYPE_NULL) {
+            // empty expected JSON + null root = pass (empty/comment-only documents)
+            passed++;
+        } else if (norm_expected && norm_actual && json_objects_equal(norm_expected, norm_actual)) {
+            // JSON objects are unordered — order-independent comparison
             passed++;
         } else {
             failed++;
