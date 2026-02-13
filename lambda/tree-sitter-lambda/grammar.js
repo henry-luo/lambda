@@ -916,8 +916,6 @@ module.exports = grammar({
     // Type sequence: horizontal-whitespace-separated concatenation of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // NOTE: Without token.immediate, whitespace is handled by extras. Use precedence
-    // to prefer binary_type (|, &, !) over type_seq when operators are present.
     type_seq: $ => prec.left('pattern_concat', seq(
       $._type_term,
       prec.dynamic(-1, repeat1(prec.dynamic(-1, $._type_term))),
