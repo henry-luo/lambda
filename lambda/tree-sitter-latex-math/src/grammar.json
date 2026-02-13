@@ -301,6 +301,41 @@
         "value": "smallmatrix|equation\\*?|multline\\*?|subarray|gathered|Vmatrix|Bmatrix|bmatrix|vmatrix|pmatrix|aligned|matrix|gather\\*?|align\\*?|rcases|dcases|split|cases|array"
       }
     },
+    "_updown_arrow_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(updownarrow|Updownarrow|downarrow|Downarrow|uparrow|Uparrow)"
+      }
+    },
+    "_infix_frac_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(choose|above|brack|brace|over|atop)"
+      }
+    },
+    "_space_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\([,:;!]|qquad|quad)"
+      }
+    },
+    "_limits_mod": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(no)?limits"
+      }
+    },
+    "_hspace_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\hspace\\*?"
+      }
+    },
     "symbol_command": {
       "type": "SYMBOL",
       "name": "_symbol_cmd"
@@ -373,28 +408,8 @@
           "name": "_arrow_cmd"
         },
         {
-          "type": "STRING",
-          "value": "\\uparrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\downarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\updownarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Uparrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Downarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Updownarrow"
+          "type": "SYMBOL",
+          "name": "_updown_arrow_cmd"
         }
       ]
     },
@@ -526,33 +541,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\over"
-              },
-              {
-                "type": "STRING",
-                "value": "\\atop"
-              },
-              {
-                "type": "STRING",
-                "value": "\\above"
-              },
-              {
-                "type": "STRING",
-                "value": "\\choose"
-              },
-              {
-                "type": "STRING",
-                "value": "\\brace"
-              },
-              {
-                "type": "STRING",
-                "value": "\\brack"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_infix_frac_cmd"
           }
         },
         {
@@ -569,17 +559,8 @@
       ]
     },
     "limits_modifier": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "\\limits"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nolimits"
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "_limits_mod"
     },
     "subsup": {
       "type": "PREC_RIGHT",
@@ -1087,28 +1068,8 @@
           "name": "_delimiter_cmd"
         },
         {
-          "type": "STRING",
-          "value": "\\uparrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\downarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\updownarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Uparrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Downarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Updownarrow"
+          "type": "SYMBOL",
+          "name": "_updown_arrow_cmd"
         }
       ]
     },
@@ -1825,33 +1786,8 @@
       ]
     },
     "space_command": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "\\,"
-        },
-        {
-          "type": "STRING",
-          "value": "\\:"
-        },
-        {
-          "type": "STRING",
-          "value": "\\;"
-        },
-        {
-          "type": "STRING",
-          "value": "\\!"
-        },
-        {
-          "type": "STRING",
-          "value": "\\quad"
-        },
-        {
-          "type": "STRING",
-          "value": "\\qquad"
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "_space_cmd"
     },
     "hspace_command": {
       "type": "SEQ",
@@ -1860,17 +1796,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\hspace"
-              },
-              {
-                "type": "STRING",
-                "value": "\\hspace*"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_hspace_cmd"
           }
         },
         {
