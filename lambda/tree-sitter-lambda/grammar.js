@@ -109,16 +109,6 @@ function time() {
   );
 }
 
-// Built-in types consolidated into a single rule using choice of keywords
-// Each keyword is listed explicitly so Tree-sitter treats them as reserved words
-function built_in_types() {
-  return prec(1, choice(
-    'null', 'any', 'error', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
-    'datetime', 'date', 'time', 'symbol', 'string', 'binary', 'range',
-    'list', 'array', 'map', 'element', 'entity', 'object', 'type', 'function'
-  ));
-}
-
 function _attr_content_type($) {
   return choice(
     seq(alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
@@ -855,7 +845,12 @@ module.exports = grammar({
       seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
     ),
 
-    base_type: $ => built_in_types(),
+    // Built-in types as reserved keywords
+    base_type: _ => prec(1, choice(
+      'null', 'any', 'error', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
+      'datetime', 'date', 'time', 'symbol', 'string', 'binary', 'range',
+      'list', 'array', 'map', 'element', 'entity', 'object', 'type', 'function'
+    )),
 
     list_type: $ => seq(
       // list cannot be empty
