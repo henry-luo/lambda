@@ -7224,7 +7224,7 @@
             "members": [
               {
                 "type": "SYMBOL",
-                "name": "_pattern_expr"
+                "name": "_type_expr"
               },
               {
                 "type": "REPEAT",
@@ -7237,7 +7237,7 @@
                     },
                     {
                       "type": "SYMBOL",
-                      "name": "_pattern_expr"
+                      "name": "_type_expr"
                     }
                   ]
                 }
@@ -7972,15 +7972,6 @@
         {
           "type": "SYMBOL",
           "name": "constrained_type"
-        }
-      ]
-    },
-    "_pattern_expr": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "_type_expr"
         },
         {
           "type": "SYMBOL",
@@ -8721,7 +8712,7 @@
             "name": "pattern",
             "content": {
               "type": "SYMBOL",
-              "name": "_pattern_expr"
+              "name": "_type_expr"
             }
           }
         ]
@@ -8754,7 +8745,7 @@
             "name": "pattern",
             "content": {
               "type": "SYMBOL",
-              "name": "_pattern_expr"
+              "name": "_type_expr"
             }
           }
         ]
@@ -8800,6 +8791,10 @@
     [
       "type_seq",
       "binary_type"
+    ],
+    [
+      "type_seq",
+      "_type_expr"
     ]
   ],
   "precedences": [
@@ -8943,12 +8938,12 @@
         "name": "primary_type"
       },
       {
-        "type": "SYMBOL",
-        "name": "binary_type"
-      },
-      {
         "type": "STRING",
         "value": "pattern_concat"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "binary_type"
       }
     ]
   ],
@@ -8964,8 +8959,7 @@
     "_import_stam",
     "_statement",
     "_content_expr",
-    "_type_term",
-    "_pattern_expr"
+    "_type_term"
   ],
   "supertypes": []
 }
