@@ -154,14 +154,14 @@ bool str_ieq(const char* a, size_t a_len, const char* b, size_t b_len) {
     return str_icmp(a, a_len, b, b_len) == 0;
 }
 
-bool str_eq_lit(const char* s, size_t len, const char* lit) {
+bool str_eq_const(const char* s, size_t len, const char* lit) {
     if (!s) len = 0;
     if (!lit) return len == 0;
     size_t lit_len = strlen(lit);
     return str_eq(s, len, lit, lit_len);
 }
 
-bool str_ieq_lit(const char* s, size_t len, const char* lit) {
+bool str_ieq_const(const char* s, size_t len, const char* lit) {
     if (!s) len = 0;
     if (!lit) return len == 0;
     size_t lit_len = strlen(lit);
@@ -188,12 +188,12 @@ bool str_ends_with(const char* s, size_t s_len,
     return memcmp(s + s_len - suffix_len, suffix, suffix_len) == 0;
 }
 
-bool str_starts_with_lit(const char* s, size_t s_len, const char* prefix) {
+bool str_starts_with_const(const char* s, size_t s_len, const char* prefix) {
     if (!prefix) return true;
     return str_starts_with(s, s_len, prefix, strlen(prefix));
 }
 
-bool str_ends_with_lit(const char* s, size_t s_len, const char* suffix) {
+bool str_ends_with_const(const char* s, size_t s_len, const char* suffix) {
     if (!suffix) return true;
     return str_ends_with(s, s_len, suffix, strlen(suffix));
 }
@@ -212,6 +212,16 @@ bool str_iends_with(const char* s, size_t s_len,
     if (!suffix) suffix_len = 0;
     if (suffix_len > s_len) return false;
     return str_icmp(s + s_len - suffix_len, suffix_len, suffix, suffix_len) == 0;
+}
+
+bool str_istarts_with_const(const char* s, size_t s_len, const char* prefix) {
+    if (!prefix) return true;
+    return str_istarts_with(s, s_len, prefix, strlen(prefix));
+}
+
+bool str_iends_with_const(const char* s, size_t s_len, const char* suffix) {
+    if (!suffix) return true;
+    return str_iends_with(s, s_len, suffix, strlen(suffix));
 }
 
 /* ══════════════════════════════════════════════════════════════════════

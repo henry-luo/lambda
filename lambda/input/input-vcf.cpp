@@ -4,6 +4,10 @@
 #include "source_tracker.hpp"
 #include <ctype.h>
 
+extern "C" {
+#include "../../lib/str.h"
+}
+
 using namespace lambda;
 
 // Helper function to skip whitespace at the beginning of a line
@@ -154,10 +158,7 @@ static String* parse_property_value(InputContext& ctx, const char **vcf) {
 
 // Helper function to normalize property name to lowercase
 static void normalize_property_name(char* name) {
-    while (*name) {
-        *name = tolower(*name);
-        name++;
-    }
+    str_lower_inplace(name, strlen(name));
 }
 
 // Helper function to parse structured name (N property)
@@ -300,14 +301,14 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
         // Handle vCard start and end
         if (strcmp(property_name->chars, "begin") == 0) {
-            if (strcasecmp(property_value->chars, "VCARD") == 0) {
+            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCARD")) {
                 in_vcard = true;
             }
             continue;
         }
 
         if (strcmp(property_name->chars, "end") == 0) {
-            if (strcasecmp(property_value->chars, "VCARD") == 0) {
+            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCARD")) {
                 in_vcard = false;
             }
             continue;

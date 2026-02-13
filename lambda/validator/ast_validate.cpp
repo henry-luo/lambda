@@ -496,43 +496,44 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
     if (!input_format) {
         const char* ext = strrchr(data_file, '.');
         if (ext) {
-            if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".htm") == 0) {
+            size_t ext_len = strlen(ext);
+            if (str_ieq_const(ext, ext_len, ".html") || str_ieq_const(ext, ext_len, ".htm")) {
                 input_format = "html";
-            } else if (strcasecmp(ext, ".md") == 0 || strcasecmp(ext, ".markdown") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".md") || str_ieq_const(ext, ext_len, ".markdown")) {
                 input_format = "markdown";
-            } else if (strcasecmp(ext, ".json") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".json")) {
                 input_format = "json";
-            } else if (strcasecmp(ext, ".xml") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".xml")) {
                 input_format = "xml";
-            } else if (strcasecmp(ext, ".yaml") == 0 || strcasecmp(ext, ".yml") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".yaml") || str_ieq_const(ext, ext_len, ".yml")) {
                 input_format = "yaml";
-            } else if (strcasecmp(ext, ".csv") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".csv")) {
                 input_format = "csv";
-            } else if (strcasecmp(ext, ".ini") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".ini")) {
                 input_format = "ini";
-            } else if (strcasecmp(ext, ".toml") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".toml")) {
                 input_format = "toml";
-            } else if (strcasecmp(ext, ".eml") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".eml")) {
                 input_format = "eml";
-            } else if (strcasecmp(ext, ".ics") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".ics")) {
                 input_format = "ics";
-            } else if (strcasecmp(ext, ".vcf") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".vcf")) {
                 input_format = "vcf";
-            } else if (strcasecmp(ext, ".rst") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".rst")) {
                 input_format = "rst";
-            } else if (strcasecmp(ext, ".wiki") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".wiki")) {
                 input_format = "wiki";
-            } else if (strcasecmp(ext, ".adoc") == 0 || strcasecmp(ext, ".asciidoc") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".adoc") || str_ieq_const(ext, ext_len, ".asciidoc")) {
                 input_format = "asciidoc";
-            } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 ||
-                      strcasecmp(ext, ".3") == 0 || strcasecmp(ext, ".4") == 0 ||
-                      strcasecmp(ext, ".5") == 0 || strcasecmp(ext, ".6") == 0 ||
-                      strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
-                      strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".1") || str_ieq_const(ext, ext_len, ".2") ||
+                      str_ieq_const(ext, ext_len, ".3") || str_ieq_const(ext, ext_len, ".4") ||
+                      str_ieq_const(ext, ext_len, ".5") || str_ieq_const(ext, ext_len, ".6") ||
+                      str_ieq_const(ext, ext_len, ".7") || str_ieq_const(ext, ext_len, ".8") ||
+                      str_ieq_const(ext, ext_len, ".9") || str_ieq_const(ext, ext_len, ".man")) {
                 input_format = "man";
-            } else if (strcasecmp(ext, ".textile") == 0 || strcasecmp(ext, ".txtl") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".textile") || str_ieq_const(ext, ext_len, ".txtl")) {
                 input_format = "textile";
-            } else if (strcasecmp(ext, ".m") == 0 || strcasecmp(ext, ".mk") == 0 || strcasecmp(ext, ".mark") == 0) {
+            } else if (str_ieq_const(ext, ext_len, ".m") || str_ieq_const(ext, ext_len, ".mk") || str_ieq_const(ext, ext_len, ".mark")) {
                 input_format = "mark";
             }
             // If no recognized extension, keep as nullptr for Lambda format

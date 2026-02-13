@@ -50,10 +50,10 @@ bool str_ieq(const char* a, size_t a_len, const char* b, size_t b_len);
 
 /** compare with a NUL-terminated literal (convenience for the very common
  *  `strcmp(tag, "div") == 0` pattern). */
-bool str_eq_lit(const char* s, size_t len, const char* lit);
+bool str_eq_const(const char* s, size_t len, const char* lit);
 
 /** case-insensitive compare with a NUL-terminated literal. */
-bool str_ieq_lit(const char* s, size_t len, const char* lit);
+bool str_ieq_const(const char* s, size_t len, const char* lit);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  2. Prefix / Suffix
@@ -65,14 +65,18 @@ bool str_ends_with(const char* s, size_t s_len,
                    const char* suffix, size_t suffix_len);
 
 /** convenience overloads for NUL-terminated prefix/suffix. */
-bool str_starts_with_lit(const char* s, size_t s_len, const char* prefix);
-bool str_ends_with_lit(const char* s, size_t s_len, const char* suffix);
+bool str_starts_with_const(const char* s, size_t s_len, const char* prefix);
+bool str_ends_with_const(const char* s, size_t s_len, const char* suffix);
 
 /** case-insensitive prefix/suffix (ASCII). */
 bool str_istarts_with(const char* s, size_t s_len,
                       const char* prefix, size_t prefix_len);
 bool str_iends_with(const char* s, size_t s_len,
                     const char* suffix, size_t suffix_len);
+
+/** case-insensitive convenience overloads for NUL-terminated prefix/suffix. */
+bool str_istarts_with_const(const char* s, size_t s_len, const char* prefix);
+bool str_iends_with_const(const char* s, size_t s_len, const char* suffix);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  3. Search
