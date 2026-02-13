@@ -1848,6 +1848,79 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     free(num_str);
     return (Type*)item_type;
 }
+
+// helper: returns Type* for base_type node (used in primary_expr context)
+Type* build_base_type_inline(Transpiler* tp, TSNode type_node) {
+    StrView type_name = ts_node_source(tp, type_node);
+    if (strview_equal(&type_name, "null")) {
+        return (Type*)&LIT_TYPE_NULL;
+    }
+    else if (strview_equal(&type_name, "any")) {
+        return (Type*)&LIT_TYPE_ANY;
+    }
+    else if (strview_equal(&type_name, "bool")) {
+        return (Type*)&LIT_TYPE_BOOL;
+    }
+    else if (strview_equal(&type_name, "int") || strview_equal(&type_name, "int64")) {
+        return (Type*)&LIT_TYPE_INT;
+    }
+    else if (strview_equal(&type_name, "float")) {
+        return (Type*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "decimal")) {
+        return (Type*)&LIT_TYPE_DECIMAL;
+    }
+    else if (strview_equal(&type_name, "number")) {
+        return (Type*)&LIT_TYPE_NUMBER;
+    }
+    else if (strview_equal(&type_name, "string")) {
+        return (Type*)&LIT_TYPE_STRING;
+    }
+    else if (strview_equal(&type_name, "symbol")) {
+        return (Type*)&LIT_TYPE_SYMBOL;
+    }
+    else if (strview_equal(&type_name, "datetime")) {
+        return (Type*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        return (Type*)&LIT_TYPE_TIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        return (Type*)&LIT_TYPE_DATE;
+    }
+    else if (strview_equal(&type_name, "binary")) {
+        return (Type*)&LIT_TYPE_BINARY;
+    }
+    else if (strview_equal(&type_name, "list")) {
+        return (Type*)&LIT_TYPE_LIST;
+    }
+    else if (strview_equal(&type_name, "range")) {
+        return (Type*)&LIT_TYPE_RANGE;
+    }
+    else if (strview_equal(&type_name, "array")) {
+        return (Type*)&LIT_TYPE_ARRAY;
+    }
+    else if (strview_equal(&type_name, "map")) {
+        return (Type*)&LIT_TYPE_MAP;
+    }
+    else if (strview_equal(&type_name, "element") || strview_equal(&type_name, "entity") || strview_equal(&type_name, "object")) {
+        return (Type*)&LIT_TYPE_ELMT;
+    }
+    else if (strview_equal(&type_name, "function")) {
+        return (Type*)&LIT_TYPE_FUNC;
+    }
+    else if (strview_equal(&type_name, "type")) {
+        return (Type*)&LIT_TYPE_TYPE;
+    }
+    else if (strview_equal(&type_name, "error")) {
+        return (Type*)&LIT_TYPE_ERROR;
+    }
+    else {
+        log_error("Unknown base type: %.*s", (int)type_name.length, type_name.str);
+        return &TYPE_ERROR;
+    }
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     log_debug("*** DEBUG: build_primary_expr called ***");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
@@ -1864,8 +1937,18 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         symbol = ts_node_symbol(child);
     }
     log_debug("*** DEBUG: symbol=%d ***", symbol);
-    if (symbol == SYM_NULL) {
-        ast_node->type = &LIT_NULL;
+    if (symbol == SYM_BASE_TYPE) {
+        // base_type in primary_expr context - check if it's "null" (value) vs other built-in types (type reference)
+        StrView type_name = ts_node_source(tp, child);
+        if (strview_equal(&type_name, "null")) {
+            // "null" as value literal
+            ast_node->type = &LIT_NULL;
+        }
+        else {
+            // other built-in types are type expressions - delegate to build_expr which calls build_base_type
+            ast_node->expr = build_expr(tp, child);
+            ast_node->type = ast_node->expr->type;
+        }
     }
     else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
         ast_node->type = &LIT_BOOL;

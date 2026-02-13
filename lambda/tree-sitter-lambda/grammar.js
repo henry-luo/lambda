@@ -109,35 +109,14 @@ function time() {
   );
 }
 
-function built_in_types(include_null) {
-  let types = [
-    'any',
-    'error',
-    'bool',
-    // 'int8', 'int16', 'int32', 'int64',
-    'int',    // int32
-    'int64',  // int64
-    // 'float32', 'float64',
-    'float',  // float64
-    'decimal',  // big decimal
-    'number',
-    'date',
-    'time',
-    'datetime',
-    'symbol',
-    'string',
-    'binary',
-    'range',
-    'list',
-    'array',
-    'map',
-    'element',
-    'entity',
-    'object',
-    'type',
-    'function',
-  ];
-  return include_null ? choice('null', ...types) : choice(...types);
+// Built-in types consolidated into a single rule using choice of keywords
+// Each keyword is listed explicitly so Tree-sitter treats them as reserved words
+function built_in_types() {
+  return prec(1, choice(
+    'null', 'any', 'error', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
+    'datetime', 'date', 'time', 'symbol', 'string', 'binary', 'range',
+    'list', 'array', 'map', 'element', 'entity', 'object', 'type', 'function'
+  ));
 }
 
 function _attr_content_type($) {
@@ -309,7 +288,7 @@ module.exports = grammar({
       return token(integer_literal);
     },
 
-    null: _ => 'null',
+    // Note: 'null' is now part of $.base_type, no separate rule needed
     true: _ => 'true',
     false: _ => 'false',
     inf: _ => 'inf',
@@ -325,7 +304,7 @@ module.exports = grammar({
       $.binary,
       $.true,
       $.false,
-      $.null
+      $.base_type,  // null is part of base_type
     ),
 
     // expr statements that need ';'
@@ -496,7 +475,6 @@ module.exports = grammar({
 
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
-      $.null,
       $.true,
       $.false,
       $.inf,
@@ -510,7 +488,7 @@ module.exports = grammar({
       $.array,
       $.map,
       $.element,
-      alias($._non_null_base_type, $.base_type),
+      $.base_type,  // includes null
       $.identifier,
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
@@ -877,9 +855,7 @@ module.exports = grammar({
       seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
     ),
 
-    base_type: $ => built_in_types(true),
-
-    _non_null_base_type: $ => built_in_types(false),
+    base_type: $ => built_in_types(),
 
     list_type: $ => seq(
       // list cannot be empty
