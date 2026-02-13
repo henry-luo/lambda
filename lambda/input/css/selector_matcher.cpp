@@ -11,41 +11,15 @@
 // Helper Functions
 // ============================================================================
 
-// Case-insensitive string comparison
+// Case-insensitive string comparison — delegates to str_icmp
 static int strcasecmp_local(const char* s1, const char* s2) {
-    while (*s1 && *s2) {
-        int c1 = tolower((unsigned char)*s1);
-        int c2 = tolower((unsigned char)*s2);
-        if (c1 != c2) {
-            return c1 - c2;
-        }
-        s1++;
-        s2++;
-    }
-    return tolower((unsigned char)*s1) - tolower((unsigned char)*s2);
+    return str_icmp(s1, strlen(s1), s2, strlen(s2));
 }
 
-// Case-insensitive substring search
+// Case-insensitive substring search — delegates to str_ifind
 static bool contains_substring_case_insensitive(const char* haystack, const char* needle) {
     if (!haystack || !needle) return false;
-
-    size_t needle_len = strlen(needle);
-    size_t haystack_len = strlen(haystack);
-
-    if (needle_len > haystack_len) return false;
-
-    for (size_t i = 0; i <= haystack_len - needle_len; i++) {
-        bool match = true;
-        for (size_t j = 0; j < needle_len; j++) {
-            if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match) return true;
-    }
-
-    return false;
+    return str_ifind(haystack, strlen(haystack), needle, strlen(needle)) != STR_NPOS;
 }
 
 // ============================================================================
@@ -621,7 +595,7 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
                     size_t word_len = pos - word_start;
                     if (word_len == value_len) {
                         if (use_case_insensitive) {
-                            if (strncasecmp(word_start, attr_value, value_len) == 0) {
+                            if (str_ieq(word_start, value_len, attr_value, value_len)) {
                                 return true;
                             }
                         } else {
@@ -639,7 +613,7 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
             {
                 size_t value_len = strlen(attr_value);
                 if (use_case_insensitive) {
-                    return strncasecmp(element_attr, attr_value, value_len) == 0;
+                    return str_istarts_with(element_attr, strlen(element_attr), attr_value, value_len);
                 } else {
                     return strncmp(element_attr, attr_value, value_len) == 0;
                 }
@@ -1263,11 +1237,11 @@ bool selector_matcher_parse_nth_formula(const char* formula_str, CssNthFormula* 
     }
 
     // Check for "odd" or "even"
-    if (strcasecmp_local(formula_str, "odd") == 0) {
+    if (str_ieq_const(formula_str, strlen(formula_str), "odd")) {
         formula->odd = true;
         return true;
     }
-    if (strcasecmp_local(formula_str, "even") == 0) {
+    if (str_ieq_const(formula_str, strlen(formula_str), "even")) {
         formula->even = true;
         return true;
     }
@@ -1331,29 +1305,30 @@ uint32_t selector_matcher_pseudo_class_to_flag(const char* pseudo_class) {
         return 0;
     }
 
-    if (strcasecmp_local(pseudo_class, "hover") == 0) return PSEUDO_STATE_HOVER;
-    if (strcasecmp_local(pseudo_class, "active") == 0) return PSEUDO_STATE_ACTIVE;
-    if (strcasecmp_local(pseudo_class, "focus") == 0) return PSEUDO_STATE_FOCUS;
-    if (strcasecmp_local(pseudo_class, "focus-visible") == 0) return PSEUDO_STATE_FOCUS_VISIBLE;
-    if (strcasecmp_local(pseudo_class, "focus-within") == 0) return PSEUDO_STATE_FOCUS_WITHIN;
-    if (strcasecmp_local(pseudo_class, "visited") == 0) return PSEUDO_STATE_VISITED;
-    if (strcasecmp_local(pseudo_class, "link") == 0) return PSEUDO_STATE_LINK;
-    if (strcasecmp_local(pseudo_class, "target") == 0) return PSEUDO_STATE_TARGET;
-    if (strcasecmp_local(pseudo_class, "enabled") == 0) return PSEUDO_STATE_ENABLED;
-    if (strcasecmp_local(pseudo_class, "disabled") == 0) return PSEUDO_STATE_DISABLED;
-    if (strcasecmp_local(pseudo_class, "checked") == 0) return PSEUDO_STATE_CHECKED;
-    if (strcasecmp_local(pseudo_class, "indeterminate") == 0) return PSEUDO_STATE_INDETERMINATE;
-    if (strcasecmp_local(pseudo_class, "valid") == 0) return PSEUDO_STATE_VALID;
-    if (strcasecmp_local(pseudo_class, "invalid") == 0) return PSEUDO_STATE_INVALID;
-    if (strcasecmp_local(pseudo_class, "required") == 0) return PSEUDO_STATE_REQUIRED;
-    if (strcasecmp_local(pseudo_class, "optional") == 0) return PSEUDO_STATE_OPTIONAL;
-    if (strcasecmp_local(pseudo_class, "read-only") == 0) return PSEUDO_STATE_READ_ONLY;
-    if (strcasecmp_local(pseudo_class, "read-write") == 0) return PSEUDO_STATE_READ_WRITE;
-    if (strcasecmp_local(pseudo_class, "placeholder-shown") == 0) return PSEUDO_STATE_PLACEHOLDER_SHOWN;
-    if (strcasecmp_local(pseudo_class, "selected") == 0) return PSEUDO_STATE_SELECTED;
-    if (strcasecmp_local(pseudo_class, "first-child") == 0) return PSEUDO_STATE_FIRST_CHILD;
-    if (strcasecmp_local(pseudo_class, "last-child") == 0) return PSEUDO_STATE_LAST_CHILD;
-    if (strcasecmp_local(pseudo_class, "only-child") == 0) return PSEUDO_STATE_ONLY_CHILD;
+    size_t pc_len = strlen(pseudo_class);
+    if (str_ieq_const(pseudo_class, pc_len, "hover")) return PSEUDO_STATE_HOVER;
+    if (str_ieq_const(pseudo_class, pc_len, "active")) return PSEUDO_STATE_ACTIVE;
+    if (str_ieq_const(pseudo_class, pc_len, "focus")) return PSEUDO_STATE_FOCUS;
+    if (str_ieq_const(pseudo_class, pc_len, "focus-visible")) return PSEUDO_STATE_FOCUS_VISIBLE;
+    if (str_ieq_const(pseudo_class, pc_len, "focus-within")) return PSEUDO_STATE_FOCUS_WITHIN;
+    if (str_ieq_const(pseudo_class, pc_len, "visited")) return PSEUDO_STATE_VISITED;
+    if (str_ieq_const(pseudo_class, pc_len, "link")) return PSEUDO_STATE_LINK;
+    if (str_ieq_const(pseudo_class, pc_len, "target")) return PSEUDO_STATE_TARGET;
+    if (str_ieq_const(pseudo_class, pc_len, "enabled")) return PSEUDO_STATE_ENABLED;
+    if (str_ieq_const(pseudo_class, pc_len, "disabled")) return PSEUDO_STATE_DISABLED;
+    if (str_ieq_const(pseudo_class, pc_len, "checked")) return PSEUDO_STATE_CHECKED;
+    if (str_ieq_const(pseudo_class, pc_len, "indeterminate")) return PSEUDO_STATE_INDETERMINATE;
+    if (str_ieq_const(pseudo_class, pc_len, "valid")) return PSEUDO_STATE_VALID;
+    if (str_ieq_const(pseudo_class, pc_len, "invalid")) return PSEUDO_STATE_INVALID;
+    if (str_ieq_const(pseudo_class, pc_len, "required")) return PSEUDO_STATE_REQUIRED;
+    if (str_ieq_const(pseudo_class, pc_len, "optional")) return PSEUDO_STATE_OPTIONAL;
+    if (str_ieq_const(pseudo_class, pc_len, "read-only")) return PSEUDO_STATE_READ_ONLY;
+    if (str_ieq_const(pseudo_class, pc_len, "read-write")) return PSEUDO_STATE_READ_WRITE;
+    if (str_ieq_const(pseudo_class, pc_len, "placeholder-shown")) return PSEUDO_STATE_PLACEHOLDER_SHOWN;
+    if (str_ieq_const(pseudo_class, pc_len, "selected")) return PSEUDO_STATE_SELECTED;
+    if (str_ieq_const(pseudo_class, pc_len, "first-child")) return PSEUDO_STATE_FIRST_CHILD;
+    if (str_ieq_const(pseudo_class, pc_len, "last-child")) return PSEUDO_STATE_LAST_CHILD;
+    if (str_ieq_const(pseudo_class, pc_len, "only-child")) return PSEUDO_STATE_ONLY_CHILD;
 
     return 0;
 }

@@ -1,6 +1,7 @@
 #include "html5_tokenizer.h"
 #include "html5_token.h"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../mark_builder.hpp"
 #include <string.h>
 #include <ctype.h>
@@ -228,7 +229,7 @@ bool html5_utf8iter_maybe_consume_match(Html5Utf8Iterator* iter, const char* pre
     if (case_sensitive) {
         matched = (strncmp(iter->start, prefix, length) == 0);
     } else {
-        matched = (strncasecmp(iter->start, prefix, length) == 0);
+        matched = (str_ieq(iter->start, length, prefix, length));
     }
 
     if (matched) {
@@ -508,25 +509,13 @@ static bool html5_is_appropriate_end_tag(Html5Parser* parser) {
         return false;
     }
     // Case-insensitive comparison
-    for (size_t i = 0; i < parser->temp_buffer_len; i++) {
-        char c1 = parser->temp_buffer[i];
-        char c2 = parser->last_start_tag_name[i];
-        // Convert to lowercase for comparison
-        if (c1 >= 'A' && c1 <= 'Z') c1 += 0x20;
-        if (c2 >= 'A' && c2 <= 'Z') c2 += 0x20;
-        if (c1 != c2) return false;
-    }
-    return true;
+    return str_ieq(parser->temp_buffer, parser->temp_buffer_len,
+                   parser->last_start_tag_name, parser->last_start_tag_name_len);
 }
 
-// helper: check if string matches (case insensitive)
+// helper: check if string matches (case insensitive) — delegates to str_ieq
 static bool html5_match_string_ci(const char* str1, const char* str2, size_t len) {
-    for (size_t i = 0; i < len; i++) {
-        if (tolower(str1[i]) != tolower(str2[i])) {
-            return false;
-        }
-    }
-    return true;
+    return str_ieq(str1, len, str2, len);
 }
 
 // Legacy named character references that can be used without semicolon

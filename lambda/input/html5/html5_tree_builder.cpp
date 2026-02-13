@@ -1,6 +1,7 @@
 #include "html5_parser.h"
 #include "html5_tokenizer.h"
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../mark_builder.hpp"
 #include "../../mark_reader.hpp"
 #include "../../mark_editor.hpp"
@@ -105,30 +106,16 @@ static const char* limited_quirks_with_system_id_prefixes[] = {
     nullptr
 };
 
-// Case-insensitive string comparison
+// Case-insensitive string comparison — delegates to str_ieq
 static bool strcasecmp_eq(const char* a, const char* b) {
     if (a == nullptr || b == nullptr) return a == b;
-    while (*a && *b) {
-        char ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a;
-        char cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
-        if (ca != cb) return false;
-        a++;
-        b++;
-    }
-    return *a == *b;
+    return str_ieq(a, strlen(a), b, strlen(b));
 }
 
-// Case-insensitive prefix check
+// Case-insensitive prefix check — delegates to str_istarts_with
 static bool strcasecmp_prefix(const char* str, const char* prefix) {
     if (str == nullptr || prefix == nullptr) return false;
-    while (*prefix) {
-        char cs = *str >= 'A' && *str <= 'Z' ? *str + 32 : *str;
-        char cp = *prefix >= 'A' && *prefix <= 'Z' ? *prefix + 32 : *prefix;
-        if (cs != cp) return false;
-        str++;
-        prefix++;
-    }
-    return true;
+    return str_istarts_with(str, strlen(str), prefix, strlen(prefix));
 }
 
 // Check if public_id starts with any prefix in the list

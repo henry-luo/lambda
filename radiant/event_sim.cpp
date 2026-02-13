@@ -7,6 +7,7 @@
 #include "state_store.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
@@ -27,8 +28,10 @@ void parse_json(Input* input, const char* json_string);
 static int key_name_to_glfw(const char* name) {
     if (!name) return GLFW_KEY_UNKNOWN;
 
+    size_t name_len = strlen(name);
+
     // Single character keys
-    if (strlen(name) == 1) {
+    if (name_len == 1) {
         char c = name[0];
         if (c >= 'a' && c <= 'z') return GLFW_KEY_A + (c - 'a');
         if (c >= 'A' && c <= 'Z') return GLFW_KEY_A + (c - 'A');
@@ -36,24 +39,24 @@ static int key_name_to_glfw(const char* name) {
     }
 
     // Special keys
-    if (strcasecmp(name, "space") == 0) return GLFW_KEY_SPACE;
-    if (strcasecmp(name, "enter") == 0 || strcasecmp(name, "return") == 0) return GLFW_KEY_ENTER;
-    if (strcasecmp(name, "tab") == 0) return GLFW_KEY_TAB;
-    if (strcasecmp(name, "backspace") == 0) return GLFW_KEY_BACKSPACE;
-    if (strcasecmp(name, "delete") == 0) return GLFW_KEY_DELETE;
-    if (strcasecmp(name, "escape") == 0 || strcasecmp(name, "esc") == 0) return GLFW_KEY_ESCAPE;
-    if (strcasecmp(name, "left") == 0) return GLFW_KEY_LEFT;
-    if (strcasecmp(name, "right") == 0) return GLFW_KEY_RIGHT;
-    if (strcasecmp(name, "up") == 0) return GLFW_KEY_UP;
-    if (strcasecmp(name, "down") == 0) return GLFW_KEY_DOWN;
-    if (strcasecmp(name, "home") == 0) return GLFW_KEY_HOME;
-    if (strcasecmp(name, "end") == 0) return GLFW_KEY_END;
-    if (strcasecmp(name, "pageup") == 0) return GLFW_KEY_PAGE_UP;
-    if (strcasecmp(name, "pagedown") == 0) return GLFW_KEY_PAGE_DOWN;
-    if (strcasecmp(name, "control") == 0 || strcasecmp(name, "ctrl") == 0) return GLFW_KEY_LEFT_CONTROL;
-    if (strcasecmp(name, "shift") == 0) return GLFW_KEY_LEFT_SHIFT;
-    if (strcasecmp(name, "alt") == 0) return GLFW_KEY_LEFT_ALT;
-    if (strcasecmp(name, "super") == 0 || strcasecmp(name, "cmd") == 0 || strcasecmp(name, "meta") == 0) return GLFW_KEY_LEFT_SUPER;
+    if (str_ieq_const(name, name_len, "space")) return GLFW_KEY_SPACE;
+    if (str_ieq_const(name, name_len, "enter") || str_ieq_const(name, name_len, "return")) return GLFW_KEY_ENTER;
+    if (str_ieq_const(name, name_len, "tab")) return GLFW_KEY_TAB;
+    if (str_ieq_const(name, name_len, "backspace")) return GLFW_KEY_BACKSPACE;
+    if (str_ieq_const(name, name_len, "delete")) return GLFW_KEY_DELETE;
+    if (str_ieq_const(name, name_len, "escape") || str_ieq_const(name, name_len, "esc")) return GLFW_KEY_ESCAPE;
+    if (str_ieq_const(name, name_len, "left")) return GLFW_KEY_LEFT;
+    if (str_ieq_const(name, name_len, "right")) return GLFW_KEY_RIGHT;
+    if (str_ieq_const(name, name_len, "up")) return GLFW_KEY_UP;
+    if (str_ieq_const(name, name_len, "down")) return GLFW_KEY_DOWN;
+    if (str_ieq_const(name, name_len, "home")) return GLFW_KEY_HOME;
+    if (str_ieq_const(name, name_len, "end")) return GLFW_KEY_END;
+    if (str_ieq_const(name, name_len, "pageup")) return GLFW_KEY_PAGE_UP;
+    if (str_ieq_const(name, name_len, "pagedown")) return GLFW_KEY_PAGE_DOWN;
+    if (str_ieq_const(name, name_len, "control") || str_ieq_const(name, name_len, "ctrl")) return GLFW_KEY_LEFT_CONTROL;
+    if (str_ieq_const(name, name_len, "shift")) return GLFW_KEY_LEFT_SHIFT;
+    if (str_ieq_const(name, name_len, "alt")) return GLFW_KEY_LEFT_ALT;
+    if (str_ieq_const(name, name_len, "super") || str_ieq_const(name, name_len, "cmd") || str_ieq_const(name, name_len, "meta")) return GLFW_KEY_LEFT_SUPER;
 
     // Function keys
     if (name[0] == 'f' || name[0] == 'F') {

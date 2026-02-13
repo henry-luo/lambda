@@ -7,6 +7,10 @@
 #include <cstring>
 #include <cctype>
 
+extern "C" {
+#include "../../../lib/str.h"
+}
+
 namespace lambda {
 namespace markup {
 
@@ -111,10 +115,9 @@ Format FormatRegistry::detectFromFilename(const char* filename) {
 
     // Convert to lowercase for comparison
     char ext_lower[32];
-    size_t i = 0;
-    for (; ext[i] && i < sizeof(ext_lower) - 1; i++) {
-        ext_lower[i] = tolower((unsigned char)ext[i]);
-    }
+    size_t i = strlen(ext);
+    if (i > sizeof(ext_lower) - 1) i = sizeof(ext_lower) - 1;
+    str_to_lower(ext_lower, ext, i);
     ext_lower[i] = '\0';
 
     // Check each adapter's extensions

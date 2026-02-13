@@ -100,17 +100,17 @@ TEST_F(StrCmpTest, IEqBasic) {
 }
 
 TEST_F(StrCmpTest, EqLit) {
-    EXPECT_TRUE(str_eq_lit("div", 3, "div"));
-    EXPECT_FALSE(str_eq_lit("div", 3, "span"));
-    EXPECT_FALSE(str_eq_lit("div", 3, "di"));
-    EXPECT_TRUE(str_eq_lit("", 0, ""));
-    EXPECT_TRUE(str_eq_lit(NULL, 0, ""));
+    EXPECT_TRUE(str_eq_const("div", 3, "div"));
+    EXPECT_FALSE(str_eq_const("div", 3, "span"));
+    EXPECT_FALSE(str_eq_const("div", 3, "di"));
+    EXPECT_TRUE(str_eq_const("", 0, ""));
+    EXPECT_TRUE(str_eq_const(NULL, 0, ""));
 }
 
 TEST_F(StrCmpTest, IEqLit) {
-    EXPECT_TRUE(str_ieq_lit("DIV", 3, "div"));
-    EXPECT_TRUE(str_ieq_lit("Content-Type", 12, "content-type"));
-    EXPECT_FALSE(str_ieq_lit("abc", 3, "abd"));
+    EXPECT_TRUE(str_ieq_const("DIV", 3, "div"));
+    EXPECT_TRUE(str_ieq_const("Content-Type", 12, "content-type"));
+    EXPECT_FALSE(str_ieq_const("abc", 3, "abd"));
 }
 
 /* ================================================================== *
@@ -134,13 +134,13 @@ TEST_F(StrPrefixTest, EndsWith) {
 }
 
 TEST_F(StrPrefixTest, StartsWithLit) {
-    EXPECT_TRUE(str_starts_with_lit("http://x", 8, "http://"));
-    EXPECT_FALSE(str_starts_with_lit("ftp://x", 7, "http://"));
+    EXPECT_TRUE(str_starts_with_const("http://x", 8, "http://"));
+    EXPECT_FALSE(str_starts_with_const("ftp://x", 7, "http://"));
 }
 
 TEST_F(StrPrefixTest, EndsWithLit) {
-    EXPECT_TRUE(str_ends_with_lit("style.css", 9, ".css"));
-    EXPECT_FALSE(str_ends_with_lit("style.js", 8, ".css"));
+    EXPECT_TRUE(str_ends_with_const("style.css", 9, ".css"));
+    EXPECT_FALSE(str_ends_with_const("style.js", 8, ".css"));
 }
 
 TEST_F(StrPrefixTest, IStartsWith) {
@@ -152,6 +152,22 @@ TEST_F(StrPrefixTest, IStartsWith) {
 TEST_F(StrPrefixTest, IEndsWith) {
     EXPECT_TRUE(str_iends_with("FILE.JSON", 9, ".json", 5));
     EXPECT_FALSE(str_iends_with("FILE.XML", 8, ".json", 5));
+}
+
+TEST_F(StrPrefixTest, IStartsWithConst) {
+    EXPECT_TRUE(str_istarts_with_const("HTTP://example.com", 18, "http://"));
+    EXPECT_TRUE(str_istarts_with_const("Content-Type", 12, "content-"));
+    EXPECT_FALSE(str_istarts_with_const("ftp://x", 7, "http://"));
+    EXPECT_TRUE(str_istarts_with_const("hello", 5, ""));
+    EXPECT_FALSE(str_istarts_with_const("", 0, "a"));
+}
+
+TEST_F(StrPrefixTest, IEndsWithConst) {
+    EXPECT_TRUE(str_iends_with_const("FILE.JSON", 9, ".json"));
+    EXPECT_TRUE(str_iends_with_const("image.PNG", 9, ".png"));
+    EXPECT_FALSE(str_iends_with_const("FILE.XML", 8, ".json"));
+    EXPECT_TRUE(str_iends_with_const("hello", 5, ""));
+    EXPECT_FALSE(str_iends_with_const("", 0, ".txt"));
 }
 
 TEST_F(StrPrefixTest, NullSafety) {

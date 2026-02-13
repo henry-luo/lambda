@@ -21,6 +21,7 @@
 #include <math.h>
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 
 /**
  * find_font_path_platform
@@ -74,7 +75,7 @@ char* find_font_path_platform(const char* font_name) {
 
     // Check hardcoded mappings first
     for (int i = 0; mappings[i].family_name != NULL; i++) {
-        if (strcasecmp(font_name, mappings[i].family_name) == 0) {
+        if (str_ieq(font_name, strlen(font_name), mappings[i].family_name, strlen(mappings[i].family_name))) {
             FILE* test_file = fopen(mappings[i].file_path, "r");
             if (test_file) {
                 fclose(test_file);

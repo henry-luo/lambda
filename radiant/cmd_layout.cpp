@@ -112,7 +112,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                 TypeElmt* type = (TypeElmt*)elem->type;
 
                 // Check for DOCTYPE element (case-insensitive)
-                if (type && strcasecmp(type->name.str, "!DOCTYPE") == 0) {
+                if (type && str_ieq_const(type->name.str, strlen(type->name.str), "!DOCTYPE")) {
                     log_debug("Found DOCTYPE element");
 
                     // Extract DOCTYPE content from the element's children
@@ -182,7 +182,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 
                             // HTML5 DOCTYPE: "html" with no public/system identifiers
                             // Must check this AFTER other patterns to avoid false matches
-                            if (strncasecmp(content, "html", 4) == 0) {
+                            if (str_istarts_with_const(content, strlen(content), "html")) {
                                 // Skip whitespace after "html"
                                 const char* after_html = content + 4;
                                 while (*after_html && isspace(*after_html)) {
@@ -268,7 +268,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             // The DOM iterator will skip DomComment nodes via !is_element() check below.
             TypeElmt* child_type = (TypeElmt*)html_child->type;
             if (child_type && (strcmp(child_type->name.str, "!--") == 0 ||
-                               strcasecmp(child_type->name.str, "!DOCTYPE") == 0)) {
+                               str_ieq_const(child_type->name.str, strlen(child_type->name.str), "!DOCTYPE"))) {
                 continue;  // Skip comment/DOCTYPE - DOM has corresponding DomComment
             }
 
@@ -325,7 +325,7 @@ Element* get_html_root_element(Input* input) {
                 TypeElmt* type = (TypeElmt*)elem->type;
 
                 // Skip DOCTYPE and comments (case-insensitive for DOCTYPE)
-                if (strcasecmp(type->name.str, "!DOCTYPE") != 0 &&
+                if (!str_ieq_const(type->name.str, strlen(type->name.str), "!DOCTYPE") &&
                     strcmp(type->name.str, "!--") != 0) {
                     return elem;
                 }
@@ -433,20 +433,20 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
 
             log_debug("[viewport] Key='%s' Value='%s'", key, value);
 
-            if (strcasecmp(key, "initial-scale") == 0) {
+            if (str_ieq_const(key, strlen(key), "initial-scale")) {
                 doc->viewport_initial_scale = (float)str_to_double_default(value, strlen(value), 0.0);
                 log_info("[viewport] initial-scale=%.2f", doc->viewport_initial_scale);
             }
-            else if (strcasecmp(key, "minimum-scale") == 0) {
+            else if (str_ieq_const(key, strlen(key), "minimum-scale")) {
                 doc->viewport_min_scale = (float)str_to_double_default(value, strlen(value), 0.0);
                 log_debug("[viewport] minimum-scale=%.2f", doc->viewport_min_scale);
             }
-            else if (strcasecmp(key, "maximum-scale") == 0) {
+            else if (str_ieq_const(key, strlen(key), "maximum-scale")) {
                 doc->viewport_max_scale = (float)str_to_double_default(value, strlen(value), 0.0);
                 log_debug("[viewport] maximum-scale=%.2f", doc->viewport_max_scale);
             }
-            else if (strcasecmp(key, "width") == 0) {
-                if (strcasecmp(value, "device-width") == 0) {
+            else if (str_ieq_const(key, strlen(key), "width")) {
+                if (str_ieq_const(value, strlen(value), "device-width")) {
                     doc->viewport_width = 0;  // 0 means device-width
                     log_debug("[viewport] width=device-width");
                 } else {
@@ -454,8 +454,8 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
                     log_debug("[viewport] width=%d", doc->viewport_width);
                 }
             }
-            else if (strcasecmp(key, "height") == 0) {
-                if (strcasecmp(value, "device-height") == 0) {
+            else if (str_ieq_const(key, strlen(key), "height")) {
+                if (str_ieq_const(value, strlen(value), "device-height")) {
                     doc->viewport_height = 0;  // 0 means device-height
                     log_debug("[viewport] height=device-height");
                 } else {
@@ -479,9 +479,9 @@ void extract_viewport_meta(Element* elem, DomDocument* doc) {
     if (!type) return;
 
     // Check if this is a <meta> element with name="viewport"
-    if (strcasecmp(type->name.str, "meta") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "meta")) {
         const char* name = extract_element_attribute(elem, "name", nullptr);
-        if (name && strcasecmp(name, "viewport") == 0) {
+        if (name && str_ieq_const(name, strlen(name), "viewport")) {
             const char* content = extract_element_attribute(elem, "content", nullptr);
             if (content) {
                 parse_viewport_content(content, doc);
@@ -491,7 +491,7 @@ void extract_viewport_meta(Element* elem, DomDocument* doc) {
     }
 
     // Stop searching after <body> - viewport meta should be in <head>
-    if (strcasecmp(type->name.str, "body") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "body")) {
         return;
     }
 
@@ -517,7 +517,7 @@ const char* extract_base_href(Element* elem) {
     if (!type) return nullptr;
 
     // Check if this is a <base> element with href attribute
-    if (strcasecmp(type->name.str, "base") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "base")) {
         const char* href = extract_element_attribute(elem, "href", nullptr);
         if (href && strlen(href) > 0) {
             log_debug("[base] Found <base href=\"%s\">", href);
@@ -527,7 +527,7 @@ const char* extract_base_href(Element* elem) {
     }
 
     // Stop searching after <body> - base should be in <head>
-    if (strcasecmp(type->name.str, "body") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "body")) {
         return nullptr;
     }
 
@@ -563,7 +563,7 @@ float extract_transform_scale(CssDeclaration* transform_decl) {
             if (!func->name) continue;
 
             // Check for scale functions
-            if (strcasecmp(func->name, "scale") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+            if (str_ieq_const(func->name, strlen(func->name), "scale") && func->arg_count >= 1 && func->args && func->args[0]) {
                 CssValue* arg = func->args[0];
                 if (arg->type == CSS_VALUE_TYPE_NUMBER) {
                     float scale_x = (float)arg->data.number.value;
@@ -576,14 +576,14 @@ float extract_transform_scale(CssDeclaration* transform_decl) {
                     return scale_x;
                 }
             }
-            else if (strcasecmp(func->name, "scaleX") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+            else if (str_ieq_const(func->name, strlen(func->name), "scaleX") && func->arg_count >= 1 && func->args && func->args[0]) {
                 if (func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
                     float scale = (float)func->args[0]->data.number.value;
                     log_info("[transform] Found scaleX(%.3f)", scale);
                     return scale;  // X scale only
                 }
             }
-            else if (strcasecmp(func->name, "scaleY") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+            else if (str_ieq_const(func->name, strlen(func->name), "scaleY") && func->arg_count >= 1 && func->args && func->args[0]) {
                 if (func->args[0]->type == CSS_VALUE_TYPE_NUMBER) {
                     float scale = (float)func->args[0]->data.number.value;
                     log_info("[transform] Found scaleY(%.3f)", scale);
@@ -595,7 +595,7 @@ float extract_transform_scale(CssDeclaration* transform_decl) {
     else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         // Single transform function
         CssFunction* func = value->data.function;
-        if (func->name && strcasecmp(func->name, "scale") == 0 && func->arg_count >= 1 && func->args && func->args[0]) {
+        if (func->name && str_ieq_const(func->name, strlen(func->name), "scale") && func->arg_count >= 1 && func->args && func->args[0]) {
             CssValue* arg = func->args[0];
             if (arg->type == CSS_VALUE_TYPE_NUMBER) {
                 float scale = (float)arg->data.number.value;
@@ -620,14 +620,14 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
     DomElement* body_elem = nullptr;
 
     // Traverse to find body - typically root is <html>, body is a child
-    if (root->tag_name && strcasecmp(root->tag_name, "body") == 0) {
+    if (root->tag_name && str_ieq_const(root->tag_name, strlen(root->tag_name), "body")) {
         body_elem = root;
     } else {
         // Search in children
         for (DomNode* child = root->first_child; child; child = child->next_sibling) {
             if (child->node_type == DOM_NODE_ELEMENT) {
                 DomElement* child_elem = static_cast<DomElement*>(child);
-                if (child_elem->tag_name && strcasecmp(child_elem->tag_name, "body") == 0) {
+                if (child_elem->tag_name && str_ieq_const(child_elem->tag_name, strlen(child_elem->tag_name), "body")) {
                     body_elem = child_elem;
                     break;
                 }
@@ -635,7 +635,7 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
                 for (DomNode* grandchild = child_elem->first_child; grandchild; grandchild = grandchild->next_sibling) {
                     if (grandchild->node_type == DOM_NODE_ELEMENT) {
                         DomElement* grandchild_elem = static_cast<DomElement*>(grandchild);
-                        if (grandchild_elem->tag_name && strcasecmp(grandchild_elem->tag_name, "body") == 0) {
+                        if (grandchild_elem->tag_name && str_ieq_const(grandchild_elem->tag_name, strlen(grandchild_elem->tag_name), "body")) {
                             body_elem = grandchild_elem;
                             break;
                         }
@@ -673,12 +673,12 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
     if (!type) return;
 
     // Check if this is a <link> element
-    if (strcasecmp(type->name.str, "link") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
         // Extract 'rel' and 'href' attributes
         const char* rel = extract_element_attribute(elem, "rel", nullptr);
         const char* href = extract_element_attribute(elem, "href", nullptr);
 
-        if (rel && href && strcasecmp(rel, "stylesheet") == 0) {
+        if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
             log_debug("[CSS] Found <link rel='stylesheet' href='%s'>", href);
 
             // Resolve relative path using base_path (supports file:// and http:// URLs)
@@ -810,7 +810,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
     if (!type) return;
 
     // Check if this is a <style> element
-    if (strcasecmp(type->name.str, "style") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
         // Extract text content from style element
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
@@ -864,7 +864,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
     if (!type) return;
 
     // Check if this is a <style> element
-    if (strcasecmp(type->name.str, "style") == 0) {
+    if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
         // Extract text content from style element
         // Text content should be in the element's children
         for (int64_t i = 0; i < elem->length; i++) {
@@ -2199,11 +2199,11 @@ DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_heigh
     const char* ext = strrchr(img_filepath, '.');
     ImageFormat format = IMAGE_FORMAT_PNG;  // default
     if (ext) {
-        if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
+        if (str_ieq_const(ext, strlen(ext), ".jpg") || str_ieq_const(ext, strlen(ext), ".jpeg")) {
             format = IMAGE_FORMAT_JPEG;
-        } else if (strcasecmp(ext, ".gif") == 0) {
+        } else if (str_ieq_const(ext, strlen(ext), ".gif")) {
             format = IMAGE_FORMAT_GIF;
-        } else if (strcasecmp(ext, ".png") == 0) {
+        } else if (str_ieq_const(ext, strlen(ext), ".png")) {
             format = IMAGE_FORMAT_PNG;
         }
     }
@@ -3368,7 +3368,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         TypeElmt* elem_type = (TypeElmt*)result_elem->type;
 
         // Check if this is an 'html' element
-        if (elem_type && strcasecmp(elem_type->name.str, "html") == 0) {
+        if (elem_type && str_ieq_const(elem_type->name.str, strlen(elem_type->name.str), "html")) {
             log_debug("[Lambda Script] Script returned complete HTML document, using as-is");
             is_html_document = true;
             html_elem = result_elem;
