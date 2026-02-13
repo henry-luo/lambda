@@ -157,114 +157,153 @@
         }
       ]
     },
-    "symbol_command": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "\\infty"
-        },
-        {
-          "type": "STRING",
-          "value": "\\infinity"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nexists"
-        },
-        {
-          "type": "STRING",
-          "value": "\\exists"
-        },
-        {
-          "type": "STRING",
-          "value": "\\forall"
-        },
-        {
-          "type": "STRING",
-          "value": "\\imath"
-        },
-        {
-          "type": "STRING",
-          "value": "\\jmath"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ell"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Re"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Im"
-        },
-        {
-          "type": "STRING",
-          "value": "\\partial"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nabla"
-        },
-        {
-          "type": "STRING",
-          "value": "\\aleph"
-        },
-        {
-          "type": "STRING",
-          "value": "\\hbar"
-        },
-        {
-          "type": "STRING",
-          "value": "\\emptyset"
-        },
-        {
-          "type": "STRING",
-          "value": "\\varnothing"
-        },
-        {
-          "type": "STRING",
-          "value": "\\cdots"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ldots"
-        },
-        {
-          "type": "STRING",
-          "value": "\\vdots"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ddots"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dots"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dotsb"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dotsc"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dotsi"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dotsm"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dotso"
+    "_symbol_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "PATTERN",
+          "value": "\\\\(infinity|varnothing|emptyset|nexists|partial|exists|forall|cdots|ldots|vdots|ddots|infty|imath|jmath|nabla|aleph|dotsb|dotsc|dotsi|dotsm|dotso|dots|hbar|ell|Re|Im)"
         }
-      ]
+      }
+    },
+    "_operator_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(pm|mp|times|div|cdot|ast|star|circ|bullet|oplus|ominus|otimes|oslash|odot|cup|cap|sqcup|sqcap|vee|wedge|setminus)"
+      }
+    },
+    "_relation_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(leq|le|geq|ge|neq|ne|equiv|sim|simeq|approx|cong|propto|asymp|subset|supset|subseteq|supseteq|in|ni|notin|ll|gg|prec|succ|preceq|succeq|perp|parallel|mid|vdash|dashv|models)"
+      }
+    },
+    "_arrow_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(leftrightarrows|leftleftarrows|leftrightsquigarrow|longleftrightarrow|Longleftrightarrow|nleftrightarrow|nLeftrightarrow|leftrightharpoons|rightleftharpoons|leftrightarrow|Leftrightarrow|leftharpoondown|longleftarrow|Longleftarrow|leftharpoonup|hookleftarrow|leftarrow|Leftarrow|curvearrowright|curvearrowleft|rightrightarrows|rightharpoondown|circlearrowright|circlearrowleft|looparrowright|looparrowleft|rightharpoonup|hookrightarrow|longrightarrow|Longrightarrow|nRightarrow|nrightarrow|rightarrow|Rightarrow|longmapsto|nearrow|searrow|nwarrow|swarrow|mapsto|gets|to)"
+      }
+    },
+    "_delimiter_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(lmoustache|rmoustache|backslash|langle|rangle|lfloor|rfloor|lbrace|rbrace|lbrack|rbrack|lgroup|rgroup|lceil|rceil|lvert|rvert|lVert|rVert|vert|Vert)"
+      }
+    },
+    "_big_operator_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(bigsqcup|bigotimes|bigoplus|bigwedge|bigvee|bigcap|bigcup|coprod|liminf|limsup|iiint|iint|oint|prod|sum|lim|max|min|sup|inf|int|det|gcd|Pr)"
+      }
+    },
+    "_accent_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(overleftrightarrow|underleftrightarrow|overrightarrow|underrightarrow|overleftarrow|underleftarrow|widetilde|underbrace|underline|overbrace|overline|widehat|ddddot|dddot|acute|breve|check|grave|tilde|ddot|dot|hat|bar|vec)"
+      }
+    },
+    "_sized_delim_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(biggl|Biggl|biggr|Biggr|biggm|Biggm|bigg|Bigg|bigl|Bigl|bigr|Bigr|bigm|Bigm|big|Big)"
+      }
+    },
+    "_style_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(scriptscriptstyle|operatorname|displaystyle|mathnormal|scriptstyle|textstyle|mathfrak|mathscr|mathcal|mathrm|mathit|mathbf|mathsf|mathtt|mathbb)"
+      }
+    },
+    "_extensible_arrow_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(xLeftrightarrow|xleftrightarrow|xhookrightarrow|xhookleftarrow|xRightarrow|xrightarrow|xLeftarrow|xleftarrow|xmapsto)"
+      }
+    },
+    "_text_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(textrm|textit|textbf|textsf|texttt|text|mbox|hbox)"
+      }
+    },
+    "_box_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(mathllap|mathrlap|mathclap|boxed|bbox|fbox|llap|rlap|clap)"
+      }
+    },
+    "_frac_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\[dtc]?frac"
+      }
+    },
+    "_binom_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\[dt]?binom"
+      }
+    },
+    "_overunder_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(overset|underset|stackrel)"
+      }
+    },
+    "_color_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(textcolor|colorbox|color)"
+      }
+    },
+    "_phantom_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(hphantom|vphantom|phantom|smash)"
+      }
+    },
+    "_matrix_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(bordermatrix|pmatrix|matrix)"
+      }
+    },
+    "_skip_cmd": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "\\\\(hskip|kern|mskip|mkern)"
+      }
+    },
+    "_env_name_token": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PATTERN",
+        "value": "smallmatrix|equation\\*?|multline\\*?|subarray|gathered|Vmatrix|Bmatrix|bmatrix|vmatrix|pmatrix|aligned|matrix|gather\\*?|align\\*?|rcases|dcases|split|cases|array"
+      }
+    },
+    "symbol_command": {
+      "type": "SYMBOL",
+      "name": "_symbol_cmd"
     },
     "symbol": {
       "type": "PATTERN",
@@ -301,88 +340,8 @@
           "value": "/"
         },
         {
-          "type": "STRING",
-          "value": "\\pm"
-        },
-        {
-          "type": "STRING",
-          "value": "\\mp"
-        },
-        {
-          "type": "STRING",
-          "value": "\\times"
-        },
-        {
-          "type": "STRING",
-          "value": "\\div"
-        },
-        {
-          "type": "STRING",
-          "value": "\\cdot"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ast"
-        },
-        {
-          "type": "STRING",
-          "value": "\\star"
-        },
-        {
-          "type": "STRING",
-          "value": "\\circ"
-        },
-        {
-          "type": "STRING",
-          "value": "\\bullet"
-        },
-        {
-          "type": "STRING",
-          "value": "\\oplus"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ominus"
-        },
-        {
-          "type": "STRING",
-          "value": "\\otimes"
-        },
-        {
-          "type": "STRING",
-          "value": "\\oslash"
-        },
-        {
-          "type": "STRING",
-          "value": "\\odot"
-        },
-        {
-          "type": "STRING",
-          "value": "\\cup"
-        },
-        {
-          "type": "STRING",
-          "value": "\\cap"
-        },
-        {
-          "type": "STRING",
-          "value": "\\sqcup"
-        },
-        {
-          "type": "STRING",
-          "value": "\\sqcap"
-        },
-        {
-          "type": "STRING",
-          "value": "\\vee"
-        },
-        {
-          "type": "STRING",
-          "value": "\\wedge"
-        },
-        {
-          "type": "STRING",
-          "value": "\\setminus"
+          "type": "SYMBOL",
+          "name": "_operator_cmd"
         }
       ]
     },
@@ -406,236 +365,12 @@
           "value": "!"
         },
         {
-          "type": "STRING",
-          "value": "\\leq"
+          "type": "SYMBOL",
+          "name": "_relation_cmd"
         },
         {
-          "type": "STRING",
-          "value": "\\le"
-        },
-        {
-          "type": "STRING",
-          "value": "\\geq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ge"
-        },
-        {
-          "type": "STRING",
-          "value": "\\neq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ne"
-        },
-        {
-          "type": "STRING",
-          "value": "\\equiv"
-        },
-        {
-          "type": "STRING",
-          "value": "\\sim"
-        },
-        {
-          "type": "STRING",
-          "value": "\\simeq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\approx"
-        },
-        {
-          "type": "STRING",
-          "value": "\\cong"
-        },
-        {
-          "type": "STRING",
-          "value": "\\propto"
-        },
-        {
-          "type": "STRING",
-          "value": "\\asymp"
-        },
-        {
-          "type": "STRING",
-          "value": "\\subset"
-        },
-        {
-          "type": "STRING",
-          "value": "\\supset"
-        },
-        {
-          "type": "STRING",
-          "value": "\\subseteq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\supseteq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\in"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ni"
-        },
-        {
-          "type": "STRING",
-          "value": "\\notin"
-        },
-        {
-          "type": "STRING",
-          "value": "\\ll"
-        },
-        {
-          "type": "STRING",
-          "value": "\\gg"
-        },
-        {
-          "type": "STRING",
-          "value": "\\prec"
-        },
-        {
-          "type": "STRING",
-          "value": "\\succ"
-        },
-        {
-          "type": "STRING",
-          "value": "\\preceq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\succeq"
-        },
-        {
-          "type": "STRING",
-          "value": "\\perp"
-        },
-        {
-          "type": "STRING",
-          "value": "\\parallel"
-        },
-        {
-          "type": "STRING",
-          "value": "\\mid"
-        },
-        {
-          "type": "STRING",
-          "value": "\\vdash"
-        },
-        {
-          "type": "STRING",
-          "value": "\\dashv"
-        },
-        {
-          "type": "STRING",
-          "value": "\\models"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftrightarrows"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftleftarrows"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Leftrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nleftrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nLeftrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftrightharpoons"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rightleftharpoons"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftrightsquigarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftharpoonup"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftharpoondown"
-        },
-        {
-          "type": "STRING",
-          "value": "\\leftarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Leftarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\longleftarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Longleftarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\longleftrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Longleftrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\hookleftarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Rightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nRightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nearrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\searrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\nwarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\swarrow"
+          "type": "SYMBOL",
+          "name": "_arrow_cmd"
         },
         {
           "type": "STRING",
@@ -660,70 +395,6 @@
         {
           "type": "STRING",
           "value": "\\Updownarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\hookrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\mapsto"
-        },
-        {
-          "type": "STRING",
-          "value": "\\longmapsto"
-        },
-        {
-          "type": "STRING",
-          "value": "\\to"
-        },
-        {
-          "type": "STRING",
-          "value": "\\gets"
-        },
-        {
-          "type": "STRING",
-          "value": "\\curvearrowright"
-        },
-        {
-          "type": "STRING",
-          "value": "\\curvearrowleft"
-        },
-        {
-          "type": "STRING",
-          "value": "\\looparrowright"
-        },
-        {
-          "type": "STRING",
-          "value": "\\looparrowleft"
-        },
-        {
-          "type": "STRING",
-          "value": "\\circlearrowright"
-        },
-        {
-          "type": "STRING",
-          "value": "\\circlearrowleft"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rightrightarrows"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rightharpoonup"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rightharpoondown"
-        },
-        {
-          "type": "STRING",
-          "value": "\\longrightarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "\\Longrightarrow"
         }
       ]
     },
@@ -1100,25 +771,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\frac"
-              },
-              {
-                "type": "STRING",
-                "value": "\\dfrac"
-              },
-              {
-                "type": "STRING",
-                "value": "\\tfrac"
-              },
-              {
-                "type": "STRING",
-                "value": "\\cfrac"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_frac_cmd"
           }
         },
         {
@@ -1178,21 +832,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\binom"
-              },
-              {
-                "type": "STRING",
-                "value": "\\dbinom"
-              },
-              {
-                "type": "STRING",
-                "value": "\\tbinom"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_binom_cmd"
           }
         },
         {
@@ -1379,73 +1020,8 @@
             "type": "FIELD",
             "name": "size",
             "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "\\big"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Big"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigg"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Bigg"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigl"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Bigl"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\biggl"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Biggl"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigr"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Bigr"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\biggr"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Biggr"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigm"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Bigm"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\biggm"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Biggm"
-                }
-              ]
+              "type": "SYMBOL",
+              "name": "_sized_delim_cmd"
             }
           },
           {
@@ -1496,22 +1072,6 @@
         },
         {
           "type": "STRING",
-          "value": "\\lbrace"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rbrace"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lbrack"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rbrack"
-        },
-        {
-          "type": "STRING",
           "value": "|"
         },
         {
@@ -1520,71 +1080,11 @@
         },
         {
           "type": "STRING",
-          "value": "\\vert"
+          "value": "."
         },
         {
-          "type": "STRING",
-          "value": "\\Vert"
-        },
-        {
-          "type": "STRING",
-          "value": "\\langle"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rangle"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lfloor"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rfloor"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lceil"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rceil"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lvert"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rvert"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lVert"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rVert"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lgroup"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rgroup"
-        },
-        {
-          "type": "STRING",
-          "value": "\\lmoustache"
-        },
-        {
-          "type": "STRING",
-          "value": "\\rmoustache"
-        },
-        {
-          "type": "STRING",
-          "value": "\\backslash"
+          "type": "SYMBOL",
+          "name": "_delimiter_cmd"
         },
         {
           "type": "STRING",
@@ -1609,10 +1109,6 @@
         {
           "type": "STRING",
           "value": "\\Updownarrow"
-        },
-        {
-          "type": "STRING",
-          "value": "."
         }
       ]
     },
@@ -1623,21 +1119,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\overset"
-              },
-              {
-                "type": "STRING",
-                "value": "\\underset"
-              },
-              {
-                "type": "STRING",
-                "value": "\\stackrel"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_overunder_cmd"
           }
         },
         {
@@ -1665,45 +1148,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\xrightarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xleftarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xRightarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xLeftarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xleftrightarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xLeftrightarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xhookleftarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xhookrightarrow"
-              },
-              {
-                "type": "STRING",
-                "value": "\\xmapsto"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_extensible_arrow_cmd"
           }
         },
         {
@@ -1742,105 +1188,8 @@
             "type": "FIELD",
             "name": "cmd",
             "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "\\hat"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\check"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\tilde"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\acute"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\grave"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\dot"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\ddot"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\dddot"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\ddddot"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\breve"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bar"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\vec"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\widehat"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\widetilde"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\overline"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\underline"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\overbrace"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\underbrace"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\overrightarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\overleftarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\overleftrightarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\underrightarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\underleftarrow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\underleftrightarrow"
-                }
-              ]
+              "type": "SYMBOL",
+              "name": "_accent_cmd"
             }
           },
           {
@@ -1881,105 +1230,8 @@
             "type": "FIELD",
             "name": "op",
             "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "\\sum"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\prod"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\coprod"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\int"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\iint"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\iiint"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\oint"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigcup"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigcap"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigsqcup"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigvee"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigwedge"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigoplus"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\bigotimes"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\liminf"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\limsup"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\lim"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\max"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\min"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\sup"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\inf"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\det"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\gcd"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\Pr"
-                }
-              ]
+              "type": "SYMBOL",
+              "name": "_big_operator_cmd"
             }
           },
           {
@@ -2160,101 +1412,8 @@
       "value": "\\end"
     },
     "env_name": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "matrix"
-        },
-        {
-          "type": "STRING",
-          "value": "pmatrix"
-        },
-        {
-          "type": "STRING",
-          "value": "bmatrix"
-        },
-        {
-          "type": "STRING",
-          "value": "vmatrix"
-        },
-        {
-          "type": "STRING",
-          "value": "Vmatrix"
-        },
-        {
-          "type": "STRING",
-          "value": "Bmatrix"
-        },
-        {
-          "type": "STRING",
-          "value": "smallmatrix"
-        },
-        {
-          "type": "STRING",
-          "value": "aligned"
-        },
-        {
-          "type": "STRING",
-          "value": "align"
-        },
-        {
-          "type": "STRING",
-          "value": "align*"
-        },
-        {
-          "type": "STRING",
-          "value": "gathered"
-        },
-        {
-          "type": "STRING",
-          "value": "gather"
-        },
-        {
-          "type": "STRING",
-          "value": "gather*"
-        },
-        {
-          "type": "STRING",
-          "value": "split"
-        },
-        {
-          "type": "STRING",
-          "value": "multline"
-        },
-        {
-          "type": "STRING",
-          "value": "multline*"
-        },
-        {
-          "type": "STRING",
-          "value": "cases"
-        },
-        {
-          "type": "STRING",
-          "value": "rcases"
-        },
-        {
-          "type": "STRING",
-          "value": "dcases"
-        },
-        {
-          "type": "STRING",
-          "value": "array"
-        },
-        {
-          "type": "STRING",
-          "value": "subarray"
-        },
-        {
-          "type": "STRING",
-          "value": "equation"
-        },
-        {
-          "type": "STRING",
-          "value": "equation*"
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "_env_name_token"
     },
     "env_columns": {
       "type": "SEQ",
@@ -2359,21 +1518,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\matrix"
-              },
-              {
-                "type": "STRING",
-                "value": "\\pmatrix"
-              },
-              {
-                "type": "STRING",
-                "value": "\\bordermatrix"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_matrix_cmd"
           }
         },
         {
@@ -2429,41 +1575,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\text"
-              },
-              {
-                "type": "STRING",
-                "value": "\\textrm"
-              },
-              {
-                "type": "STRING",
-                "value": "\\textit"
-              },
-              {
-                "type": "STRING",
-                "value": "\\textbf"
-              },
-              {
-                "type": "STRING",
-                "value": "\\textsf"
-              },
-              {
-                "type": "STRING",
-                "value": "\\texttt"
-              },
-              {
-                "type": "STRING",
-                "value": "\\mbox"
-              },
-              {
-                "type": "STRING",
-                "value": "\\hbox"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_text_cmd"
           }
         },
         {
@@ -2515,69 +1628,8 @@
             "type": "FIELD",
             "name": "cmd",
             "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "\\mathrm"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathit"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathbf"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathsf"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathtt"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathcal"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathfrak"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathbb"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathscr"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\mathnormal"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\displaystyle"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\textstyle"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\scriptstyle"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\scriptscriptstyle"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\operatorname"
-                }
-              ]
+              "type": "SYMBOL",
+              "name": "_style_cmd"
             }
           },
           {
@@ -2623,45 +1675,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\bbox"
-              },
-              {
-                "type": "STRING",
-                "value": "\\fbox"
-              },
-              {
-                "type": "STRING",
-                "value": "\\boxed"
-              },
-              {
-                "type": "STRING",
-                "value": "\\llap"
-              },
-              {
-                "type": "STRING",
-                "value": "\\rlap"
-              },
-              {
-                "type": "STRING",
-                "value": "\\clap"
-              },
-              {
-                "type": "STRING",
-                "value": "\\mathllap"
-              },
-              {
-                "type": "STRING",
-                "value": "\\mathrlap"
-              },
-              {
-                "type": "STRING",
-                "value": "\\mathclap"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_box_cmd"
           }
         },
         {
@@ -2700,21 +1715,8 @@
             "type": "FIELD",
             "name": "cmd",
             "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "\\textcolor"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\color"
-                },
-                {
-                  "type": "STRING",
-                  "value": "\\colorbox"
-                }
-              ]
+              "type": "SYMBOL",
+              "name": "_color_cmd"
             }
           },
           {
@@ -2792,25 +1794,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\phantom"
-              },
-              {
-                "type": "STRING",
-                "value": "\\hphantom"
-              },
-              {
-                "type": "STRING",
-                "value": "\\vphantom"
-              },
-              {
-                "type": "STRING",
-                "value": "\\smash"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_phantom_cmd"
           }
         },
         {
@@ -2946,25 +1931,8 @@
           "type": "FIELD",
           "name": "cmd",
           "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "\\hskip"
-              },
-              {
-                "type": "STRING",
-                "value": "\\kern"
-              },
-              {
-                "type": "STRING",
-                "value": "\\mskip"
-              },
-              {
-                "type": "STRING",
-                "value": "\\mkern"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_skip_cmd"
           }
         },
         {
