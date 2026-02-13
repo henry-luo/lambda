@@ -41,7 +41,7 @@ true
 true
 "4.3"
 false
-'Test 5: Any Character (\.) and Ellipsis (...)'
+'Test 5: Any Character (\.) and Zero-More (\.\*)'
 "5.1"
 true
 "5.2"
