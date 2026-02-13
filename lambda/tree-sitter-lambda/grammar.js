@@ -66,7 +66,7 @@ function binary_expr($, in_attr, exclude_pipe = false) {
     // Pipe operators - same precedence, left-to-right chaining
     ...(exclude_pipe ? [] : [
       ['|', 'pipe'],
-      ['where', 'pipe'],  // same precedence as | for left-to-right chaining
+      ['that', 'pipe'],  // same precedence as | for left-to-right chaining
       // Pipe-to-file operators (procedural only) - lower precedence than | and where
       ['|>', 'pipe_file'],
       ['|>>', 'pipe_file'],
@@ -993,16 +993,16 @@ module.exports = grammar({
       $.binary_type,
       $.type_negation,         // prefix negation (string/symbol patterns)
       $.error_union_type,
-      $.constrained_type,      // type with where clause constraint
+      $.constrained_type,      // type with that clause constraint
     ),
 
-    // Constrained type: base_type where (constraint_expr)
-    // e.g. int where (5 < ~ < 10), string where (len(~) > 0)
+    // Constrained type: base_type that (constraint_expr)
+    // e.g. int that (5 < ~ < 10), string that (len(~) > 0)
     // The constraint uses ~ to refer to the value being checked
     // Parentheses required to avoid grammar ambiguity with index expressions
     constrained_type: $ => seq(
       field('base', choice($.primary_type, $.type_occurrence)),
-      'where',
+      'that',
       '(',
       field('constraint', $._expr),
       ')',

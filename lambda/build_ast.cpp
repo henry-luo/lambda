@@ -2210,6 +2210,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
     else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_PIPE; }
     else if (strview_equal(&op, "where")) { ast_node->op = OPERATOR_WHERE; }
+    else if (strview_equal(&op, "that")) { ast_node->op = OPERATOR_WHERE; }  // 'that' is alias for 'where'
     else if (strview_equal(&op, "|>")) { ast_node->op = OPERATOR_PIPE_FILE; }
     else if (strview_equal(&op, "|>>")) { ast_node->op = OPERATOR_PIPE_APPEND; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
