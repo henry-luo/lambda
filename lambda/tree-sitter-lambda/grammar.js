@@ -40,10 +40,11 @@ const decimal_literal = choice(
 const base64_unit = /[A-Za-z0-9+/]{4}/;
 const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
-// need to exclude relational exprs in attr, optionally exclude pipe operators
-function binary_expr($, in_attr, exclude_pipe = false) {
+// need to exclude relational exprs in attr (to avoid conflicts with element tags)
+// pipe operators are always included
+function binary_expr($, in_attr) {
   let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr))
-                        : (exclude_pipe ? $.expr_no_pipe : $._expr);
+                        : $._expr;
   let ops = [
     ['+', 'binary_plus'],
     ['++', 'binary_plus'],
@@ -55,7 +56,8 @@ function binary_expr($, in_attr, exclude_pipe = false) {
     ['^', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],
-    ...(in_attr ?[]:
+    // Relational operators - excluded in attr to avoid element tag conflicts
+    ...(in_attr ? [] :
       [['<', 'binary_relation'],
       ['<=', 'binary_relation'],
       ['>=', 'binary_relation'],
@@ -63,14 +65,11 @@ function binary_expr($, in_attr, exclude_pipe = false) {
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
-    // Pipe operators - same precedence, left-to-right chaining
-    ...(exclude_pipe ? [] : [
-      ['|', 'pipe'],
-      ['that', 'pipe'],  // same precedence as | for left-to-right chaining
-      // Pipe-to-file operators (procedural only) - lower precedence than | and where
-      ['|>', 'pipe_file'],
-      ['|>>', 'pipe_file'],
-    ]),
+    // Pipe operators - always included (even in attr context)
+    ['|', 'pipe'],
+    ['that', 'pipe'],  // filter operator: items that ~ > 0
+    ['|>', 'pipe_file'],
+    ['|>>', 'pipe_file'],
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     ['is', 'is_in'],
@@ -150,6 +149,8 @@ module.exports = grammar({
   conflicts: $ => [
     [$._expr, $.member_expr],
     [$._type_expr, $.constrained_type],
+    [$.primary_type, $._pattern_atom],  // both include string, range_type, identifier
+    [$._pattern_expr, $._type_expr],    // both include binary_type
   ],
 
   precedences: $ => [[
@@ -439,29 +440,10 @@ module.exports = grammar({
       $.raise_expr,
     ),
 
-    // Expression without pipe operators (|, where) - used in for loop iteration expression
-    expr_no_pipe: $ => choice(
-      $.primary_expr,
-      $.unary_expr,
-      $.spread_expr,
-      $.binary_expr_no_pipe,
-      $.let_expr,
-      $.if_expr,
-      $.match_expr,
-      $.for_expr,
-      $.fn_expr,
-      $.raise_expr,
-    ),
-
     // raise expression - raises an error in functional context
     raise_expr: $ => prec.right(seq(
       'raise', field('value', $._expr)
     )),
-
-    // Binary expression without pipe operators
-    binary_expr_no_pipe: $ => choice(
-      ...binary_expr($, false, true),
-    ),
 
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
@@ -707,23 +689,21 @@ module.exports = grammar({
     // Single variable: for v in expr
     // Indexed: for i, v in expr
     // Attribute iteration: for v at expr OR for k, v at expr
-    // Use _expression_no_pipe so 'where' is not consumed as binary operator
     loop_expr: $ => choice(
       // for value in | at expr
       seq(
-        field('name', $.identifier), choice('in', 'at'), field('as', $.expr_no_pipe)
+        field('name', $.identifier), choice('in', 'at'), field('as', $._expr)
       ),
       // for key, value in | at expr
       seq(
         field('index', $.identifier), ',', field('name', $.identifier),
-        choice('in', 'at'), field('as', $.expr_no_pipe)
+        choice('in', 'at'), field('as', $._expr)
       ),
     ),
 
     // let clause within for: let name = expr
-    // Use _expression_no_pipe so subsequent 'where' is not consumed
     for_let_clause: $ => seq(
-      'let', field('name', $.identifier), '=', field('value', $.expr_no_pipe)
+      'let', field('name', $.identifier), '=', field('value', $._expr)
     ),
 
     // where clause: where expr
@@ -733,9 +713,8 @@ module.exports = grammar({
     )),
 
     // order by clause: order by expr [asc|desc] [, expr [asc|desc], ...]
-    // Use _expression_no_pipe so limit/offset are not consumed
     order_spec: $ => seq(
-      field('expr', $.expr_no_pipe),
+      field('expr', $._expr),
       optional(field('dir', choice('asc', 'ascending', 'desc', 'descending')))
     ),
 
@@ -947,11 +926,12 @@ module.exports = grammar({
     // Pattern term: atom optionally followed by an occurrence modifier.
     _pattern_term: $ => choice(
       $._pattern_atom,
-      alias($.pattern_occurrence, $.type_occurrence),
+      alias($.pattern_occurrence, $.type_occurrence),  // atom with occurrence modifier
     ),
 
     // Occurrence modifier applied to a pattern atom.
-    pattern_occurrence: $ => prec.right(1, seq(
+    // Uses _pattern_atom (not _type_expr) so pattern_group can have occurrences
+    pattern_occurrence: $ => prec.right(seq(
       field('operand', $._pattern_atom),
       field('operator', $.occurrence),
     )),
@@ -963,22 +943,22 @@ module.exports = grammar({
     )),
 
     // Pattern negation: !pattern_atom
-    pattern_negation: $ => prec.right(seq(
-      '!', field('operand', $._pattern_atom),
-    )),
+    // pattern_negation: $ => prec.right(seq(
+    //   '!', field('operand', $._pattern_atom),
+    // )),
 
     // Binary pattern operations: union (|) and intersection (&)
-    pattern_binary: $ => choice(
-      ...type_pattern($._pattern_expr),
-    ),
+    // pattern_binary: $ => choice(
+    //   ...type_pattern($._pattern_expr),
+    // ),
 
     // Full pattern expression: the body of string/symbol pattern definitions.
     _pattern_expr: $ => choice(
       $._pattern_atom,
-      alias($.pattern_occurrence, $.type_occurrence),
+      alias($.pattern_occurrence, $.type_occurrence),  // atom with occurrence modifier
       $.pattern_seq,
-      alias($.pattern_negation, $.type_negation),
-      alias($.pattern_binary, $.binary_type),
+      $.type_negation,    // !pattern
+      $.binary_type,      // pattern | pattern, pattern & pattern
     ),
 
     // Prefix negation: !T (for string/symbol patterns: !\d)
