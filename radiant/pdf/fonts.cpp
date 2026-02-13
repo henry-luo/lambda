@@ -10,6 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/str.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -1026,7 +1027,7 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
     size_t name_len = strlen(ref_name);
     entry->name = (char*)pool_calloc(cache->pool, name_len + 1);
     if (entry->name) {
-        strcpy(entry->name, ref_name);
+        str_copy(entry->name, name_len + 1, ref_name, name_len);
     }
 
     // Get BaseFont using Map::get (safe, no runtime context needed)
@@ -1044,7 +1045,7 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
         if (base_str) {
             entry->base_font = (char*)pool_calloc(cache->pool, base_str->len + 1);
             if (entry->base_font) {
-                strcpy(entry->base_font, base_str->chars);
+                str_copy(entry->base_font, base_str->len + 1, base_str->chars, base_str->len);
             }
         }
     }

@@ -1,4 +1,5 @@
 #include "stringbuf.h"
+#include "str.h"
 #include <string.h>
 #include "log.h"
 
@@ -135,9 +136,8 @@ void stringbuf_append_str(StringBuf *sb, const char *str) {
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
     // Perform the copy
-    memcpy(sb->str->chars + sb->length, str, str_len);
+    str_copy(sb->str->chars + sb->length, str_len + 1, str, str_len);
     sb->length = new_length;
-    sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
 }
 
@@ -153,9 +153,8 @@ void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
-    memcpy(sb->str->chars + sb->length, str, len);
+    str_copy(sb->str->chars + sb->length, len + 1, str, len);
     sb->length = new_length;
-    sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
 }
 
@@ -189,7 +188,7 @@ void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
 
     if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
-    memset(sb->str->chars + sb->length, c, n);
+    str_fill(sb->str->chars + sb->length, n, c);
     sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
@@ -258,7 +257,7 @@ void stringbuf_copy(StringBuf *dst, const StringBuf *src) {
     stringbuf_reset(dst);
     if (!stringbuf_ensure_cap(dst, src->length + 1)) return;
 
-    memcpy(dst->str->chars, src->str->chars, src->length + 1);
+    str_copy(dst->str->chars, src->length + 1, src->str->chars, src->length);
     dst->length = src->length;
     dst->str->len = dst->length;
 }

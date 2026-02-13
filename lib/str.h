@@ -220,8 +220,8 @@ bool str_to_uint64(const char* s, size_t len, uint64_t* out, const char** end);
 bool str_to_double(const char* s, size_t len, double* out, const char** end);
 
 /** convenience: parse or return default_val. */
-int64_t  str_to_int64_or(const char* s, size_t len, int64_t default_val);
-double   str_to_double_or(const char* s, size_t len, double default_val);
+int64_t  str_to_int64_default(const char* s, size_t len, int64_t default_val);
+double   str_to_double_default(const char* s, size_t len, double default_val);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  9. Split / Tokenize (zero-allocation iterator)

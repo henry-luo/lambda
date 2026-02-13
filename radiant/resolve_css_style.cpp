@@ -6,6 +6,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <cmath>
@@ -3087,7 +3088,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             size_t url_len = strlen(url);
                             char* image_path = (char*)alloc_prop(lycon, url_len + 1);
                             if (image_path) {
-                                strcpy(image_path, url);
+                                str_copy(image_path, url_len + 1, url, url_len);
                                 span->bound->background->image = image_path;
                                 log_debug("[CSS] background-image stored: '%s'", image_path);
                             }
@@ -3101,7 +3102,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     size_t url_len = strlen(url);
                     char* image_path = (char*)alloc_prop(lycon, url_len + 1);
                     if (image_path) {
-                        strcpy(image_path, url);
+                        str_copy(image_path, url_len + 1, url, url_len);
                         span->bound->background->image = image_path;
                         log_debug("[CSS] background-image stored: '%s'", image_path);
                     }
@@ -6156,13 +6157,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (total_len > 0) {
                     char* combined = (char*)mem_alloc(total_len + 1, MEM_CAT_LAYOUT);
                     combined[0] = '\0';
+                    size_t combined_len = 0;
                     for (int i = 0; i < value->data.list.count; i++) {
                         if (value->data.list.values[i]->type == CSS_VALUE_TYPE_STRING) {
-                            if (combined[0] != '\0') strcat(combined, " ");
+                            if (combined_len > 0) combined_len = str_cat(combined, combined_len, total_len + 1, " ", 1);
                             // Wrap each row in quotes
-                            strcat(combined, "\"");
-                            strcat(combined, value->data.list.values[i]->data.string);
-                            strcat(combined, "\"");
+                            combined_len = str_cat(combined, combined_len, total_len + 1, "\"", 1);
+                            combined_len = str_cat(combined, combined_len, total_len + 1, value->data.list.values[i]->data.string, strlen(value->data.list.values[i]->data.string));
+                            combined_len = str_cat(combined, combined_len, total_len + 1, "\"", 1);
                         }
                     }
                     log_debug("[CSS] grid-template-areas: combined string '%s'", combined);
@@ -7317,13 +7319,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (url) {
                     size_t len = strlen(url);
                     block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
-                    strcpy(block->blk->list_style_image, url);
+                    str_copy(block->blk->list_style_image, len + 1, url, len);
                     log_debug("[CSS] list-style-image: %s (stored)", url);
                 }
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_NONE) {
                     block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-                    strcpy(block->blk->list_style_image, "none");
+                    str_copy(block->blk->list_style_image, 5, "none", 4);
                     log_debug("[CSS] list-style-image: none (stored)");
                 } else {
                     const CssEnumInfo* info = css_enum_info(value->data.keyword);
@@ -7369,7 +7371,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 else if (!is_position && keyword == CSS_VALUE_NONE) {
                     block->blk->list_style_type = CSS_VALUE_NONE;
                     block->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-                    strcpy(block->blk->list_style_image, "none");
+                    str_copy(block->blk->list_style_image, 5, "none", 4);
                     log_debug("[CSS] list-style: expanded to list-style-type=none, list-style-image=none");
                 }
                 // Otherwise might be other keyword
@@ -7412,7 +7414,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (url) {
                     size_t len = strlen(url);
                     block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
-                    strcpy(block->blk->list_style_image, url);
+                    str_copy(block->blk->list_style_image, len + 1, url, len);
                     log_debug("[CSS] list-style: expanded to list-style-image=%s", url);
                 }
             }
@@ -7465,7 +7467,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         if (url) {
                             size_t len = strlen(url);
                             block->blk->list_style_image = (char*)alloc_prop(lycon, len + 1);
-                            strcpy(block->blk->list_style_image, url);
+                            str_copy(block->blk->list_style_image, len + 1, url, len);
                             log_debug("[CSS] list-style: expanded to list-style-image=%s", url);
                         }
                     }
@@ -7485,7 +7487,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 block->blk->counter_reset = (char*)alloc_prop(lycon, 5);
-                strcpy(block->blk->counter_reset, "none");
+                str_copy(block->blk->counter_reset, 5, "none", 4);
                 log_debug("[CSS] counter-reset: none");
             } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
                 // Direct string value (parsed by CSS parser) or custom property name (identifier)
@@ -7493,7 +7495,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (str) {
                     size_t len = strlen(str);
                     block->blk->counter_reset = (char*)alloc_prop(lycon, len + 1);
-                    strcpy(block->blk->counter_reset, str);
+                    str_copy(block->blk->counter_reset, len + 1, str, len);
                     log_debug("[CSS] counter-reset: %s", str);
                 }
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
@@ -7524,7 +7526,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 if (sb->length > 0) {
                     block->blk->counter_reset = (char*)alloc_prop(lycon, sb->length + 1);
-                    strcpy(block->blk->counter_reset, sb->str->chars);
+                    str_copy(block->blk->counter_reset, sb->length + 1, sb->str->chars, sb->length);
                     log_debug("[CSS] counter-reset: %s", sb->str->chars);
                 }
                 stringbuf_free(sb);
@@ -7543,7 +7545,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 block->blk->counter_increment = (char*)alloc_prop(lycon, 5);
-                strcpy(block->blk->counter_increment, "none");
+                str_copy(block->blk->counter_increment, 5, "none", 4);
                 log_debug("[CSS] counter-increment: none");
             } else if (value->type == CSS_VALUE_TYPE_STRING || value->type == CSS_VALUE_TYPE_CUSTOM) {
                 // Direct string value (parsed by CSS parser) or custom property name (identifier)
@@ -7551,7 +7553,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (str) {
                     size_t len = strlen(str);
                     block->blk->counter_increment = (char*)alloc_prop(lycon, len + 1);
-                    strcpy(block->blk->counter_increment, str);
+                    str_copy(block->blk->counter_increment, len + 1, str, len);
                     log_debug("[CSS] counter-increment: %s", str);
                 }
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
@@ -7588,7 +7590,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
                 if (sb->length > 0) {
                     block->blk->counter_increment = (char*)alloc_prop(lycon, sb->length + 1);
-                    strcpy(block->blk->counter_increment, sb->str->chars);
+                    str_copy(block->blk->counter_increment, sb->length + 1, sb->str->chars, sb->length);
                     log_debug("[CSS] counter-increment: %s", sb->str->chars);
                 }
                 stringbuf_free(sb);
@@ -7630,7 +7632,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     // Allocate and store content string
                     size_t len = strlen(str);
                     char* content_copy = (char*)alloc_prop(lycon, len + 1);
-                    strcpy(content_copy, str);
+                    str_copy(content_copy, len + 1, str, len);
 
                     if (is_before) {
                         block->pseudo->before_content = content_copy;

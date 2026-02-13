@@ -460,8 +460,8 @@ CSS: allocate a buffer, loop tolower, use it — now a single call).
 bool    str_to_int64(s, len, &out, &end);     // safe integer parse
 bool    str_to_uint64(s, len, &out, &end);
 bool    str_to_double(s, len, &out, &end);
-int64_t str_to_int64_or(s, len, default_val); // parse-or-default
-double  str_to_double_or(s, len, default_val);
+int64_t str_to_int64_default(s, len, default_val); // parse-or-default
+double  str_to_double_default(s, len, default_val);
 ```
 
 **Rationale**: `atoi` (28 sites) and `atof` (18 sites) have undefined behavior on
@@ -732,59 +732,48 @@ automatically benefit from the improved internals.
   positives due to borrow propagation; replaced with XOR + OR-cascade + multiply
   horizontal-sum technique
 
-### Phase 2: Secondary String Library Migration (high priority)
+### Phase 2: Secondary String Library Migration (completed)
 
-Before touching the broader Lambda codebase, migrate the four secondary string
-utility libraries to use `str.h` internally. This serves as both a proving ground
-for the new API and an immediate quality improvement to these foundational layers.
+Migrated four secondary string utility libraries to use `str.h` internally:
 
-**StrView** (`lib/strview.h`):
-- Reimplement `strview_eq` → delegates to `str_eq`
-- Reimplement `strview_find` → delegates to `str_find_byte` / `str_find`
-- Reimplement `strview_trim` → delegates to `str_trim`
-- Reimplement `strview_start_with` → delegates to `str_starts_with`
-- Reimplement `strview_sub` → bounds-check + pointer arithmetic (already trivial)
-- Reimplement `strview_to_int` → delegates to `str_to_int64`
-- Reimplement `strview_to_cstr` → delegates to `str_copy`
-- **API expansion**: consider adding `strview_ends_with`, `strview_contains`,
-  `strview_to_double`, `strview_split` as thin wrappers
-- **Code review**: verify all functions are NULL-tolerant and consistent with
-  `str.h` conventions
+**StrView** (`lib/strview.c`): 7 functions delegated to `str.h` equivalents
+(`strview_eq`→`str_eq`, `strview_find`→`str_find`, `strview_trim`→`str_trim`,
+`strview_start_with`→`str_starts_with`, `strview_to_int`→`str_to_int64`,
+`strview_to_cstr`→`str_dup`). Fixed NUL-termination bug in `strview_find` (was
+using `strstr` on non-NUL-terminated views).
 
-**StrBuf** (`lib/strbuf.h` / `strbuf.c`):
-- Replace internal `memcpy`/`memmove` append logic with `str_copy` / `str_cat`
-  where appropriate
-- Replace `strbuf_find_*` manual loops with `str_find` / `str_find_byte`
-- Replace `strbuf_trim` internal implementation with `str_trim`
-- Use `str_to_lower` / `str_to_upper` for case conversion if added
-- **API expansion**: consider `strbuf_replace`, `strbuf_insert`, `strbuf_fmt`
-  leveraging `str_replace_all` and `str_fmt`
-- **Code review**: ensure growth strategy and NUL-termination are consistent;
-  review error handling paths
+**StrBuf** (`lib/strbuf.c`): `memcpy`→`str_copy` (4 sites), `memset`→`str_fill`
+(1 site). Fixed `str_fill` arg-order swap that caused hangs.
 
-**String** (`lib/string.h`):
-- This is Lambda's ref-counted, pool-allocated `String` struct (`{len, ref_cnt, chars[]}`)
-- Review `create_string` and `string_from_strview` for correctness
-- **API expansion**: consider `string_eq`, `string_cmp`, `string_hash` that
-  delegate to `str_eq`, `str_cmp`, `str_hash` on the embedded `chars`
-- **Code review**: verify ref-counting edge cases, pool allocation alignment
+**String** (`lib/string.h` / `string.c`): `memcpy`→`str_copy` (2 sites). Added
+4 new convenience functions: `string_eq`, `string_cmp`, `string_hash`,
+`string_eq_cstr`.
 
-**StringBuf** (pool-growable variant):
-- Same treatment as StrBuf but using pool allocation
-- Review growth semantics with `pool_realloc` compatibility
-- Ensure `str.h` functions integrate cleanly with pool-backed buffers
+**StringBuf** (`lib/stringbuf.c`): `memcpy`→`str_copy` (3 sites),
+`memset`→`str_fill` (1 site). Fixed same `str_fill` arg-order swap.
 
-**Success criteria for Phase 2:**
-- All secondary string libraries pass their existing tests after refactor
-- No duplicated string logic remains in `strview.h`, `strbuf.c`, etc.
-- New API additions have unit tests
-- Code review notes documented
+Baselines verified: Lambda 223/223, Radiant 1972/1972, strbuf 30/30,
+stringbuf 24/24, strview 9/9.
 
-### Phase 3: Unsafe Call Replacement (gradual)
-- Replace `strcpy` → `str_copy` (70 sites, highest risk)
-- Replace `strcat` → `str_cat` (22 sites)
-- Replace `atoi`/`atof` → `str_to_int64`/`str_to_double` (46 sites)
-- Replace `sprintf` → `str_fmt` (2 sites)
+### Phase 3: Unsafe Call Replacement (completed)
+
+All unsafe C string calls in production code have been replaced with safe `str.h`
+equivalents:
+
+- `sprintf` → `str_fmt` — **5 sites** across 3 files (enhanced_file_cache.cpp,
+  render.cpp, render_svg.cpp)
+- `atoi` → `str_to_int64_default` — **49 sites** across 19 files (main.cpp, format
+  writers, CSS selectors, radiant layout/view, tex parsers, validators)
+- `atof` → `str_to_double_default` — **26 sites** across 10 files (build_ast.cpp,
+  CSS tokenizer, tex math/graphics, radiant layout/style, main.cpp)
+- `strcpy` → `str_copy` — **107 active sites** across 24 files (3 remain in
+  commented-out dead code in render.cpp)
+- `strcat` → `str_cat` — **26 active sites** across 7 files (1 remains in
+  commented-out dead code in render.cpp); introduced length-tracking variables
+  for sequential concatenation patterns
+
+**Total: 213 unsafe calls eliminated.** Baselines verified: Lambda 223/223,
+Radiant 1972/1972, str unit tests 158/158.
 
 ### Phase 4: Convenience Adoption (ongoing)
 - Replace `strncmp(s, "prefix", N)` → `str_starts_with_lit(s, len, "prefix")`
