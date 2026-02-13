@@ -87,7 +87,7 @@ static void format_heading_reader(WikiContext& ctx, const ElementReader& elem) {
     if (level_attr.isString()) {
         String* level_str = level_attr.asString();
         if (level_str && level_str->len > 0) {
-            level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
+            level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
             if (level < 1) level = 1;
             if (level > 6) level = 6;
         }

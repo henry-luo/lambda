@@ -460,8 +460,8 @@ CSS: allocate a buffer, loop tolower, use it — now a single call).
 bool    str_to_int64(s, len, &out, &end);     // safe integer parse
 bool    str_to_uint64(s, len, &out, &end);
 bool    str_to_double(s, len, &out, &end);
-int64_t str_to_int64_or(s, len, default_val); // parse-or-default
-double  str_to_double_or(s, len, default_val);
+int64_t str_to_int64_default(s, len, default_val); // parse-or-default
+double  str_to_double_default(s, len, default_val);
 ```
 
 **Rationale**: `atoi` (28 sites) and `atof` (18 sites) have undefined behavior on
@@ -762,9 +762,9 @@ equivalents:
 
 - `sprintf` → `str_fmt` — **5 sites** across 3 files (enhanced_file_cache.cpp,
   render.cpp, render_svg.cpp)
-- `atoi` → `str_to_int64_or` — **49 sites** across 19 files (main.cpp, format
+- `atoi` → `str_to_int64_default` — **49 sites** across 19 files (main.cpp, format
   writers, CSS selectors, radiant layout/view, tex parsers, validators)
-- `atof` → `str_to_double_or` — **26 sites** across 10 files (build_ast.cpp,
+- `atof` → `str_to_double_default` — **26 sites** across 10 files (build_ast.cpp,
   CSS tokenizer, tex math/graphics, radiant layout/style, main.cpp)
 - `strcpy` → `str_copy` — **107 active sites** across 24 files (3 remain in
   commented-out dead code in render.cpp)

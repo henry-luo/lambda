@@ -461,11 +461,11 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "--strict") == 0) {
             strict_mode = true;
         } else if (strcmp(argv[i], "--max-errors") == 0 && i + 1 < argc) {
-            max_errors = (int)str_to_int64_or(argv[i + 1], strlen(argv[i + 1]), 0);
+            max_errors = (int)str_to_int64_default(argv[i + 1], strlen(argv[i + 1]), 0);
             if (max_errors <= 0) max_errors = 100;
             i++;
         } else if (strcmp(argv[i], "--max-depth") == 0 && i + 1 < argc) {
-            max_depth = (int)str_to_int64_or(argv[i + 1], strlen(argv[i + 1]), 0);
+            max_depth = (int)str_to_int64_default(argv[i + 1], strlen(argv[i + 1]), 0);
             if (max_depth <= 0) max_depth = 100;
             i++;
         } else if (strcmp(argv[i], "--allow-unknown") == 0) {

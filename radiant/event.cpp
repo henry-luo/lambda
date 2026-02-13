@@ -1101,7 +1101,7 @@ bool is_view_focusable(View* view) {
             // Check for tabindex attribute
             const char* tabindex = elem->get_attribute("tabindex");
             if (tabindex) {
-                int ti = (int)str_to_int64_or(tabindex, strlen(tabindex), 0);
+                int ti = (int)str_to_int64_default(tabindex, strlen(tabindex), 0);
                 return ti >= 0;
             }
             break;

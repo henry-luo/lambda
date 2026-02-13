@@ -93,7 +93,7 @@ static void format_heading_reader(MarkdownContext& ctx, const ElementReader& ele
     // First try to get level from attribute (Pandoc schema)
     String* level_attr = elem.get_string_attr("level");
     if (level_attr && level_attr->len > 0) {
-        level = (int)str_to_int64_or(level_attr->chars, strlen(level_attr->chars), 0);
+        level = (int)str_to_int64_default(level_attr->chars, strlen(level_attr->chars), 0);
         if (level < 1) level = 1;
         if (level > 6) level = 6;
     } else if (strlen(tag_name) >= 2 && tag_name[0] == 'h' && isdigit(tag_name[1])) {
@@ -196,7 +196,7 @@ static void format_list_reader(MarkdownContext& ctx, const ElementReader& elem) 
 
     int start_num = 1;
     if (start_attr && start_attr->len > 0) {
-        start_num = (int)str_to_int64_or(start_attr->chars, strlen(start_attr->chars), 0);
+        start_num = (int)str_to_int64_default(start_attr->chars, strlen(start_attr->chars), 0);
     }
 
     // Determine bullet style for unordered lists
@@ -724,7 +724,7 @@ static int get_heading_level(Item item) {
         // First try to get level from attribute (Pandoc schema)
         String* level_attr = get_attribute(elem, "level");
         if (level_attr && level_attr->len > 0) {
-            int level = (int)str_to_int64_or(level_attr->chars, strlen(level_attr->chars), 0);
+            int level = (int)str_to_int64_default(level_attr->chars, strlen(level_attr->chars), 0);
             return (level >= 1 && level <= 6) ? level : 0;
         }
         // Fallback: parse level from tag name
@@ -748,7 +748,7 @@ static int get_heading_level_reader(const ItemReader& item) {
         // first try to get level from attribute (Pandoc schema)
         String* level_attr = elem.get_string_attr("level");
         if (level_attr && level_attr->len > 0) {
-            int level = (int)str_to_int64_or(level_attr->chars, strlen(level_attr->chars), 0);
+            int level = (int)str_to_int64_default(level_attr->chars, strlen(level_attr->chars), 0);
             return (level >= 1 && level <= 6) ? level : 0;
         }
         // fallback: parse level from tag name

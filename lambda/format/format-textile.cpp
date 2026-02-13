@@ -186,7 +186,7 @@ static void format_heading_reader(TextileContext& ctx, const ElementReader& elem
     if (level_attr.isString()) {
         String* level_str = level_attr.asString();
         if (level_str && level_str->len > 0) {
-            level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
+            level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
             if (level < 1) level = 1;
             if (level > 6) level = 6;
         }
@@ -616,7 +616,7 @@ static void format_map_as_element_reader(TextileContext& ctx, const MapReader& m
         if (level_attr.isString()) {
             String* level_str = level_attr.asString();
             if (level_str && level_str->len > 0) {
-                int attr_level = (int)str_to_int64_or(level_str->chars, strlen(level_str->chars), 0);
+                int attr_level = (int)str_to_int64_default(level_str->chars, strlen(level_str->chars), 0);
                 if (attr_level >= 1 && attr_level <= 6) {
                     level = attr_level;
                 }
