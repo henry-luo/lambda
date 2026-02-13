@@ -2,6 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "../../lib/str.h"
 #include <ctype.h>
 
 using namespace lambda;
@@ -429,7 +430,7 @@ void parse_ics(Input* input, const char* ics_string) {
 
         // Handle calendar start and end
         if (strcmp(property_name->chars, "BEGIN") == 0) {
-            if (strcasecmp(property_value->chars, "VCALENDAR") == 0) {
+            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCALENDAR")) {
                 in_calendar = true;
             } else if (in_calendar) {
                 // Start of a component (VEVENT, VTODO, etc.)
@@ -455,10 +456,10 @@ void parse_ics(Input* input, const char* ics_string) {
         }
 
         if (strcmp(property_name->chars, "END") == 0) {
-            if (strcasecmp(property_value->chars, "VCALENDAR") == 0) {
+            if (str_ieq_const(property_value->chars, strlen(property_value->chars), "VCALENDAR")) {
                 in_calendar = false;
             } else if (current_component && current_component_type &&
-                      strcasecmp(property_value->chars, current_component_type->chars) == 0) {
+                      str_ieq(property_value->chars, strlen(property_value->chars), current_component_type->chars, strlen(current_component_type->chars))) {
                 // End of current component
                 if (current_component_props) {
                     String* props_key = builder.createName("properties");

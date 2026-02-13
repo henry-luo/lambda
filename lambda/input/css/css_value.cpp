@@ -4,6 +4,7 @@
 
 extern "C" {
 #include "../../../lib/log.h"
+#include "../../../lib/str.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/hashmap.h"
 }
@@ -435,11 +436,9 @@ static uint64_t css_keyword_hash(const void *item, uint64_t seed0, uint64_t seed
     const char* str = *(const char**)item;
     // convert to lowercase for case-insensitive hashing
     char lower[256];
-    size_t i = 0;
-    while (str[i] && i < 255) {
-        lower[i] = tolower((unsigned char)str[i]);
-        i++;
-    }
+    size_t i = strlen(str);
+    if (i > 255) i = 255;
+    str_to_lower(lower, str, i);
     lower[i] = '\0';
     return hashmap_sip(lower, i, seed0, seed1);
 }
@@ -448,7 +447,7 @@ static uint64_t css_keyword_hash(const void *item, uint64_t seed0, uint64_t seed
 static int css_keyword_compare(const void *a, const void *b, void *udata) {
     const char* str_a = *(const char**)a;
     const char* str_b = *(const char**)b;
-    return strcasecmp(str_a, str_b);
+    return str_icmp(str_a, strlen(str_a), str_b, strlen(str_b));
 }
 
 // Look up CSS value by name (case-insensitive)

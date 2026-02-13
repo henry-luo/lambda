@@ -7,6 +7,7 @@ extern "C" {
 #include "../lib/url.h"
 #include "../lib/base64.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
 }
 #include <string.h>
 #include <strings.h>  // for strcasecmp
@@ -799,7 +800,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
             if (!descriptor || !descriptor->family_name) continue;
 
             // Check if family name matches (case-insensitive per CSS spec)
-            int cmp_result = strcasecmp(descriptor->family_name, family_name);
+            int cmp_result = str_icmp(descriptor->family_name, strlen(descriptor->family_name), family_name, strlen(family_name));
             if (cmp_result == 0) {
                 // Calculate match score based on weight and style
                 float score = 0.5f; // Base score for family name match
@@ -843,7 +844,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                         if (!best_match->src_entries[j].path) continue;
 
                         const char* fmt = best_match->src_entries[j].format;
-                        if (fmt && strcasecmp(fmt, pref_fmt) == 0) {
+                        if (fmt && str_ieq(fmt, strlen(fmt), pref_fmt, strlen(pref_fmt))) {
                             log_debug("Trying preferred format '%s': %s", pref_fmt, best_match->src_entries[j].path);
                             face = load_local_font_file(uicon, best_match->src_entries[j].path, style);
                             if (face) {
@@ -861,7 +862,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
 
                         const char* fmt = best_match->src_entries[j].format;
                         // Skip EOT format (FreeType doesn't support it)
-                        if (fmt && strcasecmp(fmt, "embedded-opentype") == 0) {
+                        if (fmt && str_ieq_const(fmt, strlen(fmt), "embedded-opentype")) {
                             log_debug("Skipping embedded-opentype format: %s", best_match->src_entries[j].path);
                             continue;
                         }
