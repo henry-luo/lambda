@@ -53,7 +53,7 @@ void log_render_stats() {
  * Reset canvas target and draw shapes to buffer.
  * This resets ThorVG's dirty region tracking to prevent black backgrounds
  * when rendering multiple shapes to the same frame buffer.
- * 
+ *
  * ThorVG's smart rendering tracks "dirty regions" and clears them before
  * each draw. When we render multiple shapes to the same buffer within one
  * frame, this causes previously drawn content to be cleared to black.
@@ -501,7 +501,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             else {
                 scan_has_space = false;
                 uint32_t scan_codepoint;
-                int bytes = utf8_to_codepoint(scan, &scan_codepoint);
+                int bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &scan_codepoint);
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
@@ -579,7 +579,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             }
             else {
                 has_space = false;
-                int bytes = utf8_to_codepoint(p, &codepoint);
+                int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
                 if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
                 else { p += bytes;  char_index++; }
 
@@ -1666,7 +1666,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 setup_font(rdcon->ui_context, &rdcon->font, default_font);
 
                 ViewBlock* root_block = (ViewBlock*)root_view;
-                
+
                 // Check if root element is SVG - if so, render directly without background
                 if (root_block->tag_id == HTM_TAG_SVG) {
                     log_debug("render embedded SVG document (no background)");
@@ -1739,7 +1739,7 @@ void render_children(RenderContext* rdcon, View* view) {
                 render_form_control(rdcon, block);
             }
             else if (block->tag_id == HTM_TAG_SVG) {
-                // Inline SVG element - render via ThorVG  
+                // Inline SVG element - render via ThorVG
                 log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
                 // Skip render_block_view to avoid painting background behind SVG
                 render_inline_svg(rdcon, block);  // render SVG content with transparent background

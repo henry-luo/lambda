@@ -157,7 +157,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
             int bytes = 1;
 
             if (codepoint >= 128) {
-                bytes = utf8_to_codepoint(src, &codepoint);
+                bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
                 if (bytes <= 0) bytes = 1;
             }
 
