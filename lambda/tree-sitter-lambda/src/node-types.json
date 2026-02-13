@@ -2478,6 +2478,10 @@
         {
           "type": "type_occurrence",
           "named": true
+        },
+        {
+          "type": "type_seq",
+          "named": true
         }
       ]
     }
@@ -3505,45 +3509,6 @@
     "fields": {}
   },
   {
-    "type": "pattern_group",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "binary_type",
-          "named": true
-        },
-        {
-          "type": "constrained_type",
-          "named": true
-        },
-        {
-          "type": "error_union_type",
-          "named": true
-        },
-        {
-          "type": "primary_type",
-          "named": true
-        },
-        {
-          "type": "type_negation",
-          "named": true
-        },
-        {
-          "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "type_seq_multiline",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "primary_expr",
     "named": true,
     "fields": {},
@@ -4272,10 +4237,6 @@
             "named": true
           },
           {
-            "type": "pattern_group",
-            "named": true
-          },
-          {
             "type": "primary_type",
             "named": true
           },
@@ -4323,10 +4284,6 @@
           },
           {
             "type": "error_union_type",
-            "named": true
-          },
-          {
-            "type": "pattern_group",
             "named": true
           },
           {
@@ -4420,46 +4377,11 @@
       "required": true,
       "types": [
         {
-          "type": "pattern_group",
-          "named": true
-        },
-        {
           "type": "primary_type",
           "named": true
         },
         {
           "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "type_seq",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "type_seq_multiline",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "pattern_group",
-          "named": true
-        },
-        {
-          "type": "primary_type",
-          "named": true
-        },
-        {
-          "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "type_seq_multiline",
           "named": true
         }
       ]
@@ -4827,19 +4749,19 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
-  },
-  {
-    "type": "decimal",
     "named": true
   },
   {
     "type": "decimal",
     "named": false
+  },
+  {
+    "type": "decimal",
+    "named": true
   },
   {
     "type": "default",
@@ -4879,11 +4801,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -5039,19 +4961,19 @@
   },
   {
     "type": "string",
-    "named": false
+    "named": true
   },
   {
     "type": "string",
-    "named": true
-  },
-  {
-    "type": "symbol",
     "named": false
   },
   {
     "type": "symbol",
     "named": true
+  },
+  {
+    "type": "symbol",
+    "named": false
   },
   {
     "type": "t'",
@@ -5063,11 +4985,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
