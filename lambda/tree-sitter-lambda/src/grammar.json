@@ -7210,42 +7210,46 @@
       }
     },
     "list_type": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "("
-        },
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "_type_expr"
-            },
-            {
-              "type": "REPEAT",
-              "content": {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "STRING",
-                    "value": ","
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "_type_expr"
-                  }
-                ]
+      "type": "PREC_DYNAMIC",
+      "value": 2,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "("
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_pattern_expr"
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": ","
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "_pattern_expr"
+                    }
+                  ]
+                }
               }
-            }
-          ]
-        },
-        {
-          "type": "STRING",
-          "value": ")"
-        }
-      ]
+            ]
+          },
+          {
+            "type": "STRING",
+            "value": ")"
+          }
+        ]
+      }
     },
     "array_type": {
       "type": "SEQ",
@@ -7673,6 +7677,10 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "range_type"
+        },
+        {
+          "type": "SYMBOL",
           "name": "_non_null_literal"
         },
         {
@@ -7682,10 +7690,6 @@
         {
           "type": "SYMBOL",
           "name": "identifier"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "range_type"
         },
         {
           "type": "SYMBOL",
@@ -7850,112 +7854,26 @@
       "type": "PREC_LEFT",
       "value": "pattern_concat",
       "content": {
-        "type": "CHOICE",
+        "type": "SEQ",
         "members": [
           {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "_type_term"
-              },
-              {
-                "type": "IMMEDIATE_TOKEN",
-                "content": {
-                  "type": "PATTERN",
-                  "value": "[ \\t]+"
-                }
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_type_term"
-              }
-            ]
+            "type": "SYMBOL",
+            "name": "_type_term"
           },
           {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "type_seq"
-              },
-              {
-                "type": "IMMEDIATE_TOKEN",
+            "type": "PREC_DYNAMIC",
+            "value": -1,
+            "content": {
+              "type": "REPEAT1",
+              "content": {
+                "type": "PREC_DYNAMIC",
+                "value": -1,
                 "content": {
-                  "type": "PATTERN",
-                  "value": "[ \\t]+"
+                  "type": "SYMBOL",
+                  "name": "_type_term"
                 }
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_type_term"
               }
-            ]
-          }
-        ]
-      }
-    },
-    "pattern_group": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "("
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_pattern_group_expr"
-        },
-        {
-          "type": "STRING",
-          "value": ")"
-        }
-      ]
-    },
-    "_pattern_group_expr": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "_type_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "type_seq_multiline"
-        }
-      ]
-    },
-    "type_seq_multiline": {
-      "type": "PREC_LEFT",
-      "value": "pattern_concat",
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "_type_term"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_type_term"
-              }
-            ]
-          },
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "type_seq_multiline"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_type_term"
-              }
-            ]
+            }
           }
         ]
       }
@@ -7966,10 +7884,6 @@
         {
           "type": "SYMBOL",
           "name": "primary_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "pattern_group"
         },
         {
           "type": "ALIAS",
@@ -8071,10 +7985,6 @@
         {
           "type": "SYMBOL",
           "name": "type_seq"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "pattern_group"
         }
       ]
     },
@@ -8875,6 +8785,11 @@
       "term_occurrence"
     ],
     [
+      "type_seq",
+      "term_occurrence",
+      "_type_expr"
+    ],
+    [
       "term_occurrence",
       "_type_expr"
     ],
@@ -8883,17 +8798,8 @@
       "primary_type"
     ],
     [
-      "type_seq_multiline",
-      "term_occurrence"
-    ],
-    [
-      "type_seq_multiline",
-      "term_occurrence",
-      "_type_expr"
-    ],
-    [
-      "list_type",
-      "pattern_group"
+      "type_seq",
+      "binary_type"
     ]
   ],
   "precedences": [
@@ -9037,12 +8943,12 @@
         "name": "primary_type"
       },
       {
-        "type": "STRING",
-        "value": "pattern_concat"
-      },
-      {
         "type": "SYMBOL",
         "name": "binary_type"
+      },
+      {
+        "type": "STRING",
+        "value": "pattern_concat"
       }
     ]
   ],
@@ -9059,8 +8965,7 @@
     "_statement",
     "_content_expr",
     "_type_term",
-    "_pattern_expr",
-    "_pattern_group_expr"
+    "_pattern_expr"
   ],
   "supertypes": []
 }
