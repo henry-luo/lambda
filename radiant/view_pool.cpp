@@ -74,7 +74,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             // Read colspan attribute
             const char* colspan_str = node->get_attribute("colspan");
             if (colspan_str && *colspan_str) {
-                int colspan = atoi(colspan_str);
+                int colspan = (int)str_to_int64_or(colspan_str, strlen(colspan_str), 0);
                 cell->td->col_span = (colspan > 0) ? colspan : 1;
             } else {
                 cell->td->col_span = 1;
@@ -82,7 +82,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             // Read rowspan attribute
             const char* rowspan_str = node->get_attribute("rowspan");
             if (rowspan_str && *rowspan_str) {
-                int rowspan = atoi(rowspan_str);
+                int rowspan = (int)str_to_int64_or(rowspan_str, strlen(rowspan_str), 0);
                 cell->td->row_span = (rowspan > 0) ? rowspan : 1;
             } else {
                 cell->td->row_span = 1;
@@ -2203,17 +2203,17 @@ void print_caret_state(RadiantState* state, const char* output_path) {
         log_debug("print_caret_state: no state provided");
         return;
     }
-    
+
     StrBuf* buf = strbuf_new_cap(1024);
-    
+
     strbuf_append_str(buf, "\n================== CARET STATE ==================\n");
-    
+
     if (state->caret) {
         CaretState* caret = state->caret;
         strbuf_append_format(buf, "Caret:\n");
         strbuf_append_format(buf, "  view: %p\n", (void*)caret->view);
         if (caret->view) {
-            strbuf_append_format(buf, "  view_type: %d (%s)\n", 
+            strbuf_append_format(buf, "  view_type: %d (%s)\n",
                 caret->view->view_type, caret->view->view_name());
             strbuf_append_format(buf, "  node_name: %s\n", caret->view->node_name() ? caret->view->node_name() : "(null)");
         }
@@ -2225,15 +2225,15 @@ void print_caret_state(RadiantState* state, const char* output_path) {
     } else {
         strbuf_append_str(buf, "Caret: (none)\n");
     }
-    
+
     strbuf_append_str(buf, "\n");
-    
+
     if (state->selection) {
         SelectionState* sel = state->selection;
         strbuf_append_format(buf, "Selection:\n");
         strbuf_append_format(buf, "  view: %p\n", (void*)sel->view);
         if (sel->view) {
-            strbuf_append_format(buf, "  view_type: %d (%s)\n", 
+            strbuf_append_format(buf, "  view_type: %d (%s)\n",
                 sel->view->view_type, sel->view->view_name());
         }
         strbuf_append_format(buf, "  is_collapsed: %s\n", sel->is_collapsed ? "true" : "false");
@@ -2245,9 +2245,9 @@ void print_caret_state(RadiantState* state, const char* output_path) {
     } else {
         strbuf_append_str(buf, "Selection: (none)\n");
     }
-    
+
     strbuf_append_str(buf, "==================================================\n");
-    
+
     // Append to view_tree.txt (not overwrite)
     const char* path = output_path ? output_path : "./view_tree.txt";
     FILE* file = fopen(path, "a");  // append mode
@@ -2256,9 +2256,9 @@ void print_caret_state(RadiantState* state, const char* output_path) {
         fclose(file);
         log_info("print_caret_state: appended caret state to %s", path);
     }
-    
+
     // Also log it
     log_debug("%s", buf->str);
-    
+
     strbuf_free(buf);
 }

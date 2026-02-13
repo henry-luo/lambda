@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include "../../../lib/str.h"
 
 // Forward declarations for functions defined later in this file
 static void css_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule);
@@ -344,7 +345,7 @@ void css_engine_set_color_scheme(CssEngine* engine, const char* scheme) {
     size_t len = strlen(scheme);
     char* scheme_copy = (char*)pool_alloc(engine->pool, len + 1);
     if (scheme_copy) {
-        strcpy(scheme_copy, scheme);
+        str_copy(scheme_copy, len + 1, scheme, len);
         engine->context.color_scheme = scheme_copy;
     }
 }
@@ -375,7 +376,7 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
         size_t url_len = strlen(base_url);
         char* url_copy = (char*)pool_alloc(engine->pool, url_len + 1);
         if (url_copy) {
-            strcpy(url_copy, base_url);
+            str_copy(url_copy, url_len + 1, base_url, url_len);
             stylesheet->origin_url = url_copy;
         }
     }
@@ -841,7 +842,7 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
     size_t len = strlen(media_query);
     char* query = (char*)pool_alloc(engine->pool, len + 1);
     if (!query) return false;
-    strcpy(query, media_query);
+    str_copy(query, len + 1, media_query, len);
 
     // Handle comma-separated queries (OR logic)
     char* saveptr1;
@@ -880,7 +881,7 @@ bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
         // Make another copy for tokenizing by 'and'
         char* and_copy = (char*)pool_alloc(engine->pool, strlen(query_part) + 1);
         if (!and_copy) return false;
-        strcpy(and_copy, query_part);
+        str_copy(and_copy, strlen(query_part) + 1, query_part, strlen(query_part));
 
         // Replace " and " with null terminators to split
         char* condition = and_copy;

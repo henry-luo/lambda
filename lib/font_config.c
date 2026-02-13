@@ -23,6 +23,7 @@
 #include "arena.h"
 #include "arraylist.h"
 #include "hashmap.h"
+#include "str.h"
 #include "strbuf.h"
 #include "file.h"
 #include "log.h"
@@ -305,7 +306,7 @@ static int font_entry_ptr_compare(const void *a, const void *b, void *udata) {
 static uint64_t font_family_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const FontFamily *family = (const FontFamily*)item;
     if (!family || !family->family_name) return 0;
-    
+
     // Convert to lowercase for case-insensitive hashing
     // This must match the case-insensitive compare function
     size_t len = strlen(family->family_name);
@@ -315,7 +316,7 @@ static uint64_t font_family_hash(const void *item, uint64_t seed0, uint64_t seed
         lower_name[i] = tolower((unsigned char)family->family_name[i]);
     }
     lower_name[copy_len] = '\0';
-    
+
     return hashmap_xxhash3(lower_name, copy_len, seed0, seed1);
 }
 
@@ -449,7 +450,7 @@ static void add_windows_font_directories(ArrayList *directories) {
 
     // User fonts directory
     if (SHGetFolderPathA(NULL, 0x001c, NULL, 0, user_fonts) == 0) {  // CSIDL_LOCAL_APPDATA, SHGFP_TYPE_CURRENT, S_OK
-        strcat(user_fonts, "\\Microsoft\\Windows\\Fonts");
+        str_cat(user_fonts, strlen(user_fonts), sizeof(user_fonts), "\\Microsoft\\Windows\\Fonts", 24);
         arraylist_append(directories, strdup(user_fonts));
     }
 }
