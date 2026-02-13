@@ -145,7 +145,6 @@ module.exports = grammar({
     $._statement,
     $._content_expr,
     $._type_term,
-    $._pattern_expr,
   ],
 
   conflicts: $ => [
@@ -156,6 +155,7 @@ module.exports = grammar({
     [$.term_occurrence, $._type_expr],  // primary_type followed by occurrence (+,?,*,[n])
     [$.occurrence_count, $.primary_type],  // [n, could be occurrence_count or array_type
     [$.type_seq, $.binary_type],  // \d | \w: could start type_seq or be binary_type
+    [$.type_seq, $._type_expr],   // primary_type could start type_seq or be _type_expr directly
   ],
 
   precedences: $ => [[
@@ -195,11 +195,11 @@ module.exports = grammar({
     $.fn_type,
     $.constrained_type,
     $.type_occurrence,
-    $.term_occurrence,  // term occurrence binds tighter than pattern_concat
+    $.term_occurrence,  // quantifiers bind tighter than concatenation
     $.type_negation,
     $.primary_type,
-    $.binary_type,       // union/intersect/exclude bind tighter than concat
-    'pattern_concat',
+    'pattern_concat',    // concatenation binds tighter than alternation
+    $.binary_type,       // alternation (|, &, !) - lowest type precedence
   ]],
 
   rules: {
@@ -837,13 +837,12 @@ module.exports = grammar({
       'list', 'array', 'map', 'element', 'entity', 'object', 'type', 'function'
     )),
 
-    // list_type uses prec.dynamic(2) to prefer it over pattern_group when parsing
-    // parenthesized expressions like ("a" to "z") in pattern context.
-    // Uses _pattern_expr to allow type_seq inside parens for pattern concatenation.
+    // list_type for tuple types and pattern grouping
+    // e.g. (int, string) for tuple, ("a" to "z")+ for grouped pattern with occurrence
     // AST builder rejects comma-separated multi-element list_type in pattern context.
     list_type: $ => prec.dynamic(2, seq(
       // list cannot be empty
-      '(', seq($._pattern_expr, repeat(seq(',', $._pattern_expr))), ')',
+      '(', seq($._type_expr, repeat(seq(',', $._type_expr))), ')',
     )),
 
     array_type: $ => seq(
@@ -948,24 +947,16 @@ module.exports = grammar({
       '!', field('operand', $.primary_type),
     )),
 
+    // Unified type expression - includes all type constructs and pattern sequences.
+    // type_seq (concatenation) is validated by AST builder to only appear in pattern context.
     _type_expr: $ => choice(
       $.primary_type,
       $.type_occurrence,
-      $.binary_type,
-      $.type_negation,         // prefix negation (string/symbol patterns)
+      $.binary_type,           // alternation: T | U
+      $.type_negation,         // prefix negation: !T
       $.error_union_type,
       $.constrained_type,      // type with that clause constraint
-      // NOTE: type_seq is NOT in _type_expr - it only appears in _pattern_expr
-    ),
-
-    // Pattern expression: the body of string/symbol pattern definitions.
-    // Includes type_seq which is only valid in pattern context (AST builder validates).
-    // This is separate from _type_expr to prevent greedy parsing of subsequent statements.
-    // Note: Use list_type for grouping - e.g. ("a" to "z")+
-    // Multi-element list_type (with commas) is rejected by AST builder in pattern context.
-    _pattern_expr: $ => choice(
-      $._type_expr,            // any type expression
-      $.type_seq,              // pattern sequence: \d[3] "-" \d[4]
+      $.type_seq,              // concatenation: \d[3] "-" \d[4] (pattern context only)
     ),
 
     // Constrained type: base_type that (constraint_expr)
@@ -1074,22 +1065,22 @@ module.exports = grammar({
     // Backslash-dot matches any character
     pattern_any: _ => '\\.',
 
-    // String pattern definition: string name = pattern_expr
-    // Uses _pattern_expr which allows type_seq for pattern concatenation.
+    // String pattern definition: string name = type_expr
+    // type_expr now includes type_seq for pattern concatenation.
     string_pattern: $ => prec.right(seq(
       'string',
       field('name', $.identifier),
       '=',
-      field('pattern', $._pattern_expr),
+      field('pattern', $._type_expr),
     )),
 
-    // Symbol pattern definition: symbol name = pattern_expr
-    // Uses _pattern_expr which allows type_seq for pattern concatenation.
+    // Symbol pattern definition: symbol name = type_expr
+    // type_expr now includes type_seq for pattern concatenation.
     symbol_pattern: $ => prec.right(seq(
       'symbol',
       field('name', $.identifier),
       '=',
-      field('pattern', $._pattern_expr),
+      field('pattern', $._type_expr),
     )),
 
   },
