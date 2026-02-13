@@ -2982,7 +2982,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "where"
+                  "value": "that"
                 }
               },
               {
@@ -5553,7 +5553,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "where"
+                  "value": "that"
                 }
               },
               {
@@ -8951,7 +8951,7 @@
         },
         {
           "type": "STRING",
-          "value": "where"
+          "value": "that"
         },
         {
           "type": "STRING",
