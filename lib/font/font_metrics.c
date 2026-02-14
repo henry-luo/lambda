@@ -5,9 +5,14 @@
  * table values (typo ascender/descender, x-height, cap-height),
  * hhea metrics, kerning flag, space width.
  *
+ * Also provides Chrome-compatible normal line-height and cell-height
+ * computation (including macOS CoreText 15% hack via platform callback).
+ *
  * Consolidates metric logic from:
  *  - radiant/font.cpp setup_font() — basic ascender/descender/line_height/space_width
- *  - radiant/layout.cpp get_os2_typo_metrics() — OS/2 table reading
+ *  - radiant/layout.cpp get_os2_typo_metrics(), calc_normal_line_height()
+ *  - radiant/layout_text.cpp get_font_cell_height()
+ *  - radiant/resolve_css_style.cpp get_font_x_height_ratio() — x-height from OS/2 or glyph
  *  - radiant/resolve_css_style.cpp get_font_x_height_ratio() — x-height from OS/2 or glyph
  *  - radiant/font_face.cpp compute_enhanced_font_metrics() — enhanced metrics
  *
@@ -151,6 +156,7 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->hhea_descender =  (face->size->metrics.descender / 64.0f) / pixel_ratio;
     float hhea_height =  (face->size->metrics.height     / 64.0f) / pixel_ratio;
     m->hhea_line_gap  = hhea_height - (m->hhea_ascender - m->hhea_descender);
+    m->hhea_line_height = hhea_height;
 
     // default ascender/descender from hhea
     m->ascender  =  m->hhea_ascender;
@@ -187,6 +193,11 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->line_gap    = m->typo_line_gap; // use OS/2 line gap if available
     m->line_height = m->ascender - m->descender + m->line_gap;
 
+    // ---- underline metrics ----
+    m->underline_position  = (face->underline_position  / 64.0f);
+    m->underline_thickness = (face->underline_thickness / 64.0f);
+    if (m->underline_thickness < 1.0f) m->underline_thickness = 1.0f;
+
     // ---- typographic measures ----
     m->x_height    = measure_x_height(face, scale, m->ascender);
     m->cap_height  = measure_cap_height(face, scale, m->ascender);
@@ -204,4 +215,143 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
              m->em_size, m->has_kerning);
 
     return m;
+}
+
+// ============================================================================
+// Chrome-compatible normal line-height computation
+// ============================================================================
+
+// platform-specific font metrics — implemented in radiant/font_lookup_platform.c
+// returns 1 if metrics retrieved, 0 to fall back to FreeType
+extern int get_font_metrics_platform(const char* font_family, float font_size,
+                                     float* out_ascent, float* out_descent,
+                                     float* out_line_height);
+
+/**
+ * Calculate normal CSS line-height following Chrome/Blink exactly.
+ *
+ * Algorithm:
+ *   1. Try platform-specific metrics (CoreText on macOS) which includes
+ *      the 15% ascent hack for Times/Helvetica/Courier.
+ *   2. If OS/2 USE_TYPO_METRICS flag is set, use sTypo* metrics.
+ *   3. Otherwise use HHEA metrics with font-unit scaling.
+ *   4. Round each component individually (Chrome's SkScalarRoundToScalar).
+ *
+ * Returns line-height in CSS pixels.
+ */
+float font_calc_normal_line_height(FontHandle* handle) {
+    if (!handle || !handle->ft_face) return 0;
+
+    FT_Face face = handle->ft_face;
+    FontContext* ctx = handle->ctx;
+    float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
+                            ? ctx->config.pixel_ratio : 1.0f;
+
+    const char* family = face->family_name;
+
+    // derive CSS font size from ppem (or fallback)
+    float font_size;
+    if (face->size && face->size->metrics.y_ppem != 0) {
+        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+    } else {
+        // y_ppem=0 (common with WOFF), use stored CSS size
+        font_size = handle->size_px;
+        if (font_size <= 0) {
+            float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
+            font_size = height_px / 1.2f / pixel_ratio;
+        }
+    }
+
+    // 1. try platform-specific metrics first (CoreText on macOS)
+    float ascent, descent, line_height;
+    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+        log_debug("font_calc_normal_line_height (platform): %.2f for %s@%.1f",
+                  line_height, family, font_size);
+        return line_height;
+    }
+
+    // 2. check OS/2 USE_TYPO_METRICS flag
+    const FontMetrics* m = font_get_metrics(handle);
+    if (!m) return 0;
+
+    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+    bool use_typo = os2 && (os2->fsSelection & 0x0080);
+
+    float leading;
+    if (use_typo && os2) {
+        ascent  = m->typo_ascender;
+        descent = m->typo_descender;  // positive value
+        leading = m->typo_line_gap;
+
+        float ra = roundf(ascent);
+        float rd = roundf(descent);
+        float rl = roundf(leading);
+        line_height = ra + rd + rl;
+    } else {
+        // 3. HHEA fallback — use font-unit values for Chrome-accurate rounding
+        float scale = font_size / m->em_size;
+        float raw_ascent  = (float)face->ascender * scale;
+        float raw_descent = -(float)face->descender * scale;
+        int hhea_line_gap = face->height - face->ascender + face->descender;
+        float raw_leading = (float)hhea_line_gap * scale;
+
+        float ra = roundf(raw_ascent);
+        float rd = roundf(raw_descent);
+        float rl = roundf(raw_leading);
+        line_height = ra + rd + rl;
+    }
+
+    log_debug("font_calc_normal_line_height: %.2f for %s@%.1f (use_typo=%d)",
+              line_height, family, font_size, use_typo);
+    return line_height;
+}
+
+/**
+ * Get font cell height for text rect height computation.
+ *
+ * Matches browser's Range.getClientRects() which uses font metrics,
+ * not CSS line-height. For Apple's classic fonts (Times/Helvetica/Courier),
+ * uses CoreText with 15% hack. For all other fonts, returns
+ * FreeType metrics.height (ascent + descent).
+ *
+ * Returns cell height in CSS pixels.
+ */
+float font_get_cell_height(FontHandle* handle) {
+    if (!handle || !handle->ft_face) return 0;
+
+    FT_Face face = handle->ft_face;
+    FontContext* ctx = handle->ctx;
+    float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
+                            ? ctx->config.pixel_ratio : 1.0f;
+
+    const char* family = face->family_name;
+
+    // derive CSS font size
+    float font_size;
+    if (face->size && face->size->metrics.y_ppem != 0) {
+        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+    } else {
+        font_size = handle->size_px;
+        if (font_size <= 0) {
+            float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
+            font_size = height_px / 1.2f / pixel_ratio;
+        }
+    }
+
+    // Apple's classic fonts need CoreText with 15% hack
+    bool needs_mac_hack = family && (
+        strcmp(family, "Times") == 0 ||
+        strcmp(family, "Helvetica") == 0 ||
+        strcmp(family, "Courier") == 0
+    );
+
+    if (needs_mac_hack) {
+        float ascent, descent, lh;
+        if (get_font_metrics_platform(family, font_size, &ascent, &descent, &lh)) {
+            return ascent + descent;  // without leading
+        }
+    }
+
+    // all other fonts: FreeType metrics.height (ascent + descent)
+    return face->size->metrics.height / 64.0f / pixel_ratio;
 }

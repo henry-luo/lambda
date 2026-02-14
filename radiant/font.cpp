@@ -350,7 +350,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     return face;
 }
 
-FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
+FT_GlyphSlot load_glyph(UiContext* uicon, FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
+    FT_Face face = handle ? (FT_Face)font_handle_get_ft_face(handle) : NULL;
+    if (!face) return NULL;
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
 
@@ -468,9 +470,9 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             const FontMetrics* m = font_get_metrics(handle);
             if (m) {
                 fprop->space_width = m->space_width;
-                fprop->ascender    = m->ascender;
-                fprop->descender   = -(m->descender); // FontMetrics.descender is negative, FontProp expects positive
-                fprop->font_height = m->line_height;
+                fprop->ascender    = m->hhea_ascender;
+                fprop->descender   = -(m->hhea_descender); // FontMetrics.hhea_descender is negative, FontProp expects positive
+                fprop->font_height = m->hhea_line_height;
                 fprop->has_kerning = m->has_kerning;
             }
             return;
@@ -545,6 +547,29 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (!fbox->ft_face) {
         log_error("Failed to setup font: %s (and all fallbacks)", family_to_load);
         return;
+    }
+
+    // Wrap the legacy-loaded FT_Face in a FontHandle for metric/accessor usage
+    // The FontHandle is "borrowed" — it won't call FT_Done_Face on release
+    if (uicon->font_ctx) {
+        float css_size = fprop->font_size;
+        FontHandle* handle = font_handle_wrap(uicon->font_ctx, (void*)fbox->ft_face, css_size);
+        if (handle) {
+            fbox->font_handle = handle;
+            fprop->font_handle = handle;
+
+            // populate FontProp derived fields from unified metrics
+            const FontMetrics* m = font_get_metrics(handle);
+            if (m) {
+                fprop->space_width = m->space_width;
+                fprop->ascender    = m->hhea_ascender;
+                fprop->descender   = -(m->hhea_descender); // FontMetrics.hhea_descender is negative, FontProp expects positive
+                fprop->font_height = m->hhea_line_height;
+                fprop->has_kerning = m->has_kerning;
+            }
+            return;
+        }
+        // font_handle_wrap failed — fall through to manual metric extraction
     }
 
     // Pixel ratio for converting physical font metrics back to CSS pixels for layout

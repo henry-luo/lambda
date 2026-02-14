@@ -10,6 +10,7 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 #include "../lib/log.h"
+#include "../lib/font/font.h"
 #include "../lib/avl_tree.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -374,7 +375,7 @@ static bool is_view_in_selection(SelectionState* sel, View* view) {
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
-    if (!rdcon->font.ft_face) {
+    if (!rdcon->font.font_handle) {
         log_debug("font face is null");
         return;
     }
@@ -507,7 +508,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else { scan += bytes; }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, scan_codepoint, false);
+                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, scan_codepoint, false);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -541,7 +542,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         if (has_selection) {
             log_debug("[SEL-INLINE] text_rect: x=%.1f y=%.1f, rdcon->block: x=%.1f y=%.1f, final pos: x=%.1f y=%.1f, font_size=%.1f, y_ppem=%d",
                 text_rect->x, text_rect->y, rdcon->block.x, rdcon->block.y, x, y,
-                rdcon->font.style->font_size, rdcon->font.ft_face->size->metrics.y_ppem);
+                rdcon->font.style->font_size, (int)font_handle_get_physical_size_px(rdcon->font.font_handle));
         }
 
         // Track cumulative position for debugging
@@ -591,34 +592,35 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 // Debug: Log the font face being used for this glyph
                 static int glyph_debug_count = 0;
                 if (glyph_debug_count < 500) {
-                    FT_Face f = rdcon->font.ft_face;
+                    FT_Face f = (FT_Face)font_handle_get_ft_face(rdcon->font.font_handle);
                     log_debug("[GLYPH DEBUG] loading glyph U+%04X from font '%s' (family=%s) y_ppem=%d css_size=%.2f",
                               codepoint,
                               f ? f->family_name : "NULL",
                               rdcon->font.style ? rdcon->font.style->family : "NULL",
-                              f && f->size ? f->size->metrics.y_ppem : -1,
+                              rdcon->font.font_handle ? (int)font_handle_get_physical_size_px(rdcon->font.font_handle) : -1,
                               rdcon->font.style ? rdcon->font.style->font_size : -1.0f);
                     glyph_debug_count++;
                 }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
+                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, codepoint, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
                 if (!glyph) {
                     // draw a square box for missing glyph (scaled_space_width is in physical pixels)
                     // Use y_ppem if available, otherwise derive from height (y_ppem=0 for some WOFF fonts)
-                    float box_height = (rdcon->font.ft_face->size->metrics.y_ppem != 0)
-                        ? (rdcon->font.ft_face->size->metrics.y_ppem / 64.0f)
-                        : (rdcon->font.ft_face->size->metrics.height / 64.0f / 1.2f);
+                    FT_Face _face = (FT_Face)font_handle_get_ft_face(rdcon->font.font_handle);
+                    float box_height = (_face->size->metrics.y_ppem != 0)
+                        ? (_face->size->metrics.y_ppem / 64.0f)
+                        : (_face->size->metrics.height / 64.0f / 1.2f);
                     Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
                     fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
                     x += scaled_space_width;
                 }
                 else {
                     // draw the glyph to the image buffer
-                    float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    float ascend = ((FT_Face)font_handle_get_ft_face(rdcon->font.font_handle))->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
 
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {

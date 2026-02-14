@@ -4,14 +4,15 @@
 
 ### Implementation Status
 
-| Phase | Description | Status | Date |
-|-------|-------------|--------|------|
-| **Phase 1** | Foundation — all 11 source files in `lib/font/`, build config, compilation | ✅ Complete | 2026-02-14 |
+| Phase       | Description                                                                                          | Status     | Date       |
+| ----------- | ---------------------------------------------------------------------------------------------------- | ---------- | ---------- |
+| **Phase 1** | Foundation — all 11 source files in `lib/font/`, build config, compilation                           | ✅ Complete | 2026-02-14 |
 | **Phase 2** | Radiant migration — wire `FontContext` into `UiContext`, rewrite `setup_font()` via `font_resolve()` | ✅ Complete | 2026-02-15 |
-| **Phase 3** | Caching & fallback — disk cache, bitmap cache, advance eviction, @font-face bridge | ✅ Complete | 2026-02-14 |
-| **Phase 4** | Cleanup — slim headers, remove ~335 lines of unused stubs from `font_face.cpp` | ✅ Complete | 2026-02-16 |
+| **Phase 3** | Caching & fallback — disk cache, bitmap cache, advance eviction, @font-face bridge                   | ✅ Complete | 2026-02-14 |
+| **Phase 4** | Cleanup — slim headers, remove ~335 lines of unused stubs from `font_face.cpp`                       | ✅ Complete | 2026-02-16 |
+| **Phase 5** | FT_Face migration — migrate ~50 direct FreeType API call sites across 15+ files to FontHandle API     | ✅ Complete | 2026-02-14 |
 
-**Build:** 0 errors, 0 warnings · **Lambda baseline:** 224/224 ✅ · **Radiant baseline:** 1972/1972 ✅
+**Build:** 0 errors · **Lambda baseline:** 224/224 ✅ · **Radiant baseline:** 1972/1972 ✅
 
 #### Phase 2 Changes
 
@@ -37,6 +38,64 @@
 - `radiant/font_face.h` — Removed 7 unused types and ~30 unused function declarations; kept only externally-used API: `FontFaceSrc`, `FontFaceDescriptor`, `process_document_font_faces`, `load_font_with_descriptors`, `load_local_font_file`, `register_font_face`, char width cache functions
 
 **Name collision fix:** `font_database_save_cache` / `font_database_load_cache` conflicted with stubs in old `lib/font_config.c` — renamed to `_internal` suffix in `lib/font/`.
+
+#### Phase 5 Changes — FT_Face → FontHandle Migration
+
+**Approach:** Systematic migration of all direct `FT_Face` API usage across 15+ Radiant files to use the opaque `FontHandle` API from `lib/font/`. This phase addresses the Phase 4 deferred item: _"15+ downstream files depend on `FT_Face`/`FT_Library` types. Full type elimination requires migrating all call sites to use `FontHandle`."_
+
+**Scope:** ~50 direct FreeType API call sites, ~30 `size->metrics` accesses, ~10 `family_name` accesses.
+
+**New APIs added to `lib/font/font.h`:**
+- `font_handle_get_family_name()` — returns family name without exposing `FT_Face`
+- `font_handle_get_size_px()` / `font_handle_get_physical_size_px()` — CSS and physical size accessors
+- `font_calc_normal_line_height()` — Chrome-compatible normal line-height (CoreText → OS/2 USE_TYPO_METRICS → HHEA fallback with per-component rounding)
+- `font_get_cell_height()` — text rect height (CoreText with 15% hack for Apple classic fonts, FreeType `metrics.height` for others)
+- `font_get_glyph_index()` — replaces `FT_Get_Char_Index` without exposing FT types
+- `font_get_x_height_ratio()` — x-height / em-size ratio for CSS `ex` unit resolution
+- `font_handle_wrap()` — wraps an existing (borrowed) `FT_Face` into a `FontHandle` without ownership transfer
+- Added `hhea_line_height`, `underline_position`, `underline_thickness` fields to `FontMetrics`
+
+**Key signature changes:**
+- `load_glyph(UiContext*, FT_Face, ...)` → `load_glyph(UiContext*, FontHandle*, ...)`
+- `get_os2_typo_metrics(FT_Face, float)` → `get_os2_typo_metrics(FontHandle*)`
+- `calc_normal_line_height(FT_Face, float, float)` → `calc_normal_line_height(FontHandle*)`
+- `FT_UInt prev_glyph_index` → `uint32_t prev_glyph_index` in `layout.hpp`
+
+**Borrowed FontHandle for legacy path:** The `setup_font()` legacy path (when `font_resolve()` is not available) now wraps the legacy-loaded `FT_Face` into a borrowed `FontHandle` via `font_handle_wrap()`. A `borrowed_face` flag on `FontHandle` prevents `FT_Done_Face` on release, ensuring the legacy code retains ownership. This guarantees `font_handle` is **always** populated after `setup_font()`, enabling all downstream code to use FontHandle exclusively.
+
+**Files modified:**
+- `lib/font/font.h` — 8 new API declarations, `hhea_line_height` field in `FontMetrics`
+- `lib/font/font_internal.h` — `bool borrowed_face` flag in `FontHandle` struct
+- `lib/font/font_context.c` — `font_handle_wrap()`, `font_get_x_height_ratio()`, 3 accessor functions, updated `font_handle_release()` to skip `FT_Done_Face` when borrowed
+- `lib/font/font_metrics.c` — `font_calc_normal_line_height()` (Chrome algorithm), `font_get_cell_height()`, `hhea_line_height`/`underline_*` computation
+- `lib/font/font_glyph.c` — `font_get_glyph_index()` function
+- `radiant/view.hpp` — `load_glyph` extern now takes `FontHandle*`
+- `radiant/layout.hpp` — `FT_UInt` → `uint32_t`, updated function signatures
+- `radiant/font.cpp` — `load_glyph` extracts `FT_Face` internally; `setup_font` legacy path wraps via `font_handle_wrap()`; `FontProp` populated from `hhea_*` metrics
+- `radiant/layout.cpp` — `get_os2_typo_metrics(FontHandle*)` reads from `FontMetrics`; `calc_normal_line_height(FontHandle*)` delegates to `font_calc_normal_line_height()`; marker span height uses `hhea_line_height`; all `ft_face` null checks → `font_handle`
+- `radiant/layout_text.cpp` — `FT_Load_Char`/`FT_Get_Char_Index` → via `font_handle_get_ft_face()`/`font_get_glyph_index()`; text rect height uses `font_get_cell_height()`; font_height uses `hhea_line_height`
+- `radiant/layout_block.cpp` — metric accesses via `FontMetrics`, debug log uses `hhea_line_height`
+- `radiant/layout_flex_measurement.cpp` — all 7 `ft_face` null checks → `font_handle`
+- `radiant/render.cpp` — null check → `font_handle`, family_name via accessor
+- `radiant/render_form.cpp`, `render_pdf.cpp`, `render_svg.cpp` — `load_glyph` → `FontHandle*`, null checks → `font_handle`
+- `radiant/intrinsic_sizing.cpp` — `FT_HAS_KERNING` → `font_get_metrics()->has_kerning`
+- `radiant/event.cpp` — `load_glyph` → `FontHandle*`, debug logs → `font_handle_get_physical_size_px()`
+- `radiant/resolve_css_style.cpp` — `get_font_x_height_ratio(ft_face)` → `font_get_x_height_ratio(font_handle)`
+
+**Critical bugs found and fixed (36 test regressions → 0):**
+
+After completing the migration, 36 out of 1972 Radiant baseline tests failed. Root cause analysis revealed three distinct bugs:
+
+1. **`FontMetrics.line_height` vs HHEA height confusion** — The old code consistently used `face->size->metrics.height / 64.0 / pixel_ratio` for font height, which is always the HHEA-based height (ascender − descender + line_gap from the `hhea` table). The new code used `FontMetrics.line_height`, but that field is computed from `m->ascender − m->descender + m->line_gap`, where `ascender`/`descender` get **overwritten by OS/2 typo values** when the font's `fsSelection` has `USE_TYPO_METRICS` set (bit 7). This produced different heights for any font with that flag. **Fix:** Added a dedicated `hhea_line_height` field to `FontMetrics` (computed once from the HHEA values that never get overwritten) and used it in all places that need the HHEA-based height: `fprop->font_height`, marker span height, text rect `font_height`, and debug logs.
+
+2. **`fprop->ascender/descender` using typo values instead of HHEA** — Same root cause as above. `FontMetrics.ascender`/`.descender` can be overwritten by OS/2 typo values, but `FontProp.ascender`/`.descender` must always match the old `face->size->metrics.ascender / 64.0 / pixel_ratio` path (which is HHEA). **Fix:** Changed `font.cpp` to populate `fprop->ascender` from `m->hhea_ascender` and `fprop->descender` from `-(m->hhea_descender)` instead of the generic `m->ascender`/`m->descender`.
+
+3. **`font_get_x_height_ratio()` wrong formula** — The old `get_font_x_height_ratio()` returned `sxHeight / units_per_EM`, a dimensionless font-unit ratio used for CSS `ex` unit resolution. The new `font_get_x_height_ratio()` computed `m->x_height / (m->ascender − m->descender)`, which is completely different — `x_height` is in CSS pixels and `ascender − descender` is also in CSS pixels but ≠ em_size. For the Ahem test font, this produced a ratio of ~0.56 instead of the correct 0.8, causing `font-size: 7.5ex` to resolve to 90px instead of 96px. This single bug accounted for the majority of the 36 test failures (font-size, table-height, table-layout, text-indent, white-space tests). **Fix:** Rewrote `font_get_x_height_ratio()` to directly read `sxHeight / units_per_EM` from the underlying `FT_Face`, with a fallback to measuring the `'x'` glyph in design units — matching the old behavior exactly.
+
+**Remaining work (deferred):**
+- Remove `#include FT_FREETYPE_H` from `view.hpp` — requires moving `FT_Library ft_library` out of `UiContext` and `FT_Face ft_face` out of `FontBox`
+- Remove `ft_face` field from `FontBox` — render files still access it for physical-pixel rendering via `font_handle_get_ft_face()`
+- Migrate remaining direct FT_Face accesses in render files to use FontHandle-based APIs
 
 ---
 
@@ -777,10 +836,22 @@ For WOFF1, no new library is needed — `zlib` is already linked (FreeType depen
 - ✅ Slimmed `font.h`: removed `FontfaceEntry` type and `fontface_compare`/`fontface_entry_free` declarations (internal to `font.cpp`).
 - ✅ Removed ~335 lines of unused stubs from `font_face.cpp`: `EnhancedFontBox`, `FontMatchCriteria`, `FontMatchResult`, `FontFallbackChain` types and 12 stub functions (`calculate_font_match_score`, `find_best_font_match`, `build_fallback_chain`, `font_supports_codepoint`, `resolve_font_for_codepoint`, `cache_codepoint_font_mapping`, `compute_enhanced_font_metrics`, `calculate_line_height_from_css`, `apply_pixel_ratio_to_font_metrics`, `scale_font_size_for_display`, `ensure_pixel_ratio_compatibility`, `setup_font_enhanced`). All duplicated by `lib/font/` or never called.
 - ✅ Removed unused `cache_character_width`/`get_cached_char_width` declarations from `font_face.h`.
-- ⏸ Kept `FT_FREETYPE_H` in `view.hpp` — 15+ downstream files depend on `FT_Face`/`FT_Library` types. Full type elimination requires migrating all call sites to use `FontHandle`, deferred to future work.
-- ⏸ Kept `radiant/font.cpp`, `radiant/font_lookup_platform.c`, `lib/font_config.c/h` — still actively used. `font_lookup_platform.c` provides CoreText metrics (CTFontGetAscent/Descent/Leading with Chrome's 15% hack) not yet replicated in `lib/font/`.
+- ⏸ Kept `FT_FREETYPE_H` in `view.hpp` — 15+ downstream files depend on `FT_Face`/`FT_Library` types. **Phase 5 migrated all layout call sites to use `FontHandle`**, but the include and `FT_Face` field remain for render-layer access. Full header removal deferred.
+- ⏸ Kept `radiant/font.cpp`, `radiant/font_lookup_platform.c`, `lib/font_config.c/h` — still actively used. `font_lookup_platform.c` provides CoreText metrics (CTFontGetAscent/Descent/Leading with Chrome's 15% hack) now consumed by `font_calc_normal_line_height()` and `font_get_cell_height()` in `lib/font/font_metrics.c` via extern linkage.
 - ⏸ PDF `FT_Library` kept separate — PDF font loading runs at lambda/input layer (no `UiContext` available), correctly isolated.
 - **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
+
+**Phase 5 — FT_Face → FontHandle Migration ✅ COMPLETE (2026-02-14)**
+- ✅ Surveyed all FreeType usage across `radiant/` — ~50 direct API call sites across 15+ files.
+- ✅ Added 8 new FontHandle-based APIs to `lib/font/font.h` with implementations in `font_context.c`, `font_metrics.c`, `font_glyph.c`.
+- ✅ Added `font_handle_wrap()` for borrowing existing FT_Face into FontHandle (with `borrowed_face` flag to prevent double-free).
+- ✅ Migrated all function signatures: `load_glyph`, `calc_normal_line_height`, `get_os2_typo_metrics` now take `FontHandle*`.
+- ✅ Migrated all callers across 15 files: null checks (`ft_face` → `font_handle`), metric accesses (`ft_face->size->metrics.*` → `FontMetrics`), glyph operations (`FT_Get_Char_Index` → `font_get_glyph_index`).
+- ✅ Added `hhea_line_height` field to `FontMetrics` for HHEA-only height (never overwritten by OS/2 typo metrics).
+- ✅ Fixed `font_get_x_height_ratio()` to use font-unit ratio (`sxHeight / units_per_EM`) matching old behavior.
+- ✅ Fixed `FontProp` population to use HHEA metrics (`hhea_ascender`/`hhea_descender`/`hhea_line_height`) for backward compatibility.
+- ✅ **Build:** 0 errors.
+- ✅ **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass (36 regressions found and fixed during development).
 
 ---
 
@@ -1110,7 +1181,7 @@ The opaque `FontContext` makes either approach possible without API changes.
 | **Files** | 7+ across `lib/` and `radiant/` | 11 in `lib/font/` (font face management included) + `radiant/font_face.cpp` (only CSS @font-face parsing stays in Radiant) |
 | **Font formats** | TTF/OTF/TTC only (WOFF1 broken, WOFF2 partial) | TTF, OTF, TTC, WOFF1, WOFF2 — all first-class |
 | **Format pipeline** | Scattered across `font.cpp`, `font_face.cpp`, `font_config.c` | Single `font_loader.c` detect→decompress→load path |
-| **FT_* exposure** | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h` |
+| **FT_* exposure** | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h` + `view.hpp` (FT_Face field kept for render layer; all layout call sites migrated to FontHandle in Phase 5) |
 | **FT_Library instances** | 2 (layout + PDF) | 1 (shared via FontContext) |
 | **FreeType memory** | Uses default `malloc`/`free` internally | Routed through `Pool` via `FT_Memory` |
 | **WOFF1 support** | ❌ Detected but silent failure | ✅ zlib decompression → arena buffer |
@@ -1131,15 +1202,15 @@ The work is primarily **reorganization and consolidation**, not greenfield imple
 
 | File | Lines | Key Contents |
 |------|------:|-------------|
-| `font.h` | 322 | Public API: `FontContext`, `FontHandle`, `FontMetrics`, `GlyphInfo`, `TextExtents`, `FontFaceDesc`, all `font_*()` functions |
-| `font_internal.h` | 359 | Internal structs (`FontContext`, `FontHandle` full layout), FT_* includes, helper macros, `_internal` function declarations |
-| `font_context.c` | 390 | `FT_Memory` pool routing, `font_context_create/destroy`, `font_handle_retain/release`, disk cache integration in `font_context_scan()`, `font_cache_save()` API |
+| `font.h` | 364 | Public API: `FontContext`, `FontHandle`, `FontMetrics`, `GlyphInfo`, `TextExtents`, `FontFaceDesc`, all `font_*()` functions. Phase 5 added `font_handle_wrap`, `font_calc_normal_line_height`, `font_get_cell_height`, `font_get_glyph_index`, `font_get_x_height_ratio`, size/family accessors, `hhea_line_height` field |
+| `font_internal.h` | 359 | Internal structs (`FontContext`, `FontHandle` full layout with `borrowed_face` flag), FT_* includes, helper macros, `_internal` function declarations |
+| `font_context.c` | 467 | `FT_Memory` pool routing, `font_context_create/destroy`, `font_handle_retain/release` (with borrowed check), `font_handle_wrap()`, `font_get_x_height_ratio()`, size/family accessors, disk cache integration |
 | `font_database.c` | 1200 | TTF table parsing (name, OS/2), directory scanning, metadata extraction, TTC support, format detection, **disk cache save/load** (binary format with mtime/size validation) |
 | `font_platform.c` | 180 | macOS (`/System/Library/Fonts`, `~/Library/Fonts`), Linux (`/usr/share/fonts`, `~/.fonts`), Windows stubs |
 | `font_loader.c` | 309 | Unified `font_load_from_file/data_uri/memory`, `select_best_fixed_size()`, format detect → decompress → `FT_New_Memory_Face` |
 | `font_decompress.cpp` | 280 | WOFF1 per-table zlib decompression, WOFF2 via `ComputeWOFF2FinalSize` + `WOFF2MemoryOut`, `font_decompress_if_needed()` dispatcher |
-| `font_metrics.c` | 195 | OS/2 table (typo metrics, `USE_TYPO_METRICS` bit 7), x_height/cap_height (table → glyph → estimate), space_width, kerning flag |
-| `font_glyph.c` | 290 | Per-handle advance cache (hashmap, 4096 max with eviction), **bitmap cache** (lazy init, clear-on-full), `font_get_glyph/kerning`, `font_render_glyph`, `font_measure_text/char` |
+| `font_metrics.c` | 357 | OS/2 table (typo metrics, `USE_TYPO_METRICS` bit 7), x_height/cap_height, space_width, kerning flag, `hhea_line_height`, underline metrics. Phase 5 added `font_calc_normal_line_height()` (Chrome algorithm with CoreText/OS2/HHEA), `font_get_cell_height()` |
+| `font_glyph.c` | 331 | Per-handle advance cache (hashmap, 4096 max with eviction), **bitmap cache** (lazy init, clear-on-full), `font_get_glyph/kerning`, `font_render_glyph`, `font_measure_text/char`, `font_get_glyph_index()` |
 | `font_cache.c` | 260 | Face cache ("family:weight:slant:size" key), LRU eviction, **`font_resolve()`** top-level pipeline: cache → @font-face → generic → database → platform → fallback |
 | `font_fallback.c` | 215 | Generic CSS families (serif, sans-serif, monospace, cursive, fantasy, system-ui, ui-monospace + Apple/cross-platform aliases), codepoint fallback with negative caching |
 | `font_face.c` | 278 | `font_face_register/find/list/load/clear`, weight/slant distance scoring, pool/arena-copied descriptors |

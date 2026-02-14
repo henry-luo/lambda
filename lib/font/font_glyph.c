@@ -70,6 +70,15 @@ static struct hashmap* ensure_bitmap_cache(FontContext* ctx) {
 }
 
 // ============================================================================
+// Core: get glyph index for a codepoint
+// ============================================================================
+
+uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint) {
+    if (!handle || !handle->ft_face) return 0;
+    return (uint32_t)FT_Get_Char_Index(handle->ft_face, codepoint);
+}
+
+// ============================================================================
 // Core: get glyph info for a codepoint
 // ============================================================================
 

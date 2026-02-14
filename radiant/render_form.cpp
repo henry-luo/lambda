@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "form_control.hpp"
+#include "../lib/font/font.h"
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <string.h>
@@ -101,7 +102,7 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
     // Setup font for rendering
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
-    if (!fbox.ft_face) {
+    if (!fbox.font_handle) {
         log_debug("[FORM] render_simple_string: failed to setup font");
         return;
     }
@@ -125,7 +126,7 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
         p += bytes;
 
         // Load glyph
-        FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, fbox.ft_face, font, codepoint, true);
+        FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, fbox.font_handle, font, codepoint, true);
         if (!glyph) {
             pen_x += font->font_size * 0.5f;  // fallback advance
             continue;
