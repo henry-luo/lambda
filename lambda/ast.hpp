@@ -53,6 +53,7 @@ extern "C" {
 #define SYM_PATH_SELF sym_path_self
 #define SYM_PATH_PARENT sym_path_parent
 #define SYM_PATH_EXPR sym_path_expr
+#define SYM_PARENT_EXPR sym_parent_expr   // expr.. parent access shorthand
 
 // Pipe expression current item references (pipe is now part of binary_expr)
 #define SYM_CURRENT_ITEM sym_current_item
@@ -250,6 +251,7 @@ typedef enum AstNodeType {
     AST_NODE_MEMBER_EXPR,
     AST_NODE_PATH_EXPR,         // path expression (file.etc.hosts, http.api.example.com)
     AST_NODE_PATH_INDEX_EXPR,   // path subscript expression - adds dynamic segment: path[expr]
+    AST_NODE_PARENT_EXPR,        // parent access shorthand: expr.. for .parent
     AST_NODE_CALL_EXPR,
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
@@ -315,6 +317,12 @@ typedef struct AstPathIndexNode : AstNode {
     AstNode* base_path;      // the base path expression
     AstNode* segment_expr;   // expression for the dynamic segment
 } AstPathIndexNode;
+
+// Parent access expression: expr.. for .parent, expr.._.. for .parent.parent
+typedef struct AstParentNode : AstNode {
+    AstNode* object;          // the base expression
+    int depth;                // number of parent levels (1 for .., 2 for .._.., etc.)
+} AstParentNode;
 
 typedef struct SysFuncInfo {
     SysFunc fn;

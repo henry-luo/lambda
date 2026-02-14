@@ -168,7 +168,7 @@ add_int(3 + 4, 5 + 6)            // 7 + 11 = 18
 //==============================================================================
 
 // Assigning function to variable forces dynamic dispatch
-let f = fn(a: int, b: int) { a + b }
+let f = (a: int, b: int) => a + b
 f(5, 3)                          // 8
 
 // Passing function as argument (must use untyped params for dynamic call)
