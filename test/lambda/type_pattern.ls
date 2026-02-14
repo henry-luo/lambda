@@ -158,7 +158,7 @@ let warehouse_bad_product = {
 // ============================================================
 'Section 5: Nested Arrays'
 
-type Matrix = int*[2+]                // at least 2 rows of ints
+type Matrix = (int*)[2+]              // at least 2 rows of ints (explicit grouping)
 
 let matrix_2x3 = [[1, 2, 3], [4, 5, 6]]
 let matrix_3x3 = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
@@ -171,7 +171,7 @@ let matrix_1x3 = [[1, 2, 3]]
 let empty_matrix = []
 "5.4"; (empty_matrix is Matrix)        // false - need at least 2 rows
 
-type PointGrid = Point*[1+]            // at least 1 row of points
+type PointGrid = (Point*)[1+]          // at least 1 row of points (explicit grouping)
 
 let point_grid = [
     [{ x: 0, y: 0 }, { x: 1, y: 0 }],
