@@ -15,6 +15,16 @@ true
 2
 27
 8
+"Inf/NaN:"
+inf
+-inf
+inf
+0
+nan
+nan
+nan
+inf
+nan
 "Comparison exprs: ============"
 true
 false

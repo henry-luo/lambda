@@ -1182,10 +1182,20 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
             else if (pri_node->type->type_id == LMD_TYPE_FLOAT) {
-                // we have large int that is promoted to float, thus needs the casting to double
-                strbuf_append_str(tp->code_buf, "((double)(");
-                write_node_source(tp, pri_node->node);
-                strbuf_append_str(tp->code_buf, "))");
+                TypeFloat *f_type = (TypeFloat*)pri_node->type;
+                double val = f_type->double_val;
+                if (__builtin_isinf(val)) {
+                    // inf keyword: emit C constant expression for infinity
+                    strbuf_append_str(tp->code_buf, "(1.0/0.0)");
+                } else if (__builtin_isnan(val)) {
+                    // nan keyword: emit C constant expression for NaN
+                    strbuf_append_str(tp->code_buf, "(0.0/0.0)");
+                } else {
+                    // regular numeric float literal: emit source text directly
+                    strbuf_append_str(tp->code_buf, "((double)(");
+                    write_node_source(tp, pri_node->node);
+                    strbuf_append_str(tp->code_buf, "))");
+                }
             }
             else if (pri_node->type->type_id == LMD_TYPE_DECIMAL) {
                 // loads the const decimal without boxing
