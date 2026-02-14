@@ -150,11 +150,11 @@ module.exports = grammar({
     [$._expr, $.member_expr],
     [$._type_expr, $.constrained_type],
     [$.unary_type, $.constrained_type],  // primary_type could be unary_type or start constrained_type
-    [$.type_seq, $.type_occurrence],  // unary_type could start type_seq or type_occurrence
-    [$.type_seq, $.type_occurrence, $._type_expr],  // unary_type in pattern context
-    [$.type_occurrence, $._type_expr],  // unary_type followed by occurrence (+,?,*,[n])
+    [$.concat_type, $.occurrence_type],  // unary_type could start concat_type or occurrence_type
+    [$.concat_type, $.occurrence_type, $._type_expr],  // unary_type in pattern context
+    [$.occurrence_type, $._type_expr],  // unary_type followed by occurrence (+,?,*,[n])
     [$.occurrence_count, $.primary_type],  // [n, could be occurrence_count or array_type
-    [$.type_seq, $._type_expr],   // unary_type could start type_seq or be _type_expr directly
+    [$.concat_type, $._type_expr],   // unary_type could start concat_type or be _type_expr directly
   ],
 
   precedences: $ => [[
@@ -192,10 +192,10 @@ module.exports = grammar({
   ],
   [
     $.fn_type,
-    $.unary_type,            // atomic types (primary_type | type_negation) - tightest
-    $.type_occurrence,       // quantifiers: T+, T*, T?, T[n]
-    $.constrained_type,      // T that (...) - postfix constraint clause
-    'pattern_concat',        // concatenation binds tighter than alternation
+    $.unary_type,            // atomic types (primary_type | negation_type) - tightest
+    $.occurrence_type,       // quantifiers: T+, T*, T?, T[n]
+    $.constrained_type,      // T that (...) - postfix constraint clause; as it feels more like a binary type, thus it comes after occurrence_type, but before concat_type
+    'concat_type',           // concatenation binds tighter than alternation
     $.binary_type,           // alternation (|, &, !) - lowest type precedence
   ]],
 
@@ -904,13 +904,13 @@ module.exports = grammar({
     // This is what occurrence modifiers can apply to.
     unary_type: $ => choice(
       $.primary_type,
-      $.type_negation,       // !T - prefix negation
+      $.negation_type,       // !T - prefix negation
     ),
 
     // Occurrence applied to unary type: T?, T+, T*, T[n]
     // No chaining allowed (like regex) - use explicit grouping: (T*)[2]
-    // Use prec.dynamic(1) to prefer occurrence over type_seq continuation.
-    type_occurrence: $ => prec.dynamic(1, prec.right(seq(
+    // Use prec.dynamic(1) to prefer occurrence over concat_type continuation.
+    occurrence_type: $ => prec.dynamic(1, prec.right(seq(
       field('operand', $.unary_type),
       field('operator', $.occurrence),
     ))),
@@ -919,31 +919,31 @@ module.exports = grammar({
       ...type_pattern($._type_expr),
     ),
 
-    // ====== Type Sequence (for string/symbol patterns) ======
-    // Type sequence: whitespace-separated concatenation of type terms.
+    // ====== Type Concatenation (for string/symbol patterns) ======
+    // Type concatenation: whitespace-separated sequence of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
     // Terms are unary_type (possibly with occurrence).
-    type_seq: $ => prec.left('pattern_concat', seq(
-      choice($.unary_type, $.type_occurrence),
-      prec.dynamic(-1, repeat1(prec.dynamic(-1, choice($.unary_type, $.type_occurrence)))),
+    concat_type: $ => prec.left('concat_type', seq(
+      choice($.unary_type, $.occurrence_type),
+      prec.dynamic(-1, repeat1(prec.dynamic(-1, choice($.unary_type, $.occurrence_type)))),
     )),
 
     // Prefix negation: !T (for string/symbol patterns: !\d)
     // Validated in AST builder for context-appropriate usage.
-    type_negation: $ => prec.right(seq(
+    negation_type: $ => prec.right(seq(
       '!', field('operand', $.primary_type),
     )),
 
     // Unified type expression - single hierarchy like _expr.
-    // Precedence (high to low): unary_type > type_occurrence > type_seq > binary_type
+    // Precedence (high to low): unary_type > occurrence_type > concat_type > binary_type
     _type_expr: $ => choice(
-      $.unary_type,            // primary_type | type_negation
-      $.type_occurrence,       // unary_type with occurrence: T+, T?, T*, T[n]
+      $.unary_type,            // primary_type | negation_type
+      $.occurrence_type,       // unary_type with occurrence: T+, T?, T*, T[n]
       $.binary_type,           // alternation: T | U
       $.error_union_type,
       $.constrained_type,      // type with that clause constraint
-      $.type_seq,              // concatenation: \d[3] "-" \d[4] (pattern context only)
+      $.concat_type,           // concatenation: \d[3] "-" \d[4] (pattern context only)
     ),
 
     // Constrained type: base_type that (constraint_expr)
@@ -951,7 +951,7 @@ module.exports = grammar({
     // The constraint uses ~ to refer to the value being checked
     // Parentheses required to avoid grammar ambiguity with index expressions
     constrained_type: $ => seq(
-      field('base', choice($.primary_type, $.type_occurrence)),
+      field('base', choice($.primary_type, $.occurrence_type)),
       'that',
       '(',
       field('constraint', $._expr),
@@ -1053,7 +1053,7 @@ module.exports = grammar({
     pattern_any: _ => '\\.',
 
     // String pattern definition: string name = type_expr
-    // type_expr now includes type_seq for pattern concatenation.
+    // type_expr now includes concat_type for pattern concatenation.
     string_pattern: $ => prec.right(seq(
       'string',
       field('name', $.identifier),
@@ -1062,7 +1062,7 @@ module.exports = grammar({
     )),
 
     // Symbol pattern definition: symbol name = type_expr
-    // type_expr now includes type_seq for pattern concatenation.
+    // type_expr now includes concat_type for pattern concatenation.
     symbol_pattern: $ => prec.right(seq(
       'symbol',
       field('name', $.identifier),
