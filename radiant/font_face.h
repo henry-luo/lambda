@@ -2,8 +2,7 @@
 
 #include "view.hpp"
 #include "../lib/log.h"
-#include <ft2build.h>
-#include FT_FREETYPE_H
+// FT_Face provided by view.hpp (via FT_FREETYPE_H)
 
 #ifdef __cplusplus
 extern "C" {
@@ -86,10 +85,6 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
 
 // Load a font from a local file path or data URI
 FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* style);
-
-// Character width caching for performance
-void cache_character_width(FontFaceDescriptor* descriptor, uint32_t codepoint, int width);
-int get_cached_char_width(FontFaceDescriptor* descriptor, uint32_t codepoint);
 
 #ifdef __cplusplus
 }
