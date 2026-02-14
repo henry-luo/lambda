@@ -18,8 +18,29 @@ factorial(5.0)
 strcat("hello", " world")
 mul(2, 3.0)
 
-let f = fn(a, b) { a + b }
+// anonymous function: untyped params
+let f = (a, b) => a + b
 type(f);  f(1,2);
+
+// anonymous function: no params
+let g = () => 42
+type(g);  g();
+
+// anonymous function: single untyped param
+let double = (x) => x * 2
+double(5);
+
+// anonymous function: typed params
+let typed_add = (a: int, b: int) => a + b
+typed_add(10, 20);
+
+// anonymous function: mixed typed params
+let greet = (name: string) => "Hello, " ++ name
+greet("world");
+
+// anonymous function as argument (higher-order)
+fn apply(f, x) => f(x)
+apply((x) => x * 10, 3);
 
 let t = string
 t;  "abc" is t;  123 is t;  true is string;

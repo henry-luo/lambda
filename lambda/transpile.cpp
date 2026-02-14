@@ -579,6 +579,9 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
         pre_define_closure_envs(tp, ((AstFieldNode*)node)->object);
         pre_define_closure_envs(tp, ((AstFieldNode*)node)->field);
         break;
+    case AST_NODE_PARENT_EXPR:
+        pre_define_closure_envs(tp, ((AstParentNode*)node)->object);
+        break;
     default:
         break;
     }
@@ -1182,10 +1185,20 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
             else if (pri_node->type->type_id == LMD_TYPE_FLOAT) {
-                // we have large int that is promoted to float, thus needs the casting to double
-                strbuf_append_str(tp->code_buf, "((double)(");
-                write_node_source(tp, pri_node->node);
-                strbuf_append_str(tp->code_buf, "))");
+                TypeFloat *f_type = (TypeFloat*)pri_node->type;
+                double val = f_type->double_val;
+                if (__builtin_isinf(val)) {
+                    // inf keyword: emit C constant expression for infinity
+                    strbuf_append_str(tp->code_buf, "(1.0/0.0)");
+                } else if (__builtin_isnan(val)) {
+                    // nan keyword: emit C constant expression for NaN
+                    strbuf_append_str(tp->code_buf, "(0.0/0.0)");
+                } else {
+                    // regular numeric float literal: emit source text directly
+                    strbuf_append_str(tp->code_buf, "((double)(");
+                    write_node_source(tp, pri_node->node);
+                    strbuf_append_str(tp->code_buf, "))");
+                }
             }
             else if (pri_node->type->type_id == LMD_TYPE_DECIMAL) {
                 // loads the const decimal without boxing
@@ -4273,6 +4286,41 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
+// transpile parent access: expr.. → fn_member(expr, "parent")
+// expr.._.. → fn_member(fn_member(expr, "parent"), "parent")
+void transpile_parent_expr(Transpiler* tp, AstParentNode *parent_node) {
+    if (!parent_node->object) {
+        log_error("transpile_parent_expr: null object");
+        strbuf_append_str(tp->code_buf, "ItemError /* null parent expr */");
+        return;
+    }
+
+    // register "parent" as a constant string if not already done
+    String* parent_name = name_pool_create_len(tp->name_pool, "parent", 6);
+    // find or add to const_list
+    int parent_const_index = -1;
+    for (int i = 0; i < tp->const_list->length; i++) {
+        String* s = (String*)tp->const_list->data[i];
+        if (s == parent_name) {
+            parent_const_index = i;
+            break;
+        }
+    }
+    if (parent_const_index < 0) {
+        arraylist_append(tp->const_list, parent_name);
+        parent_const_index = tp->const_list->length - 1;
+    }
+
+    // emit nested fn_member calls: fn_member(...fn_member(obj, "parent")..., "parent")
+    for (int i = 0; i < parent_node->depth; i++) {
+        strbuf_append_str(tp->code_buf, "fn_member(");
+    }
+    transpile_box_item(tp, parent_node->object);
+    for (int i = 0; i < parent_node->depth; i++) {
+        strbuf_append_format(tp->code_buf, ",const_s2it(%d))", parent_const_index);
+    }
+}
+
 // Emit a forward declaration for a function (just signature, no body)
 void forward_declare_func(Transpiler* tp, AstFuncNode *fn_node) {
     bool is_closure = (fn_node->captures != nullptr);
@@ -4840,6 +4888,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_PATH_INDEX_EXPR:
         transpile_path_index_expr(tp, (AstPathIndexNode*)expr_node);
         break;
+    case AST_NODE_PARENT_EXPR:
+        transpile_parent_expr(tp, (AstParentNode*)expr_node);
+        break;
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
@@ -5167,6 +5218,9 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
         define_ast_node(tp, ((AstFieldNode*)node)->object);
         define_ast_node(tp, ((AstFieldNode*)node)->field);
+        break;
+    case AST_NODE_PARENT_EXPR:
+        define_ast_node(tp, ((AstParentNode*)node)->object);
         break;
     case AST_NODE_CALL_EXPR: {
         define_ast_node(tp, ((AstCallNode*)node)->function);
