@@ -1,6 +1,7 @@
 #include "font_face.h"
 #include "layout.hpp"
 #include "../lib/font_config.h"
+#include "../lib/font/font.h"  // unified font module — font_face_register
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_font_face.hpp"
 extern "C" {
@@ -60,6 +61,8 @@ void init_text_flow_logging(void) {
 void setup_text_flow_log_categories(void) {
     init_text_flow_logging();
 }
+
+// ============================================================================
 
 // Structured logging for font operations (replace printf)
 void log_font_loading_attempt(const char* family_name, const char* path) {
@@ -373,6 +376,53 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
 
     clog_info(font_log, "Registered @font-face: %s -> %s (total: %d)",
               descriptor->family_name, descriptor->src_local_path, uicon->font_face_count);
+
+    // ---- Bridge to unified font module ----
+    // Also register with FontContext so that font_resolve() can find @font-face
+    // descriptors directly, without going through load_font_with_descriptors().
+    if (uicon->font_ctx && descriptor->family_name) {
+        // map CssEnum weight/style → FontWeight/FontSlant
+        FontWeight fw = FONT_WEIGHT_NORMAL;
+        if (descriptor->font_weight == CSS_VALUE_BOLD) fw = FONT_WEIGHT_BOLD;
+        else if (descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
+            fw = (FontWeight)descriptor->font_weight;
+
+        FontSlant fs = FONT_SLANT_NORMAL;
+        if (descriptor->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
+        else if (descriptor->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
+
+        // build sources array from descriptor's src_entries + src_local_path
+        int src_count = descriptor->src_count;
+        if (!src_count && descriptor->src_local_path) src_count = 1;
+
+        FontFaceSource* sources = nullptr;
+        if (src_count > 0) {
+            sources = (FontFaceSource*)alloca(src_count * sizeof(FontFaceSource));
+            memset(sources, 0, src_count * sizeof(FontFaceSource));
+
+            if (descriptor->src_entries && descriptor->src_count > 0) {
+                for (int i = 0; i < descriptor->src_count; i++) {
+                    sources[i].path   = descriptor->src_entries[i].path;
+                    sources[i].format = descriptor->src_entries[i].format;
+                }
+            } else if (descriptor->src_local_path) {
+                sources[0].path   = descriptor->src_local_path;
+                sources[0].format = nullptr;
+            }
+        }
+
+        FontFaceDesc face_desc = {};
+        face_desc.family       = descriptor->family_name;
+        face_desc.weight       = fw;
+        face_desc.slant        = fs;
+        face_desc.sources      = sources;
+        face_desc.source_count = src_count;
+
+        if (font_face_register(uicon->font_ctx, &face_desc)) {
+            clog_debug(font_log, "register_font_face: bridged to unified font module for '%s'",
+                       descriptor->family_name);
+        }
+    }
 }
 
 // Character width caching
@@ -618,7 +668,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
     // Load font from memory using FT_New_Memory_Face
     // IMPORTANT: FreeType does NOT copy the buffer, so font_data must stay alive
     FT_Face face = NULL;
-    FT_Error error = FT_New_Memory_Face(uicon->ft_library, font_data, (FT_Long)font_data_size, 0, &face);
+    FT_Error error = FT_New_Memory_Face((FT_Library)uicon->ft_library, font_data, (FT_Long)font_data_size, 0, &face);
 
     if (error) {
         clog_error(font_log, "FT_New_Memory_Face failed: error=%d (data size=%zu)", error, font_data_size);
@@ -664,7 +714,7 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
     log_font_loading_attempt("local font", font_path);
 
     FT_Face face = NULL;
-    FT_Error error = FT_New_Face(uicon->ft_library, font_path, 0, &face);
+    FT_Error error = FT_New_Face((FT_Library)uicon->ft_library, font_path, 0, &face);
 
     if (error) {
         char error_msg[256];
@@ -914,7 +964,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
             arraylist_free(family_matches);
             // load_styled_font already caches its results, so we skip caching here
             strbuf_free(cache_key);
-            return load_styled_font(uicon, family_name, style);
+            return (FT_Face)load_styled_font(uicon, family_name, style);
         } else {
             // Font doesn't exist in database - skip expensive platform lookup
             clog_info(font_log, "Font family '%s' not in database, skipping platform lookup", family_name);
@@ -934,287 +984,4 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     strbuf_free(cache_key);
 
     return result_face;
-}
-
-// Enhanced font matching (basic implementation)
-float calculate_font_match_score(FontFaceDescriptor* descriptor, FontMatchCriteria* criteria) {
-    if (!descriptor || !criteria) {
-        return 0.0f;
-    }
-
-    float score = 0.0f;
-
-    // Family name match (most important)
-    if (descriptor->family_name && criteria->family_name) {
-        if (strcmp(descriptor->family_name, criteria->family_name) == 0) {
-            score += 0.5f;
-        }
-    }
-
-    // Style match
-    if (descriptor->font_style == criteria->style) {
-        score += 0.25f;
-    }
-
-    // Weight match
-    if (descriptor->font_weight == criteria->weight) {
-        score += 0.25f;
-    }
-
-    clog_debug(font_log, "Font match score for %s: %.2f", descriptor->family_name, score);
-    return score;
-}
-
-FontMatchResult find_best_font_match(UiContext* uicon, FontMatchCriteria* criteria) {
-    FontMatchResult result = {0};
-
-    if (!uicon || !criteria) {
-        return result;
-    }
-
-    clog_debug(font_log, "Finding best font match for: %s", criteria->family_name);
-
-    // For now, fall back to existing font loading
-    // In a full implementation, we would search @font-face descriptors
-    FontProp font_prop = {
-        .font_size = (float)criteria->size,
-        .font_style = criteria->style,
-        .font_weight = criteria->weight
-    };
-    result.face = load_styled_font(uicon, criteria->family_name, &font_prop);
-    result.match_score = result.face ? 1.0f : 0.0f;
-    result.is_exact_match = result.face != NULL;
-    result.requires_synthesis = false;
-    result.supports_codepoint = true; // Assume yes for now
-
-    return result;
-}
-
-// Font fallback chain management (basic implementation)
-FontFallbackChain* build_fallback_chain(UiContext* uicon, const char* css_font_family) {
-    if (!uicon || !css_font_family) {
-        return NULL;
-    }
-
-    FontFallbackChain* chain = (FontFallbackChain*)mem_alloc(sizeof(FontFallbackChain), MEM_CAT_LAYOUT);
-    if (!chain) {
-        clog_error(font_log, "Failed to allocate FontFallbackChain");
-        return NULL;
-    }
-
-    memset(chain, 0, sizeof(FontFallbackChain));
-
-    // Simple implementation: just use the requested family + system fallbacks
-    chain->family_count = 1;
-    chain->family_names = (char**)mem_alloc(sizeof(char*), MEM_CAT_LAYOUT);
-    chain->family_names[0] = mem_strdup(css_font_family, MEM_CAT_LAYOUT);
-    chain->system_fonts = uicon->fallback_fonts; // Use existing fallback fonts
-    chain->cache_enabled = true;
-
-    clog_debug(font_log, "Built fallback chain for: %s", css_font_family);
-    return chain;
-}
-
-bool font_supports_codepoint(FT_Face face, uint32_t codepoint) {
-    if (!face) {
-        return false;
-    }
-
-    FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
-    bool supports = (char_index > 0);
-
-    clog_debug(font_log, "Font %s %s codepoint U+%04X",
-              face->family_name, supports ? "supports" : "does not support", codepoint);
-
-    return supports;
-}
-
-FT_Face resolve_font_for_codepoint(FontFallbackChain* chain, uint32_t codepoint, FontProp* style) {
-    if (!chain) {
-        return NULL;
-    }
-
-    clog_debug(font_log, "Resolving font for codepoint U+%04X", codepoint);
-
-    // Check cache first
-    if (chain->cache_enabled && chain->codepoint_font_cache) {
-        FT_Face* cached_face = (FT_Face*)hashmap_get(chain->codepoint_font_cache, &codepoint);
-        if (cached_face && *cached_face) {
-            clog_debug(font_log, "Font cache hit for codepoint U+%04X", codepoint);
-            return *cached_face;
-        }
-    }
-
-    // Search through system fallback fonts
-    // chain->system_fonts is an array of font family names from ui_context.cpp
-    if (chain->system_fonts) {
-        for (char** font_ptr = chain->system_fonts; *font_ptr != NULL; font_ptr++) {
-            const char* fallback_font = *font_ptr;
-            clog_debug(font_log, "  Trying fallback font: %s for U+%04X", fallback_font, codepoint);
-
-            // Try to load this font
-            // We need access to UiContext to load fonts, but it's not in chain
-            // For now, we'll store the best candidate and return NULL
-            // The calling code (find_font_for_codepoint in text_metrics.cpp) will handle loading
-            clog_debug(font_log, "  Font: %s is a candidate for U+%04X", fallback_font, codepoint);
-        }
-    }
-
-    clog_debug(font_log, "Font fallback chain resolution: no font cached, caller should try fallbacks");
-    return NULL;
-}
-
-void cache_codepoint_font_mapping(FontFallbackChain* chain, uint32_t codepoint, FT_Face face) {
-    if (!chain || !face) {
-        return;
-    }
-
-    if (!chain->codepoint_font_cache) {
-        chain->codepoint_font_cache = hashmap_new(sizeof(uint32_t) + sizeof(FT_Face), 256, 0, 0,
-                                                 NULL, NULL, NULL, NULL);
-    }
-
-    if (chain->codepoint_font_cache) {
-        struct { uint32_t codepoint; FT_Face face; } entry = {codepoint, face};
-        hashmap_set(chain->codepoint_font_cache, &entry);
-
-        clog_debug(font_log, "Cached font mapping: U+%04X -> %s", codepoint, face->family_name);
-    }
-}
-
-// Enhanced metrics functions (basic implementation)
-void compute_enhanced_font_metrics(EnhancedFontBox* fbox) {
-    if (!fbox || !fbox->face) {
-        return;
-    }
-
-    if (fbox->metrics_computed) {
-        return; // Already computed
-    }
-
-    FT_Face face = fbox->face;
-    EnhancedFontMetrics* metrics = &fbox->metrics;
-
-    // Basic metrics from FreeType
-    metrics->ascender = face->size->metrics.ascender / 64.0;
-    metrics->descender = face->size->metrics.descender / 64.0;
-    metrics->height = face->size->metrics.height / 64.0;
-    metrics->line_gap = metrics->height - (metrics->ascender - metrics->descender);
-
-    // OpenType metrics (if available)
-    if (face->face_flags & FT_FACE_FLAG_SFNT) {
-        // These would need proper OpenType table parsing
-        metrics->typo_ascender = metrics->ascender;
-        metrics->typo_descender = metrics->descender;
-        metrics->typo_line_gap = metrics->line_gap;
-        metrics->win_ascent = metrics->ascender;
-        metrics->win_descent = -metrics->descender;
-        metrics->hhea_ascender = metrics->ascender;
-        metrics->hhea_descender = metrics->descender;
-        metrics->hhea_line_gap = metrics->line_gap;
-    }
-
-    // Estimate x-height and cap-height
-    // In a full implementation, these would be read from the font's OS/2 table
-    metrics->x_height = metrics->ascender * 0.5; // Rough estimate
-    metrics->cap_height = metrics->ascender * 0.7; // Rough estimate
-
-    metrics->baseline_offset = 0; // No adjustment by default
-    metrics->metrics_computed = true;
-    fbox->metrics_computed = true;
-
-    clog_debug(font_log, "Computed enhanced metrics for %s: asc=%d, desc=%d, height=%d",
-              face->family_name, metrics->ascender, metrics->descender, metrics->height);
-}
-
-int calculate_line_height_from_css(EnhancedFontBox* fbox, CssEnum line_height_css) {
-    if (!fbox) {
-        return 0;
-    }
-
-    compute_enhanced_font_metrics(fbox);
-
-    // For now, use basic calculation
-    // In a full implementation, this would handle CSS line-height values properly
-    int base_height = fbox->metrics.height;
-
-    clog_debug(font_log, "Calculated line height: %d", base_height);
-    return base_height;
-}
-
-// High-DPI display support functions
-void apply_pixel_ratio_to_font_metrics(EnhancedFontBox* fbox, float pixel_ratio) {
-    if (!fbox || pixel_ratio <= 0.0f) {
-        return;
-    }
-
-    fbox->pixel_ratio = pixel_ratio;
-    fbox->high_dpi_aware = (pixel_ratio > 1.0f);
-
-    clog_debug(font_log, "Applied pixel ratio %.2f to font metrics", pixel_ratio);
-}
-
-int scale_font_size_for_display(int base_size, float pixel_ratio) {
-    if (pixel_ratio <= 0.0f) {
-        return base_size;
-    }
-
-    int scaled_size = (int)(base_size * pixel_ratio);
-    clog_debug(font_log, "Scaled font size: %d -> %d (ratio: %.2f)", base_size, scaled_size, pixel_ratio);
-    return scaled_size;
-}
-
-void ensure_pixel_ratio_compatibility(EnhancedFontBox* fbox) {
-    if (!fbox) {
-        return;
-    }
-
-    // Ensure existing pixel_ratio handling is preserved
-    if (fbox->pixel_ratio > 0.0f && fbox->high_dpi_aware) {
-        clog_debug(font_log, "Pixel ratio compatibility ensured: %.2f", fbox->pixel_ratio);
-    }
-}
-
-// Enhanced font system integration
-void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox,
-                        const char* font_name, FontProp* fprop) {
-    if (!uicon || !fbox || !fprop) {
-        clog_error(font_log, "Invalid parameters for setup_font_enhanced");
-        return;
-    }
-
-    // Initialize enhanced font box
-    memset(fbox, 0, sizeof(EnhancedFontBox));
-    fbox->style = *fprop;
-    fbox->current_font_size = fprop->font_size;
-    fbox->cache_enabled = true;
-    fbox->pixel_ratio = uicon->pixel_ratio; // Preserve existing pixel_ratio
-    fbox->high_dpi_aware = (uicon->pixel_ratio > 1.0f);
-
-    // Load font face
-    fbox->face = load_styled_font(uicon, fprop->family ? fprop->family : font_name, fprop);
-
-    if (fbox->face) {
-        // Calculate space width
-        FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING); // FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
-        if (FT_Load_Char(fbox->face, ' ', load_flags)) {
-            clog_warn(font_log, "Could not load space character for %s", font_name);
-            // Handle WOFF fonts where y_ppem=0
-            float ppem = fbox->face->size->metrics.y_ppem / 64.0f;
-            if (ppem <= 0 && fbox->face->size && fbox->face->size->metrics.height > 0) {
-                ppem = fbox->face->size->metrics.height / 64.0f / 1.2f;
-            }
-            fbox->space_width = ppem > 0 ? ppem : fprop->font_size * fbox->pixel_ratio;
-        } else {
-            fbox->space_width = fbox->face->glyph->advance.x / 64.0;
-        }
-
-        // Compute enhanced metrics
-        compute_enhanced_font_metrics(fbox);
-
-        clog_info(font_log, "Enhanced font setup complete: %s (size: %d, pixel_ratio: %.2f)",
-                 font_name, fprop->font_size, fbox->pixel_ratio);
-    } else {
-        clog_error(font_log, "Failed to load font face for enhanced setup: %s", font_name);
-    }
 }

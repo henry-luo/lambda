@@ -4,6 +4,10 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/avl_tree.h"
+#include "../lib/font/font.h"
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 #include "../lib/log.h"
 #include <chrono>
@@ -563,17 +567,13 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             // Use Unicode-specified width (fraction of em)
             text_width += unicode_space_em * lycon->font.current_font_size;
         } else {
-            // Use sub-pixel rendering flags for better quality
-            FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char(lycon->font.ft_face, codepoint, load_flags)) {
+            // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
+            GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
+            if (ginfo.id == 0) {
                 fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
                 return RDT_LINE_NOT_FILLED;
             }
-            FT_GlyphSlot slot = lycon->font.ft_face->glyph;
-            // Font is loaded at physical pixel size, so advance is in physical pixels
-            // Divide by pixel_ratio to convert back to CSS pixels for layout
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-            text_width += (float)(slot->advance.x) / 64.0f / pixel_ratio;
+            text_width += ginfo.advance_x;
         }
         // Apply letter-spacing (but not after the last character)
         str++;
@@ -644,16 +644,16 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->width = text_width;
     lycon->line.advance_x += text_width;
     // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    // Pass pixel_ratio to get CSS pixel values
-    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face, pixel_ratio);
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
     if (typo.valid && typo.use_typo_metrics) {
         lycon->line.max_ascender = max(lycon->line.max_ascender, typo.ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, typo.descender);
-    } else {
-        // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
-        lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0 / pixel_ratio);
-        lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0 / pixel_ratio);
+    } else if (lycon->font.font_handle) {
+        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+        if (m) {
+            lycon->line.max_ascender = max(lycon->line.max_ascender, m->hhea_ascender);
+            lycon->line.max_descender = max(lycon->line.max_descender, -(m->hhea_descender));
+        }
     }
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
@@ -792,12 +792,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     rect->start_index = str - text_start;
     // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-    float font_height = lycon->font.ft_face->size->metrics.height / 64.0 / pixel_ratio;
+    float font_height = font_get_metrics(lycon->font.font_handle)->hhea_line_height;
     rect->x = lycon->line.advance_x;
     // browser text rect height uses font metrics (ascent+descent), NOT CSS line-height
     // CSS line-height affects line spacing/positioning, but text rect height is font-based
     // Use platform-specific metrics (CoreText on macOS) for accurate ascent+descent
-    rect->height = get_font_cell_height(lycon->font.ft_face, pixel_ratio);
+    rect->height = font_get_cell_height(lycon->font.font_handle);
 
     // Text rect y-position based on vertical alignment
     // CSS half-leading model: text is centered within the line box
@@ -908,7 +908,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Use Unicode-specified width (fraction of em)
                 wd = unicode_space_em * lycon->font.current_font_size;
             } else {
-                FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
+                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(lycon->ui_context, lycon->font.font_handle, lycon->font.style, codepoint, false);
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
@@ -923,14 +923,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
-            FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, codepoint);
+            uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
             if (lycon->line.prev_glyph_index) {
-                FT_Vector kerning;
-                FT_Get_Kerning(lycon->font.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
-                if (kerning.x) {
-                    // Kerning is in physical pixels, divide by pixel_ratio for CSS pixels
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                    float kerning_css = (float)kerning.x / 64.0f / pixel_ratio;
+                float kerning_css = font_get_kerning_by_index(lycon->font.font_handle, lycon->line.prev_glyph_index, glyph_index);
+                if (kerning_css != 0.0f) {
                     if (str == text_start + rect->start_index) {
                         rect->x += kerning_css;
                     }
