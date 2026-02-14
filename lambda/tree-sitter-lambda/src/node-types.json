@@ -844,7 +844,7 @@
             "named": true
           },
           {
-            "type": "primary_type",
+            "type": "unary_type",
             "named": true
           }
         ]
@@ -1573,7 +1573,7 @@
         ]
       },
       "group": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1593,7 +1593,7 @@
         ]
       },
       "limit": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1603,7 +1603,7 @@
         ]
       },
       "offset": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1613,7 +1613,7 @@
         ]
       },
       "order": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1669,7 +1669,7 @@
         ]
       },
       "where": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1939,7 +1939,7 @@
         ]
       },
       "group": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1959,7 +1959,7 @@
         ]
       },
       "limit": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1969,7 +1969,7 @@
         ]
       },
       "offset": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1979,7 +1979,7 @@
         ]
       },
       "order": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
@@ -1999,7 +1999,7 @@
         ]
       },
       "where": {
-        "multiple": false,
+        "multiple": true,
         "required": false,
         "types": [
           {
