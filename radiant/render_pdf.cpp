@@ -2,6 +2,11 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
+
+// FreeType for PDF glyph metrics
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {

@@ -9,6 +9,11 @@
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "state_store.hpp"
+
+// FreeType for glyph rendering and font metric access
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include "../lib/log.h"
 #include "../lib/font/font.h"
 #include "../lib/avl_tree.h"
@@ -508,7 +513,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else { scan += bytes; }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, scan_codepoint, false);
+                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, scan_codepoint, false);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -603,7 +608,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, codepoint, true);
+                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, codepoint, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -639,7 +644,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                     static int bitmap_debug_count = 0;
                     if (bitmap_debug_count < 50 && rdcon->font.ft_face &&
-                        strcmp(rdcon->font.ft_face->family_name, "Monaco") == 0) {
+                        strcmp(((FT_Face)rdcon->font.ft_face)->family_name, "Monaco") == 0) {
                         log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
                                   codepoint, glyph->bitmap.width, glyph->bitmap.rows,
                                   glyph->bitmap.pitch, glyph->bitmap_left, glyph->bitmap_top,
@@ -659,13 +664,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         }
         // render text deco (positions in physical pixels)
         if (rdcon->font.style->text_deco != CSS_VALUE_NONE) {
-            float thinkness = max(rdcon->font.ft_face->underline_thickness / 64.0, 1);
+            float thinkness = max(((FT_Face)rdcon->font.ft_face)->underline_thickness / 64.0, 1);
             Rect rect;
             // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // underline drawn at baseline, with a gap of thickness
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s +
-                    (rdcon->font.ft_face->size->metrics.ascender / 64.0) + thinkness;
+                    (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0) + thinkness;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s;
@@ -769,8 +774,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         case CSS_VALUE_DISC: {
             // Filled circle - center vertically in line, positioned at right side of marker box
             // Note: y_ppem is already in pixels, but ascender is in 26.6 fixed point
-            float font_size = rdcon->font.ft_face ? (float)rdcon->font.ft_face->size->metrics.y_ppem : 16.0f;
-            float baseline_offset = rdcon->font.ft_face ? (rdcon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+            float font_size = rdcon->font.ft_face ? (float)((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem : 16.0f;
+            float baseline_offset = rdcon->font.ft_face ? (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0f) : 12.0f;
             // Position bullet center: x at right side of marker box (with small gap), y at middle of x-height
             float cx = x + width - bullet_size - 4.0f;  // 4px gap from right edge
             float cy = y + baseline_offset - font_size * 0.35f;  // center on x-height
@@ -790,8 +795,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
         case CSS_VALUE_CIRCLE: {
             // Stroked circle (outline only)
-            float font_size = rdcon->font.ft_face ? (float)rdcon->font.ft_face->size->metrics.y_ppem : 16.0f;
-            float baseline_offset = rdcon->font.ft_face ? (rdcon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+            float font_size = rdcon->font.ft_face ? (float)((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem : 16.0f;
+            float baseline_offset = rdcon->font.ft_face ? (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0f) : 12.0f;
             float cx = x + width - bullet_size - 4.0f;
             float cy = y + baseline_offset - font_size * 0.35f;
             float radius = bullet_size / 2.0f;
@@ -811,8 +816,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
         case CSS_VALUE_SQUARE: {
             // Filled square
-            float font_size = rdcon->font.ft_face ? (float)rdcon->font.ft_face->size->metrics.y_ppem : 16.0f;
-            float baseline_offset = rdcon->font.ft_face ? (rdcon->font.ft_face->size->metrics.ascender / 64.0f) : 12.0f;
+            float font_size = rdcon->font.ft_face ? (float)((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem : 16.0f;
+            float baseline_offset = rdcon->font.ft_face ? (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0f) : 12.0f;
             float sx = x + width - bullet_size - 4.0f;
             float sy = y + baseline_offset - font_size * 0.35f - bullet_size/2;
 
@@ -970,7 +975,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         // dom_wrapper.type = LEXBOR_NODE;
         // dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
         // text.node = &dom_wrapper;
-        // float font_size = rdcon->font.ft_face->size->metrics.y_ppem / 64.0;
+        // float font_size = ((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem / 64.0;
         // text.x = list_item->x - 20 * ratio;
         // text.y = list_item->y;  // align at top the list item
         // text.width = text_rect.length * font_size;  text.height = font_size;
