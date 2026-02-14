@@ -1,9 +1,14 @@
 #include "view.hpp"
 #include <locale.h>
+
+// FreeType for library initialization/cleanup
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
 
 #include "../lib/log.h"
 #include "../lib/font_config.h"
+#include "../lib/font/font.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
@@ -58,16 +63,18 @@ int ui_context_init(UiContext* uicon, bool headless) {
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
     // init FreeType with sub-pixel rendering configuration
-    if (FT_Init_FreeType(&uicon->ft_library)) {
+    FT_Library ft_lib;
+    if (FT_Init_FreeType(&ft_lib)) {
         fprintf(stderr, "Could not initialize FreeType library\n");
         return EXIT_FAILURE;
     }
+    uicon->ft_library = ft_lib;
 
     // Configure sub-pixel rendering for better text quality
-    configure_freetype_subpixel(uicon->ft_library);
+    configure_freetype_subpixel(ft_lib);
 
     // Configure FreeType for better sub-pixel rendering
-    FT_Error lcd_error = FT_Library_SetLcdFilter(uicon->ft_library, FT_LCD_FILTER_DEFAULT);
+    FT_Error lcd_error = FT_Library_SetLcdFilter(ft_lib, FT_LCD_FILTER_DEFAULT);
     if (lcd_error) {
         log_debug("Could not set LCD filter (FreeType version may not support it)");
     } else {
@@ -128,6 +135,14 @@ int ui_context_init(UiContext* uicon, bool headless) {
                (int)uicon->viewport_width, (int)uicon->viewport_height,
                (int)uicon->window_width, (int)uicon->window_height);
     }
+
+    // Create unified font context (Phase 2: coexists with old font_db/ft_library)
+    // Created after window so pixel_ratio is known
+    FontContextConfig font_cfg = {};
+    font_cfg.pixel_ratio = uicon->pixel_ratio;
+    font_cfg.max_cached_faces = 64;
+    font_cfg.enable_lcd_rendering = true;
+    uicon->font_ctx = font_context_create(&font_cfg);
 
     // set default fonts
     // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
@@ -196,7 +211,11 @@ void ui_context_cleanup(UiContext* uicon) {
 
     log_debug("cleaning up font resources");
     fontface_cleanup(uicon);  // free font cache
-    FT_Done_FreeType(uicon->ft_library);
+    if (uicon->font_ctx) {
+        font_context_destroy(uicon->font_ctx);
+        uicon->font_ctx = NULL;
+    }
+    FT_Done_FreeType((FT_Library)uicon->ft_library);
     font_database_destroy(uicon->font_db);
 
     log_debug("cleaning up media resources");
