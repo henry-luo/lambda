@@ -137,24 +137,15 @@ module.exports = grammar({
     $._non_null_literal,
     $._parenthesized_expr,
     $._arguments,
-    $._expr_stam,
     $._number,
     $._datetime,
-    $._attr_expr,
-    $._import_stam,
-    $._statement,
-    $._content_expr,
   ],
 
   conflicts: $ => [
     [$._expr, $.member_expr],
-    [$._type_expr, $.constrained_type],
-    [$.unary_type, $.constrained_type],  // primary_type could be unary_type or start constrained_type
-    [$.type_seq, $.type_occurrence],  // unary_type could start type_seq or type_occurrence
-    [$.type_seq, $.type_occurrence, $._type_expr],  // unary_type in pattern context
-    [$.type_occurrence, $._type_expr],  // unary_type followed by occurrence (+,?,*,[n])
-    [$.occurrence_count, $.primary_type],  // [n, could be occurrence_count or array_type
-    [$.type_seq, $._type_expr],   // unary_type could start type_seq or be _type_expr directly
+    [$._type_quantified, $.occurrence_type],       // unary_type + [n] could be occurrence or end of type
+    [$._type_compound, $.concat_type],             // _type_quantified could be complete or start of concat
+    [$._type_compound, $.constrained_type],        // _type_quantified could be complete or base of constrained
   ],
 
   precedences: $ => [[
@@ -191,12 +182,9 @@ module.exports = grammar({
     $.assign_stam,
   ],
   [
-    $.fn_type,
-    $.unary_type,            // atomic types (primary_type | type_negation) - tightest
-    $.type_occurrence,       // quantifiers: T+, T*, T?, T[n]
-    $.constrained_type,      // T that (...) - postfix constraint clause
-    'pattern_concat',        // concatenation binds tighter than alternation
-    $.binary_type,           // alternation (|, &, !) - lowest type precedence
+    $.unary_type,            // atomic types (primary_type | negation_type) - tightest
+    $.binary_type,           // alternation (|, &, !)
+    $.fn_type,               // fn binds loosest: fn int+ means fn (int+)
   ]],
 
   rules: {
@@ -289,17 +277,6 @@ module.exports = grammar({
     nan: _ => 'nan',
 
     // Containers: list, array, map, element
-
-    _content_literal: $ => choice(
-      // $._number, // not allowed, as 123 - 456 is expr
-      // $.symbol, // not allowed, as it is ambiguous with ident expr
-      $.string,
-      $._datetime,
-      $.binary,
-      $.true,
-      $.false,
-      $.base_type,  // null is part of base_type
-    ),
 
     // expr statements that need ';'
     _expr_stam: $ => choice(
@@ -750,12 +727,14 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses (comma-separated after declarations)
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses in order
-      optional(field('where', $.for_where_clause)),
-      optional(field('group', $.for_group_clause)),
-      optional(field('order', $.for_order_clause)),
-      optional(field('limit', $.for_limit_clause)),
-      optional(field('offset', $.for_offset_clause)),
+      // optional clauses (where, group, order, limit, offset) in any order
+      repeat(choice(
+        field('where', $.for_where_clause),
+        field('group', $.for_group_clause),
+        field('order', $.for_order_clause),
+        field('limit', $.for_limit_clause),
+        field('offset', $.for_offset_clause),
+      )),
       ')',
       field('then', $._expr),
     )),
@@ -766,12 +745,14 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))),
       // optional let clauses
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses in order
-      optional(field('where', $.for_where_clause)),
-      optional(field('group', $.for_group_clause)),
-      optional(field('order', $.for_order_clause)),
-      optional(field('limit', $.for_limit_clause)),
-      optional(field('offset', $.for_offset_clause)),
+      // optional clauses (where, group, order, limit, offset) in any order
+      repeat(choice(
+        field('where', $.for_where_clause),
+        field('group', $.for_group_clause),
+        field('order', $.for_order_clause),
+        field('limit', $.for_limit_clause),
+        field('offset', $.for_offset_clause),
+      )),
       '{', field('then', $.content), '}'
     ),
 
@@ -821,11 +802,12 @@ module.exports = grammar({
     occurrence: $ => choice('?', '+', '*', $.occurrence_count),
 
     // Occurrence count: [n] (exact), [n, m] (range), [n+] (unbounded)
-    occurrence_count: $ => choice(
+    // Higher precedence than primary_type to prefer occurrence over array_type
+    occurrence_count: $ => prec(2, choice(
       seq('[', $.integer, ']'),                      // exactly n: T[5]
       seq('[', $.integer, ',', $.integer, ']'),      // n to m: T[2, 5]
       seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
-    ),
+    )),
 
     // Built-in types as reserved keywords
     base_type: _ => prec(1, choice(
@@ -904,13 +886,28 @@ module.exports = grammar({
     // This is what occurrence modifiers can apply to.
     unary_type: $ => choice(
       $.primary_type,
-      $.type_negation,       // !T - prefix negation
+      $.negation_type,       // !T - prefix negation
+    ),
+
+    // Quantified: unary type with optional occurrence modifier
+    // Structural level between unary_type and compound types
+    _type_quantified: $ => choice(
+      $.occurrence_type,
+      $.unary_type,
+    ),
+
+    // Compound type: constrained, concat, or simple quantified
+    // Structural level between quantified and binary types
+    _type_compound: $ => choice(
+      $.constrained_type,
+      $.concat_type,
+      $._type_quantified,
     ),
 
     // Occurrence applied to unary type: T?, T+, T*, T[n]
     // No chaining allowed (like regex) - use explicit grouping: (T*)[2]
-    // Use prec.dynamic(1) to prefer occurrence over type_seq continuation.
-    type_occurrence: $ => prec.dynamic(1, prec.right(seq(
+    // Use prec.dynamic(1) to prefer occurrence over concat_type continuation.
+    occurrence_type: $ => prec.dynamic(1, prec.right(seq(
       field('operand', $.unary_type),
       field('operator', $.occurrence),
     ))),
@@ -919,31 +916,29 @@ module.exports = grammar({
       ...type_pattern($._type_expr),
     ),
 
-    // ====== Type Sequence (for string/symbol patterns) ======
-    // Type sequence: whitespace-separated concatenation of type terms.
+    // ====== Type Concatenation (for string/symbol patterns) ======
+    // Type concatenation: whitespace-separated sequence of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // Terms are unary_type (possibly with occurrence).
-    type_seq: $ => prec.left('pattern_concat', seq(
-      choice($.unary_type, $.type_occurrence),
-      prec.dynamic(-1, repeat1(prec.dynamic(-1, choice($.unary_type, $.type_occurrence)))),
-    )),
+    // Terms are _type_quantified (unary_type possibly with occurrence).
+    concat_type: $ => prec.left(prec.dynamic(-1, seq(
+      $._type_quantified,
+      repeat1($._type_quantified),
+    ))),
 
     // Prefix negation: !T (for string/symbol patterns: !\d)
     // Validated in AST builder for context-appropriate usage.
-    type_negation: $ => prec.right(seq(
+    negation_type: $ => prec.right(seq(
       '!', field('operand', $.primary_type),
     )),
 
-    // Unified type expression - single hierarchy like _expr.
-    // Precedence (high to low): unary_type > type_occurrence > type_seq > binary_type
+    // Unified type expression - layered hierarchy
+    // Structural precedence (tightest to loosest):
+    //   unary_type > occurrence_type > constrained/concat > binary > error_union
     _type_expr: $ => choice(
-      $.unary_type,            // primary_type | type_negation
-      $.type_occurrence,       // unary_type with occurrence: T+, T?, T*, T[n]
-      $.binary_type,           // alternation: T | U
-      $.error_union_type,
-      $.constrained_type,      // type with that clause constraint
-      $.type_seq,              // concatenation: \d[3] "-" \d[4] (pattern context only)
+      $._type_compound,        // covers unary, occurrence, constrained, concat
+      $.binary_type,           // alternation: T | U, T & U, T ! U
+      $.error_union_type,      // T^ error union
     ),
 
     // Constrained type: base_type that (constraint_expr)
@@ -951,7 +946,7 @@ module.exports = grammar({
     // The constraint uses ~ to refer to the value being checked
     // Parentheses required to avoid grammar ambiguity with index expressions
     constrained_type: $ => seq(
-      field('base', choice($.primary_type, $.type_occurrence)),
+      field('base', $._type_quantified),
       'that',
       '(',
       field('constraint', $._expr),
@@ -1053,7 +1048,7 @@ module.exports = grammar({
     pattern_any: _ => '\\.',
 
     // String pattern definition: string name = type_expr
-    // type_expr now includes type_seq for pattern concatenation.
+    // type_expr now includes concat_type for pattern concatenation.
     string_pattern: $ => prec.right(seq(
       'string',
       field('name', $.identifier),
@@ -1062,7 +1057,7 @@ module.exports = grammar({
     )),
 
     // Symbol pattern definition: symbol name = type_expr
-    // type_expr now includes type_seq for pattern concatenation.
+    // type_expr now includes concat_type for pattern concatenation.
     symbol_pattern: $ => prec.right(seq(
       'symbol',
       field('name', $.identifier),
