@@ -7008,72 +7008,76 @@
       ]
     },
     "occurrence_count": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "["
-            },
-            {
-              "type": "SYMBOL",
-              "name": "integer"
-            },
-            {
-              "type": "STRING",
-              "value": "]"
-            }
-          ]
-        },
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "["
-            },
-            {
-              "type": "SYMBOL",
-              "name": "integer"
-            },
-            {
-              "type": "STRING",
-              "value": ","
-            },
-            {
-              "type": "SYMBOL",
-              "name": "integer"
-            },
-            {
-              "type": "STRING",
-              "value": "]"
-            }
-          ]
-        },
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "["
-            },
-            {
-              "type": "SYMBOL",
-              "name": "integer"
-            },
-            {
-              "type": "STRING",
-              "value": "+"
-            },
-            {
-              "type": "STRING",
-              "value": "]"
-            }
-          ]
-        }
-      ]
+      "type": "PREC",
+      "value": 2,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "["
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": "]"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "["
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": "]"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "["
+              },
+              {
+                "type": "SYMBOL",
+                "name": "integer"
+              },
+              {
+                "type": "STRING",
+                "value": "+"
+              },
+              {
+                "type": "STRING",
+                "value": "]"
+              }
+            ]
+          }
+        ]
+      }
     },
     "base_type": {
       "type": "PREC",
@@ -8727,8 +8731,12 @@
       "constrained_type"
     ],
     [
-      "unary_type",
-      "constrained_type"
+      "_type_expr",
+      "occurrence_type"
+    ],
+    [
+      "_type_expr",
+      "concat_type"
     ],
     [
       "concat_type",
@@ -8737,18 +8745,6 @@
     [
       "concat_type",
       "occurrence_type",
-      "_type_expr"
-    ],
-    [
-      "occurrence_type",
-      "_type_expr"
-    ],
-    [
-      "occurrence_count",
-      "primary_type"
-    ],
-    [
-      "concat_type",
       "_type_expr"
     ]
   ],
@@ -8870,10 +8866,6 @@
     [
       {
         "type": "SYMBOL",
-        "name": "fn_type"
-      },
-      {
-        "type": "SYMBOL",
         "name": "unary_type"
       },
       {
@@ -8891,6 +8883,10 @@
       {
         "type": "SYMBOL",
         "name": "binary_type"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "fn_type"
       }
     ]
   ],
