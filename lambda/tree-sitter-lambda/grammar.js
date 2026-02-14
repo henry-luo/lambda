@@ -145,19 +145,17 @@ module.exports = grammar({
     $._statement,
     $._content_expr,
     $._type_term,
-    $._pattern_expr,
-    $._pattern_group_expr,
   ],
 
   conflicts: $ => [
     [$._expr, $.member_expr],
     [$._type_expr, $.constrained_type],
     [$.type_seq, $.term_occurrence],  // primary_type could start type_seq or term_occurrence
+    [$.type_seq, $.term_occurrence, $._type_expr],  // primary_type in pattern context
     [$.term_occurrence, $._type_expr],  // primary_type followed by occurrence (+,?,*,[n])
     [$.occurrence_count, $.primary_type],  // [n, could be occurrence_count or array_type
-    [$.type_seq_multiline, $.term_occurrence],  // inside pattern_group
-    [$.type_seq_multiline, $.term_occurrence, $._type_expr],  // inside pattern_group with type_expr
-    [$.list_type, $.pattern_group],  // (...) could be list_type or pattern_group
+    [$.type_seq, $.binary_type],  // \d | \w: could start type_seq or be binary_type
+    [$.type_seq, $._type_expr],   // primary_type could start type_seq or be _type_expr directly
   ],
 
   precedences: $ => [[
@@ -197,11 +195,11 @@ module.exports = grammar({
     $.fn_type,
     $.constrained_type,
     $.type_occurrence,
-    $.term_occurrence,  // term occurrence binds tighter than pattern_concat
+    $.term_occurrence,  // quantifiers bind tighter than concatenation
     $.type_negation,
     $.primary_type,
-    'pattern_concat',
-    $.binary_type,
+    'pattern_concat',    // concatenation binds tighter than alternation
+    $.binary_type,       // alternation (|, &, !) - lowest type precedence
   ]],
 
   rules: {
@@ -839,10 +837,13 @@ module.exports = grammar({
       'list', 'array', 'map', 'element', 'entity', 'object', 'type', 'function'
     )),
 
-    list_type: $ => seq(
+    // list_type for tuple types and pattern grouping
+    // e.g. (int, string) for tuple, ("a" to "z")+ for grouped pattern with occurrence
+    // AST builder rejects comma-separated multi-element list_type in pattern context.
+    list_type: $ => prec.dynamic(2, seq(
       // list cannot be empty
       '(', seq($._type_expr, repeat(seq(',', $._type_expr))), ')',
-    ),
+    )),
 
     array_type: $ => seq(
       '[', comma_sep($._type_expr), ']',
@@ -888,10 +889,10 @@ module.exports = grammar({
     )),
 
     primary_type: $ => choice(
+      $.range_type,        // range_type first to ensure "a" to "z" is parsed as range
       $._non_null_literal, // non-null literal values; null is now a base type
       $.base_type,
       $.identifier,  // type reference / pattern reference
-      $.range_type,
       $.list_type,
       $.array_type,
       $.map_type,
@@ -912,44 +913,21 @@ module.exports = grammar({
     ),
 
     // ====== Type Sequence (for string/symbol patterns) ======
-    // Type sequence: horizontal-space-separated concatenation of type terms.
+    // Type sequence: horizontal-whitespace-separated concatenation of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // Uses token.immediate to require horizontal whitespace (space/tab) between terms,
-    // NOT newlines - this prevents type_seq from spanning multiple lines.
-    // For multi-line patterns, use pattern_group: (\d[3] "-" \n \d[4])
-    type_seq: $ => prec.left('pattern_concat', choice(
-      seq($._type_term, token.immediate(/[ \t]+/), $._type_term),
-      seq($.type_seq, token.immediate(/[ \t]+/), $._type_term),
-    )),
-
-    // Pattern group: parenthesized pattern expression allowing multi-line patterns.
-    // Inside parentheses, type_seq_multiline allows newlines between terms.
-    // e.g. (\d[3] "-"
-    //       \d[3] "-" \d[4])
-    pattern_group: $ => seq(
-      '(', $._pattern_group_expr, ')',
-    ),
-
-    // Expression inside pattern_group - allows multi-line type sequences
-    _pattern_group_expr: $ => choice(
-      $._type_expr,
-      $.type_seq_multiline,
-    ),
-
-    // Multi-line type sequence: allows any whitespace (including newlines) between terms.
-    // Only valid inside pattern_group parentheses.
-    type_seq_multiline: $ => prec.left('pattern_concat', choice(
-      seq($._type_term, $._type_term),
-      seq($.type_seq_multiline, $._type_term),
+    type_seq: $ => prec.left('pattern_concat', seq(
+      $._type_term,
+      prec.dynamic(-1, repeat1(prec.dynamic(-1, $._type_term))),
     )),
 
     // Type term: primary type or primary type with occurrence modifier.
     // Used as operand in type_seq to ensure occurrence binds tighter than sequence.
     // Uses term_occurrence (primary_type operand) to avoid \d[4] being parsed as \d + array_type.
+    // Note: list_type is used for grouping in patterns - e.g. ("a" to "z")+
+    // Multi-element list_type is rejected by AST builder in pattern context.
     _type_term: $ => choice(
       $.primary_type,
-      $.pattern_group,   // parenthesized pattern (allows multi-line)
       alias($.term_occurrence, $.type_occurrence),
     ),
 
@@ -967,23 +945,16 @@ module.exports = grammar({
       '!', field('operand', $.primary_type),
     )),
 
+    // Unified type expression - includes all type constructs and pattern sequences.
+    // type_seq (concatenation) is validated by AST builder to only appear in pattern context.
     _type_expr: $ => choice(
       $.primary_type,
       $.type_occurrence,
-      $.binary_type,
-      $.type_negation,         // prefix negation (string/symbol patterns)
+      $.binary_type,           // alternation: T | U
+      $.type_negation,         // prefix negation: !T
       $.error_union_type,
       $.constrained_type,      // type with that clause constraint
-      // NOTE: type_seq is NOT in _type_expr - it only appears in _pattern_expr
-    ),
-
-    // Pattern expression: the body of string/symbol pattern definitions.
-    // Includes type_seq which is only valid in pattern context (AST builder validates).
-    // This is separate from _type_expr to prevent greedy parsing of subsequent statements.
-    _pattern_expr: $ => choice(
-      $._type_expr,            // any type expression
-      $.type_seq,              // pattern sequence: \d[3] "-" \d[4]
-      $.pattern_group,         // parenthesized multi-line pattern: (\d[3] \n "-" \d[4])
+      $.type_seq,              // concatenation: \d[3] "-" \d[4] (pattern context only)
     ),
 
     // Constrained type: base_type that (constraint_expr)
@@ -1092,22 +1063,22 @@ module.exports = grammar({
     // Backslash-dot matches any character
     pattern_any: _ => '\\.',
 
-    // String pattern definition: string name = pattern_expr
-    // Uses _pattern_expr which allows type_seq for pattern concatenation.
+    // String pattern definition: string name = type_expr
+    // type_expr now includes type_seq for pattern concatenation.
     string_pattern: $ => prec.right(seq(
       'string',
       field('name', $.identifier),
       '=',
-      field('pattern', $._pattern_expr),
+      field('pattern', $._type_expr),
     )),
 
-    // Symbol pattern definition: symbol name = pattern_expr
-    // Uses _pattern_expr which allows type_seq for pattern concatenation.
+    // Symbol pattern definition: symbol name = type_expr
+    // type_expr now includes type_seq for pattern concatenation.
     symbol_pattern: $ => prec.right(seq(
       'symbol',
       field('name', $.identifier),
       '=',
-      field('pattern', $._pattern_expr),
+      field('pattern', $._type_expr),
     )),
 
   },
