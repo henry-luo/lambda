@@ -192,6 +192,9 @@ FontContext* font_context_create(FontContextConfig* config) {
     // set default fallback fonts
     ctx->fallback_fonts = default_fallback_fonts;
 
+    // create bitmap cache for rendered glyphs (LRU, up to max_cached_glyphs)
+    ctx->bitmap_cache = NULL; // lazily created in font_render_glyph on first use
+
     log_info("font_context_create: initialized (pixel_ratio=%.1f, max_faces=%d, max_glyphs=%d)",
              ctx->config.pixel_ratio, ctx->config.max_cached_faces, ctx->config.max_cached_glyphs);
 
@@ -253,7 +256,27 @@ void font_context_destroy(FontContext* ctx) {
 bool font_context_scan(FontContext* ctx) {
     if (!ctx || !ctx->database) return false;
     if (ctx->database->scanned) return true;
-    return font_database_scan_internal(ctx->database);
+
+    // try loading from disk cache first (much faster than scanning)
+    if (ctx->config.enable_disk_cache && ctx->config.cache_dir) {
+        char cache_path[1024];
+        snprintf(cache_path, sizeof(cache_path), "%s/font_cache.bin", ctx->config.cache_dir);
+        if (font_database_load_cache_internal(ctx->database, cache_path)) {
+            log_info("font_context_scan: loaded from disk cache");
+            return true;
+        }
+    }
+
+    bool ok = font_database_scan_internal(ctx->database);
+
+    // save to disk cache after successful scan
+    if (ok && ctx->config.enable_disk_cache && ctx->config.cache_dir) {
+        char cache_path[1024];
+        snprintf(cache_path, sizeof(cache_path), "%s/font_cache.bin", ctx->config.cache_dir);
+        font_database_save_cache_internal(ctx->database, cache_path);
+    }
+
+    return ok;
 }
 
 // ============================================================================
@@ -349,4 +372,19 @@ FontCacheStats font_get_cache_stats(FontContext* ctx) {
     if (ctx->glyph_arena) stats.memory_usage_bytes += arena_total_allocated(ctx->glyph_arena);
 
     return stats;
+}
+
+// ============================================================================
+// Disk cache — persist font database for faster startup
+// ============================================================================
+
+bool font_cache_save(FontContext* ctx) {
+    if (!ctx || !ctx->database) return false;
+    if (!ctx->config.cache_dir) {
+        log_debug("font_cache_save: no cache_dir configured");
+        return false;
+    }
+    char cache_path[1024];
+    snprintf(cache_path, sizeof(cache_path), "%s/font_cache.bin", ctx->config.cache_dir);
+    return font_database_save_cache_internal(ctx->database, cache_path);
 }
