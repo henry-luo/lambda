@@ -34,10 +34,17 @@
 
   ;; handle positioned elements (absolute/fixed are pulled from flow)
   ;; they are laid out by their containing block, not here.
-  ;; we only handle static and relative here.
+  ;; for absolute/fixed, we call layout-positioned directly.
 
   (define view
-    (match box
+    (cond
+      ;; absolute or fixed: lay out via layout-positioned
+      [(or (eq? position 'absolute) (eq? position 'fixed))
+       (define avail-w (avail-width->number (cadr avail)))
+       (define avail-h (avail-height->number (caddr avail)))
+       (layout-positioned box (or avail-w 0) (or avail-h 0) layout)]
+      [else
+       (match box
       ;; display:none
       [`(none ,id)
        (make-empty-view id)]
@@ -75,7 +82,7 @@
       [`(replaced ,id ,styles ,intrinsic-w ,intrinsic-h)
        (layout-replaced box avail)]
 
-      [_ (error 'layout "unknown box type: ~a" box)]))
+      [_ (error 'layout "unknown box type: ~a" box)])]))
 
   ;; apply relative positioning offset
   (if (eq? position 'relative)
