@@ -102,7 +102,7 @@ type IntList = int[2]
 // ============================================================
 'Test 7: Nested Patterns'
 
-type PairOfLists = int*[2]  // exactly 2 lists of ints
+type PairOfLists = (int*)[2]  // exactly 2 lists of ints (explicit grouping required)
 
 "7.1"; ([[1, 2], [3, 4, 5]] is PairOfLists)  // true - 2 int lists
 "7.2"; ([[1]] is PairOfLists)                // false - only 1 list
