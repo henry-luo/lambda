@@ -144,18 +144,17 @@ module.exports = grammar({
     $._import_stam,
     $._statement,
     $._content_expr,
-    $._type_term,
   ],
 
   conflicts: $ => [
     [$._expr, $.member_expr],
     [$._type_expr, $.constrained_type],
-    [$.type_seq, $.term_occurrence],  // primary_type could start type_seq or term_occurrence
-    [$.type_seq, $.term_occurrence, $._type_expr],  // primary_type in pattern context
-    [$.term_occurrence, $._type_expr],  // primary_type followed by occurrence (+,?,*,[n])
+    [$.unary_type, $.constrained_type],  // primary_type could be unary_type or start constrained_type
+    [$.type_seq, $.type_occurrence],  // unary_type could start type_seq or type_occurrence
+    [$.type_seq, $.type_occurrence, $._type_expr],  // unary_type in pattern context
+    [$.type_occurrence, $._type_expr],  // unary_type followed by occurrence (+,?,*,[n])
     [$.occurrence_count, $.primary_type],  // [n, could be occurrence_count or array_type
-    [$.type_seq, $.binary_type],  // \d | \w: could start type_seq or be binary_type
-    [$.type_seq, $._type_expr],   // primary_type could start type_seq or be _type_expr directly
+    [$.type_seq, $._type_expr],   // unary_type could start type_seq or be _type_expr directly
   ],
 
   precedences: $ => [[
@@ -193,13 +192,11 @@ module.exports = grammar({
   ],
   [
     $.fn_type,
-    $.constrained_type,
-    $.type_occurrence,
-    $.term_occurrence,  // quantifiers bind tighter than concatenation
-    $.type_negation,
-    $.primary_type,
-    'pattern_concat',    // concatenation binds tighter than alternation
-    $.binary_type,       // alternation (|, &, !) - lowest type precedence
+    $.unary_type,            // atomic types (primary_type | type_negation) - tightest
+    $.type_occurrence,       // quantifiers: T+, T*, T?, T[n]
+    $.constrained_type,      // T that (...) - postfix constraint clause
+    'pattern_concat',        // concatenation binds tighter than alternation
+    $.binary_type,           // alternation (|, &, !) - lowest type precedence
   ]],
 
   rules: {
@@ -903,41 +900,34 @@ module.exports = grammar({
       $.pattern_any,            // \. (any character)
     ),
 
-    type_occurrence: $ => prec.right(seq(
-      field('operand', $._type_expr),
+    // Unary type: primary type or prefix-modified type (before occurrence)
+    // This is what occurrence modifiers can apply to.
+    unary_type: $ => choice(
+      $.primary_type,
+      $.type_negation,       // !T - prefix negation
+    ),
+
+    // Occurrence applied to unary type: T?, T+, T*, T[n]
+    // No chaining allowed (like regex) - use explicit grouping: (T*)[2]
+    // Use prec.dynamic(1) to prefer occurrence over type_seq continuation.
+    type_occurrence: $ => prec.dynamic(1, prec.right(seq(
+      field('operand', $.unary_type),
       field('operator', $.occurrence),
-    )),
+    ))),
 
     binary_type: $ => choice(
       ...type_pattern($._type_expr),
     ),
 
     // ====== Type Sequence (for string/symbol patterns) ======
-    // Type sequence: horizontal-whitespace-separated concatenation of type terms.
+    // Type sequence: whitespace-separated concatenation of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
+    // Terms are unary_type (possibly with occurrence).
     type_seq: $ => prec.left('pattern_concat', seq(
-      $._type_term,
-      prec.dynamic(-1, repeat1(prec.dynamic(-1, $._type_term))),
+      choice($.unary_type, $.type_occurrence),
+      prec.dynamic(-1, repeat1(prec.dynamic(-1, choice($.unary_type, $.type_occurrence)))),
     )),
-
-    // Type term: primary type or primary type with occurrence modifier.
-    // Used as operand in type_seq to ensure occurrence binds tighter than sequence.
-    // Uses term_occurrence (primary_type operand) to avoid \d[4] being parsed as \d + array_type.
-    // Note: list_type is used for grouping in patterns - e.g. ("a" to "z")+
-    // Multi-element list_type is rejected by AST builder in pattern context.
-    _type_term: $ => choice(
-      $.primary_type,
-      alias($.term_occurrence, $.type_occurrence),
-    ),
-
-    // Occurrence applied to primary_type — for use in type_seq.
-    // This prevents ambiguity between \d[4] and \d followed by array_type [4].
-    // Use prec.dynamic(1) to prefer this over type_seq at parse time.
-    term_occurrence: $ => prec.dynamic(1, prec.right(seq(
-      field('operand', $.primary_type),
-      field('operator', $.occurrence),
-    ))),
 
     // Prefix negation: !T (for string/symbol patterns: !\d)
     // Validated in AST builder for context-appropriate usage.
@@ -945,13 +935,12 @@ module.exports = grammar({
       '!', field('operand', $.primary_type),
     )),
 
-    // Unified type expression - includes all type constructs and pattern sequences.
-    // type_seq (concatenation) is validated by AST builder to only appear in pattern context.
+    // Unified type expression - single hierarchy like _expr.
+    // Precedence (high to low): unary_type > type_occurrence > type_seq > binary_type
     _type_expr: $ => choice(
-      $.primary_type,
-      $.type_occurrence,
+      $.unary_type,            // primary_type | type_negation
+      $.type_occurrence,       // unary_type with occurrence: T+, T?, T*, T[n]
       $.binary_type,           // alternation: T | U
-      $.type_negation,         // prefix negation: !T
       $.error_union_type,
       $.constrained_type,      // type with that clause constraint
       $.type_seq,              // concatenation: \d[3] "-" \d[4] (pattern context only)
