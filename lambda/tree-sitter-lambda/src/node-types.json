@@ -2220,6 +2220,11 @@
     }
   },
   {
+    "type": "index",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "index_expr",
     "named": true,
     "fields": {
@@ -2276,6 +2281,11 @@
         ]
       }
     }
+  },
+  {
+    "type": "integer",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "let_expr",
@@ -4558,11 +4568,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "default",
@@ -4641,10 +4651,6 @@
     "named": false
   },
   {
-    "type": "index",
-    "named": true
-  },
-  {
     "type": "inf",
     "named": true
   },
@@ -4655,10 +4661,6 @@
   {
     "type": "int64",
     "named": false
-  },
-  {
-    "type": "integer",
-    "named": true
   },
   {
     "type": "is",
@@ -4766,11 +4768,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "t'",

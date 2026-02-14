@@ -119,4 +119,13 @@ true
 0E+4
 0.0
 0.0
+"===== DECIMAL NEGATION ====="
+-3.14159
+0.0
+-3.14159
+1.5
+-5.85987
+4.85987
+1.0
+-1.0
 "Decimal arithmetic test completed successfully"
