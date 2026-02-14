@@ -6,9 +6,6 @@
 #include "font_face.h"
 #include "../lib/font/font.h"
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_TRUETYPE_TABLES_H
 #include <chrono>
 
 extern "C" {
@@ -362,9 +359,6 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
     return result;
 }
 
-// Constant for fsSelection bit 7 (USE_TYPO_METRICS)
-constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
-
 // Read OS/2 table metrics using FontHandle
 // Reference: Chrome Blink simple_font_data.cc TypoAscenderAndDescender()
 TypoMetrics get_os2_typo_metrics(FontHandle* handle) {
@@ -388,12 +382,8 @@ TypoMetrics get_os2_typo_metrics(FontHandle* handle) {
     result.line_gap  = m->typo_line_gap;
     result.valid = true;
 
-    // check USE_TYPO_METRICS flag via the underlying FT_Face
-    FT_Face face = (FT_Face)font_handle_get_ft_face(handle);
-    if (face) {
-        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-        result.use_typo_metrics = os2 && (os2->fsSelection & OS2_FS_SELECTION_USE_TYPO_METRICS);
-    }
+    // USE_TYPO_METRICS flag is already resolved in FontMetrics
+    result.use_typo_metrics = m->use_typo_metrics;
 
     return result;
 }

@@ -1,7 +1,7 @@
 #include "layout.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
-#include "font_face.h"  // for FontFaceDescriptor
+#include "font_face.h"  // for FontFaceDescriptor (also provides FT includes)
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -11,7 +11,7 @@
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <cmath>
-#include FT_TRUETYPE_TABLES_H
+#include FT_TRUETYPE_TABLES_H  // for TT_OS2 in get_font_x_height_ratio
 
 // Forward declaration for CSS variable lookup
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
