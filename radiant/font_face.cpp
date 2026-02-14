@@ -1,6 +1,7 @@
 #include "font_face.h"
 #include "layout.hpp"
 #include "../lib/font_config.h"
+#include "../lib/font/font.h"  // unified font module — font_face_register
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_font_face.hpp"
 extern "C" {
@@ -60,6 +61,59 @@ void init_text_flow_logging(void) {
 void setup_text_flow_log_categories(void) {
     init_text_flow_logging();
 }
+
+// ============================================================================
+// Internal types — used only within this file (removed from font_face.h)
+// ============================================================================
+
+// Enhanced font metrics for better typography (stub)
+typedef struct EnhancedFontMetrics {
+    float ascender, descender, height;
+    float line_gap;
+    float x_height, cap_height, baseline_offset;
+    float typo_ascender, typo_descender, typo_line_gap;
+    float win_ascent, win_descent;
+    float hhea_ascender, hhea_descender, hhea_line_gap;
+    bool metrics_computed;
+} EnhancedFontMetrics;
+
+typedef struct EnhancedFontBox {
+    FontProp style;
+    FT_Face face;
+    float space_width;
+    int current_font_size;
+    EnhancedFontMetrics metrics;
+    bool metrics_computed;
+    bool cache_enabled;
+    float pixel_ratio;
+    bool high_dpi_aware;
+} EnhancedFontBox;
+
+typedef struct FontMatchCriteria {
+    const char* family_name;
+    CssEnum weight, style;
+    int size;
+    uint32_t required_codepoint;
+} FontMatchCriteria;
+
+typedef struct FontMatchResult {
+    FT_Face face;
+    FontFaceDescriptor* descriptor;
+    float match_score;
+    bool is_exact_match, requires_synthesis, supports_codepoint;
+} FontMatchResult;
+
+typedef struct FontFallbackChain {
+    char** family_names;
+    int family_count;
+    FontFaceDescriptor** web_fonts;
+    char** system_fonts;
+    char* generic_family;
+    struct hashmap* codepoint_font_cache;
+    bool cache_enabled;
+} FontFallbackChain;
+
+// ============================================================================
 
 // Structured logging for font operations (replace printf)
 void log_font_loading_attempt(const char* family_name, const char* path) {
@@ -373,6 +427,53 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
 
     clog_info(font_log, "Registered @font-face: %s -> %s (total: %d)",
               descriptor->family_name, descriptor->src_local_path, uicon->font_face_count);
+
+    // ---- Bridge to unified font module ----
+    // Also register with FontContext so that font_resolve() can find @font-face
+    // descriptors directly, without going through load_font_with_descriptors().
+    if (uicon->font_ctx && descriptor->family_name) {
+        // map CssEnum weight/style → FontWeight/FontSlant
+        FontWeight fw = FONT_WEIGHT_NORMAL;
+        if (descriptor->font_weight == CSS_VALUE_BOLD) fw = FONT_WEIGHT_BOLD;
+        else if (descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
+            fw = (FontWeight)descriptor->font_weight;
+
+        FontSlant fs = FONT_SLANT_NORMAL;
+        if (descriptor->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
+        else if (descriptor->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
+
+        // build sources array from descriptor's src_entries + src_local_path
+        int src_count = descriptor->src_count;
+        if (!src_count && descriptor->src_local_path) src_count = 1;
+
+        FontFaceSource* sources = nullptr;
+        if (src_count > 0) {
+            sources = (FontFaceSource*)alloca(src_count * sizeof(FontFaceSource));
+            memset(sources, 0, src_count * sizeof(FontFaceSource));
+
+            if (descriptor->src_entries && descriptor->src_count > 0) {
+                for (int i = 0; i < descriptor->src_count; i++) {
+                    sources[i].path   = descriptor->src_entries[i].path;
+                    sources[i].format = descriptor->src_entries[i].format;
+                }
+            } else if (descriptor->src_local_path) {
+                sources[0].path   = descriptor->src_local_path;
+                sources[0].format = nullptr;
+            }
+        }
+
+        FontFaceDesc face_desc = {};
+        face_desc.family       = descriptor->family_name;
+        face_desc.weight       = fw;
+        face_desc.slant        = fs;
+        face_desc.sources      = sources;
+        face_desc.source_count = src_count;
+
+        if (font_face_register(uicon->font_ctx, &face_desc)) {
+            clog_debug(font_log, "register_font_face: bridged to unified font module for '%s'",
+                       descriptor->family_name);
+        }
+    }
 }
 
 // Character width caching
