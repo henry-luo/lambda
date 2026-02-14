@@ -1954,6 +1954,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
         ast_node->type = &LIT_BOOL;
     }
+    else if (symbol == sym_inf || symbol == sym_nan) {
+        ast_node->type = build_lit_float(tp, child);
+    }
     else if (symbol == SYM_INT) {
         // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
         StrView source = ts_node_source(tp, child);
@@ -5167,6 +5170,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         b_node->type = &LIT_BOOL;
         return (AstNode*)b_node;
+    }
+    case sym_inf:  case sym_nan: {
+        AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        f_node->type = build_lit_float(tp, expr_node);
+        return (AstNode*)f_node;
     }
     case SYM_INT: {
         AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
