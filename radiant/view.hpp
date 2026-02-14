@@ -28,9 +28,10 @@
 #define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
 #endif
 
+// FreeType core — provides FT_Face, FT_Library, FT_GlyphSlot, etc.
+// FT_SFNT_NAMES_H removed: callers needing TT_OS2/FT_Get_Sfnt_Table include it directly
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#include FT_SFNT_NAMES_H
 #include <thorvg_capi.h>
 
 // Use inline functions instead of macros to avoid conflicts with std::max/min
@@ -855,7 +856,7 @@ typedef struct BlockProp {
 
 typedef struct FontBox {
     FontProp *style;  // current font style
-    FT_Face ft_face;  // FreeType font face (migration: use font_handle)
+    FT_Face ft_face;  // FreeType face pointer (kept for backward compat, use font_handle for new code)
     struct FontHandle* font_handle; // unified font handle (Phase 2)
     int current_font_size;  // font size of current element
 } FontBox;
