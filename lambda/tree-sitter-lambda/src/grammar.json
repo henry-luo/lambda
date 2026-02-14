@@ -7730,11 +7730,11 @@
         },
         {
           "type": "SYMBOL",
-          "name": "type_negation"
+          "name": "negation_type"
         }
       ]
     },
-    "type_occurrence": {
+    "occurrence_type": {
       "type": "PREC_DYNAMIC",
       "value": 1,
       "content": {
@@ -7867,9 +7867,9 @@
         }
       ]
     },
-    "type_seq": {
+    "concat_type": {
       "type": "PREC_LEFT",
-      "value": "pattern_concat",
+      "value": "concat_type",
       "content": {
         "type": "SEQ",
         "members": [
@@ -7882,7 +7882,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "type_occurrence"
+                "name": "occurrence_type"
               }
             ]
           },
@@ -7903,7 +7903,7 @@
                     },
                     {
                       "type": "SYMBOL",
-                      "name": "type_occurrence"
+                      "name": "occurrence_type"
                     }
                   ]
                 }
@@ -7913,7 +7913,7 @@
         ]
       }
     },
-    "type_negation": {
+    "negation_type": {
       "type": "PREC_RIGHT",
       "value": 0,
       "content": {
@@ -7943,7 +7943,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "type_occurrence"
+          "name": "occurrence_type"
         },
         {
           "type": "SYMBOL",
@@ -7959,7 +7959,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "type_seq"
+          "name": "concat_type"
         }
       ]
     },
@@ -7978,7 +7978,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "type_occurrence"
+                "name": "occurrence_type"
               }
             ]
           }
@@ -8760,16 +8760,16 @@
       "constrained_type"
     ],
     [
-      "type_seq",
-      "type_occurrence"
+      "concat_type",
+      "occurrence_type"
     ],
     [
-      "type_seq",
-      "type_occurrence",
+      "concat_type",
+      "occurrence_type",
       "_type_expr"
     ],
     [
-      "type_occurrence",
+      "occurrence_type",
       "_type_expr"
     ],
     [
@@ -8777,7 +8777,7 @@
       "primary_type"
     ],
     [
-      "type_seq",
+      "concat_type",
       "_type_expr"
     ]
   ],
@@ -8907,7 +8907,7 @@
       },
       {
         "type": "SYMBOL",
-        "name": "type_occurrence"
+        "name": "occurrence_type"
       },
       {
         "type": "SYMBOL",
@@ -8915,7 +8915,7 @@
       },
       {
         "type": "STRING",
-        "value": "pattern_concat"
+        "value": "concat_type"
       },
       {
         "type": "SYMBOL",

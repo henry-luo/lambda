@@ -78,6 +78,10 @@
           "named": true
         },
         {
+          "type": "concat_type",
+          "named": true
+        },
+        {
           "type": "constrained_type",
           "named": true
         },
@@ -86,11 +90,7 @@
           "named": true
         },
         {
-          "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "type_seq",
+          "type": "occurrence_type",
           "named": true
         },
         {
@@ -114,6 +114,10 @@
           },
           {
             "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "concat_type",
             "named": true
           },
           {
@@ -145,6 +149,10 @@
             "named": true
           },
           {
+            "type": "occurrence_type",
+            "named": true
+          },
+          {
             "type": "primary_expr",
             "named": true
           },
@@ -154,14 +162,6 @@
           },
           {
             "type": "spread_expr",
-            "named": true
-          },
-          {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
             "named": true
           },
           {
@@ -217,6 +217,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -225,11 +229,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -319,6 +319,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -339,15 +343,11 @@
             "named": true
           },
           {
+            "type": "occurrence_type",
+            "named": true
+          },
+          {
             "type": "primary_expr",
-            "named": true
-          },
-          {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
             "named": true
           },
           {
@@ -652,6 +652,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -660,11 +664,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -700,6 +700,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -708,11 +712,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -813,6 +813,25 @@
     }
   },
   {
+    "type": "concat_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "occurrence_type",
+          "named": true
+        },
+        {
+          "type": "unary_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "constrained_type",
     "named": true,
     "fields": {
@@ -821,11 +840,11 @@
         "required": true,
         "types": [
           {
-            "type": "primary_type",
+            "type": "occurrence_type",
             "named": true
           },
           {
-            "type": "type_occurrence",
+            "type": "primary_type",
             "named": true
           }
         ]
@@ -1014,6 +1033,10 @@
           "named": true
         },
         {
+          "type": "concat_type",
+          "named": true
+        },
+        {
           "type": "constrained_type",
           "named": true
         },
@@ -1022,11 +1045,7 @@
           "named": true
         },
         {
-          "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "type_seq",
+          "type": "occurrence_type",
           "named": true
         },
         {
@@ -1186,6 +1205,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -1194,11 +1217,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -1400,6 +1419,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -1408,11 +1431,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -1516,6 +1535,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -1524,11 +1547,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -2460,6 +2479,10 @@
           "named": true
         },
         {
+          "type": "concat_type",
+          "named": true
+        },
+        {
           "type": "constrained_type",
           "named": true
         },
@@ -2468,11 +2491,7 @@
           "named": true
         },
         {
-          "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "type_seq",
+          "type": "occurrence_type",
           "named": true
         },
         {
@@ -2707,6 +2726,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -2715,11 +2738,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -2803,6 +2822,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -2811,11 +2834,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -2849,6 +2868,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -2857,11 +2880,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -3168,6 +3187,22 @@
     }
   },
   {
+    "type": "negation_type",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "ns_identifier",
     "named": true,
     "fields": {
@@ -3251,6 +3286,32 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "occurrence_type",
+    "named": true,
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "unary_type",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "occurrence",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -3406,6 +3467,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -3414,11 +3479,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -4066,6 +4127,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -4074,11 +4139,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -4225,6 +4286,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -4233,11 +4298,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -4271,6 +4332,10 @@
             "named": true
           },
           {
+            "type": "concat_type",
+            "named": true
+          },
+          {
             "type": "constrained_type",
             "named": true
           },
@@ -4279,11 +4344,7 @@
             "named": true
           },
           {
-            "type": "type_occurrence",
-            "named": true
-          },
-          {
-            "type": "type_seq",
+            "type": "occurrence_type",
             "named": true
           },
           {
@@ -4292,67 +4353,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "type_negation",
-    "named": true,
-    "fields": {
-      "operand": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_type",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "type_occurrence",
-    "named": true,
-    "fields": {
-      "operand": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "unary_type",
-            "named": true
-          }
-        ]
-      },
-      "operator": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "occurrence",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "type_seq",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "type_occurrence",
-          "named": true
-        },
-        {
-          "type": "unary_type",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -4454,11 +4454,11 @@
       "required": true,
       "types": [
         {
-          "type": "primary_type",
+          "type": "negation_type",
           "named": true
         },
         {
-          "type": "type_negation",
+          "type": "primary_type",
           "named": true
         }
       ]
@@ -4736,19 +4736,19 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
-  },
-  {
-    "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
     "named": true
+  },
+  {
+    "type": "decimal",
+    "named": false
   },
   {
     "type": "default",
@@ -4956,11 +4956,11 @@
   },
   {
     "type": "symbol",
-    "named": false
+    "named": true
   },
   {
     "type": "symbol",
-    "named": true
+    "named": false
   },
   {
     "type": "t'",
@@ -4972,11 +4972,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",
