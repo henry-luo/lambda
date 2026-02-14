@@ -4,6 +4,7 @@
 
 #include "../lib/log.h"
 #include "../lib/font_config.h"
+#include "../lib/font/font.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
@@ -129,6 +130,14 @@ int ui_context_init(UiContext* uicon, bool headless) {
                (int)uicon->window_width, (int)uicon->window_height);
     }
 
+    // Create unified font context (Phase 2: coexists with old font_db/ft_library)
+    // Created after window so pixel_ratio is known
+    FontContextConfig font_cfg = {};
+    font_cfg.pixel_ratio = uicon->pixel_ratio;
+    font_cfg.max_cached_faces = 64;
+    font_cfg.enable_lcd_rendering = true;
+    uicon->font_ctx = font_context_create(&font_cfg);
+
     // set default fonts
     // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
@@ -196,6 +205,10 @@ void ui_context_cleanup(UiContext* uicon) {
 
     log_debug("cleaning up font resources");
     fontface_cleanup(uicon);  // free font cache
+    if (uicon->font_ctx) {
+        font_context_destroy(uicon->font_ctx);
+        uicon->font_ctx = NULL;
+    }
     FT_Done_FreeType(uicon->ft_library);
     font_database_destroy(uicon->font_db);
 

@@ -7,6 +7,7 @@
 #include "font_lookup_platform.h"
 #include "../lib/log.h"
 #include "../lib/font_config.h"
+#include "../lib/font/font.h"
 #include "../lib/memtrack.h"
 
 /**
@@ -146,13 +147,13 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
         if (font->style == FONT_STYLE_NORMAL) score += 10;  // Not italic
         // Avoid TTC files for ThorVG (it doesn't support TrueType Collections)
         if (font->file_path && !strstr(font->file_path, ".ttc")) score += 5;
-        
+
         if (score > best_score) {
             best_score = score;
             best_font = font;
         }
     }
-    
+
     FontEntry* font = best_font ? best_font : (FontEntry*)matches->data[0];
     char* result = mem_strdup(font->file_path, MEM_CAT_FONT);
     arraylist_free(matches);
@@ -432,11 +433,53 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     fbox->style = fprop;
     fbox->current_font_size = fprop->font_size;
+    fbox->font_handle = NULL;
 
-    // Try @font-face descriptors first, then fall back to system fonts
+    // Try @font-face descriptors first (managed by Radiant CSS parser)
     const char* family_to_load = fprop->family;
     bool is_fallback = false;
     fbox->ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
+
+    // ---- New path: use unified font module for system font resolution ----
+    if (!fbox->ft_face && uicon->font_ctx) {
+        // map CssEnum weight/style → FontWeight/FontSlant
+        FontWeight fw = FONT_WEIGHT_NORMAL;
+        if (fprop->font_weight == CSS_VALUE_BOLD) fw = FONT_WEIGHT_BOLD;
+        // numeric weight stored directly in CssEnum (100-900 range)
+        else if (fprop->font_weight >= 100 && fprop->font_weight <= 900) fw = (FontWeight)fprop->font_weight;
+
+        FontSlant fs = FONT_SLANT_NORMAL;
+        if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
+        else if (fprop->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
+
+        FontStyleDesc style = {};
+        style.family  = fprop->family;
+        style.size_px = fprop->font_size;
+        style.weight  = fw;
+        style.slant   = fs;
+
+        FontHandle* handle = font_resolve(uicon->font_ctx, &style);
+        if (handle) {
+            fbox->font_handle = handle;
+            fbox->ft_face = (FT_Face)font_handle_get_ft_face(handle);
+            fprop->font_handle = handle;
+
+            // populate FontProp derived fields from unified metrics
+            const FontMetrics* m = font_get_metrics(handle);
+            if (m) {
+                fprop->space_width = m->space_width;
+                fprop->ascender    = m->ascender;
+                fprop->descender   = -(m->descender); // FontMetrics.descender is negative, FontProp expects positive
+                fprop->font_height = m->line_height;
+                fprop->has_kerning = m->has_kerning;
+            }
+            return;
+        }
+        // font_resolve failed — fall through to legacy path
+        log_debug("font_resolve failed for '%s', falling back to legacy path", fprop->family);
+    }
+
+    // ---- Legacy fallback path: direct FreeType loading ----
 
     // If @font-face loading failed, fall back to original method
     if (!fbox->ft_face) {
