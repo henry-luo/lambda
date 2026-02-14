@@ -179,6 +179,7 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
         if (os2->fsSelection & USE_TYPO_METRICS) {
             m->ascender  =  m->typo_ascender;
             m->descender = -m->typo_descender; // restore negative
+            m->use_typo_metrics = true;
         }
     } else {
         // no OS/2 table — copy hhea values as typo values

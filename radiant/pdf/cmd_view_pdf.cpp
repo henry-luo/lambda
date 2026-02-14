@@ -12,14 +12,18 @@
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 
+// FreeType for direct glyph rendering in PDF viewer
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 // External functions
 void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length); // From input-pdf.cpp
 int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
 void ui_context_cleanup(UiContext* uicon); // From window.cpp
 void ui_context_create_surface(UiContext* uicon, int width, int height); // From window.cpp
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file); // From window.cpp
-FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering); // From font.cpp
-FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style); // From font.cpp
+extern void* load_glyph(UiContext* uicon, struct FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering); // From font.cpp
+extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style); // From font.cpp
 
 // External declarations
 extern bool do_redraw;
@@ -45,7 +49,7 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
     }
 
     const char* font_family = font_prop->family ? font_prop->family : "Arial";
-    FT_Face face = load_styled_font(uicon, font_family, font_prop);
+    FT_Face face = (FT_Face)load_styled_font(uicon, font_family, font_prop);
     if (!face) {
         log_warn("No font face available for text rendering");
         return;

@@ -2,6 +2,11 @@
 #include "layout.hpp"
 #include "form_control.hpp"
 #include "../lib/font/font.h"
+
+// FreeType for font metric access in form control rendering
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <string.h>
@@ -112,7 +117,7 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
     rdcon->color = color;
 
     // Get font metrics (all in physical pixels after setup_font)
-    float ascender = fbox.ft_face->size->metrics.ascender / 64.0f;
+    float ascender = ((FT_Face)fbox.ft_face)->size->metrics.ascender / 64.0f;
 
     // Render each character
     const unsigned char* p = (const unsigned char*)text;
@@ -126,7 +131,7 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
         p += bytes;
 
         // Load glyph
-        FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, fbox.font_handle, font, codepoint, true);
+        FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(rdcon->ui_context, fbox.font_handle, font, codepoint, true);
         if (!glyph) {
             pen_x += font->font_size * 0.5f;  // fallback advance
             continue;

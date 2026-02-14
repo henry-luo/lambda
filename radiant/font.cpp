@@ -5,6 +5,11 @@
 #include "view.hpp"
 #include "font_face.h"
 #include "font_lookup_platform.h"
+
+// FreeType for direct font loading and glyph operations
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include "../lib/log.h"
 #include "../lib/font_config.h"
 #include "../lib/font/font.h"
@@ -183,7 +188,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
     if (font_path) {
         // load the font
         log_font_loading_attempt(font_name, font_path);
-        if (FT_New_Face(uicon->ft_library, (const char *)font_path, 0, &face)) {
+        if (FT_New_Face((FT_Library)uicon->ft_library, (const char *)font_path, 0, &face)) {
             log_font_loading_result(font_name, false, "FreeType error");
             face = NULL;
         } else {
@@ -241,7 +246,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
     return face;
 }
 
-FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
+void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
     // Apply pixel ratio to get physical pixel size for HiDPI displays
     float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
     float physical_font_size = font_style->font_size * pixel_ratio;
@@ -288,7 +293,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
         FontEntry* font = result.font;
         FT_Long face_index = font->is_collection ? font->collection_index : 0;
         log_debug("[FONT PATH] Loading font: %s from path: %s (index=%ld)", font_name, font->file_path, face_index);
-        if (FT_New_Face(uicon->ft_library, font->file_path, face_index, &face) == 0) {
+        if (FT_New_Face((FT_Library)uicon->ft_library, font->file_path, face_index, &face) == 0) {
             // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
             if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
                 (face->face_flags & FT_FACE_FLAG_COLOR) &&
@@ -312,7 +317,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
         // Font not found in database, fall back to platform-specific lookup
         char* font_path = find_font_path_fallback(font_name);
         if (font_path) {
-            if (FT_New_Face(uicon->ft_library, font_path, 0, &face) == 0) {
+            if (FT_New_Face((FT_Library)uicon->ft_library, font_path, 0, &face) == 0) {
                 // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
                 if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
                     (face->face_flags & FT_FACE_FLAG_COLOR) &&
@@ -350,7 +355,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     return face;
 }
 
-FT_GlyphSlot load_glyph(UiContext* uicon, FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
+void* load_glyph(UiContext* uicon, FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
     FT_Face face = handle ? (FT_Face)font_handle_get_ft_face(handle) : NULL;
     if (!face) return NULL;
     FT_GlyphSlot slot = NULL;  FT_Error error;
@@ -407,7 +412,7 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FontHandle* handle, FontProp* font_sty
     char** font_ptr = uicon->fallback_fonts;
     while (*font_ptr) {
         log_debug("Trying fallback font '%s' for char: U+%04X", *font_ptr, codepoint);
-        FT_Face fallback_face = load_styled_font(uicon, *font_ptr, font_style);
+        FT_Face fallback_face = (FT_Face)load_styled_font(uicon, *font_ptr, font_style);
         if (fallback_face) {
             char_index = FT_Get_Char_Index(fallback_face, codepoint);
             if (char_index > 0) {
@@ -577,10 +582,11 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     // Use sub-pixel rendering flags for better quality
     FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
-    if (FT_Load_Char(fbox->ft_face, ' ', load_flags)) {
+    FT_Face face = (FT_Face)fbox->ft_face;
+    if (FT_Load_Char(face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", family_to_load);
         // Fallback: use y_ppem if available, otherwise derive from font_size
-        float ppem = fbox->ft_face->size->metrics.y_ppem / 64.0f;
+        float ppem = face->size->metrics.y_ppem / 64.0f;
         if (ppem <= 0) {
             // y_ppem is 0 (common with WOFF fonts), use requested font size
             ppem = fprop->font_size * pixel_ratio;
@@ -589,14 +595,14 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     } else {
         // Use float precision for space width calculation
         // Metrics from FreeType are in physical pixels, scale back to CSS pixels for layout
-        fbox->style->space_width = (fbox->ft_face->glyph->advance.x / 64.0) / pixel_ratio;
+        fbox->style->space_width = (face->glyph->advance.x / 64.0) / pixel_ratio;
     }
-    FT_Bool use_kerning = FT_HAS_KERNING(fbox->ft_face);
+    FT_Bool use_kerning = FT_HAS_KERNING(face);
     fbox->style->has_kerning = use_kerning;
     // Scale font metrics from physical pixels back to CSS pixels for layout
-    fbox->style->ascender = (fbox->ft_face->size->metrics.ascender / 64.0) / pixel_ratio;
-    fbox->style->descender = (-fbox->ft_face->size->metrics.descender / 64.0) / pixel_ratio;
-    fbox->style->font_height = (fbox->ft_face->size->metrics.height / 64.0) / pixel_ratio;
+    fbox->style->ascender = (face->size->metrics.ascender / 64.0) / pixel_ratio;
+    fbox->style->descender = (-face->size->metrics.descender / 64.0) / pixel_ratio;
+    fbox->style->font_height = (face->size->metrics.height / 64.0) / pixel_ratio;
     // Font setup complete - logging removed to avoid hot path overhead
 }
 

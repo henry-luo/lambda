@@ -6,6 +6,9 @@
 #include "../lib/avl_tree.h"
 #include "../lib/font/font.h"
 
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include "../lib/log.h"
 #include <chrono>
 #include <cctype>
@@ -564,17 +567,13 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             // Use Unicode-specified width (fraction of em)
             text_width += unicode_space_em * lycon->font.current_font_size;
         } else {
-            // Use sub-pixel rendering flags for better quality
-            FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), codepoint, load_flags)) {
+            // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
+            GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
+            if (ginfo.id == 0) {
                 fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
                 return RDT_LINE_NOT_FILLED;
             }
-            FT_GlyphSlot slot = ((FT_Face)font_handle_get_ft_face(lycon->font.font_handle))->glyph;
-            // Font is loaded at physical pixel size, so advance is in physical pixels
-            // Divide by pixel_ratio to convert back to CSS pixels for layout
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-            text_width += (float)(slot->advance.x) / 64.0f / pixel_ratio;
+            text_width += ginfo.advance_x;
         }
         // Apply letter-spacing (but not after the last character)
         str++;
@@ -909,7 +908,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Use Unicode-specified width (fraction of em)
                 wd = unicode_space_em * lycon->font.current_font_size;
             } else {
-                FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.font_handle, lycon->font.style, codepoint, false);
+                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(lycon->ui_context, lycon->font.font_handle, lycon->font.style, codepoint, false);
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
@@ -926,12 +925,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (lycon->font.style->has_kerning) {
             uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
             if (lycon->line.prev_glyph_index) {
-                FT_Vector kerning;
-                FT_Get_Kerning((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
-                if (kerning.x) {
-                    // Kerning is in physical pixels, divide by pixel_ratio for CSS pixels
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                    float kerning_css = (float)kerning.x / 64.0f / pixel_ratio;
+                float kerning_css = font_get_kerning_by_index(lycon->font.font_handle, lycon->line.prev_glyph_index, glyph_index);
+                if (kerning_css != 0.0f) {
                     if (str == text_start + rect->start_index) {
                         rect->x += kerning_css;
                     }

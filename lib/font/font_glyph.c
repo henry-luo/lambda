@@ -166,6 +166,21 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     return (delta.x / 64.0f) / pixel_ratio;
 }
 
+float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_t right_index) {
+    if (!handle || !handle->ft_face) return 0;
+
+    FT_Face face = handle->ft_face;
+    if (!FT_HAS_KERNING(face)) return 0;
+    if (left_index == 0 || right_index == 0) return 0;
+
+    float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
+                            ? handle->ctx->config.pixel_ratio : 1.0f;
+
+    FT_Vector delta;
+    FT_Get_Kerning(face, left_index, right_index, FT_KERNING_DEFAULT, &delta);
+    return (delta.x / 64.0f) / pixel_ratio;
+}
+
 // ============================================================================
 // Codepoint presence check
 // ============================================================================
