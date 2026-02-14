@@ -84,6 +84,8 @@ struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
 struct FontDatabase;
 typedef struct FontDatabase FontDatabase;
+struct FontContext;
+struct FontHandle;
 
 // Define lexbor tag and CSS value constants first, before including headers that need them
 enum {
@@ -381,7 +383,8 @@ struct FontProp {
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
     // loaded FreeType font face for this set of font properties
-    void* ft_face;     // FreeType face pointer
+    void* ft_face;     // FreeType face pointer (migration: use font_handle instead)
+    struct FontHandle* font_handle; // unified font handle (Phase 2: populated by setup_font)
 };
 
 struct GridItemProp {
@@ -852,7 +855,8 @@ typedef struct BlockProp {
 
 typedef struct FontBox {
     FontProp *style;  // current font style
-    FT_Face ft_face;  // FreeType font face
+    FT_Face ft_face;  // FreeType font face (migration: use font_handle)
+    struct FontHandle* font_handle; // unified font handle (Phase 2)
     int current_font_size;  // font size of current element
 } FontBox;
 
@@ -1210,6 +1214,7 @@ typedef struct {
     // font handling
     FontDatabase *font_db;
     FT_Library ft_library;
+    struct FontContext* font_ctx; // unified font context (Phase 2)
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
