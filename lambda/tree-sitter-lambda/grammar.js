@@ -143,9 +143,10 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$._expr, $.member_expr],
-    [$._type_quantified, $.occurrence_type],       // unary_type + [n] could be occurrence or end of type
-    [$._type_compound, $.concat_type],             // _type_quantified could be complete or start of concat
-    [$._type_compound, $.constrained_type],        // _type_quantified could be complete or base of constrained
+    [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
+    [$._quantified_type, $.occurrence_type],       // unary_type + [n] could be occurrence or end of type
+    [$._compound_type, $.concat_type],             // _quantified_type could be complete or start of concat
+    [$._compound_type, $.constrained_type],        // _quantified_type could be complete or base of constrained
   ],
 
   precedences: $ => [[
@@ -177,7 +178,6 @@ module.exports = grammar({
     $.match_expr,
     $.for_expr,
     $.let_expr,
-    $.fn_expr,
     $.assign_expr,
     $.assign_stam,
   ],
@@ -365,7 +365,6 @@ module.exports = grammar({
       alias($.attr_binary_expr, $.binary_expr),
       $.if_expr,
       $.for_expr,
-      $.fn_expr,
     ),
 
     // Attribute name with optional namespace prefix: name or ns.name
@@ -416,7 +415,6 @@ module.exports = grammar({
       $.if_expr,
       $.match_expr,
       $.for_expr,
-      $.fn_expr,
       $.raise_expr,
     ),
 
@@ -447,6 +445,7 @@ module.exports = grammar({
       $.member_expr,
       $.call_expr,
       $._parenthesized_expr,
+      $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
       $.current_item,   // ~ for pipe context
       $.current_index,  // ~# for pipe key/index
     )),
@@ -568,22 +567,22 @@ module.exports = grammar({
       '=>', field('body', $._expr)
     ),
 
-    // Anonymous Function
-    fn_expr: $ => choice(
-      seq('fn',
+    // Anonymous Function (arrow expression)
+    // Three forms:
+    //   Typed params:   (a: int, b: string) => expr  (uses parameter nodes)
+    //   Untyped params: (a, b) => expr               (uses list, AST builder reinterprets)
+    //   No params:      () => expr                   (empty parens)
+    fn_expr: $ => prec.right(choice(
+      // Typed params: (a: int, b: string) => expr
+      prec.dynamic(1, seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-        // return type with optional error type: T or T^E or T^
-        optional(field('type', $.return_type)),
-        '{', field('body', $.content), '}'
-      ),
-      // use prec.right so the expression body is consumed greedily
-      prec.right(seq(
-        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-        // return type with optional error type: T or T^E or T^
-        optional(field('type', $.return_type)),
-        '=>', field('body', $._expr)
+        optional(field('type', $.return_type)), '=>', field('body', $._expr)
       )),
-    ),
+      // Untyped params via list: (a, b) => expr
+      seq($.list, optional(field('type', $.return_type)), '=>', field('body', $._expr)),
+      // No params: () => expr
+      seq('(', ')', optional(field('type', $.return_type)), '=>', field('body', $._expr)),
+    )),
 
     // use prec.right so the expression is consumed greedily
     // Single assignment: let x = expr
@@ -695,7 +694,7 @@ module.exports = grammar({
     // order by clause: order by expr [asc|desc] [, expr [asc|desc], ...]
     order_spec: $ => seq(
       field('expr', $._expr),
-      optional(field('dir', choice('asc', 'ascending', 'desc', 'descending')))
+      optional(field('dir', choice('asc', 'desc')))
     ),
 
     for_order_clause: $ => seq(
@@ -720,6 +719,15 @@ module.exports = grammar({
       'offset', field('count', $._expr)
     ),
 
+    // shared for clauses: where, group, order, limit, offset in any order
+    for_clauses: $ => repeat1(choice(
+      field('where', $.for_where_clause),
+      field('group', $.for_group_clause),
+      field('order', $.for_order_clause),
+      field('limit', $.for_limit_clause),
+      field('offset', $.for_offset_clause),
+    )),
+
     // use prec.right so the body expression is consumed greedily
     for_expr: $ => prec.right(seq(
       'for', '(',
@@ -728,13 +736,7 @@ module.exports = grammar({
       // optional let clauses (comma-separated after declarations)
       repeat(seq(',', field('let', $.for_let_clause))),
       // optional clauses (where, group, order, limit, offset) in any order
-      repeat(choice(
-        field('where', $.for_where_clause),
-        field('group', $.for_group_clause),
-        field('order', $.for_order_clause),
-        field('limit', $.for_limit_clause),
-        field('offset', $.for_offset_clause),
-      )),
+      optional($.for_clauses),
       ')',
       field('then', $._expr),
     )),
@@ -746,13 +748,7 @@ module.exports = grammar({
       // optional let clauses
       repeat(seq(',', field('let', $.for_let_clause))),
       // optional clauses (where, group, order, limit, offset) in any order
-      repeat(choice(
-        field('where', $.for_where_clause),
-        field('group', $.for_group_clause),
-        field('order', $.for_order_clause),
-        field('limit', $.for_limit_clause),
-        field('offset', $.for_offset_clause),
-      )),
+      optional($.for_clauses),
       '{', field('then', $.content), '}'
     ),
 
@@ -891,17 +887,17 @@ module.exports = grammar({
 
     // Quantified: unary type with optional occurrence modifier
     // Structural level between unary_type and compound types
-    _type_quantified: $ => choice(
+    _quantified_type: $ => choice(
       $.occurrence_type,
       $.unary_type,
     ),
 
     // Compound type: constrained, concat, or simple quantified
     // Structural level between quantified and binary types
-    _type_compound: $ => choice(
+    _compound_type: $ => choice(
       $.constrained_type,
       $.concat_type,
-      $._type_quantified,
+      $._quantified_type,
     ),
 
     // Occurrence applied to unary type: T?, T+, T*, T[n]
@@ -920,10 +916,10 @@ module.exports = grammar({
     // Type concatenation: whitespace-separated sequence of type terms.
     // e.g. \d[3] "-" \d[3] "-" \d[4]
     // Only valid inside string/symbol pattern definitions; AST builder rejects elsewhere.
-    // Terms are _type_quantified (unary_type possibly with occurrence).
+    // Terms are _quantified_type (unary_type possibly with occurrence).
     concat_type: $ => prec.left(prec.dynamic(-1, seq(
-      $._type_quantified,
-      repeat1($._type_quantified),
+      $._quantified_type,
+      repeat1($._quantified_type),
     ))),
 
     // Prefix negation: !T (for string/symbol patterns: !\d)
@@ -936,7 +932,7 @@ module.exports = grammar({
     // Structural precedence (tightest to loosest):
     //   unary_type > occurrence_type > constrained/concat > binary > error_union
     _type_expr: $ => choice(
-      $._type_compound,        // covers unary, occurrence, constrained, concat
+      $._compound_type,        // covers unary, occurrence, constrained, concat
       $.binary_type,           // alternation: T | U, T & U, T ! U
       $.error_union_type,      // T^ error union
     ),
@@ -946,7 +942,7 @@ module.exports = grammar({
     // The constraint uses ~ to refer to the value being checked
     // Parentheses required to avoid grammar ambiguity with index expressions
     constrained_type: $ => seq(
-      field('base', $._type_quantified),
+      field('base', $._quantified_type),
       'that',
       '(',
       field('constraint', $._expr),
