@@ -344,11 +344,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             // Set up font at the element's font size
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, view_elem->font);
-            if (temp_font.ft_face) {
+            if (temp_font.font_handle) {
                 // Use the Chrome-compatible line height calculation
-                // Pass pixel_ratio to get CSS pixel values
-                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                text_line_height = (int)(calc_normal_line_height(temp_font.ft_face, pixel_ratio) + 0.5f);
+                text_line_height = (int)(calc_normal_line_height(temp_font.font_handle) + 0.5f);
             }
         }
         log_debug("measure_flex_child_content: elem_font_size=%d, text_line_height=%d",
@@ -1020,7 +1018,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         log_debug("calculate_item_intrinsic_sizes: invalid item");
         return;
     }
-    
+
     // Form controls use FormControlProp instead of FlexItemProp (they're in a union).
     // Form controls have their intrinsic sizes in form->intrinsic_width/height,
     // not fi->intrinsic_width/height. Skip this function for form controls.
@@ -1028,7 +1026,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         log_debug("calculate_item_intrinsic_sizes: skipping form control (uses FormControlProp)");
         return;
     }
-    
+
     if (!item->fi) {
         log_debug("calculate_item_intrinsic_sizes: no flex properties");
         return;
@@ -1182,8 +1180,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         pseudo_width += widths.max_content;
                         float line_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
                                             lycon->font.style->font_size : 16.0f;
-                        if (lycon->font.ft_face) {
-                            line_height = calc_normal_line_height(lycon->font.ft_face);
+                        if (lycon->font.font_handle) {
+                            line_height = calc_normal_line_height(lycon->font.font_handle);
                         }
                         if (line_height > pseudo_height) {
                             pseudo_height = line_height;
@@ -1211,9 +1209,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         pseudo_width += widths.max_content;
                         float line_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
                                             lycon->font.style->font_size : 16.0f;
-                        if (lycon->font.ft_face) {
-                            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                            line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+                        if (lycon->font.font_handle) {
+                            line_height = calc_normal_line_height(lycon->font.font_handle);
                         }
                         if (line_height > pseudo_height) {
                             pseudo_height = line_height;
@@ -1325,9 +1322,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                             } else if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
                                        lh_val->data.keyword == CSS_VALUE_NORMAL) {
                                 // 'normal' - use font metrics
-                                if (lycon->font.ft_face) {
-                                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                                    resolved_line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+                                if (lycon->font.font_handle) {
+                                    resolved_line_height = calc_normal_line_height(lycon->font.font_handle);
                                 }
                             } else {
                                 // Length or percentage
@@ -1356,9 +1352,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                     resolved_line_height = lh_val->data.number.value * lycon->font.current_font_size;
                                 } else if (lh_val->type == CSS_VALUE_TYPE_KEYWORD &&
                                            lh_val->data.keyword == CSS_VALUE_NORMAL) {
-                                    if (lycon->font.ft_face) {
-                                        float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                                        resolved_line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+                                    if (lycon->font.font_handle) {
+                                        resolved_line_height = calc_normal_line_height(lycon->font.font_handle);
                                     }
                                 } else {
                                     resolved_line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_val);
@@ -1377,9 +1372,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // Use resolved line-height, or fallback to font metrics
                 if (resolved_line_height > 0) {
                     min_height = max_height = resolved_line_height;
-                } else if (lycon->font.ft_face) {
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                    min_height = max_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+                } else if (lycon->font.font_handle) {
+                    min_height = max_height = calc_normal_line_height(lycon->font.font_handle);
                 } else if (lycon->font.style && lycon->font.style->font_size > 0) {
                     min_height = max_height = lycon->font.style->font_size;
                 } else {
@@ -1560,9 +1554,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                 text_max_width = widths.max_content;
                                 // BUGFIX: Use line height instead of font size for text height
                                 // This matches browser behavior where text takes up line-height space
-                                if (lycon->font.ft_face) {
-                                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                                    text_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+                                if (lycon->font.font_handle) {
+                                    text_height = calc_normal_line_height(lycon->font.font_handle);
                                 } else if (lycon->font.style && lycon->font.style->font_size > 0) {
                                     text_height = lycon->font.style->font_size;  // Fallback to font-size
                                 } else {

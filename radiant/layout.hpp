@@ -140,7 +140,7 @@ typedef struct Linebox {
     bool has_space;                 // whether last layout character is a space
     bool has_float_intrusion;       // true if floats affect this line
     FontBox line_start_font;
-    FT_UInt prev_glyph_index = 0;   // for kerning
+    uint32_t prev_glyph_index = 0;   // for kerning
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;  last_space_is_hyphen = false;
@@ -470,15 +470,13 @@ struct TypoMetrics {
     bool use_typo_metrics;  // fsSelection bit 7
 };
 
-// Get OS/2 sTypo metrics for a font face
+// Get OS/2 sTypo metrics for a font handle
 // Returns metrics with valid=false if no OS/2 table is available
-// pixel_ratio: divide physical pixel metrics by this to get CSS pixels
-TypoMetrics get_os2_typo_metrics(FT_Face face, float pixel_ratio = 1.0f);
+TypoMetrics get_os2_typo_metrics(struct FontHandle* handle);
 
 // Calculate normal line height following Chrome's algorithm
-// Uses OS/2 sTypo* metrics when available, otherwise HHEA metrics
-// pixel_ratio: divide physical pixel metrics by this to get CSS pixels
-float calc_normal_line_height(FT_Face face, float pixel_ratio = 1.0f);
+// Delegates to font_calc_normal_line_height() from lib/font/
+float calc_normal_line_height(struct FontHandle* handle);
 
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
