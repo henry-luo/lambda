@@ -3563,6 +3563,10 @@
           },
           {
             "type": "SYMBOL",
+            "name": "parent_expr"
+          },
+          {
+            "type": "SYMBOL",
             "name": "call_expr"
           },
           {
@@ -3894,6 +3898,39 @@
               {
                 "type": "SYMBOL",
                 "name": "path_wildcard_recursive"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "parent_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "object",
+          "content": {
+            "type": "SYMBOL",
+            "name": "primary_expr"
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "path_parent"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "_"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "path_parent"
               }
             ]
           }
@@ -8372,6 +8409,10 @@
       "member_expr"
     ],
     [
+      "_expr",
+      "parent_expr"
+    ],
+    [
       "list",
       "if_expr"
     ],
@@ -8405,6 +8446,10 @@
       {
         "type": "SYMBOL",
         "name": "member_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "parent_expr"
       },
       {
         "type": "SYMBOL",

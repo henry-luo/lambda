@@ -137,6 +137,7 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$._expr, $.member_expr],
+    [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
     [$.list, $.if_expr],                           // if(expr) could start list (for fn_expr) or if_expr
     [$._quantified_type, $.occurrence_type],       // unary_type + [n] could be occurrence or end of type
     [$._compound_type, $.concat_type],             // _quantified_type could be complete or start of concat
@@ -148,6 +149,7 @@ module.exports = grammar({
     $.call_expr,
     $.index_expr,
     $.member_expr,
+    $.parent_expr,
     $.primary_expr,
     $.unary_expr,
     // binary operators
@@ -437,6 +439,7 @@ module.exports = grammar({
       $.index_expr,
       $.path_expr,   // /, ., or .. paths with optional segment
       $.member_expr,
+      $.parent_expr,  // expr.. for parent access shorthand
       $.call_expr,
       $._parenthesized_expr,
       $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
@@ -484,6 +487,13 @@ module.exports = grammar({
     member_expr: $ => seq(
       field('object', $.primary_expr), ".",
       field('field', choice($.identifier, $.symbol, $.index, $.path_wildcard, $.path_wildcard_recursive))
+    ),
+
+    // Parent access: expr.. for .parent, expr.._.. for .parent.parent
+    parent_expr: $ => seq(
+      field('object', $.primary_expr),
+      $.path_parent,                     // .. for parent access
+      repeat(seq('_', $.path_parent))   // _.. for additional parent levels
     ),
 
     // Path wildcards for glob patterns

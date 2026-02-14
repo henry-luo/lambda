@@ -1636,6 +1636,14 @@ Item fn_member(Item item, Item key) {
                     if (strcmp(k, "depth") == 0) {
                         return {.item = i2it(path_depth(path))};
                     }
+                    if (strcmp(k, "parent") == 0) {
+                        // return the parent path (go up one directory level)
+                        if (path->parent && path->parent->parent) {
+                            // path->parent is the next segment up in the linked list
+                            return {.path = path->parent};
+                        }
+                        return ItemNull;
+                    }
 
                     // metadata properties (require stat'd metadata)
                     if (path->meta && (path->flags & PATH_FLAG_META_LOADED)) {
