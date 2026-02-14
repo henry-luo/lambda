@@ -8,6 +8,7 @@
 (require redex/reduction-semantics
          racket/match
          racket/list
+         racket/math
          "css-layout-lang.rkt")
 
 (provide (all-defined-out))
@@ -59,6 +60,19 @@
             [_ (values 0 0 0 0)])]
          [else (loop (cdr ps))]))]))
 
+;; check if a margin edge is auto (returns raw margin values including 'auto)
+(define (get-raw-margins styles)
+  (match styles
+    [`(style . ,props)
+     (let loop ([ps props])
+       (cond
+         [(null? ps) (values 0 0 0 0)]
+         [(and (pair? (car ps)) (eq? (caar ps) 'margin))
+          (match (cadar ps)
+            [`(edges ,t ,r ,b ,l) (values t r b l)]
+            [_ (values 0 0 0 0)])]
+         [else (loop (cdr ps))]))]))
+
 ;; get all style properties as an alist
 (define (styles->alist styles)
   (match styles
@@ -79,9 +93,10 @@
     ['none #f]           ; none → no constraint
     [`(px ,n) n]
     [`(% ,pct)
-     (if containing-size
+     (if (and containing-size
+              (not (infinite? containing-size)))
          (* (/ pct 100) containing-size)
-         #f)]            ; percentage against indefinite → not resolved
+         #f)]            ; percentage against indefinite/infinite → not resolved
     [`(em ,n) (* n 16)]  ; simplified: assume 1em = 16px
     ['min-content 'min-content]
     ['max-content 'max-content]
@@ -131,7 +146,10 @@
   (define-values (pt pr pb pl) (get-edges styles 'padding))
   (define-values (bt br bb bl) (get-edges styles 'border-width))
   (define bs (get-style-prop styles 'box-sizing 'content-box))
-  (box-model mt mr mb ml pt pr pb pl bt br bb bl bs))
+  ;; convert 'auto margins to 0 for general box-model calculations
+  (define (safe-margin v) (if (eq? v 'auto) 0 v))
+  (box-model (safe-margin mt) (safe-margin mr) (safe-margin mb) (safe-margin ml)
+             pt pr pb pl bt br bb bl bs))
 
 ;; compute content-area width given the resolved CSS width and box model
 (define (compute-content-width bm css-width)
@@ -229,7 +247,7 @@
            (max 0 (- resolved-h (vertical-pb bm)))
            resolved-h)]
       [else #f]))  ; auto → determined by content
-  ;; apply min/max
+  ;; apply min/max when explicit height is set
   (when content-h
     (define min-h-val (get-style-prop styles 'min-height 'auto))
     (define max-h-val (get-style-prop styles 'max-height 'none))
@@ -237,6 +255,28 @@
     (define max-h (or (resolve-size-value max-h-val containing-height) +inf.0))
     (set! content-h (max min-h (min max-h content-h))))
   content-h)
+
+;; resolve min-height constraint for a box (returns content-box value or 0)
+(define (resolve-min-height styles containing-height)
+  (define min-h-val (get-style-prop styles 'min-height 'auto))
+  (define resolved (resolve-size-value min-h-val containing-height))
+  (if resolved
+      (let ([bm (extract-box-model styles)])
+        (if (eq? (box-model-box-sizing bm) 'border-box)
+            (max 0 (- resolved (vertical-pb bm)))
+            resolved))
+      0))
+
+;; resolve max-height constraint for a box (returns content-box value or +inf.0)
+(define (resolve-max-height styles containing-height)
+  (define max-h-val (get-style-prop styles 'max-height 'none))
+  (define resolved (resolve-size-value max-h-val containing-height))
+  (if resolved
+      (let ([bm (extract-box-model styles)])
+        (if (eq? (box-model-box-sizing bm) 'border-box)
+            (max 0 (- resolved (vertical-pb bm)))
+            resolved))
+      +inf.0))
 
 ;; ============================================================
 ;; View Construction Helpers

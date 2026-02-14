@@ -27,7 +27,13 @@
          compare-result-summary
          make-compare-config
          compare-config?
-         default-config)
+         default-config
+         layout-failure?
+         layout-failure-path
+         layout-failure-property
+         layout-failure-expected
+         layout-failure-actual
+         layout-failure-tolerance)
 
 ;; ============================================================
 ;; Configuration
