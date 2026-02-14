@@ -9,7 +9,8 @@
 (require racket/match
          racket/list
          "css-layout-lang.rkt"
-         "layout-common.rkt")
+         "layout-common.rkt"
+         "layout-positioned.rkt")
 
 (provide layout-block
          layout-block-children)
@@ -32,10 +33,8 @@
      (define bm (extract-box-model styles))
 
      ;; resolve content width (CSS 2.2 §10.3.3)
-     (define content-w
-       (if avail-w
-           (resolve-block-width styles avail-w)
-           0))
+     ;; even if avail-w is #f (indefinite), explicit px widths still resolve
+     (define content-w (resolve-block-width styles (or avail-w 0)))
 
      ;; resolve explicit height (or #f for auto)
      (define explicit-h (resolve-block-height styles avail-h))
@@ -99,6 +98,11 @@
        (cond
          [(match child [`(none ,_) #t] [_ #f])
           (loop (cdr remaining) current-y prev-margin-bottom views)]
+         ;; skip absolute/fixed positioned children (they're laid out by containing block)
+         [(let ([s (get-box-styles child)])
+            (let ([pos (get-style-prop s 'position 'static)])
+              (or (eq? pos 'absolute) (eq? pos 'fixed))))
+          (loop (cdr remaining) current-y prev-margin-bottom views)]
          [else
           (define child-view (dispatch-fn child child-avail))
 
@@ -118,6 +122,9 @@
           ;; update the view with computed position
           (define positioned-view (set-view-position child-view child-x child-y))
 
+          ;; apply relative positioning offset after block positioning
+          (define final-view (apply-relative-offset positioned-view child-styles))
+
           ;; advance y by child's border-box height
           (define child-h (view-height child-view))
           (define new-y (+ current-y collapsed-margin child-h))
@@ -125,7 +132,7 @@
           (loop (cdr remaining)
                 new-y
                 (box-model-margin-bottom child-bm)
-                (cons positioned-view views))])])))
+                (cons final-view views))])])))
 
 ;; ============================================================
 ;; Helper: Extract styles from any box type

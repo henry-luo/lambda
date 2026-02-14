@@ -355,19 +355,30 @@
 
   ;; gap properties
   (let ([v (cdr-or-false 'gap inline-alist)])
-    (when v
-      (let ([gap-px (parse-css-px v)])
-        (when gap-px
-          (add! 'row-gap gap-px)
-          (add! 'column-gap gap-px)))))
+    (when (and v (not (string=? v "normal")))
+      ;; gap shorthand: "row-gap column-gap" or single value for both
+      (define parts (string-split v))
+      (cond
+        [(= (length parts) 2)
+         ;; two values: first is row-gap, second is column-gap
+         (let ([rg (parse-css-px-or-pct (car parts))]
+               [cg (parse-css-px-or-pct (cadr parts))])
+           (when rg (add! 'row-gap rg))
+           (when cg (add! 'column-gap cg)))]
+        [(= (length parts) 1)
+         (let ([gap-v (parse-css-px-or-pct (car parts))])
+           (when gap-v
+             (add! 'row-gap gap-v)
+             (add! 'column-gap gap-v)))]
+        [else (void)])))
   (let ([v (cdr-or-false 'row-gap inline-alist)])
-    (when v
-      (let ([gap-px (parse-css-px v)])
-        (when gap-px (add! 'row-gap gap-px)))))
+    (when (and v (not (string=? v "normal")))
+      (let ([gap-v (parse-css-px-or-pct v)])
+        (when gap-v (add! 'row-gap gap-v)))))
   (let ([v (cdr-or-false 'column-gap inline-alist)])
-    (when v
-      (let ([gap-px (parse-css-px v)])
-        (when gap-px (add! 'column-gap gap-px)))))
+    (when (and v (not (string=? v "normal")))
+      (let ([gap-v (parse-css-px-or-pct v)])
+        (when gap-v (add! 'column-gap gap-v)))))
 
   ;; overflow
   (let ([v (cdr-or-false 'overflow inline-alist)])
@@ -418,6 +429,19 @@
      (lambda (m) (string->number (cadr m)))]
     [else #f]))
 
+;; parse a CSS value that can be px or percentage, returning number or (% n)
+(define (parse-css-px-or-pct str)
+  (define trimmed (string-trim str))
+  (cond
+    [(string=? trimmed "0") 0]
+    [(regexp-match #rx"^(-?[0-9.]+)px$" trimmed) =>
+     (lambda (m) (string->number (cadr m)))]
+    [(regexp-match #rx"^(-?[0-9.]+)%$" trimmed) =>
+     (lambda (m) `(% ,(string->number (cadr m))))]
+    [(regexp-match #rx"^(-?[0-9.]+)$" trimmed) =>
+     (lambda (m) (string->number (cadr m)))]
+    [else #f]))
+
 ;; parse edge shorthand from inline alist.
 ;; handles margin/padding with individual sides or shorthand.
 (define (parse-edge-shorthand alist prop-name)
@@ -438,10 +462,15 @@
   (cond
     ;; any individual side → build edges
     [(or t r b l)
-     (define tv (if t (or (parse-css-px t) 0) 0))
-     (define rv (if r (or (parse-css-px r) 0) 0))
-     (define bv (if b (or (parse-css-px b) 0) 0))
-     (define lv (if l (or (parse-css-px l) 0) 0))
+     (define (parse-margin-val v)
+       (cond
+         [(not v) 0]
+         [(equal? v "auto") 'auto]
+         [else (or (parse-css-px v) 0)]))
+     (define tv (parse-margin-val t))
+     (define rv (parse-margin-val r))
+     (define bv (parse-margin-val b))
+     (define lv (parse-margin-val l))
      `(edges ,tv ,rv ,bv ,lv)]
 
     ;; shorthand present
@@ -451,9 +480,14 @@
     [else #f]))
 
 ;; parse a margin/padding shorthand value: "10px", "10px 20px", "10px 20px 30px", "10px 20px 30px 40px"
+;; preserves 'auto for margin values
 (define (parse-margin-shorthand str)
   (define parts (string-split (string-trim str)))
-  (define vals (map (lambda (p) (or (parse-css-px p) 0)) parts))
+  (define vals (map (lambda (p)
+                      (cond
+                        [(equal? p "auto") 'auto]
+                        [else (or (parse-css-px p) 0)]))
+                    parts))
   (match vals
     [(list a) `(edges ,a ,a ,a ,a)]
     [(list tb lr) `(edges ,tb ,lr ,tb ,lr)]
@@ -532,8 +566,8 @@
     [(string=? v "space-between") 'space-between]
     [(string=? v "space-around") 'space-around]
     [(string=? v "space-evenly") 'space-evenly]
-    [(string=? v "start") 'flex-start]
-    [(string=? v "end") 'flex-end]
+    [(string=? v "start") 'start]
+    [(string=? v "end") 'end]
     [(string=? v "normal") 'flex-start]
     [else (string->symbol v)]))
 
@@ -652,26 +686,35 @@
       #f))
 
 ;; convert a reference layout node to expected layout structure
+;; Converts absolute browser coordinates to parent-relative coordinates.
 ;; returns: (expected id x y width height (children ...))
-(define (layout-node->expected node)
+(define (layout-node->expected node [parent-abs-x 0] [parent-abs-y 0])
   (define layout-data (hash-ref node 'layout (hash)))
   (define node-id (or (hash-ref node 'id #f) "anon"))
-  (define x (hash-ref layout-data 'x 0))
-  (define y (hash-ref layout-data 'y 0))
+  (define abs-x (hash-ref layout-data 'x 0))
+  (define abs-y (hash-ref layout-data 'y 0))
   (define w (hash-ref layout-data 'width 0))
   (define h (hash-ref layout-data 'height 0))
 
-  ;; recursively process children, skipping non-element nodes
+  ;; convert to parent-relative coordinates
+  (define rel-x (- abs-x parent-abs-x))
+  (define rel-y (- abs-y parent-abs-y))
+
+  ;; recursively process children, skipping non-element/display:none nodes
+  ;; children are relative to this node's absolute position
   (define children
     (filter-map
      (lambda (c)
        (and (equal? (hash-ref c 'nodeType #f) "element")
             (not (member (hash-ref c 'tag #f) '("script" "style" "link" "meta" "title")))
-            (layout-node->expected c)))
+            ;; skip display:none elements — they produce no view in Redex
+            (let ([computed (hash-ref c 'computed (hash))])
+              (not (equal? (hash-ref computed 'display #f) "none")))
+            (layout-node->expected c abs-x abs-y)))
      (hash-ref node 'children '())))
 
   `(expected ,(if (string? node-id) (string->symbol node-id) 'anon)
-             ,x ,y ,w ,h
+             ,rel-x ,rel-y ,w ,h
              ,children))
 
 ;; ============================================================
