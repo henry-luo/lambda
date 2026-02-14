@@ -1542,35 +1542,6 @@
       "type": "STRING",
       "value": "nan"
     },
-    "_content_literal": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "string"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_datetime"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "binary"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "true"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "false"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "base_type"
-        }
-      ]
-    },
     "_expr_stam": {
       "type": "CHOICE",
       "members": [
