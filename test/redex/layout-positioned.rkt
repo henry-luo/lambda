@@ -7,6 +7,7 @@
 
 (require racket/match
          racket/function
+         racket/math
          "css-layout-lang.rkt"
          "layout-common.rkt")
 
@@ -47,9 +48,35 @@
          [(and left-val right-val)
           (max 0 (- containing-w left-val right-val
                     (horizontal-pb bm) (horizontal-margin bm)))]
-         ;; shrink-to-fit: use containing block width
+         ;; shrink-to-fit: measure content with max-content, clamp to containing block
          [else
-          (max 0 (- containing-w (horizontal-pb bm) (horizontal-margin bm)))]))
+          (define shrink-avail (max 0 (- containing-w (horizontal-pb bm) (horizontal-margin bm))))
+          ;; measure intrinsic width by laying out with max-content
+          (define static-s (override-position styles 'static))
+          (define static-b (replace-box-styles box static-s))
+          (define measure-avail `(avail av-max-content indefinite))
+          (define measure-view (dispatch-fn static-b measure-avail))
+          (define intrinsic-w (view-width measure-view))
+          ;; shrink-to-fit: min(available, max(preferred, minimum))
+          ;; content width = intrinsic minus pb (since intrinsic is border-box)
+          (define content-intrinsic (max 0 (- intrinsic-w (horizontal-pb bm))))
+          (min shrink-avail content-intrinsic)]))
+
+     ;; apply min/max width constraints
+     (define min-w-val (get-style-prop styles 'min-width 'auto))
+     (define max-w-val (get-style-prop styles 'max-width 'none))
+     (define min-w (or (resolve-size-value min-w-val containing-w) 0))
+     (define max-w (or (resolve-size-value max-w-val containing-w) +inf.0))
+     ;; min/max are border-box when box-sizing:border-box, convert to content
+     (define min-w-content
+       (if (eq? (box-model-box-sizing bm) 'border-box)
+           (max 0 (- min-w (horizontal-pb bm)))
+           min-w))
+     (define max-w-content
+       (if (and (eq? (box-model-box-sizing bm) 'border-box) (not (infinite? max-w)))
+           (max 0 (- max-w (horizontal-pb bm)))
+           max-w))
+     (set! content-w (max min-w-content (min max-w-content content-w)))
 
      ;; resolve height
      (define css-height-val (get-style-prop styles 'height 'auto))
@@ -66,11 +93,35 @@
                     (vertical-pb bm) (vertical-margin bm)))]
          [else #f]))  ; auto height → determined by content
 
+     ;; apply min/max height constraints (when content-h is resolved)
+     (when content-h
+       (define min-h-val (get-style-prop styles 'min-height 'auto))
+       (define max-h-val (get-style-prop styles 'max-height 'none))
+       (define min-h (or (resolve-size-value min-h-val containing-h) 0))
+       (define max-h (or (resolve-size-value max-h-val containing-h) +inf.0))
+       (define min-h-c
+         (if (eq? (box-model-box-sizing bm) 'border-box)
+             (max 0 (- min-h (vertical-pb bm)))
+             min-h))
+       (define max-h-c
+         (if (and (eq? (box-model-box-sizing bm) 'border-box) (not (infinite? max-h)))
+             (max 0 (- max-h (vertical-pb bm)))
+             max-h))
+       (set! content-h (max min-h-c (min max-h-c content-h))))
+
      ;; lay out children to determine auto height
+     ;; override position to static to avoid infinite recursion
+     ;; (dispatch checks position and would re-call layout-positioned)
+     (define static-styles (override-position styles 'static))
+     (define static-box (replace-box-styles box static-styles))
      (define avail `(avail (definite ,content-w)
                            ,(if content-h `(definite ,content-h) 'indefinite)))
-     (define child-view (dispatch-fn box avail))
-     (define actual-h (or content-h (view-height child-view)))
+     (define child-view (dispatch-fn static-box avail))
+     ;; actual-h is content height; when auto, use child-view's height
+     ;; but child-view returns border-box height, so convert back to content height
+     (define actual-h
+       (or content-h
+           (max 0 (- (view-height child-view) (vertical-pb bm)))))
 
      ;; compute position
      (define x
@@ -89,7 +140,11 @@
                        (box-model-margin-bottom bm))]
          [else (box-model-margin-top bm)]))
 
-     (set-view-pos child-view x y)]
+     ;; set both position AND size
+     ;; final dimensions are the resolved border-box size
+     (define final-w (compute-border-box-width bm content-w))
+     (define final-h (compute-border-box-height bm actual-h))
+     (set-view-size (set-view-pos child-view x y) final-w final-h)]
 
     [_ (error 'layout-positioned "unexpected box: ~a" box)]))
 
@@ -136,10 +191,42 @@
 ;; Helpers
 ;; ============================================================
 
+;; override the position property in a styles term
+(define (override-position styles new-pos)
+  (match styles
+    [`(style . ,props)
+     (define new-props
+       (cons `(position ,new-pos)
+             (filter (lambda (p) (not (and (pair? p) (eq? (car p) 'position))))
+                     props)))
+     `(style ,@new-props)]
+    [_ styles]))
+
+;; replace the styles in a box term
+(define (replace-box-styles box new-styles)
+  (match box
+    [`(block ,id ,_ ,children)       `(block ,id ,new-styles ,children)]
+    [`(inline ,id ,_ ,children)      `(inline ,id ,new-styles ,children)]
+    [`(inline-block ,id ,_ ,children) `(inline-block ,id ,new-styles ,children)]
+    [`(flex ,id ,_ ,children)        `(flex ,id ,new-styles ,children)]
+    [`(grid ,id ,_ ,gd ,children)    `(grid ,id ,new-styles ,gd ,children)]
+    [`(table ,id ,_ ,children)       `(table ,id ,new-styles ,children)]
+    [`(text ,id ,_ ,c ,w)           `(text ,id ,new-styles ,c ,w)]
+    [`(replaced ,id ,_ ,iw ,ih)     `(replaced ,id ,new-styles ,iw ,ih)]
+    [_ box]))
+
 (define (set-view-pos view x y)
   (match view
     [`(view ,id ,_ ,_ ,w ,h ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,_ ,_ ,w ,h ,text)
+     `(view-text ,id ,x ,y ,w ,h ,text)]
+    [_ view]))
+
+(define (set-view-size view w h)
+  (match view
+    [`(view ,id ,x ,y ,_ ,_ ,children)
+     `(view ,id ,x ,y ,w ,h ,children)]
+    [`(view-text ,id ,x ,y ,_ ,_ ,text)
      `(view-text ,id ,x ,y ,w ,h ,text)]
     [_ view]))
