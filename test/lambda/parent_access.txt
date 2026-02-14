@@ -1,0 +1,13 @@
+"Parent access on map"
+{
+  name: "root",
+  parent: null
+}
+"Parent name via ..rootDouble parent accesstopPath parent access: single"
+/home.user
+"Path parent access: double"
+/home
+"Chained parent value"
+20
+"Double parent value"
+30

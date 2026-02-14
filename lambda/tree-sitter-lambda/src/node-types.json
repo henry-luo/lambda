@@ -3357,6 +3357,32 @@
     }
   },
   {
+    "type": "parent_expr",
+    "named": true,
+    "fields": {
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "path_parent",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "path_expr",
     "named": true,
     "fields": {
@@ -3527,6 +3553,10 @@
         },
         {
           "type": "nan",
+          "named": true
+        },
+        {
+          "type": "parent_expr",
           "named": true
         },
         {
@@ -4487,6 +4517,10 @@
     "named": false
   },
   {
+    "type": "_",
+    "named": false
+  },
+  {
     "type": "and",
     "named": false
   },
@@ -4608,11 +4642,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
