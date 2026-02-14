@@ -13,6 +13,7 @@
 
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
+#include "../lib/font/font.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -1588,20 +1589,20 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
 
     // setup initial ascender and descender
     // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    // Pass pixel_ratio to get CSS pixel values
-    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face, pixel_ratio);
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
     if (typo.valid && typo.use_typo_metrics) {
         lycon->block.init_ascender = typo.ascender;
         lycon->block.init_descender = typo.descender;
-    } else {
-        // Fallback to FreeType HHEA metrics
-        // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
-        lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0 / pixel_ratio;
-        lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0 / pixel_ratio;
+    } else if (lycon->font.font_handle) {
+        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+        if (m) {
+            lycon->block.init_ascender = m->hhea_ascender;
+            lycon->block.init_descender = -(m->hhea_descender);
+        }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0 / pixel_ratio,
+    float font_height = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_line_height : 0;
+    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, font_height,
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 

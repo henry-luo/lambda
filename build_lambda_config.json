@@ -7,6 +7,7 @@
     "source_dirs": [
         "lib",
         "lib/serve",
+        "lib/font",
         "lambda",
         "lambda/input",
         "lambda/input/css",

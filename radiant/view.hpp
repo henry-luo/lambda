@@ -28,9 +28,6 @@
 #define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
 #endif
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_SFNT_NAMES_H
 #include <thorvg_capi.h>
 
 // Use inline functions instead of macros to avoid conflicts with std::max/min
@@ -84,6 +81,8 @@ struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
 struct FontDatabase;
 typedef struct FontDatabase FontDatabase;
+struct FontContext;
+struct FontHandle;
 
 // Define lexbor tag and CSS value constants first, before including headers that need them
 enum {
@@ -380,8 +379,7 @@ struct FontProp {
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
-    // loaded FreeType font face for this set of font properties
-    void* ft_face;     // FreeType face pointer
+    struct FontHandle* font_handle; // unified font handle (populated by setup_font)
 };
 
 struct GridItemProp {
@@ -852,7 +850,8 @@ typedef struct BlockProp {
 
 typedef struct FontBox {
     FontProp *style;  // current font style
-    FT_Face ft_face;  // FreeType font face
+    void* ft_face;    // opaque FreeType face pointer (cast to FT_Face where needed)
+    struct FontHandle* font_handle; // unified font handle
     int current_font_size;  // font size of current element
 } FontBox;
 
@@ -1209,7 +1208,8 @@ typedef struct {
 
     // font handling
     FontDatabase *font_db;
-    FT_Library ft_library;
+    void* ft_library;  // opaque FT_Library handle (cast to FT_Library where needed)
+    struct FontContext* font_ctx; // unified font context
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
@@ -1231,8 +1231,8 @@ typedef struct {
     MouseState mouse_state; // current mouse state
 } UiContext;
 
-extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
-extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering);
+extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
+extern void* load_glyph(UiContext* uicon, struct FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 extern Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface);

@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
+#include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
@@ -139,7 +140,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     // Calculate natural text width for justify rendering (excluding trailing spaces)
     float natural_width = 0.0f;
     int space_count = 0;
-    if (ctx->font.ft_face) {
+    if (ctx->font.font_handle) {
         // Find end of non-whitespace content
         size_t content_len = strlen(text_content);
         while (content_len > 0 && text_content[content_len - 1] == ' ') {
@@ -160,7 +161,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
-                FT_GlyphSlot glyph = load_glyph(ctx->ui_context, ctx->font.ft_face, ctx->font.style, codepoint, false);
+                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(ctx->ui_context, ctx->font.font_handle, ctx->font.style, codepoint, false);
                 if (glyph) {
                     natural_width += glyph->advance.x / 64.0;
                 } else {
@@ -206,7 +207,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     strbuf_append_format(ctx->svg_content,
         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" fill=\"%s\"",
         x, baseline_y,
-        ctx->font.ft_face ? ctx->font.ft_face->family_name : "Arial",
+        ctx->font.font_handle ? font_handle_get_family_name(ctx->font.font_handle) : "Arial",
         font_size,
         color_str);
 
@@ -663,6 +664,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     // Initialize font from default
     ctx.font.style = &uicon->default_font;
     ctx.font.ft_face = NULL; // Will be set if needed
+    ctx.font.font_handle = NULL;
 
     // SVG header
     strbuf_append_format(ctx.svg_content,
