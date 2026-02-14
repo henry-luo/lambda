@@ -223,11 +223,19 @@
       ;; auto width: fill available space
       [else
        (max 0 (- containing-width (horizontal-pb bm) (horizontal-margin bm)))]))
-  ;; apply min/max constraints
+  ;; apply min/max constraints (converted to content-box when border-box)
   (define min-w-val (get-style-prop styles 'min-width 'auto))
   (define max-w-val (get-style-prop styles 'max-width 'none))
-  (define min-w (or (resolve-size-value min-w-val containing-width) 0))
-  (define max-w (or (resolve-size-value max-w-val containing-width) +inf.0))
+  (define min-w-raw (or (resolve-size-value min-w-val containing-width) 0))
+  (define max-w-raw (or (resolve-size-value max-w-val containing-width) +inf.0))
+  (define min-w
+    (if (and (> min-w-raw 0) (eq? (box-model-box-sizing bm) 'border-box))
+        (max 0 (- min-w-raw (horizontal-pb bm)))
+        min-w-raw))
+  (define max-w
+    (if (and (not (infinite? max-w-raw)) (eq? (box-model-box-sizing bm) 'border-box))
+        (max 0 (- max-w-raw (horizontal-pb bm)))
+        max-w-raw))
   (define clamped-w (max min-w (min max-w content-w)))
   clamped-w)
 
@@ -248,11 +256,20 @@
            resolved-h)]
       [else #f]))  ; auto → determined by content
   ;; apply min/max when explicit height is set
+  ;; min/max must be converted to content-box when box-sizing:border-box
   (when content-h
     (define min-h-val (get-style-prop styles 'min-height 'auto))
     (define max-h-val (get-style-prop styles 'max-height 'none))
-    (define min-h (or (resolve-size-value min-h-val containing-height) 0))
-    (define max-h (or (resolve-size-value max-h-val containing-height) +inf.0))
+    (define min-h-raw (or (resolve-size-value min-h-val containing-height) 0))
+    (define max-h-raw (or (resolve-size-value max-h-val containing-height) +inf.0))
+    (define min-h
+      (if (and (> min-h-raw 0) (eq? (box-model-box-sizing bm) 'border-box))
+          (max 0 (- min-h-raw (vertical-pb bm)))
+          min-h-raw))
+    (define max-h
+      (if (and (not (infinite? max-h-raw)) (eq? (box-model-box-sizing bm) 'border-box))
+          (max 0 (- max-h-raw (vertical-pb bm)))
+          max-h-raw))
     (set! content-h (max min-h (min max-h content-h))))
   content-h)
 
