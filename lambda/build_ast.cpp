@@ -1954,6 +1954,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
         ast_node->type = &LIT_BOOL;
     }
+    else if (symbol == sym_inf || symbol == sym_nan) {
+        ast_node->type = build_lit_float(tp, child);
+    }
     else if (symbol == SYM_INT) {
         // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
         StrView source = ts_node_source(tp, child);
@@ -2064,6 +2067,31 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_CALL_EXPR) { // || symbol == SYM_SYS_FUNC
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_PARENT_EXPR) {
+        // parent access: expr.. for .parent, expr.._.. for .parent.parent
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        AstParentNode* parent_node = (AstParentNode*)alloc_ast_node(tp, AST_NODE_PARENT_EXPR, child, sizeof(AstParentNode));
+        parent_node->object = build_expr(tp, object_node);
+
+        // count the depth: each path_parent (..) adds one level
+        int depth = 0;
+        uint32_t child_count = ts_node_child_count(child);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode c = ts_node_child(child, i);
+            if (ts_node_symbol(c) == SYM_PATH_PARENT) {
+                depth++;
+            }
+        }
+        parent_node->depth = depth > 0 ? depth : 1;  // at least 1 for single ..
+        log_debug("build parent_expr: depth=%d", parent_node->depth);
+
+        // type inherits from object
+        if (parent_node->object && parent_node->object->type) {
+            parent_node->type = parent_node->object->type;
+        }
+        ast_node->expr = (AstNode*)parent_node;
+        ast_node->type = parent_node->type;
     }
     else if (symbol == SYM_CURRENT_ITEM) {
         ast_node->expr = build_current_item(tp, child);
@@ -4194,13 +4222,27 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
     ts_tree_cursor_delete(&cursor);
 
     // PASS 3: Process clauses that reference variables (where, group, order, limit, offset)
+    // These are now nested inside a for_clauses node
     log_debug("for clauses pass 3: where/group/order/limit/offset");
-    cursor = ts_tree_cursor_new(for_node);
-    has_node = ts_tree_cursor_goto_first_child(&cursor);
 
-    while (has_node) {
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        TSNode child = ts_tree_cursor_current_node(&cursor);
+    // Find the for_clauses child node
+    TSNode clauses_node = {0};
+    uint32_t child_count = ts_node_child_count(for_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(for_node, i);
+        if (ts_node_symbol(child) == sym_for_clauses) {
+            clauses_node = child;
+            break;
+        }
+    }
+
+    if (!ts_node_is_null(clauses_node)) {
+        cursor = ts_tree_cursor_new(clauses_node);
+        has_node = ts_tree_cursor_goto_first_child(&cursor);
+
+        while (has_node) {
+            TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+            TSNode child = ts_tree_cursor_current_node(&cursor);
 
         if (field_id == FIELD_WHERE) {
             // Where clause - get the condition expression
@@ -4252,6 +4294,7 @@ void build_for_clauses(Transpiler* tp, TSNode for_node, AstForNode* ast_node) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
+    } // end if for_clauses node found
 
     if (!ast_node->loop) {
         log_error("Error: missing for loop declare");
@@ -4648,10 +4691,61 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     ast_node->vars->parent = tp->current_scope;
     ast_node->vars->is_proc = is_proc;
     tp->current_scope = ast_node->vars;
-    TSTreeCursor cursor = ts_tree_cursor_new(func_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
     AstNamedNode* prev_param = NULL;  int param_count = 0;  int required_count = 0;
     bool seen_optional = false;  // track if we've seen an optional param
+
+    // for anonymous fn_expr with list-based params: (a, b) => expr
+    // the grammar parses untyped arrow functions as fn_expr → list => body
+    // where list contains identifier expressions to be treated as parameters
+    if (!is_named) {
+        TSNode first_child = ts_node_named_child(func_node, 0);
+        if (!ts_node_is_null(first_child) && ts_node_symbol(first_child) == SYM_LIST) {
+            log_debug("fn_expr: list-based params detected (untyped arrow function)");
+            TSNode list_child = ts_node_named_child(first_child, 0);
+            while (!ts_node_is_null(list_child)) {
+                // unwrap primary_expr wrapper to get the actual identifier
+                TSNode param_node = list_child;
+                TSSymbol child_sym = ts_node_symbol(param_node);
+                while (child_sym == sym_primary_expr) {
+                    param_node = ts_node_named_child(param_node, 0);
+                    child_sym = ts_node_symbol(param_node);
+                }
+                log_debug("fn_expr: list child symbol=%d", child_sym);
+                if (child_sym == sym_identifier) {
+                    AstNamedNode* param = (AstNamedNode*)alloc_ast_node(tp,
+                        AST_NODE_PARAM, list_child, sizeof(AstNamedNode));
+                    StrView name_str = ts_node_source(tp, list_child);
+                    param->name = name_pool_create_strview(tp->name_pool, name_str);
+
+                    TypeParam* param_type = (TypeParam*)alloc_type(tp->pool, LMD_TYPE_ANY, sizeof(TypeParam));
+                    *(Type*)param_type = TYPE_ANY;
+                    param_type->full_type = NULL;
+                    param->type = (Type*)param_type;
+                    push_name(tp, param, NULL);
+
+                    if (prev_param == NULL) {
+                        ast_node->param = param;
+                        fn_type->param = param_type;
+                    } else {
+                        prev_param->next = (AstNode*)param;
+                        ((TypeParam*)prev_param->type)->next = param_type;
+                    }
+                    prev_param = param;  param_count++;  required_count++;
+                    log_debug("fn_expr: added untyped param '%.*s'",
+                        (int)name_str.length, name_str.str);
+                } else {
+                    StrView src = ts_node_source(tp, list_child);
+                    record_semantic_error(tp, list_child, ERR_SYNTAX_ERROR,
+                        "arrow function parameter must be an identifier, got '%.*s'",
+                        (int)src.length, src.str);
+                }
+                list_child = ts_node_next_named_sibling(list_child);
+            }
+        }
+    }
+
+    TSTreeCursor cursor = ts_tree_cursor_new(func_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
     while (has_node) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_DECLARE) {  // param declaration
@@ -5101,6 +5195,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         b_node->type = &LIT_BOOL;
         return (AstNode*)b_node;
+    }
+    case sym_inf:  case sym_nan: {
+        AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        f_node->type = build_lit_float(tp, expr_node);
+        return (AstNode*)f_node;
     }
     case SYM_INT: {
         AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));

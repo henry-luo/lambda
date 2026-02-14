@@ -222,4 +222,49 @@ true div false
 "hello" ++ " world"
 'foo' ++ 'bar' ++ 'baz'
 
+"Parenthesized Subtraction:"
+(1 + 2) - 3
+(100) - 50
+(5 * 3) - 10
+(10 - 3) - 2
+(2.5 + 1.5) - 3.0
+(10) - (5)
+((1 + 2)) - ((3 + 4))
+(1 + 2) - (3 + 4)
+
+"Chained Parenthesized Subtraction:"
+(10 + 5) - (3 + 2) - (1 + 1)
+(100) - (50) - (25) - (10)
+(8 * 2) - (3 * 3) - 1
+
+"Subtraction After Variable Parens:"
+let px = 10, py = 5
+(px) - py
+(px + py) - 3
+(px * 2) - py
+(px) - (py)
+(px - 1) - (py - 2)
+
+"Infinity and NaN Keywords:"
+inf
+-inf
+nan
+inf + 1
+-inf + 1
+inf - inf
+inf * 0
+inf * 2
+-inf * 2
+1 / inf
+nan + 1
+(inf > 1000000)
+
+"Scientific Notation with Negative Exponent:"
+1e-5
+1.5e+3
+-1e-5
+-1.5e+3
+1e10 - 1e10
+1e-10 + 1e-10
+
 "===== END OF COMPREHENSIVE TEST ====="
