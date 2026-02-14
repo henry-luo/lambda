@@ -148,4 +148,16 @@ zero / 3.14159n
 zero + zero
 zero - zero
 
+"===== DECIMAL NEGATION ====="
+-3.14159n
+-0.0n
+let dval = 3.14159n
+-dval
+let neg_dval = -1.5n
+-neg_dval
+-(3.14159n + 2.71828n)
+(3.14159n + 2.71828n) - 1.0n
+(1.5n) - (0.5n)
+(-1.5n) - (-0.5n)
+
 "Decimal arithmetic test completed successfully"

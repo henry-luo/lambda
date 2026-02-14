@@ -177,4 +177,43 @@ nan
 -9.2233e+18
 "Concatenation: hello world"
 'foobarbaz'
+"Parenthesized Subtraction:"
+0
+50
+5
+5
+1
+5
+-4
+-4
+"Chained Parenthesized Subtraction:"
+8
+15
+6
+"Subtraction After Variable Parens:"
+5
+12
+15
+5
+6
+"Infinity and NaN Keywords:"
+inf
+-inf
+nan
+inf
+-inf
+nan
+nan
+inf
+-inf
+0
+nan
+true
+"Scientific Notation with Negative Exponent:"
+0.00001
+1500
+-0.00001
+-1500
+0
+2e-10
 "===== END OF COMPREHENSIVE TEST ====="

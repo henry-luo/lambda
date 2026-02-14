@@ -1872,10 +1872,18 @@ Item fn_neg(Item item) {
         return push_d(-val);
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
-        // For decimal types, we'd need to negate the libmpdec value
-        // This would require more complex decimal arithmetic with libmpdec
-        log_debug("unary - for decimal type not yet implemented");
-        return ItemError;
+        // negate decimal: get mpd value, negate, push result
+        Decimal* dec_ptr = item.get_decimal();
+        if (!dec_ptr || !dec_ptr->dec_val) {
+            log_debug("fn_neg: invalid decimal pointer");
+            return ItemError;
+        }
+        mpd_context_t* dec_ctx = (dec_ptr->unlimited) ?
+            decimal_unlimited_context() : decimal_fixed_context();
+        mpd_t* result = mpd_new(dec_ctx);
+        if (!result) return ItemError;
+        mpd_minus(result, dec_ptr->dec_val, dec_ctx);
+        return push_decimal(result);
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate

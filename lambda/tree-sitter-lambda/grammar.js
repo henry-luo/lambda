@@ -18,23 +18,17 @@ function comma_sep(rule) {
 
 const digit = /\d/;
 const linebreak = /\r\n|\n/;
-const ws = /\s*/;
 const decimal_digits = /\d+/;
-const sign = optional(seq('-', ws));
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
-const signed_integer_literal = seq(sign, integer_literal);
-const signed_integer = seq(sign, decimal_digits);
-const exponent_part = seq(choice('e', 'E'), signed_integer);
+const exponent_part = seq(choice('e', 'E'), optional(choice('+', '-')), decimal_digits);
 const float_literal = choice(
-  seq(signed_integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
-  seq(sign, '.', decimal_digits, optional(exponent_part)),
-  seq(signed_integer_literal, exponent_part),
-  seq(sign, 'inf'),
-  seq(sign, 'nan'),
+  seq(integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
+  seq('.', decimal_digits, optional(exponent_part)),
+  seq(integer_literal, exponent_part),
 );
 const decimal_literal = choice(
-  seq(signed_integer_literal, '.', optional(decimal_digits)),
-  seq(sign, '.', decimal_digits),
+  seq(integer_literal, '.', optional(decimal_digits)),
+  seq('.', decimal_digits),
 );
 
 const base64_unit = /[A-Za-z0-9+/]{4}/;
@@ -247,13 +241,13 @@ module.exports = grammar({
 
     _number: $ => choice($.integer, $.float, $.decimal),
 
-    integer: _ => token(signed_integer_literal),
+    integer: _ => token(integer_literal),
 
     float: _ => token(float_literal),
 
     decimal: $ => {
       // no e-notation for decimal, following JS bigint
-      return token( seq(choice(decimal_literal, signed_integer_literal), choice('n','N')) );
+      return token( seq(choice(decimal_literal, integer_literal), choice('n','N')) );
     },
 
     // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
