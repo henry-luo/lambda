@@ -283,6 +283,8 @@ bool                font_database_scan_internal(FontDatabase* db);
 FontDatabaseResult  font_database_find_best_match_internal(FontDatabase* db, FontDatabaseCriteria* criteria);
 ArrayList*          font_database_find_all_matches_internal(FontDatabase* db, const char* family_name);
 FontEntry*          font_database_get_by_postscript_name_internal(FontDatabase* db, const char* ps_name);
+bool                font_database_save_cache_internal(FontDatabase* db, const char* path);
+bool                font_database_load_cache_internal(FontDatabase* db, const char* path);
 
 // font_platform.c
 void                font_platform_add_default_dirs(FontDatabase* db);
