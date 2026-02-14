@@ -537,71 +537,177 @@ make test-redex-differential
 
 ## 6. Implementation Plan
 
-### Phase 1: Core Language & Block Layout (2–3 weeks)
+### Phase 1: Core Language & Layout Modes ✅ COMPLETE
 
-**Goal**: Define the Redex language and implement block flow layout.
+All core modules implemented and tested under `test/redex/`:
 
-- [ ] Set up Racket project structure (`redex-layout/`)
-- [ ] Define `CSS-Layout` language (box tree, styles, view types)
-- [ ] Implement `layout-common.rkt` (box model computation, length resolution)
-- [ ] Implement `layout-block.rkt` (vertical stacking, margin collapsing)
-- [ ] Implement `layout-intrinsic.rkt` (min/max content width)
-- [ ] Write unit tests for block layout cases
-- [ ] Add JSON import/export for box trees
+- [x] Racket project structure, `info.rkt`, `css-layout-lang.rkt`
+- [x] `layout-common.rkt` — box model, length resolution, margin collapsing
+- [x] `layout-block.rkt` — vertical stacking, margin collapsing, display:none filtering
+- [x] `layout-inline.rkt` — line box management, greedy line breaking
+- [x] `layout-flex.rkt` — full 9-phase flexbox (grow/shrink, justify, align, wrap, gap, order)
+- [x] `layout-grid.rkt` — track sizing (px/fr/auto), placement, gap, fr distribution
+- [x] `layout-positioned.rkt` — absolute/fixed/relative positioning
+- [x] `layout-intrinsic.rkt` — min-content / max-content sizing
+- [x] `layout-dispatch.rkt` — top-level dispatch, text/replaced/table stubs
+- [x] `json-bridge.rkt` — JSON ↔ Redex box tree / view tree conversion
+- [x] `run-layout.rkt` — CLI entry point
+- [x] Test suite: 40 tests passing (13 block + 10 flex + 7 grid + 10 invariant)
 
-**Deliverable**: Block layout model that handles `<div>` stacking, padding, margins, and width/height resolution.
+### Phase 2: Reference-Driven Testing — Browser JSON → Redex ✅ COMPLETE
 
-### Phase 2: Inline Layout & Text (2 weeks)
+**Goal**: Import existing browser reference JSONs from `test/layout/reference/` and validate Redex layout against Chrome-extracted positions.
 
-**Goal**: Model inline formatting context and line breaking.
+**Approach B** (browser reference import — no C++ changes required):
 
-- [ ] Implement `layout-inline.rkt` (line box management, wrapping)
-- [ ] Abstract text measurement (parameterized width function)
-- [ ] Implement vertical-align within line boxes
-- [ ] Handle inline-block interaction
-- [ ] Half-leading model
+The `test/layout/reference/` directory contains **~3,180 JSON files** with Chrome-extracted layout data (via Puppeteer). Each file has a `layout_tree` with recursive element nodes containing:
+- `computed` — resolved CSS values (`display`, `margin*`, `padding*`, `border*Width`, `flexDirection`, `flexGrow`, etc.)
+- `layout` — `x`, `y`, `width`, `height` from `getBoundingClientRect()`
 
-**Deliverable**: Inline layout with line breaking, matching Radiant's `layout_inline.cpp` behavior.
+The converter pipeline:
 
-### Phase 3: Flexbox (3 weeks)
+```
+test/layout/data/baseline/*.html      (existing, HTML with inline styles)
+         │
+         ▼
+html-file->inline-styles              (Racket HTML parser)
+  • regex-based parser for Taffy/Yoga test structure
+  • extracts inline style alists from div elements
+  • handles nested element trees
+         │
+         ▼
+inline-styles->redex-styles           (style converter)
+  • applies base stylesheet defaults (display:flex, box-sizing:border-box, etc.)
+  • parses CSS lengths, edge shorthands, flex shorthands
+  • maps CSS keywords → Redex enum names
+         │
+         ▼
+reference->box-tree                   (box tree builder)
+  • converts parsed HTML elements → Redex Box terms
+  • determines display type (flex/block/inline/none)
+  • generates unique box ids
+         │
+         ▼
+Redex layout engine                   (existing from Phase 1)
+         │
+         ▼
+compare-layouts                       (tree-walk comparator)
+  • walks view tree and expected tree in parallel
+  • compares x/y/width/height with tolerance (5px base, 3% proportional)
+  • reports per-element pass/fail with detailed diagnostics
+```
 
-**Goal**: Full 9-phase flex algorithm in Redex.
+**Implemented modules:**
 
-- [ ] Implement `layout-flex.rkt` with reduction relation for 9 phases
-- [ ] Flex item collection and order sorting
-- [ ] Flex line creation (wrapping)
-- [ ] Flexible length resolution (grow/shrink distribution)
-- [ ] Main and cross axis alignment
-- [ ] Multi-line alignment (`align-content`)
-- [ ] Nested flex containers
-- [ ] `redex-check` property tests (e.g., "items never exceed container", "grow fills space")
+| Module | Lines | Purpose |
+|---|---|---|
+| `reference-import.rkt` | ~500 | HTML→inline styles parser, CSS value parser, box tree builder, reference JSON reader |
+| `compare-layouts.rkt` | ~200 | Tree comparator with configurable tolerance, structured failure reports |
+| `test-differential.rkt` | ~180 | CLI batch runner with `--filter`, `--limit`, `--verbose`, `--base-tolerance` |
 
-**Deliverable**: Flex layout model matching `layout_flex_multipass.cpp`.
+**Test classification:**
 
-### Phase 4: Grid Layout (3 weeks)
+| Category | Count | Description |
+|---|---|---|
+| Simple (inline-only divs) | 532 | Pure Taffy/Yoga tests, no `<style>` blocks |
+| Style-block | 1,369 | W3C CSS tests with `<style>` blocks |
+| Complex | 71 | Tests with spans, images, or text content |
 
-**Goal**: Grid track sizing and item placement.
+**Initial baseline results** (508 simple tests discovered):
 
-- [ ] Implement `layout-grid.rkt`
-- [ ] Track definition parsing (px, fr, auto, minmax)
-- [ ] Explicit and auto placement
-- [ ] Track sizing algorithm
-- [ ] Fr unit distribution
-- [ ] Grid alignment
+| Metric | Value |
+|---|---|
+| **Total** | 508 |
+| **Passed** | 45 (8.9%) |
+| **Failed** | 463 |
+| **Errors** | 0 |
 
-**Deliverable**: Grid layout model matching `layout_grid_multipass.cpp`.
+45 passing tests cover: absolute positioning, align-content, align-items, align-self, display-none, flex-grow, gap, grid, justify-content, margin, min/max, overflow, padding, percentage, rounding, scroll, and wrapping.
 
-### Phase 5: Integration & Differential Testing (2 weeks)
+**Common failure patterns** (to be addressed in Phase 3):
+1. Height stretch — children get height=0 when browser stretches via `align-items: stretch`
+2. Width auto-fill — children with no explicit width get 0 instead of flex-stretched
+3. flex-grow/shrink — free space not distributed correctly
+4. flex-wrap multiline — line splitting + cross-axis sizing gaps
+5. Percentage resolution — against containing block not fully wired
 
-**Goal**: End-to-end differential testing pipeline.
+Tasks:
 
-- [ ] Add `export_box_tree_json()` to Radiant
-- [ ] Build JSON → Redex term importer
-- [ ] Build comparison tool (`utils/compare-layouts.py`)
-- [ ] Run against `test/layout/data/` test suite
-- [ ] Document discrepancies and create regression tests
+- [x] Write `reference-import.rkt` — HTML→inline styles parser + box tree converter
+- [x] Write `compare-layouts.rkt` — tree-walk comparator with configurable tolerance
+- [x] Write `test-differential.rkt` — batch runner with CLI options
+- [x] Run full batch (508 tests), establish baseline (45 passing / 8.9%)
+- [x] Verify Phase 1 unit tests still pass (40/40)
 
-### Phase 6: Graph Layout Extension (2 weeks)
+**Deliverable**: ✅ Automated test harness that validates Redex against real browser layout for 508 CSS test cases, with zero C++ changes. Baseline established for Phase 3 gap-closing.
+
+### Phase 3: Close Layout Gaps (NEXT — iterative)
+
+**Goal**: Fix gaps surfaced by reference test failures.
+
+| Feature | Priority | Needed For |
+|---|---|---|
+| Auto margins | High | `margin_auto_*` (~20 tests) |
+| `align-self` | High | Flex/grid alignment tests |
+| `flex-wrap` multi-line | High | `wrap_*` (~30 tests) |
+| Percentage resolution | High | `percentage_*` (~25 tests) |
+| `box-sizing: content-box` | Medium | Taffy tests use `border-box` default |
+| Absolute positioning (insets) | Medium | `absolute_*` (~50 tests) |
+| `align-content` | Medium | Multi-line flex tests |
+| `min-content` / `max-content` in flex | Medium | Intrinsic sizing tests |
+| Float layout | Low | `float_*` tests (complex) |
+| Full table layout | Low | `table_*` tests (underspecified) |
+
+### Phase 4: Three-Way Differential Testing
+
+**Goal**: Triangulate layout correctness using three independent engines.
+
+```
+                    ┌──────────────────┐
+                    │   HTML/CSS       │
+                    │   test case      │
+                    └────────┬─────────┘
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐  ┌──────────┐  ┌──────────┐
+        │  Chrome  │  │ Radiant  │  │  Redex   │
+        │ (browser)│  │  (C++)   │  │ (Racket) │
+        └────┬─────┘  └────┬─────┘  └────┬─────┘
+             │              │              │
+        reference.json  view_tree.json  redex.json
+             │              │              │
+             └──────────────┼──────────────┘
+                            ▼
+                    ┌──────────────┐
+                    │  3-way diff  │
+                    └──────┬───────┘
+                           ▼
+            ┌──────────────────────────────┐
+            │  Verdict per element:        │
+            │  C=R=X  → ✅ All agree       │
+            │  C=R≠X  → 🔧 Redex model bug │
+            │  C=X≠R  → 🐛 Radiant bug     │
+            │  C≠R=X  → 🤔 Browser quirk?  │
+            │  all ≠  → ⚠️  Spec ambiguity  │
+            └──────────────────────────────┘
+```
+
+**Benefits of three-way differential testing:**
+
+1. **Bug localization** — When two engines agree and one disagrees, the disagreeing engine has the bug. No manual spec consultation needed.
+2. **Radiant regression detection** — If Redex+Chrome agree but Radiant diverges, it's a C++ implementation bug that would otherwise require pixel-level visual inspection.
+3. **Spec ambiguity discovery** — When all three disagree, it flags genuinely underspecified CSS behavior worth documenting.
+4. **Confidence for refactoring** — Radiant layout code can be safely refactored knowing the formal model provides an independent correctness check.
+5. **Coverage amplification** — `redex-check` can generate random box trees tested against all three engines, finding edge cases no hand-written test would cover.
+6. **Formal grounding** — Unlike browser-vs-browser comparison (which only checks behavioral equivalence), the Redex model makes the _intended_ algorithm explicit and auditable.
+
+Tasks:
+
+- [ ] Add `--export-box-tree` flag to `lambda.exe layout` (serialize post-cascade, pre-layout box tree)
+- [ ] Write 3-way comparison script
+- [ ] Integrate into `make test-redex-differential`
+
+### Phase 5: Graph Layout Extension (2 weeks)
 
 **Goal**: Formalize graph layout in the same framework.
 
@@ -610,15 +716,13 @@ make test-redex-differential
 - [ ] Connect to existing `radiant/graph_dagre.cpp` for differential testing
 - [ ] Demonstrate shared `Layout-Algebra` abstraction
 
-### Phase 7: Documentation & Publication (1 week)
+### Phase 6: Documentation & Publication (1 week)
 
 **Goal**: Typeset formal rules for technical documentation.
 
 - [ ] Use Redex typesetting to generate rule figures
 - [ ] Write Scribble documentation
 - [ ] Add to Lambda's `doc/` folder
-
-**Total estimated effort: 15–16 weeks** (part-time, interleaved with other work).
 
 ---
 
