@@ -668,7 +668,7 @@ FT_Face load_font_from_data_uri(UiContext* uicon, const char* data_uri, FontProp
     // Load font from memory using FT_New_Memory_Face
     // IMPORTANT: FreeType does NOT copy the buffer, so font_data must stay alive
     FT_Face face = NULL;
-    FT_Error error = FT_New_Memory_Face(uicon->ft_library, font_data, (FT_Long)font_data_size, 0, &face);
+    FT_Error error = FT_New_Memory_Face((FT_Library)uicon->ft_library, font_data, (FT_Long)font_data_size, 0, &face);
 
     if (error) {
         clog_error(font_log, "FT_New_Memory_Face failed: error=%d (data size=%zu)", error, font_data_size);
@@ -714,7 +714,7 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
     log_font_loading_attempt("local font", font_path);
 
     FT_Face face = NULL;
-    FT_Error error = FT_New_Face(uicon->ft_library, font_path, 0, &face);
+    FT_Error error = FT_New_Face((FT_Library)uicon->ft_library, font_path, 0, &face);
 
     if (error) {
         char error_msg[256];
@@ -964,7 +964,7 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
             arraylist_free(family_matches);
             // load_styled_font already caches its results, so we skip caching here
             strbuf_free(cache_key);
-            return load_styled_font(uicon, family_name, style);
+            return (FT_Face)load_styled_font(uicon, family_name, style);
         } else {
             // Font doesn't exist in database - skip expensive platform lookup
             clog_info(font_log, "Font family '%s' not in database, skipping platform lookup", family_name);

@@ -1,5 +1,9 @@
 #include "view.hpp"
 #include <locale.h>
+
+// FreeType for library initialization/cleanup
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
 
 #include "../lib/log.h"
@@ -59,16 +63,18 @@ int ui_context_init(UiContext* uicon, bool headless) {
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
     // init FreeType with sub-pixel rendering configuration
-    if (FT_Init_FreeType(&uicon->ft_library)) {
+    FT_Library ft_lib;
+    if (FT_Init_FreeType(&ft_lib)) {
         fprintf(stderr, "Could not initialize FreeType library\n");
         return EXIT_FAILURE;
     }
+    uicon->ft_library = ft_lib;
 
     // Configure sub-pixel rendering for better text quality
-    configure_freetype_subpixel(uicon->ft_library);
+    configure_freetype_subpixel(ft_lib);
 
     // Configure FreeType for better sub-pixel rendering
-    FT_Error lcd_error = FT_Library_SetLcdFilter(uicon->ft_library, FT_LCD_FILTER_DEFAULT);
+    FT_Error lcd_error = FT_Library_SetLcdFilter(ft_lib, FT_LCD_FILTER_DEFAULT);
     if (lcd_error) {
         log_debug("Could not set LCD filter (FreeType version may not support it)");
     } else {
@@ -209,7 +215,7 @@ void ui_context_cleanup(UiContext* uicon) {
         font_context_destroy(uicon->font_ctx);
         uicon->font_ctx = NULL;
     }
-    FT_Done_FreeType(uicon->ft_library);
+    FT_Done_FreeType((FT_Library)uicon->ft_library);
     font_database_destroy(uicon->font_db);
 
     log_debug("cleaning up media resources");

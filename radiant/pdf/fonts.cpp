@@ -1226,9 +1226,6 @@ FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double f
             font->font_style = CSS_VALUE_NORMAL;
         }
 
-        // Store FreeType face reference for direct rendering
-        font->ft_face = entry->ft_face;
-
         log_debug("Using embedded font: %s, size: %.2f", font->family, font->font_size);
     } else {
         // Fall back to system font mapping

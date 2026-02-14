@@ -121,6 +121,7 @@ typedef struct FontMetrics {
     float underline_thickness;  // underline stroke thickness
 
     bool has_kerning;           // font contains kerning data
+    bool use_typo_metrics;      // OS/2 fsSelection bit 7 (USE_TYPO_METRICS) is set
 } FontMetrics;
 
 // get metrics for a resolved font handle (cached, zero-cost after first call)
@@ -148,6 +149,10 @@ uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint);
 
 // get kerning between two codepoints (returns 0 if no kerning)
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right);
+
+// get kerning between two glyph indices (returns 0 if no kerning).
+// use this when you already have glyph indices from font_get_glyph_index().
+float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_t right_index);
 
 // ============================================================================
 // Glyph Rasterization — bitmap rendering for display

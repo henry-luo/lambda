@@ -3,6 +3,10 @@
 #include "form_control.hpp"
 #include "../lib/font/font.h"
 
+// FreeType for glyph slot access from load_glyph
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
@@ -1368,7 +1372,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
                 codepoint = *p;
             }
             // Use load_glyph to match layout calculation
-            FT_GlyphSlot glyph = load_glyph(evcon->ui_context, evcon->font.font_handle, evcon->font.style, codepoint, false);
+            FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(evcon->ui_context, evcon->font.font_handle, evcon->font.style, codepoint, false);
             if (!glyph) {
                 log_error("Could not load codepoint U+%04X", codepoint);
                 p += bytes;
@@ -1451,19 +1455,19 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
                 bytes = 1;
                 codepoint = *p;
             }
-            FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char((FT_Face)font_handle_get_ft_face(evcon->font.font_handle), codepoint, load_flags)) {
+            GlyphInfo ginfo = font_get_glyph(evcon->font.font_handle, codepoint);
+            if (ginfo.id == 0) {
                 p += bytes;
                 byte_offset += bytes;
                 continue;
             }
-            wd = ((FT_Face)font_handle_get_ft_face(evcon->font.font_handle))->glyph->advance.x / 64.0f / pixel_ratio;
+            wd = ginfo.advance_x;
 
             // Debug: log per-character advance for first 15 chars
             if (byte_offset - rect->start_index < 30) {
-                log_debug("[CALC-POS] byte_offset=%d codepoint=U+%04X x=%.1f wd=%.1f (raw advance=%.1f)",
+                log_debug("[CALC-POS] byte_offset=%d codepoint=U+%04X x=%.1f wd=%.1f",
                     byte_offset, codepoint,
-                    x, wd, ((FT_Face)font_handle_get_ft_face(evcon->font.font_handle))->glyph->advance.x / 64.0f);
+                    x, wd);
             }
         }
         x += wd;

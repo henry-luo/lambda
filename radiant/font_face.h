@@ -2,7 +2,10 @@
 
 #include "view.hpp"
 #include "../lib/log.h"
-// FT_Face provided by view.hpp (via FT_FREETYPE_H)
+
+// FreeType types needed for font face loading API
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 #ifdef __cplusplus
 extern "C" {
