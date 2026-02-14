@@ -2,6 +2,7 @@
 #include "grid.hpp"
 #include "form_control.hpp"
 #include "font_face.h"  // for FontFaceDescriptor
+#include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/font_config.h"
@@ -1064,7 +1065,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             if (lycon->font.current_font_size < 0) {
                 resolve_font_size(lycon, NULL);
             }
-            float x_height_ratio = get_font_x_height_ratio(lycon->font.ft_face);
+            float x_height_ratio = font_get_x_height_ratio(lycon->font.font_handle);
             result = num * lycon->font.current_font_size * x_height_ratio;
             break;
         }

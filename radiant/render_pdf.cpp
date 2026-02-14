@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
+#include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
 #include "../lib/url.h"
@@ -221,15 +222,16 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         content_len--;
     }
 
-    if (ctx->font.ft_face) {
+    if (ctx->font.font_handle) {
+        FT_Face _pdf_face = (FT_Face)font_handle_get_ft_face(ctx->font.font_handle);
         for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
             if (text_content[i] == ' ') {
                 natural_width += space_width;
                 space_count++;
             } else {
-                FT_UInt glyph_index = FT_Get_Char_Index(ctx->font.ft_face, text_content[i]);
-                if (FT_Load_Glyph(ctx->font.ft_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
-                    natural_width += ctx->font.ft_face->glyph->advance.x / 64.0f;
+                FT_UInt glyph_index = FT_Get_Char_Index(_pdf_face, text_content[i]);
+                if (FT_Load_Glyph(_pdf_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
+                    natural_width += _pdf_face->glyph->advance.x / 64.0f;
                 }
             }
         }
@@ -264,11 +266,12 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                     HPDF_Page_EndText(ctx->current_page);
 
                     // Calculate word width using FreeType
-                    if (ctx->font.ft_face) {
+                    if (ctx->font.font_handle) {
+                        FT_Face _pdf_face2 = (FT_Face)font_handle_get_ft_face(ctx->font.font_handle);
                         for (size_t j = 0; j < word_len; j++) {
-                            FT_UInt glyph_index = FT_Get_Char_Index(ctx->font.ft_face, word[j]);
-                            if (FT_Load_Glyph(ctx->font.ft_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
-                                x += ctx->font.ft_face->glyph->advance.x / 64.0f;
+                            FT_UInt glyph_index = FT_Get_Char_Index(_pdf_face2, word[j]);
+                            if (FT_Load_Glyph(_pdf_face2, glyph_index, FT_LOAD_DEFAULT) == 0) {
+                                x += _pdf_face2->glyph->advance.x / 64.0f;
                             }
                         }
                     }

@@ -66,6 +66,7 @@ FontFormat font_detect_format_ext(const char* path);
 struct FontHandle {
     FT_Face     ft_face;                // FreeType face object
     int         ref_count;              // reference counting
+    bool        borrowed_face;          // true if ft_face is NOT owned (don't FT_Done_Face on release)
 
     // cached metrics (computed lazily on first font_get_metrics call)
     FontMetrics metrics;
