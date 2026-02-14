@@ -250,5 +250,5 @@ NEVER use printf/fprintf/std::cout for debugging
   - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
   - `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
 - After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
-- For any temporal files, create them under `./temp` directory.
+- For any temporal files, create them under `./temp` directory, instead of `/tmp` dir.
 - **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.

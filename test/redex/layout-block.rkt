@@ -47,7 +47,12 @@
        (layout-block-children children child-avail bm dispatch-fn))
 
      ;; final content height: explicit or determined by children
-     (define final-content-h (or explicit-h content-height))
+     ;; apply min-height / max-height even for auto (content-determined) height
+     (define final-content-h
+       (let ([raw-h (or explicit-h content-height)])
+         (define min-h (resolve-min-height styles avail-h))
+         (define max-h (resolve-max-height styles avail-h))
+         (max min-h (min max-h raw-h))))
 
      ;; compute border-box dimensions
      (define border-box-w (compute-border-box-width bm content-w))
@@ -123,7 +128,8 @@
           (define positioned-view (set-view-position child-view child-x child-y))
 
           ;; apply relative positioning offset after block positioning
-          (define final-view (apply-relative-offset positioned-view child-styles))
+          ;; pass containing block dimensions for percentage resolution
+          (define final-view (apply-relative-offset positioned-view child-styles avail-w avail-h))
 
           ;; advance y by child's border-box height
           (define child-h (view-height child-view))

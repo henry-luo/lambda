@@ -87,14 +87,17 @@
   (if (or (not style-str) (string=? style-str ""))
       '()
       (let ([decls (string-split style-str ";")])
-        (filter-map
-         (lambda (decl)
-           (let ([parts (string-split (string-trim decl) ":")])
-             (if (>= (length parts) 2)
-                 (cons (string->symbol (string-trim (car parts)))
-                       (string-trim (string-join (cdr parts) ":")))
-                 #f)))
-         decls))))
+        ;; reverse so that last declaration wins (CSS cascade: later overrides earlier)
+        ;; since get-style-prop uses assoc which finds the first match
+        (reverse
+         (filter-map
+          (lambda (decl)
+            (let ([parts (string-split (string-trim decl) ":")])
+              (if (>= (length parts) 2)
+                  (cons (string->symbol (string-trim (car parts)))
+                        (string-trim (string-join (cdr parts) ":")))
+                  #f)))
+          decls)))))
 
 ;; extract the element tree from an HTML file body.
 ;; returns a nested structure: (element tag attrs children)
@@ -333,7 +336,10 @@
   (let ([v (cdr-or-false 'flex-direction inline-alist)])
     (when v (add! 'flex-direction (string->symbol v))))
   (let ([v (cdr-or-false 'flex-wrap inline-alist)])
-    (when v (add! 'flex-wrap (string->symbol v))))
+    (when v
+      ;; normalize invalid "no-wrap" to "nowrap" (Chrome ignores invalid values)
+      (define normalized (if (string=? v "no-wrap") "nowrap" v))
+      (add! 'flex-wrap (string->symbol normalized))))
   (let ([v (cdr-or-false 'justify-content inline-alist)])
     (when v (add! 'justify-content (map-justify-content v))))
   (let ([v (cdr-or-false 'align-items inline-alist)])
@@ -383,6 +389,12 @@
   ;; overflow
   (let ([v (cdr-or-false 'overflow inline-alist)])
     (when v (add! 'overflow (string->symbol v))))
+
+  ;; aspect-ratio
+  (let ([v (cdr-or-false 'aspect-ratio inline-alist)])
+    (when v
+      (define n (string->number (string-trim v)))
+      (when n (add! 'aspect-ratio n))))
 
   ;; position offsets
   (for ([prop '(top right bottom left)])
@@ -444,17 +456,24 @@
 
 ;; parse edge shorthand from inline alist.
 ;; handles margin/padding with individual sides or shorthand.
+;; also handles logical properties (inline-start/end, block-start/end) assuming LTR.
 (define (parse-edge-shorthand alist prop-name)
   (define top-key (string->symbol (format "~a-top" prop-name)))
   (define right-key (string->symbol (format "~a-right" prop-name)))
   (define bottom-key (string->symbol (format "~a-bottom" prop-name)))
   (define left-key (string->symbol (format "~a-left" prop-name)))
 
-  ;; check individual sides first
-  (define t (cdr-or-false top-key alist))
-  (define r (cdr-or-false right-key alist))
-  (define b (cdr-or-false bottom-key alist))
-  (define l (cdr-or-false left-key alist))
+  ;; logical property keys (CSS Logical Properties)
+  (define inline-start-key (string->symbol (format "~a-inline-start" prop-name)))
+  (define inline-end-key (string->symbol (format "~a-inline-end" prop-name)))
+  (define block-start-key (string->symbol (format "~a-block-start" prop-name)))
+  (define block-end-key (string->symbol (format "~a-block-end" prop-name)))
+
+  ;; check individual sides first, then logical properties (LTR: inline-start=left, block-start=top)
+  (define t (or (cdr-or-false top-key alist) (cdr-or-false block-start-key alist)))
+  (define r (or (cdr-or-false right-key alist) (cdr-or-false inline-end-key alist)))
+  (define b (or (cdr-or-false bottom-key alist) (cdr-or-false block-end-key alist)))
+  (define l (or (cdr-or-false left-key alist) (cdr-or-false inline-start-key alist)))
 
   ;; also check shorthand
   (define shorthand (cdr-or-false prop-name alist))
@@ -543,14 +562,43 @@
      (add! 'flex-basis 'auto)]
     [else
      (define parts (string-split trimmed))
-     (when (>= (length parts) 1)
-       (let ([g (string->number (car parts))])
-         (when g (add! 'flex-grow g))))
-     (when (>= (length parts) 2)
-       (let ([s (string->number (cadr parts))])
-         (when s (add! 'flex-shrink s))))
-     (when (>= (length parts) 3)
-       (add! 'flex-basis (parse-css-length (caddr parts))))]))
+     (cond
+       [(= (length parts) 1)
+        ;; flex: <number> → <number> 1 0%  (CSS spec: single unitless number = grow shrink basis)
+        (let ([g (string->number (car parts))])
+          (cond
+            [g (add! 'flex-grow g)
+               (add! 'flex-shrink 1)
+               (add! 'flex-basis `(px 0))]
+            [else
+             ;; single non-numeric value → treat as flex-basis
+             (add! 'flex-grow 1)
+             (add! 'flex-shrink 1)
+             (add! 'flex-basis (parse-css-length (car parts)))]))]
+       [(= (length parts) 2)
+        (let ([g (string->number (car parts))]
+              [s (string->number (cadr parts))])
+          (cond
+            [(and g s)
+             ;; flex: <grow> <shrink> → grow shrink 0%
+             (add! 'flex-grow g)
+             (add! 'flex-shrink s)
+             (add! 'flex-basis `(px 0))]
+            [g
+             ;; flex: <grow> <basis>
+             (add! 'flex-grow g)
+             (add! 'flex-shrink 1)
+             (add! 'flex-basis (parse-css-length (cadr parts)))]
+            [else
+             (add! 'flex-grow 1)
+             (add! 'flex-shrink 1)
+             (add! 'flex-basis (parse-css-length (car parts)))]))]
+       [(>= (length parts) 3)
+        (let ([g (string->number (car parts))])
+          (when g (add! 'flex-grow g)))
+        (let ([s (string->number (cadr parts))])
+          (when s (add! 'flex-shrink s)))
+        (add! 'flex-basis (parse-css-length (caddr parts)))])]))
 
 ;; ============================================================
 ;; CSS Keyword Mapping
