@@ -296,6 +296,23 @@ struct FontDatabase* font_context_get_database(FontContext* ctx) {
 }
 
 // ============================================================================
+// Font Handle Accessors
+// ============================================================================
+
+const char* font_handle_get_family_name(FontHandle* handle) {
+    if (!handle || !handle->ft_face) return NULL;
+    return handle->ft_face->family_name;
+}
+
+float font_handle_get_size_px(FontHandle* handle) {
+    return handle ? handle->size_px : 0;
+}
+
+float font_handle_get_physical_size_px(FontHandle* handle) {
+    return handle ? handle->physical_size_px : 0;
+}
+
+// ============================================================================
 // FontHandle reference counting
 // ============================================================================
 
@@ -310,8 +327,8 @@ void font_handle_release(FontHandle* handle) {
     if (!handle) return;
     handle->ref_count--;
     if (handle->ref_count <= 0) {
-        // destroy the FreeType face
-        if (handle->ft_face) {
+        // destroy the FreeType face (only if we own it)
+        if (handle->ft_face && !handle->borrowed_face) {
             FT_Done_Face(handle->ft_face);
             handle->ft_face = NULL;
         }
@@ -387,4 +404,64 @@ bool font_cache_save(FontContext* ctx) {
     char cache_path[1024];
     snprintf(cache_path, sizeof(cache_path), "%s/font_cache.bin", ctx->config.cache_dir);
     return font_database_save_cache_internal(ctx->database, cache_path);
+}
+
+// ============================================================================
+// Font accessor helpers (migration support)
+// ============================================================================
+
+float font_get_x_height_ratio(FontHandle* handle) {
+    if (!handle || !handle->ft_face) return 0.5f; // CSS default
+    FT_Face face = handle->ft_face;
+
+    // try OS/2 sxHeight (most accurate, matches old get_font_x_height_ratio)
+    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+    if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
+        return (float)os2->sxHeight / face->units_per_EM;
+    }
+
+    // fallback: measure 'x' glyph in design units
+    FT_UInt x_index = FT_Get_Char_Index(face, 'x');
+    if (x_index > 0) {
+        FT_Error err = FT_Load_Glyph(face, x_index, FT_LOAD_NO_SCALE);
+        if (!err && face->units_per_EM > 0) {
+            return (float)face->glyph->metrics.height / face->units_per_EM;
+        }
+    }
+
+    return 0.5f; // fallback
+}
+
+// ============================================================================
+// Font handle wrapping — borrow an existing FT_Face
+// ============================================================================
+
+FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
+    if (!ctx || !ft_face_ptr) return NULL;
+
+    FT_Face face = (FT_Face)ft_face_ptr;
+    float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
+
+    FontHandle* handle = (FontHandle*)pool_calloc(ctx->pool, sizeof(FontHandle));
+    if (!handle) return NULL;
+
+    handle->ft_face          = face;
+    handle->ref_count        = 1;
+    handle->borrowed_face    = true; // do NOT call FT_Done_Face on release
+    handle->metrics_ready    = false;
+    handle->ctx              = ctx;
+    handle->size_px          = size_px;
+    handle->physical_size_px = size_px * pixel_ratio;
+
+    // copy family name into arena
+    if (face->family_name) {
+        size_t len = strlen(face->family_name);
+        handle->family_name = (char*)arena_alloc(ctx->arena, len + 1);
+        if (handle->family_name) {
+            memcpy(handle->family_name, face->family_name, len + 1);
+        }
+    }
+
+    log_debug("font_handle_wrap: borrowed %s @%.0fpx", face->family_name, size_px);
+    return handle;
 }

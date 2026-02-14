@@ -4,6 +4,7 @@
 #include "layout_positioned.hpp"
 #include "layout_cache.hpp"
 #include "font_face.h"
+#include "../lib/font/font.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -364,163 +365,42 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
 // Constant for fsSelection bit 7 (USE_TYPO_METRICS)
 constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
 
-// Read OS/2 table metrics using FreeType
+// Read OS/2 table metrics using FontHandle
 // Reference: Chrome Blink simple_font_data.cc TypoAscenderAndDescender()
-// Chrome checks fsSelection bit 7 (USE_TYPO_METRICS) to decide which metrics to use
-// pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio to get CSS pixels
-TypoMetrics get_os2_typo_metrics(FT_Face face, float pixel_ratio) {
+TypoMetrics get_os2_typo_metrics(FontHandle* handle) {
     TypoMetrics result = {0, 0, 0, false, false};
 
-    if (!face) {
-        log_error("get_os2_typo_metrics called with NULL face");
+    if (!handle) {
+        log_error("get_os2_typo_metrics called with NULL handle");
         return result;
     }
 
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (!os2) {
-        log_debug("No OS/2 table available for font: %s", face->family_name);
-        return result;  // No OS/2 table available
+    const FontMetrics* m = font_get_metrics(handle);
+    if (!m) return result;
+
+    // check if OS/2 typo metrics differ from hhea (indicating a real OS/2 table)
+    if (m->typo_ascender == 0 && m->typo_descender == 0) {
+        return result;  // no OS/2 table or no meaningful typo metrics
     }
 
-    // Convert from font units to CSS pixels
-    // scale = ppem / units_per_EM, then divide by pixel_ratio for CSS pixels
-    // CRITICAL: Some WOFF fonts have y_ppem=0, derive scale from height if needed
-    float scale;
-    if (face->size && face->size->metrics.y_ppem != 0) {
-        scale = (float)face->size->metrics.y_ppem / face->units_per_EM / pixel_ratio;
-    } else {
-        // Fallback: derive ppem from height (height ≈ ppem * 1.2 * 64 in 26.6 format)
-        float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
-        float approx_ppem = height_px / 1.2f;
-        scale = approx_ppem / face->units_per_EM / pixel_ratio;
-        log_debug("y_ppem=0 for %s, derived scale from height: %.6f", face->family_name, scale);
-    }
-
-    // Check fsSelection bit 7 (USE_TYPO_METRICS)
-    result.use_typo_metrics = (os2->fsSelection & OS2_FS_SELECTION_USE_TYPO_METRICS) != 0;
-
-    result.ascender = os2->sTypoAscender * scale;
-    result.descender = -os2->sTypoDescender * scale;  // Make positive (OS/2 descender is negative)
-    // CSS spec: line gap must be floored at zero
-    result.line_gap = (os2->sTypoLineGap > 0) ? (os2->sTypoLineGap * scale) : 0.0f;
+    result.ascender  = m->typo_ascender;
+    result.descender = m->typo_descender;  // already positive from FontMetrics
+    result.line_gap  = m->typo_line_gap;
     result.valid = true;
 
-    log_debug("OS/2 typo metrics for %s: asc=%.2f, desc=%.2f, gap=%.2f, USE_TYPO=%s (raw: %d, %d, %d, fsSelection=0x%04x)",
-              face->family_name, result.ascender, result.descender, result.line_gap,
-              result.use_typo_metrics ? "yes" : "no",
-              os2->sTypoAscender, os2->sTypoDescender, os2->sTypoLineGap, os2->fsSelection);
+    // check USE_TYPO_METRICS flag via the underlying FT_Face
+    FT_Face face = (FT_Face)font_handle_get_ft_face(handle);
+    if (face) {
+        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+        result.use_typo_metrics = os2 && (os2->fsSelection & OS2_FS_SELECTION_USE_TYPO_METRICS);
+    }
 
     return result;
 }
 
-// Platform-specific font metrics function (defined in font_lookup_platform.c)
-// Returns 1 if metrics were retrieved, 0 to fall back to FreeType
-extern "C" int get_font_metrics_platform(const char* font_family, float font_size,
-                                          float* out_ascent, float* out_descent, float* out_line_height);
-
-// Calculate normal line height following Chrome Blink implementation exactly
-// Reference: simple_font_data.cc PlatformInit(), font_metrics.cc AscentDescentWithHacks()
-//
-// Chrome's algorithm:
-// 1. Get ascent/descent from Skia (which uses CoreText on macOS, FreeType on Linux)
-//    - On Linux: Skia checks OS/2 USE_TYPO_METRICS flag and uses typo metrics when set
-//    - Otherwise uses HHEA metrics (ascender/descender from face->size->metrics)
-// 2. Round ascent and descent individually: SkScalarRoundToScalar()
-// 3. On macOS only: for Times, Helvetica, Courier - apply 15% adjustment to ascent
-//    ascent += floorf(((ascent + descent) * 0.15f) + 0.5f)
-// 4. LineSpacing = lroundf(ascent) + lroundf(descent) + lroundf(line_gap)
-// pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio to get CSS pixels
-// css_font_size: optional CSS font size, used when y_ppem=0 (WOFF fonts)
-float calc_normal_line_height(FT_Face face, float pixel_ratio, float css_font_size) {
-    const char* family = face->family_name;
-    // y_ppem is in physical pixels, divide by pixel_ratio to get CSS font size
-    // CRITICAL: Some WOFF fonts have y_ppem=0 despite correct metrics, use fallback
-    float font_size;
-    if (face->size && face->size->metrics.y_ppem != 0) {
-        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
-    } else {
-        // y_ppem is 0 (common with WOFF fonts) - use the provided CSS font size
-        font_size = css_font_size;
-        if (font_size <= 0) {
-            // Last resort: derive from height metric (height ≈ ppem * 1.2 for typical fonts)
-            float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
-            font_size = height_px / 1.2f / pixel_ratio;
-            log_warn("y_ppem=0 and no css_font_size provided for %s, derived font_size=%.1f from height", family, font_size);
-        }
-    }
-
-    // Try platform-specific implementation first (CoreText on macOS)
-    // Pass CSS font size, platform metrics return CSS pixel values
-    float ascent, descent, line_height;
-    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
-        log_debug("Normal line height (platform): %.2f for %s@%.1f", line_height, family, font_size);
-        return line_height;
-    }
-
-    // Fallback: use FreeType metrics following Chrome/Skia behavior
-    // Chrome/Skia on Linux checks OS/2 USE_TYPO_METRICS flag (bit 7 of fsSelection)
-    // Reference: SkScalerContext_FreeType::generateFontMetrics() in Chromium
-    TypoMetrics typo = get_os2_typo_metrics(face, pixel_ratio);
-    float leading;
-
-    if (typo.valid && typo.use_typo_metrics) {
-        // Font has OS/2 table with USE_TYPO_METRICS flag set - use typo metrics
-        // This matches Chrome's behavior via Skia on Linux
-        ascent = typo.ascender;
-        descent = typo.descender;
-        leading = typo.line_gap;
-        log_debug("Using OS/2 typo metrics (USE_TYPO_METRICS=1) for %s", family);
-
-        // Round each component individually (Chrome's SkScalarRoundToScalar)
-        float rounded_ascent = roundf(ascent);
-        float rounded_descent = roundf(descent);
-        float rounded_leading = roundf(leading);
-
-        // LineSpacing = ascent + descent + leading
-        line_height = rounded_ascent + rounded_descent + rounded_leading;
-    } else {
-        // Use HHEA metrics (FreeType default)
-        // IMPORTANT: Chrome/Skia computes from face->ascender and face->descender (font units),
-        // scales them to pixel size, and rounds each component individually.
-        // This is different from using face->size->metrics which are already scaled and rounded
-        // by FreeType, losing precision that affects the final rounding.
-        // Reference: Skia SkScalerContext_FreeType::generateFontMetrics() in Chromium
-        //            Blink SimpleFontData::AscentDescentWithHacks()
-
-        // Scale from font units to CSS pixels (font_size is already in CSS pixels)
-        float scale = font_size / (float)face->units_per_EM;
-        // face->ascender is positive, face->descender is negative
-        float raw_ascent = (float)face->ascender * scale;
-        float raw_descent = -(float)face->descender * scale;  // make positive
-
-        // Compute line gap (leading) from HHEA: height - ascender + descender
-        // Note: descender is negative, so height = ascender - descender + line_gap
-        int hhea_line_gap = face->height - face->ascender + face->descender;
-        float raw_leading = (float)hhea_line_gap * scale;
-
-        // Round each component individually (Chrome's SkScalarRoundToScalar)
-        float rounded_ascent = roundf(raw_ascent);
-        float rounded_descent = roundf(raw_descent);
-        float rounded_leading = roundf(raw_leading);
-
-        // LineSpacing = ascent + descent + leading (matches Chrome's Blink behavior)
-        line_height = rounded_ascent + rounded_descent + rounded_leading;
-        log_debug("Using HHEA metrics (USE_TYPO_METRICS=0) for %s: raw_ascent=%.4f->%.0f, raw_descent=%.4f->%.0f, raw_leading=%.4f->%.0f, line_height=%.0f",
-                  family, raw_ascent, rounded_ascent, raw_descent, rounded_descent, raw_leading, rounded_leading, line_height);
-    }
-
-    log_debug("Normal line height: %.0f for %s", line_height, family);
-    return line_height;
-}
-
-// Wrapper for backwards compatibility - uses 0 as css_font_size (will derive from height if needed)
-float calc_normal_line_height(FT_Face face, float pixel_ratio) {
-    return calc_normal_line_height(face, pixel_ratio, 0);
-}
-
-// Single-argument version for backwards compatibility (assumes pixel_ratio=1)
-float calc_normal_line_height(FT_Face face) {
-    return calc_normal_line_height(face, 1.0f, 0);
+// Calculate normal line height following Chrome Blink — delegates to font module
+float calc_normal_line_height(FontHandle* handle) {
+    return font_calc_normal_line_height(handle);
 }
 
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
@@ -563,16 +443,14 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
     }
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
         // 'normal' line height
-        float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-        lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+        lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
         log_debug("normal lineHeight: %f", lycon->block.line_height);
     } else {
         // Resolve var() if present
         const CssValue* resolved_value = resolve_var_function(lycon, &value);
         if (!resolved_value) {
             // var() couldn't be resolved, use normal
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+            lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
             log_debug("line-height var() unresolved, using normal: %f", lycon->block.line_height);
             return;
         }
@@ -587,8 +465,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         // If negative or zero/NaN, fall back to 'normal' (use default line height)
         if (resolved_height <= 0 || std::isnan(resolved_height)) {
             log_debug("invalid line-height: %f, falling back to normal", resolved_height);
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face, pixel_ratio);
+            lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
         } else {
             lycon->block.line_height = resolved_height;
             log_debug("resolved line height: %f", lycon->block.line_height);
@@ -1069,7 +946,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     marker_span->width = marker_prop->width;
-                    marker_span->height = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.height / 64.0f / pixel_ratio) : 16.0f;
+                    marker_span->height = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_line_height : 16.0f;
 
                     // Set marker position
                     marker_span->x = lycon->line.advance_x;
@@ -1079,8 +956,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     lycon->line.advance_x += marker_prop->width;
 
                     // Update line metrics (marker contributes to line height)
-                    float ascender = lycon->font.ft_face ? (lycon->font.ft_face->size->metrics.ascender / 64.0f / pixel_ratio) : 12.0f;
-                    float descender = lycon->font.ft_face ? (-lycon->font.ft_face->size->metrics.descender / 64.0f / pixel_ratio) : 4.0f;
+                    float ascender = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_ascender : 12.0f;
+                    float descender = lycon->font.font_handle ? -(font_get_metrics(lycon->font.font_handle)->hhea_descender) : 4.0f;
                     if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
                     if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
 
@@ -1318,16 +1195,16 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
     // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    // Pass pixel_ratio to get CSS pixel values
-    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face, pixel_ratio);
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
     if (typo.valid && typo.use_typo_metrics) {
         lycon->block.init_ascender = typo.ascender;
         lycon->block.init_descender = typo.descender;
-    } else if (lycon->font.ft_face) {
-        // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
-        lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0 / pixel_ratio;
-        lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0 / pixel_ratio;
+    } else if (lycon->font.font_handle) {
+        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+        if (m) {
+            lycon->block.init_ascender = m->hhea_ascender;
+            lycon->block.init_descender = -(m->hhea_descender);
+        }
     } else {
         // Fallback when no font face is available - use reasonable defaults
         log_error("No font face available for layout, using fallback metrics");
@@ -1560,7 +1437,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_debug("layout_html_root complete");
 
     log_debug("end layout");
-    
+
     log_debug("calling layout_cleanup...");
     layout_cleanup(&lycon);
     log_debug("layout_cleanup complete");

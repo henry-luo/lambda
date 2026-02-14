@@ -8,6 +8,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
+#include "../lib/font/font.h"
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <cmath>
@@ -33,7 +34,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     }
 
     // Check if we have a valid font face
-    if (!lycon->font.ft_face) {
+    if (!lycon->font.font_handle) {
         // Fallback: rough estimate without font metrics
         // Use ~8px per character for max, find longest word for min
         float total_width = 0.0f;
@@ -63,7 +64,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     float longest_word = 0.0f;
 
     FT_UInt prev_glyph = 0;
-    bool has_kerning = FT_HAS_KERNING(lycon->font.ft_face);
+    bool has_kerning = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
     const unsigned char* str = (const unsigned char*)text;
     bool is_word_start = true;  // for text-transform: capitalize
 
@@ -107,12 +108,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             current_word = 0.0f;
 
             // Get space glyph for kerning continuity (matching layout_text.cpp)
-            FT_UInt space_glyph = FT_Get_Char_Index(lycon->font.ft_face, ch);
+            FT_UInt space_glyph = FT_Get_Char_Index((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), ch);
 
             // Apply kerning between prev character and space (matching layout_text.cpp)
             if (has_kerning && prev_glyph && space_glyph) {
                 FT_Vector kern;
-                FT_Get_Kerning(lycon->font.ft_face, prev_glyph, space_glyph,
+                FT_Get_Kerning((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), prev_glyph, space_glyph,
                               FT_KERNING_DEFAULT, &kern);
                 total_width += kern.x / 64.0f;
             }
@@ -158,11 +159,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         is_word_start = false;  // No longer at word start after first character
 
         // Get glyph index for the (possibly transformed) codepoint
-        FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, codepoint);
+        FT_UInt glyph_index = FT_Get_Char_Index((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), codepoint);
         if (!glyph_index) {
             // Glyph not found in primary font - try font fallback via load_glyph
             // This ensures intrinsic sizing uses the same fallback fonts as layout_text.cpp
-            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
+            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.font_handle, lycon->font.style, codepoint, false);
             if (glyph) {
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
@@ -190,7 +191,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         float kerning = 0.0f;
         if (has_kerning && prev_glyph) {
             FT_Vector kern;
-            FT_Get_Kerning(lycon->font.ft_face, prev_glyph, glyph_index,
+            FT_Get_Kerning((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), prev_glyph, glyph_index,
                           FT_KERNING_DEFAULT, &kern);
             kerning = kern.x / 64.0f / pixel_ratio;
         }
@@ -199,9 +200,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // IMPORTANT: Use FT_LOAD_NO_HINTING to match layout_text.cpp and font.cpp behavior
         // Different load flags give different advance widths, causing measurement/layout mismatch
         FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
-        if (FT_Load_Glyph(lycon->font.ft_face, glyph_index, load_flags) == 0) {
+        if (FT_Load_Glyph((FT_Face)font_handle_get_ft_face(lycon->font.font_handle), glyph_index, load_flags) == 0) {
             // Advance is in physical pixels, divide by pixel_ratio for CSS pixels
-            float advance = lycon->font.ft_face->glyph->advance.x / 64.0f / pixel_ratio + kerning;
+            float advance = ((FT_Face)font_handle_get_ft_face(lycon->font.font_handle))->glyph->advance.x / 64.0f / pixel_ratio + kerning;
 
             // Apply letter-spacing (CSS spec: applied between characters, not after last)
             // Check if there are more characters after this one

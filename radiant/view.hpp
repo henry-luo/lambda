@@ -1238,7 +1238,7 @@ typedef struct {
 } UiContext;
 
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
-extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering);
+extern FT_GlyphSlot load_glyph(UiContext* uicon, struct FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 extern Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface);

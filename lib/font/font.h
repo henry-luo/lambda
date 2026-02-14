@@ -110,13 +110,15 @@ typedef struct FontMetrics {
     // OpenType table metrics (for browser-compat line height)
     float typo_ascender, typo_descender, typo_line_gap;
     float win_ascent, win_descent;
-    float hhea_ascender, hhea_descender, hhea_line_gap;
+    float hhea_ascender, hhea_descender, hhea_line_gap, hhea_line_height;
 
     // useful typographic measures
     float x_height;             // height of lowercase 'x'
     float cap_height;           // height of uppercase letters
     float space_width;          // advance width of U+0020 SPACE
     float em_size;              // units per em (typically 1000 or 2048)
+    float underline_position;   // underline position below baseline (positive = down)
+    float underline_thickness;  // underline stroke thickness
 
     bool has_kerning;           // font contains kerning data
 } FontMetrics;
@@ -140,6 +142,9 @@ typedef struct GlyphInfo {
 
 // get glyph info for a codepoint (advance, bearings — cached)
 GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint);
+
+// get the glyph index for a codepoint (0 if not present)
+uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint);
 
 // get kerning between two codepoints (returns 0 if no kerning)
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right);
@@ -196,6 +201,39 @@ FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* st
 
 // check whether a handle supports a codepoint (without loading glyph)
 bool font_has_codepoint(FontHandle* handle, uint32_t codepoint);
+
+// ============================================================================
+// Font Handle Accessors — for callers migrating from FT_Face
+// ============================================================================
+
+// get the font family name (e.g., "Arial", "Times New Roman")
+const char* font_handle_get_family_name(FontHandle* handle);
+
+// get the requested CSS pixel size
+float font_handle_get_size_px(FontHandle* handle);
+
+// get the physical pixel size (CSS px * pixel_ratio)
+float font_handle_get_physical_size_px(FontHandle* handle);
+
+// get the x-height to em-size ratio (for CSS 'ex' unit resolution)
+float font_get_x_height_ratio(FontHandle* handle);
+
+// ============================================================================
+// Line Height Computation — Chrome-compatible algorithm
+// ============================================================================
+
+// Calculate normal CSS line-height following Chrome/Blink's algorithm:
+//   1. CoreText metrics on macOS (with 15% hack for Times/Helvetica/Courier)
+//   2. OS/2 USE_TYPO_METRICS path
+//   3. HHEA fallback with font-unit scaling and individual rounding
+// Returns the line-height in CSS pixels.
+float font_calc_normal_line_height(FontHandle* handle);
+
+// Get the font cell height for text rect height computation.
+// Matches browser's Range.getClientRects() which uses font metrics, not CSS line-height.
+// For Apple's classic fonts (Times/Helvetica/Courier), uses CoreText with 15% hack.
+// For all other fonts, returns FreeType metrics.height (ascent + descent).
+float font_get_cell_height(FontHandle* handle);
 
 // ============================================================================
 // Font Face Management — register, query, and load font face descriptors
@@ -309,6 +347,11 @@ void* font_context_get_ft_library(FontContext* ctx);
 // get the underlying FT_Face from a FontHandle (void* to avoid FT_Face in API).
 // only use this for code that still needs direct FreeType access during migration.
 void* font_handle_get_ft_face(FontHandle* handle);
+
+// wrap an externally-loaded FT_Face into a FontHandle (borrowed — does NOT own the face).
+// the returned handle provides FontMetrics, accessors, etc., but will NOT call FT_Done_Face
+// on release. caller is responsible for the FT_Face lifetime.
+FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face, float size_px);
 
 // get the font database from context (for backward compat during migration).
 // returns the internal FontDatabase pointer.
