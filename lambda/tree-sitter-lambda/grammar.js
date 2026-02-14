@@ -290,17 +290,6 @@ module.exports = grammar({
 
     // Containers: list, array, map, element
 
-    _content_literal: $ => choice(
-      // $._number, // not allowed, as 123 - 456 is expr
-      // $.symbol, // not allowed, as it is ambiguous with ident expr
-      $.string,
-      $._datetime,
-      $.binary,
-      $.true,
-      $.false,
-      $.base_type,  // null is part of base_type
-    ),
-
     // expr statements that need ';'
     _expr_stam: $ => choice(
       $.let_stam,
