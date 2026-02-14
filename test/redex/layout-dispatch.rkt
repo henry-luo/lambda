@@ -85,8 +85,11 @@
       [_ (error 'layout "unknown box type: ~a" box)])]))
 
   ;; apply relative positioning offset
+  ;; pass containing block dimensions for percentage resolution
   (if (eq? position 'relative)
-      (apply-relative-offset view styles)
+      (let ([cb-w (avail-width->number (cadr avail))]
+            [cb-h (avail-height->number (caddr avail))])
+        (apply-relative-offset view styles cb-w cb-h))
       view))
 
 ;; ============================================================
