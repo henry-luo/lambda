@@ -33,6 +33,7 @@
     ],
     "includes": [
         ".",
+        "build_temp/re2-noabsl",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
@@ -213,9 +214,9 @@
         {
             "name": "re2",
             "description": "RE2 regular expression library for string pattern matching",
-            "include": "/opt/homebrew/Cellar/re2/20250812_1/include",
-            "lib": "-lre2",
-            "link": "dynamic"
+            "include": "build_temp/re2-noabsl",
+            "lib": "build_temp/re2-noabsl/build/libre2.a",
+            "link": "static"
         }
     ],
     "dev_libraries": [
