@@ -16,6 +16,9 @@
 // Glyph advance cache (per-FontHandle hashmap)
 // ============================================================================
 
+// maximum entries per-handle advance cache before eviction
+#define ADVANCE_CACHE_MAX_ENTRIES 4096
+
 static uint64_t advance_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const GlyphAdvanceEntry* entry = (const GlyphAdvanceEntry*)item;
     return hashmap_xxhash3(&entry->codepoint, sizeof(uint32_t), seed0, seed1);
@@ -32,6 +35,38 @@ static struct hashmap* ensure_advance_cache(FontHandle* handle) {
                                              advance_hash, advance_compare, NULL, NULL);
     }
     return handle->advance_cache;
+}
+
+// ============================================================================
+// Bitmap cache hashmap callbacks
+// ============================================================================
+
+static uint64_t bitmap_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const BitmapCacheEntry* entry = (const BitmapCacheEntry*)item;
+    // hash on codepoint + mode + handle pointer for uniqueness
+    uint64_t data[2];
+    data[0] = ((uint64_t)entry->codepoint << 8) | (uint64_t)entry->mode;
+    data[1] = (uint64_t)(uintptr_t)entry->handle;
+    return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
+}
+
+static int bitmap_cache_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const BitmapCacheEntry* ea = (const BitmapCacheEntry*)a;
+    const BitmapCacheEntry* eb = (const BitmapCacheEntry*)b;
+    if (ea->handle != eb->handle) return ea->handle < eb->handle ? -1 : 1;
+    if (ea->codepoint != eb->codepoint) return ea->codepoint < eb->codepoint ? -1 : 1;
+    if (ea->mode != eb->mode) return ea->mode < eb->mode ? -1 : 1;
+    return 0;
+}
+
+static struct hashmap* ensure_bitmap_cache(FontContext* ctx) {
+    if (!ctx->bitmap_cache) {
+        int cap = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs / 4 : 1024;
+        ctx->bitmap_cache = hashmap_new(sizeof(BitmapCacheEntry), (size_t)cap, 0, 0,
+                                        bitmap_cache_hash, bitmap_cache_compare, NULL, NULL);
+    }
+    return ctx->bitmap_cache;
 }
 
 // ============================================================================
@@ -82,8 +117,13 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
     info.height    = (int)(slot->metrics.height / 64.0f);
     info.is_color  = (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
 
-    // cache the advance
+    // cache the advance (with size limit)
     if (cache) {
+        if (hashmap_count(cache) >= ADVANCE_CACHE_MAX_ENTRIES) {
+            // simple eviction: clear and start fresh when full
+            // advance caches are per-handle and rebuild quickly
+            hashmap_clear(cache, false);
+        }
         GlyphAdvanceEntry entry = {
             .codepoint = codepoint,
             .glyph_id  = char_index,
@@ -134,6 +174,19 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                                       GlyphRenderMode mode) {
     if (!handle || !handle->ft_face) return NULL;
 
+    FontContext* ctx = handle->ctx;
+    if (!ctx) return NULL;
+
+    // check bitmap cache first
+    struct hashmap* bmp_cache = ensure_bitmap_cache(ctx);
+    if (bmp_cache) {
+        BitmapCacheEntry search = {.codepoint = codepoint, .mode = mode, .handle = handle};
+        BitmapCacheEntry* cached = (BitmapCacheEntry*)hashmap_get(bmp_cache, &search);
+        if (cached && cached->bitmap.buffer) {
+            return &cached->bitmap;
+        }
+    }
+
     FT_Face face = handle->ft_face;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
     if (char_index == 0) return NULL;
@@ -165,9 +218,6 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     FT_GlyphSlot slot = face->glyph;
 
     // allocate GlyphBitmap from glyph arena (short-lived, reset per frame)
-    FontContext* ctx = handle->ctx;
-    if (!ctx) return NULL;
-
     GlyphBitmap* bmp = (GlyphBitmap*)arena_calloc(ctx->glyph_arena, sizeof(GlyphBitmap));
     if (!bmp) return NULL;
 
@@ -185,6 +235,23 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
         if (bmp->buffer) {
             memcpy(bmp->buffer, slot->bitmap.buffer, buf_size);
         }
+    }
+
+    // insert into bitmap cache (evict if full)
+    if (bmp_cache) {
+        int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
+        if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
+            // simple eviction: clear the cache (bitmap data lives in glyph_arena
+            // which is reset per frame anyway, so this is safe)
+            hashmap_clear(bmp_cache, false);
+        }
+        BitmapCacheEntry entry = {
+            .codepoint = codepoint,
+            .mode      = mode,
+            .handle    = handle,
+            .bitmap    = *bmp,
+        };
+        hashmap_set(bmp_cache, &entry);
     }
 
     return bmp;

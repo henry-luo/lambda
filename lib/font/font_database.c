@@ -1018,3 +1018,240 @@ const char* font_format_to_str(FontFormat format) {
         default:                  return "Unknown";
     }
 }
+
+// ============================================================================
+// Disk Cache — binary serialisation of scanned font metadata
+//
+// Format:
+//   [4 bytes] FONT_CACHE_MAGIC  (0x4C464E54 = 'LFNT')
+//   [4 bytes] FONT_CACHE_VERSION
+//   [4 bytes] entry count (N)
+//   for each entry:
+//     [2 bytes] family_name length (including NUL)
+//     [family_name]
+//     [2 bytes] subfamily_name length (0 if absent)
+//     [subfamily_name] (if len > 0)
+//     [2 bytes] postscript_name length (0 if absent)
+//     [postscript_name] (if len > 0)
+//     [2 bytes] file_path length
+//     [file_path]
+//     [4 bytes] weight (int)
+//     [1 byte]  slant  (FontSlant enum)
+//     [1 byte]  format (FontFormat enum)
+//     [1 byte]  is_monospace
+//     [1 byte]  is_collection
+//     [4 bytes] collection_index
+//     [8 bytes] file_mtime (time_t written as int64)
+//     [8 bytes] file_size
+// ============================================================================
+
+// helper: write a length-prefixed string (uint16 len + bytes, including NUL)
+static bool write_cache_string(FILE* f, const char* s) {
+    uint16_t len = 0;
+    if (s) len = (uint16_t)(strlen(s) + 1);
+    if (fwrite(&len, 2, 1, f) != 1) return false;
+    if (len > 0 && fwrite(s, 1, len, f) != len) return false;
+    return true;
+}
+
+// helper: read a length-prefixed string into arena
+static char* read_cache_string(FILE* f, Arena* arena) {
+    uint16_t len = 0;
+    if (fread(&len, 2, 1, f) != 1) return NULL;
+    if (len == 0) return NULL;
+    char* buf = (char*)arena_alloc(arena, len);
+    if (!buf) return NULL;
+    if (fread(buf, 1, len, f) != len) return NULL;
+    buf[len - 1] = '\0'; // ensure NUL
+    return buf;
+}
+
+bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
+    if (!db || !path) return false;
+    if (!db->scanned) return false; // nothing to save
+
+    FILE* f = fopen(path, "wb");
+    if (!f) {
+        log_error("font_database_save_cache: cannot open '%s' for writing", path);
+        return false;
+    }
+
+    // header
+    uint32_t magic   = FONT_CACHE_MAGIC;
+    uint32_t version = FONT_CACHE_VERSION;
+    uint32_t count   = db->all_fonts ? (uint32_t)db->all_fonts->length : 0;
+
+    if (fwrite(&magic,   4, 1, f) != 1 ||
+        fwrite(&version, 4, 1, f) != 1 ||
+        fwrite(&count,   4, 1, f) != 1) {
+        fclose(f);
+        return false;
+    }
+
+    // entries — only write fully parsed entries (skip placeholders)
+    uint32_t written = 0;
+    for (int i = 0; i < (int)count; i++) {
+        FontEntry* e = (FontEntry*)db->all_fonts->data[i];
+        if (!e || !e->file_path) continue;
+
+        if (!write_cache_string(f, e->family_name))    goto fail;
+        if (!write_cache_string(f, e->subfamily_name)) goto fail;
+        if (!write_cache_string(f, e->postscript_name)) goto fail;
+        if (!write_cache_string(f, e->file_path))      goto fail;
+
+        int32_t weight = (int32_t)e->weight;
+        uint8_t slant  = (uint8_t)e->style;
+        uint8_t format = (uint8_t)e->format;
+        uint8_t mono   = e->is_monospace ? 1 : 0;
+        uint8_t coll   = e->is_collection ? 1 : 0;
+        int32_t coll_idx = (int32_t)e->collection_index;
+        int64_t mtime  = (int64_t)e->file_mtime;
+        int64_t fsize  = (int64_t)e->file_size;
+
+        if (fwrite(&weight,   4, 1, f) != 1) goto fail;
+        if (fwrite(&slant,    1, 1, f) != 1) goto fail;
+        if (fwrite(&format,   1, 1, f) != 1) goto fail;
+        if (fwrite(&mono,     1, 1, f) != 1) goto fail;
+        if (fwrite(&coll,     1, 1, f) != 1) goto fail;
+        if (fwrite(&coll_idx, 4, 1, f) != 1) goto fail;
+        if (fwrite(&mtime,    8, 1, f) != 1) goto fail;
+        if (fwrite(&fsize,    8, 1, f) != 1) goto fail;
+        written++;
+    }
+
+    // rewrite the actual count (may differ from all_fonts->length if we skipped some)
+    fseek(f, 8, SEEK_SET);
+    fwrite(&written, 4, 1, f);
+
+    fclose(f);
+    db->cache_dirty = false;
+    log_info("font_database_save_cache: wrote %u entries to '%s'", written, path);
+    return true;
+
+fail:
+    fclose(f);
+    log_error("font_database_save_cache: write error");
+    return false;
+}
+
+bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
+    if (!db || !path) return false;
+
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+        log_debug("font_database_load_cache: cache file '%s' not found, will scan", path);
+        return false;
+    }
+
+    // read header
+    uint32_t magic, version, count;
+    if (fread(&magic,   4, 1, f) != 1 ||
+        fread(&version, 4, 1, f) != 1 ||
+        fread(&count,   4, 1, f) != 1) {
+        fclose(f);
+        return false;
+    }
+
+    if (magic != FONT_CACHE_MAGIC || version != FONT_CACHE_VERSION) {
+        log_info("font_database_load_cache: stale cache (magic=0x%X version=%u), will rescan",
+                 magic, version);
+        fclose(f);
+        return false;
+    }
+
+    if (count > 100000) {
+        log_error("font_database_load_cache: suspicious entry count %u, rejecting", count);
+        fclose(f);
+        return false;
+    }
+
+    Arena* arena = db->arena;
+    int loaded = 0;
+    int stale = 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        char* family    = read_cache_string(f, arena);
+        char* subfamily = read_cache_string(f, arena);
+        char* psname    = read_cache_string(f, arena);
+        char* file_path = read_cache_string(f, arena);
+
+        int32_t weight; uint8_t slant, format, mono, coll;
+        int32_t coll_idx; int64_t mtime, fsize;
+
+        if (fread(&weight,   4, 1, f) != 1 ||
+            fread(&slant,    1, 1, f) != 1 ||
+            fread(&format,   1, 1, f) != 1 ||
+            fread(&mono,     1, 1, f) != 1 ||
+            fread(&coll,     1, 1, f) != 1 ||
+            fread(&coll_idx, 4, 1, f) != 1 ||
+            fread(&mtime,    8, 1, f) != 1 ||
+            fread(&fsize,    8, 1, f) != 1) {
+            log_error("font_database_load_cache: truncated entry at index %u", i);
+            fclose(f);
+            // partial load — still usable, just re-organize what we have
+            break;
+        }
+
+        if (!file_path) continue;
+
+        // validate that the file still exists and mtime matches
+        struct stat st;
+        if (stat(file_path, &st) != 0) {
+            stale++;
+            continue; // file deleted, skip
+        }
+        if ((int64_t)st.st_mtime != mtime || (int64_t)st.st_size != fsize) {
+            stale++;
+            continue; // file modified, skip
+        }
+
+        // create FontEntry
+        FontEntry* entry = (FontEntry*)pool_calloc(db->pool, sizeof(FontEntry));
+        if (!entry) continue;
+
+        entry->family_name     = family;
+        entry->subfamily_name  = subfamily;
+        entry->postscript_name = psname;
+        entry->file_path       = file_path;
+        entry->weight          = weight;
+        entry->style           = (FontSlant)slant;
+        entry->format          = (FontFormat)format;
+        entry->is_monospace    = mono != 0;
+        entry->is_collection   = coll != 0;
+        entry->collection_index = coll_idx;
+        entry->file_mtime      = (time_t)mtime;
+        entry->file_size       = (size_t)fsize;
+        entry->is_placeholder  = (family == NULL); // no family = needs parsing
+
+        arraylist_append(db->all_fonts, entry);
+
+        // index by file path and postscript name
+        if (entry->file_path) {
+            hashmap_set(db->file_paths, entry);
+        }
+        if (entry->postscript_name) {
+            hashmap_set(db->postscript_names, entry);
+        }
+
+        loaded++;
+    }
+
+    fclose(f);
+
+    if (stale > 0) {
+        log_info("font_database_load_cache: %d stale entries skipped (files changed or deleted)", stale);
+        db->cache_dirty = true; // need to resave after next scan
+    }
+
+    if (loaded > 0) {
+        // organize into families
+        organize_fonts_into_families(db);
+        db->scanned = true;
+        db->last_scan = time(NULL);
+        log_info("font_database_load_cache: loaded %d entries from '%s'", loaded, path);
+        return true;
+    }
+
+    log_info("font_database_load_cache: no valid entries in cache, will rescan");
+    return false;
+}
