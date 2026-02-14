@@ -16,8 +16,8 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node);
 // Forward declarations for pattern building
 AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol);
 AstNode* build_pattern_char_class(Transpiler* tp, TSNode node);
-AstNode* build_type_seq(Transpiler* tp, TSNode node);
-AstNode* build_type_negation(Transpiler* tp, TSNode node);
+AstNode* build_concat_type(Transpiler* tp, TSNode node);
+AstNode* build_negation_type(Transpiler* tp, TSNode node);
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol);
 AstNode* build_identifier(Transpiler* tp, TSNode ident_node);
 
@@ -5139,7 +5139,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_PRIMARY_TYPE:
         return build_primary_type(tp, expr_node);
     case sym_unary_type: {
-        // unary_type is a wrapper - unwrap to the actual child (primary_type or type_negation)
+        // unary_type is a wrapper - unwrap to the actual child (primary_type or negation_type)
         TSNode child = ts_node_named_child(expr_node, 0);
         return build_expr(tp, child);
     }
@@ -5147,17 +5147,17 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_binary_type(tp, expr_node);
     case SYM_ERROR_UNION_TYPE:
         return build_error_union_type(tp, expr_node);
-    case SYM_TYPE_OCCURRENCE:
+    case sym_occurrence_type:
         return build_occurrence_type(tp, expr_node);
     case SYM_RANGE_TYPE:
         return build_range_type(tp, expr_node);
     case SYM_CONSTRAINED_TYPE:
         return build_constrained_type(tp, expr_node);
-    case SYM_TYPE_SEQ:
-        return build_type_seq(tp, expr_node);
+    case sym_concat_type:
+        return build_concat_type(tp, expr_node);
     // Note: SYM_PATTERN_GROUP removed - use list_type for grouping in patterns
-    case SYM_TYPE_NEGATION:
-        return build_type_negation(tp, expr_node);
+    case sym_negation_type:
+        return build_negation_type(tp, expr_node);
     case SYM_PATTERN_CHAR_CLASS:
         return build_pattern_char_class(tp, expr_node);
     case SYM_PATTERN_ANY: {
@@ -5320,24 +5320,24 @@ AstNode* build_pattern_char_class(Transpiler* tp, TSNode node) {
     return (AstNode*)ast_node;
 }
 
-// Build type_seq node — concatenation of type terms (for string/symbol patterns)
+// Build concat_type node — concatenation of type terms (for string/symbol patterns)
 // e.g. \d[3] "-" \d[3] "-" \d[4]
-// With recursive grammar: type_seq -> type_term type_term | type_seq type_term
-AstNode* build_type_seq(Transpiler* tp, TSNode node) {
-    log_debug("build type_seq (pattern concatenation)");
+// With recursive grammar: concat_type -> type_term type_term | concat_type type_term
+AstNode* build_concat_type(Transpiler* tp, TSNode node) {
+    log_debug("build concat_type (pattern concatenation)");
     AstPatternSeqNode* seq_node = (AstPatternSeqNode*)
         alloc_ast_node(tp, AST_NODE_PATTERN_SEQ, node, sizeof(AstPatternSeqNode));
     seq_node->type = alloc_type_kind(tp->pool, TYPE_KIND_PATTERN, sizeof(TypePattern));
 
     uint32_t child_count = ts_node_named_child_count(node);
-    log_debug("build_type_seq: %d children", child_count);
+    log_debug("build_concat_type: %d children", child_count);
 
     AstNode* prev = nullptr;
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         AstNode* child_node = build_expr(tp, child);
         if (child_node) {
-            // Flatten nested type_seq nodes (due to recursive grammar)
+            // Flatten nested concat_type nodes (due to recursive grammar)
             if (child_node->node_type == AST_NODE_PATTERN_SEQ) {
                 AstPatternSeqNode* nested = (AstPatternSeqNode*)child_node;
                 if (prev) {
@@ -5364,10 +5364,10 @@ AstNode* build_type_seq(Transpiler* tp, TSNode node) {
     return (AstNode*)seq_node;
 }
 
-// Build type_negation node — prefix ! operator (for string/symbol patterns)
+// Build negation_type node — prefix ! operator (for string/symbol patterns)
 // e.g. !\d
-AstNode* build_type_negation(Transpiler* tp, TSNode node) {
-    log_debug("build type_negation (pattern negation)");
+AstNode* build_negation_type(Transpiler* tp, TSNode node) {
+    log_debug("build negation_type (pattern negation)");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, node, sizeof(AstUnaryNode));
 
     TSNode operand_node = ts_node_child_by_field_id(node, FIELD_OPERAND);
