@@ -149,12 +149,10 @@ module.exports = grammar({
   conflicts: $ => [
     [$._expr, $.member_expr],
     [$._type_expr, $.constrained_type],
-    [$.unary_type, $.constrained_type],  // primary_type could be unary_type or start constrained_type
-    [$.concat_type, $.occurrence_type],  // unary_type could start concat_type or occurrence_type
-    [$.concat_type, $.occurrence_type, $._type_expr],  // unary_type in pattern context
-    [$.occurrence_type, $._type_expr],  // unary_type followed by occurrence (+,?,*,[n])
-    [$.occurrence_count, $.primary_type],  // [n, could be occurrence_count or array_type
-    [$.concat_type, $._type_expr],   // unary_type could start concat_type or be _type_expr directly
+    [$._type_expr, $.occurrence_type],  // unary_type followed by occurrence (+,?,*,[n])
+    [$._type_expr, $.concat_type],   // unary_type could start concat_type or be _type_expr
+    [$.concat_type, $.occurrence_type],  // unary_type in concat could start occurrence
+    [$.concat_type, $.occurrence_type, $._type_expr],  // three-way: unary_type ambiguity
   ],
 
   precedences: $ => [[
@@ -191,12 +189,12 @@ module.exports = grammar({
     $.assign_stam,
   ],
   [
-    $.fn_type,
     $.unary_type,            // atomic types (primary_type | negation_type) - tightest
     $.occurrence_type,       // quantifiers: T+, T*, T?, T[n]
-    $.constrained_type,      // T that (...) - postfix constraint clause; as it feels more like a binary type, thus it comes after occurrence_type, but before concat_type
+    $.constrained_type,      // T that (...) - postfix constraint clause
     'concat_type',           // concatenation binds tighter than alternation
-    $.binary_type,           // alternation (|, &, !) - lowest type precedence
+    $.binary_type,           // alternation (|, &, !) 
+    $.fn_type,               // fn binds loosest: fn int+ means fn (int+)
   ]],
 
   rules: {
@@ -810,11 +808,12 @@ module.exports = grammar({
     occurrence: $ => choice('?', '+', '*', $.occurrence_count),
 
     // Occurrence count: [n] (exact), [n, m] (range), [n+] (unbounded)
-    occurrence_count: $ => choice(
+    // Higher precedence than primary_type to prefer occurrence over array_type
+    occurrence_count: $ => prec(2, choice(
       seq('[', $.integer, ']'),                      // exactly n: T[5]
       seq('[', $.integer, ',', $.integer, ']'),      // n to m: T[2, 5]
       seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
-    ),
+    )),
 
     // Built-in types as reserved keywords
     base_type: _ => prec(1, choice(
