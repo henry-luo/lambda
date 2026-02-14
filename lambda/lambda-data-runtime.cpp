@@ -708,6 +708,14 @@ Item item_attr(Item data, const char* key) {
             return (Item){.item = s2it(name_str)};
         }
 
+        // path.parent - returns the parent path (one level up)
+        if (strcmp(key, "parent") == 0) {
+            if (path->parent && path->parent->parent) {
+                return {.path = path->parent};
+            }
+            return ItemNull;
+        }
+
         // Metadata-based properties - require loading metadata first
         if (strcmp(key, "is_dir") == 0 || strcmp(key, "is_file") == 0 || strcmp(key, "is_link") == 0 ||
             strcmp(key, "size") == 0 || strcmp(key, "modified") == 0) {

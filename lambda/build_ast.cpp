@@ -2068,6 +2068,31 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
+    else if (symbol == SYM_PARENT_EXPR) {
+        // parent access: expr.. for .parent, expr.._.. for .parent.parent
+        TSNode object_node = ts_node_child_by_field_id(child, FIELD_OBJECT);
+        AstParentNode* parent_node = (AstParentNode*)alloc_ast_node(tp, AST_NODE_PARENT_EXPR, child, sizeof(AstParentNode));
+        parent_node->object = build_expr(tp, object_node);
+
+        // count the depth: each path_parent (..) adds one level
+        int depth = 0;
+        uint32_t child_count = ts_node_child_count(child);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode c = ts_node_child(child, i);
+            if (ts_node_symbol(c) == SYM_PATH_PARENT) {
+                depth++;
+            }
+        }
+        parent_node->depth = depth > 0 ? depth : 1;  // at least 1 for single ..
+        log_debug("build parent_expr: depth=%d", parent_node->depth);
+
+        // type inherits from object
+        if (parent_node->object && parent_node->object->type) {
+            parent_node->type = parent_node->object->type;
+        }
+        ast_node->expr = (AstNode*)parent_node;
+        ast_node->type = parent_node->type;
+    }
     else if (symbol == SYM_CURRENT_ITEM) {
         ast_node->expr = build_current_item(tp, child);
         ast_node->type = ast_node->expr->type;
