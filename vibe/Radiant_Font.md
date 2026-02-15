@@ -1,184 +1,30 @@
 # Unified Font Module for Lambda/Radiant
 
-## Proposal — February 2026
-
-### Implementation Status
-
-| Phase       | Description                                                                                          | Status     | Date       |
-| ----------- | ---------------------------------------------------------------------------------------------------- | ---------- | ---------- |
-| **Phase 1** | Foundation — all 11 source files in `lib/font/`, build config, compilation                           | ✅ Complete | 2026-02-14 |
-| **Phase 2** | Radiant migration — wire `FontContext` into `UiContext`, rewrite `setup_font()` via `font_resolve()` | ✅ Complete | 2026-02-15 |
-| **Phase 3** | Caching & fallback — disk cache, bitmap cache, advance eviction, @font-face bridge                   | ✅ Complete | 2026-02-14 |
-| **Phase 4** | Cleanup — slim headers, remove ~335 lines of unused stubs from `font_face.cpp`                       | ✅ Complete | 2026-02-16 |
-| **Phase 5** | FT_Face migration — migrate ~50 direct FreeType API call sites across 15+ files to FontHandle API     | ✅ Complete | 2026-02-14 |
-| **Phase 6** | Radiant integration — decouple FreeType from `view.hpp`, migrate layout FT calls to font module APIs | ✅ Complete | 2026-02-15 |
-| **Phase 7** | Phaseout `lib/font_config.c` — migrate all callers to `lib/font/` APIs, exclude from build            | ✅ Complete | 2026-02-15 |
-
-**Build:** 0 errors · **Lambda baseline:** 224/224 ✅ · **Radiant baseline:** 1972/1972 ✅
-
-#### Phase 2 Changes
-
-**Approach:** Hybrid migration — both `FT_Face` and `FontHandle*` coexist in `FontProp`/`FontBox` for backward compatibility. `setup_font()` is the single migration point; all downstream callers continue reading `ft_face` unchanged.
-
-**Files modified:**
-- `radiant/view.hpp` — Forward declarations for `FontContext`/`FontHandle`; added `font_handle` field to `FontProp` and `FontBox`; added `font_ctx` to `UiContext`
-- `radiant/ui_context.cpp` — Create `FontContext` with actual `pixel_ratio` (after window creation); destroy in cleanup
-- `radiant/font.cpp` — Rewritten `setup_font()`: try @font-face first (old path), then `font_resolve()` for system fonts (new path), then legacy fallback chain; metrics populated from `font_get_metrics()`
-- `lib/font/font.h` — Renamed `FontStyle` → `FontStyleDesc` and `FontFaceSrc` → `FontFaceSource` to avoid name collisions with existing `lib/font_config.h` types
-- `lib/font/*.c` — Same rename applied across all implementation files
-
-#### Phase 3 Changes
-
-**Approach:** Gap-fill — most Phase 3 features (LRU face cache, advance cache, fallback chains, generic-family table, @font-face descriptor registry) were already implemented in Phase 1. Phase 3 filled the remaining gaps: disk persistence, bitmap caching, advance eviction, and bridging Radiant's `register_font_face()` to the unified module.
-
-**Files modified:**
-- `lib/font/font_database.c` — Implemented `font_database_save_cache_internal()` and `font_database_load_cache_internal()` with binary format (magic `0x4C464E54`, version 1, length-prefixed strings, file mtime/size validation for cache invalidation)
-- `lib/font/font_internal.h` — Added declarations for `font_database_save_cache_internal` and `font_database_load_cache_internal`
-- `lib/font/font_context.c` — Modified `font_context_scan()` to try disk cache first (via `font_database_load_cache_internal`), save after full scan; added `font_cache_save()` public API implementation
-- `lib/font/font_glyph.c` — Added `ADVANCE_CACHE_MAX_ENTRIES` (4096) with clear-on-full eviction; added `bitmap_cache_hash()`, `bitmap_cache_compare()`, `ensure_bitmap_cache()` for lazy bitmap cache init; wired bitmap cache into `font_render_glyph()` (lookup before FreeType render, insert after)
-- `radiant/font_face.cpp` — Added `#include "../lib/font/font.h"`; moved 7 removed types (`EnhancedFontMetrics`, `EnhancedFontBox`, `FontMatchCriteria`, `FontMatchResult`, `FontFallbackChain`, `CharacterMetrics`, `GlyphRenderInfo`) to internal scope; added bridge in `register_font_face()` that converts `CssEnum` weight/style → `FontWeight`/`FontSlant`, builds `FontFaceSource` array, and calls `font_face_register(uicon->font_ctx, &face_desc)`
-- `radiant/font_face.h` — Removed 7 unused types and ~30 unused function declarations; kept only externally-used API: `FontFaceSrc`, `FontFaceDescriptor`, `process_document_font_faces`, `load_font_with_descriptors`, `load_local_font_file`, `register_font_face`, char width cache functions
-
-**Name collision fix:** `font_database_save_cache` / `font_database_load_cache` conflicted with stubs in old `lib/font_config.c` — renamed to `_internal` suffix in `lib/font/`.
-
-#### Phase 5 Changes — FT_Face → FontHandle Migration
-
-**Approach:** Systematic migration of all direct `FT_Face` API usage across 15+ Radiant files to use the opaque `FontHandle` API from `lib/font/`. This phase addresses the Phase 4 deferred item: _"15+ downstream files depend on `FT_Face`/`FT_Library` types. Full type elimination requires migrating all call sites to use `FontHandle`."_
-
-**Scope:** ~50 direct FreeType API call sites, ~30 `size->metrics` accesses, ~10 `family_name` accesses.
-
-**New APIs added to `lib/font/font.h`:**
-- `font_handle_get_family_name()` — returns family name without exposing `FT_Face`
-- `font_handle_get_size_px()` / `font_handle_get_physical_size_px()` — CSS and physical size accessors
-- `font_calc_normal_line_height()` — Chrome-compatible normal line-height (CoreText → OS/2 USE_TYPO_METRICS → HHEA fallback with per-component rounding)
-- `font_get_cell_height()` — text rect height (CoreText with 15% hack for Apple classic fonts, FreeType `metrics.height` for others)
-- `font_get_glyph_index()` — replaces `FT_Get_Char_Index` without exposing FT types
-- `font_get_x_height_ratio()` — x-height / em-size ratio for CSS `ex` unit resolution
-- `font_handle_wrap()` — wraps an existing (borrowed) `FT_Face` into a `FontHandle` without ownership transfer
-- Added `hhea_line_height`, `underline_position`, `underline_thickness` fields to `FontMetrics`
-
-**Key signature changes:**
-- `load_glyph(UiContext*, FT_Face, ...)` → `load_glyph(UiContext*, FontHandle*, ...)`
-- `get_os2_typo_metrics(FT_Face, float)` → `get_os2_typo_metrics(FontHandle*)`
-- `calc_normal_line_height(FT_Face, float, float)` → `calc_normal_line_height(FontHandle*)`
-- `FT_UInt prev_glyph_index` → `uint32_t prev_glyph_index` in `layout.hpp`
-
-**Borrowed FontHandle for legacy path:** The `setup_font()` legacy path (when `font_resolve()` is not available) now wraps the legacy-loaded `FT_Face` into a borrowed `FontHandle` via `font_handle_wrap()`. A `borrowed_face` flag on `FontHandle` prevents `FT_Done_Face` on release, ensuring the legacy code retains ownership. This guarantees `font_handle` is **always** populated after `setup_font()`, enabling all downstream code to use FontHandle exclusively.
-
-**Files modified:**
-- `lib/font/font.h` — 8 new API declarations, `hhea_line_height` field in `FontMetrics`
-- `lib/font/font_internal.h` — `bool borrowed_face` flag in `FontHandle` struct
-- `lib/font/font_context.c` — `font_handle_wrap()`, `font_get_x_height_ratio()`, 3 accessor functions, updated `font_handle_release()` to skip `FT_Done_Face` when borrowed
-- `lib/font/font_metrics.c` — `font_calc_normal_line_height()` (Chrome algorithm), `font_get_cell_height()`, `hhea_line_height`/`underline_*` computation
-- `lib/font/font_glyph.c` — `font_get_glyph_index()` function
-- `radiant/view.hpp` — `load_glyph` extern now takes `FontHandle*`
-- `radiant/layout.hpp` — `FT_UInt` → `uint32_t`, updated function signatures
-- `radiant/font.cpp` — `load_glyph` extracts `FT_Face` internally; `setup_font` legacy path wraps via `font_handle_wrap()`; `FontProp` populated from `hhea_*` metrics
-- `radiant/layout.cpp` — `get_os2_typo_metrics(FontHandle*)` reads from `FontMetrics`; `calc_normal_line_height(FontHandle*)` delegates to `font_calc_normal_line_height()`; marker span height uses `hhea_line_height`; all `ft_face` null checks → `font_handle`
-- `radiant/layout_text.cpp` — `FT_Load_Char`/`FT_Get_Char_Index` → via `font_handle_get_ft_face()`/`font_get_glyph_index()`; text rect height uses `font_get_cell_height()`; font_height uses `hhea_line_height`
-- `radiant/layout_block.cpp` — metric accesses via `FontMetrics`, debug log uses `hhea_line_height`
-- `radiant/layout_flex_measurement.cpp` — all 7 `ft_face` null checks → `font_handle`
-- `radiant/render.cpp` — null check → `font_handle`, family_name via accessor
-- `radiant/render_form.cpp`, `render_pdf.cpp`, `render_svg.cpp` — `load_glyph` → `FontHandle*`, null checks → `font_handle`
-- `radiant/intrinsic_sizing.cpp` — `FT_HAS_KERNING` → `font_get_metrics()->has_kerning`
-- `radiant/event.cpp` — `load_glyph` → `FontHandle*`, debug logs → `font_handle_get_physical_size_px()`
-- `radiant/resolve_css_style.cpp` — `get_font_x_height_ratio(ft_face)` → `font_get_x_height_ratio(font_handle)`
-
-**Critical bugs found and fixed (36 test regressions → 0):**
-
-After completing the migration, 36 out of 1972 Radiant baseline tests failed. Root cause analysis revealed three distinct bugs:
-
-1. **`FontMetrics.line_height` vs HHEA height confusion** — The old code consistently used `face->size->metrics.height / 64.0 / pixel_ratio` for font height, which is always the HHEA-based height (ascender − descender + line_gap from the `hhea` table). The new code used `FontMetrics.line_height`, but that field is computed from `m->ascender − m->descender + m->line_gap`, where `ascender`/`descender` get **overwritten by OS/2 typo values** when the font's `fsSelection` has `USE_TYPO_METRICS` set (bit 7). This produced different heights for any font with that flag. **Fix:** Added a dedicated `hhea_line_height` field to `FontMetrics` (computed once from the HHEA values that never get overwritten) and used it in all places that need the HHEA-based height: `fprop->font_height`, marker span height, text rect `font_height`, and debug logs.
-
-2. **`fprop->ascender/descender` using typo values instead of HHEA** — Same root cause as above. `FontMetrics.ascender`/`.descender` can be overwritten by OS/2 typo values, but `FontProp.ascender`/`.descender` must always match the old `face->size->metrics.ascender / 64.0 / pixel_ratio` path (which is HHEA). **Fix:** Changed `font.cpp` to populate `fprop->ascender` from `m->hhea_ascender` and `fprop->descender` from `-(m->hhea_descender)` instead of the generic `m->ascender`/`m->descender`.
-
-3. **`font_get_x_height_ratio()` wrong formula** — The old `get_font_x_height_ratio()` returned `sxHeight / units_per_EM`, a dimensionless font-unit ratio used for CSS `ex` unit resolution. The new `font_get_x_height_ratio()` computed `m->x_height / (m->ascender − m->descender)`, which is completely different — `x_height` is in CSS pixels and `ascender − descender` is also in CSS pixels but ≠ em_size. For the Ahem test font, this produced a ratio of ~0.56 instead of the correct 0.8, causing `font-size: 7.5ex` to resolve to 90px instead of 96px. This single bug accounted for the majority of the 36 test failures (font-size, table-height, table-layout, text-indent, white-space tests). **Fix:** Rewrote `font_get_x_height_ratio()` to directly read `sxHeight / units_per_EM` from the underlying `FT_Face`, with a fallback to measuring the `'x'` glyph in design units — matching the old behavior exactly.
-
-**Remaining work (resolved in Phase 6):**
-- ✅ Removed `#include FT_FREETYPE_H` from `view.hpp` — `FT_Library` → `void*` in `UiContext`, `FT_Face` → `void*` in `FontBox`
-- ✅ Removed dead `FontProp.ft_face` field (write-only, never read)
-- ✅ Migrated layout-layer FT calls to font module APIs (`font_get_glyph`, `font_get_kerning_by_index`, `font_get_glyph_index`)
-- ⏸ `FontBox.ft_face` kept as `void*` — render files still access via `(FT_Face)` cast for physical-pixel glyph rendering
-- ⏸ `load_glyph()` / `load_styled_font()` return `void*` — callers cast to `FT_GlyphSlot` / `FT_Face` locally
-
-#### Phase 6 Changes — Radiant Integration (Section 7)
-
-**Approach:** Remove all FreeType type dependencies from `view.hpp` (the most-included Radiant header), replacing `FT_Face`/`FT_Library`/`FT_GlyphSlot` with `void*` in public struct fields and extern declarations. Migrate layout-layer FreeType API calls to opaque font module APIs. Files that still need direct FT access get their own local `#include <ft2build.h>` and cast `void*` back to FT types internally.
-
-**New APIs added to `lib/font/font.h`:**
-- `font_get_kerning_by_index(FontHandle*, uint32_t left_index, uint32_t right_index)` — kerning by glyph indices (returns CSS px). Use when glyph indices are already available from `font_get_glyph_index()`.
-- `FontMetrics.use_typo_metrics` — `bool` indicating OS/2 `fsSelection` bit 7 (`USE_TYPO_METRICS`) is set. Eliminates the need to call `FT_Get_Sfnt_Table` in layout code.
-
-**Type changes in `radiant/view.hpp`:**
-- Removed `#include <ft2build.h>` and `#include FT_FREETYPE_H`
-- Removed `FontProp.ft_face` (dead field — assigned in `pdf/fonts.cpp` but never read)
-- `FontBox.ft_face`: `FT_Face` → `void*`
-- `UiContext.ft_library`: `FT_Library` → `void*`
-- `load_styled_font()` extern return: `FT_Face` → `void*`
-- `load_glyph()` extern return: `FT_GlyphSlot` → `void*`
-
-**Layout files migrated (FreeType calls → font module APIs):**
-- `radiant/layout_text.cpp` — `FT_Load_Char` + `slot->advance.x` → `font_get_glyph().advance_x`; `FT_Get_Kerning` → `font_get_kerning_by_index()`
-- `radiant/intrinsic_sizing.cpp` — `FT_Get_Char_Index` → `font_get_glyph_index()` (3 sites); `FT_Get_Kerning` → `font_get_kerning_by_index()` (2 sites); `FT_Load_Glyph` + advance → `font_get_glyph()` (1 site)
-- `radiant/event.cpp` — `FT_Load_Char` + advance → `font_get_glyph()` (1 site)
-- `radiant/layout.cpp` — `FT_Get_Sfnt_Table` + `fsSelection` check → `FontMetrics.use_typo_metrics` (removes **all** FT includes from this file)
-
-**Files with local FT includes added (still need direct FT access for rendering):**
-- `radiant/font.cpp` — `load_styled_font()` / `load_glyph()` definitions, `FT_New_Face` calls
-- `radiant/font_face.h` — `FT_Face` type used in function declarations
-- `radiant/font_face.cpp` — `FT_New_Face` / `FT_New_Memory_Face` calls
-- `radiant/ui_context.cpp` — `FT_Init_FreeType` / `FT_Done_FreeType`
-- `radiant/render.cpp` — `FT_Face` member access for glyph rendering (10 sites), `FT_GlyphSlot` from `load_glyph` (2 sites)
-- `radiant/render_form.cpp` — `FT_GlyphSlot` from `load_glyph`, `FT_Face` metric access
-- `radiant/render_svg.cpp` — `FT_GlyphSlot` from `load_glyph`
-- `radiant/render_pdf.cpp` — FT types for PDF font embedding
-- `radiant/event.cpp` — `FT_GlyphSlot` from `load_glyph` (fallback path)
-- `radiant/intrinsic_sizing.cpp` — `FT_GlyphSlot` from `load_glyph` (fallback path)
-- `radiant/pdf/cmd_view_pdf.cpp` — extern declarations, `FT_Face` cast
-
-**Dead code removed:**
-- `FontProp.ft_face` assignment in `radiant/pdf/fonts.cpp` (only write site, no readers)
-- `OS2_FS_SELECTION_USE_TYPO_METRICS` constant in `radiant/layout.cpp` (replaced by `FontMetrics.use_typo_metrics`)
-
-**Files modified (19 files, +140/−111 lines):**
-- `lib/font/font.h`, `lib/font/font_glyph.c`, `lib/font/font_metrics.c`
-- `radiant/view.hpp`, `radiant/layout.cpp`, `radiant/layout_text.cpp`
-- `radiant/intrinsic_sizing.cpp`, `radiant/event.cpp`
-- `radiant/font.cpp`, `radiant/font_face.h`, `radiant/font_face.cpp`
-- `radiant/ui_context.cpp`, `radiant/render.cpp`, `radiant/render_form.cpp`
-- `radiant/render_svg.cpp`, `radiant/render_pdf.cpp`, `radiant/resolve_css_style.cpp`
-- `radiant/pdf/cmd_view_pdf.cpp`, `radiant/pdf/fonts.cpp`
-
-**Remaining work (deferred to future phases):**
-- Migrate render-layer `(FT_Face)rdcon->font.ft_face->` accesses to FontHandle-based rendering APIs (10 sites in `render.cpp`)
-- Migrate `load_glyph()` callers to a FontHandle-based glyph rendering API (eliminating `FT_GlyphSlot` casts)
-- Remove `FontBox.ft_face` field entirely once render layer is fully migrated
-- Remove local FT includes from non-core files once rendering uses opaque APIs
+> **Status:** All 7 phases complete — 0 build errors · Lambda 224/224 ✅ · Radiant 1972/1972 ✅
 
 ---
 
 ## 1. Motivation
 
-Lambda's font handling has grown organically across several files with **overlapping responsibilities, duplicated logic, and inconsistent abstractions**. The code works, but it has become fragile and hard to extend. This proposal designs a unified font sub-module that consolidates all font-related functionality behind a single, consistent API.
+Lambda's font handling grew organically across 7+ files in `lib/` and `radiant/` with overlapping responsibilities, duplicated logic, and inconsistent abstractions. The code works but is fragile and hard to extend.
 
-### Current Pain Points
+### Pain Points
 
 | Problem | Where |
 |---------|-------|
-| **Scattered ownership** — Font code lives in 7+ files across `lib/` and `radiant/` with no clear module boundary | `lib/font_config.c`, `radiant/font.cpp`, `radiant/font_face.cpp`, `radiant/font_lookup_platform.c`, `radiant/font.h`, `radiant/font_face.h`, `radiant/pdf/fonts.cpp` |
-| **Duplicate FT_Library instances** — Layout engine and PDF engine each create their own `FT_Library`, with no sharing of loaded faces | `radiant/ui_context.cpp` vs `radiant/pdf/fonts.cpp` |
-| **Duplicate fixed-size font logic** — The `FT_Select_Size` handling for color emoji is copy-pasted 4 times | `font.cpp` (multiple call sites), `font_face.cpp` |
-| **Duplicate generic family tables** — `generic_families[]` in `font.cpp` and `resolve_generic_family()` define the same serif/sans-serif/monospace mappings independently | `radiant/font.cpp` |
-| **WOFF1 gap** — Format preference lists WOFF but no decompressor exists; WOFF1 fonts silently fail | `radiant/font_face.cpp` |
-| **`std::string` in WOFF2 path** — libwoff2 API requires `std::string`, violating project conventions | `radiant/font_face.cpp` |
-| **Missing glyph advance cache** — Glyph `advance_x` is recalculated every call; the `// todo` has been open since initial implementation | `radiant/font.cpp` |
-| **Disk font cache not implemented** — `FontDatabase` has full cache structs but `load_cache()`/`save_cache()` are stubs | `lib/font_config.c` |
-| **`EnhancedFontBox` / `EnhancedFontMetrics` mostly unused** — Declared in `font_face.h` but the layout pipeline still uses the simpler `FontBox` | `radiant/font_face.h` vs `radiant/layout.hpp` |
-| **FreeType types leak everywhere** — `FT_Face`, `FT_GlyphSlot`, `FT_Library` appear in `view.hpp`, `layout.hpp`, `font.h`, making them hard to replace or wrap | Project-wide |
+| **Scattered ownership** — no clear module boundary | `lib/font_config.c`, `radiant/font.cpp`, `radiant/font_face.cpp`, `radiant/font_lookup_platform.c`, `radiant/font.h`, `radiant/font_face.h`, `radiant/pdf/fonts.cpp` |
+| **Duplicate `FT_Library`** — layout and PDF each create their own, no face sharing | `radiant/ui_context.cpp` vs `radiant/pdf/fonts.cpp` |
+| **Copy-pasted `FT_Select_Size`** — color emoji handling duplicated 4 times | `font.cpp`, `font_face.cpp` |
+| **Duplicate generic-family tables** — serif/sans-serif/monospace defined independently in two places | `radiant/font.cpp` |
+| **WOFF1 gap** — format detected but no decompressor; WOFF1 fonts silently fail | `radiant/font_face.cpp` |
+| **`std::string` in WOFF2** — violates project conventions | `radiant/font_face.cpp` |
+| **No glyph advance cache** — recalculated every call (open TODO) | `radiant/font.cpp` |
+| **Disk cache stubs** — `FontDatabase` has cache structs but `load_cache()`/`save_cache()` unimplemented | `lib/font_config.c` |
+| **FreeType types leak everywhere** — `FT_Face`, `FT_GlyphSlot`, `FT_Library` in public headers | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` |
 
-### What We Are *Not* Doing
+### Non-Goals
 
-We are **not** rewriting FreeType or libwoff2. We inherit them as-is and wrap them behind our own API so that:
+We are **not** rewriting FreeType or the WOFF2 decoder. We bundle libwoff2's decode-only sources and wrap them (along with FreeType) behind our own API so that:
 - Callers never touch `FT_*` types directly.
 - Resource lifetimes (faces, glyphs, buffers) are managed in one place.
 - Future substitution (e.g., replacing FreeType with stb_truetype for WASM) only changes the backend, not every call site.
@@ -189,7 +35,7 @@ We are **not** rewriting FreeType or libwoff2. We inherit them as-is and wrap th
 
 1. **Unify** — One module (`lib/font/`) owns all font functionality: discovery, matching, loading, metrics, glyph rasterization, web font decompression, and caching.
 2. **All common font formats** — First-class support for TrueType (`.ttf`), OpenType/CFF (`.otf`), TrueType Collections (`.ttc`), WOFF (`.woff`), and WOFF2 (`.woff2`). Every format loads through a single code path; callers never know or care which format the underlying file is.
-3. **Wrap, don't rewrite** — Keep FreeType, libwoff2, and Brotli as backend libraries. Selectively include only the source files we need from those repos. Expose none of their types in the public API.
+3. **Wrap, don't rewrite** — Keep FreeType and Brotli as external backend libraries. Bundle only the minimal decode-only subset of libwoff2 sources directly under `lib/font/woff2/` (5 `.cpp` files, no external linking needed). Expose none of their types in the public API.
 4. **Consistent API** — A single `FontContext` replaces `FT_Library` + `FontDatabase` + `UiContext` font fields. All callers go through `font_*()` functions.
 5. **Pool/arena memory management everywhere** — All allocations inside the font module use Lambda's `Pool` and `Arena` allocators. Zero `malloc`/`free`/`new`/`delete`. Zero `std::string` or `std::vector`. Decompressed WOFF buffers, glyph bitmaps, cache entries, strings — everything goes through the pool or arena. This gives deterministic cleanup and memory accounting.
 6. **Unified resource management** — One cache hierarchy: font file cache → face cache → glyph metrics cache → rasterized glyph cache, all pool/arena-backed with LRU eviction.
@@ -200,9 +46,7 @@ We are **not** rewriting FreeType or libwoff2. We inherit them as-is and wrap th
 
 ## 3. Architecture
 
-### 3.1 Module Structure — ✅ Implemented
-
-All 12 files created and compiling cleanly:
+### 3.1 Module Structure
 
 ```
 lib/font/
@@ -217,10 +61,19 @@ lib/font/
 ├── font_fallback.c         # Fallback chain resolution, codepoint→face mapping
 ├── font_face.c             # Font face descriptor registry: register, store, query, match
 ├── font_platform.c         # Platform-specific discovery (macOS CoreText, Linux dirs, Win32)
-└── font_decompress.cpp     # WOFF1 (zlib) + WOFF2 (Brotli/libwoff2) decompression (NOTE: .cpp, not .c)
+├── font_decompress.cpp     # WOFF1 (zlib) + WOFF2 (Brotli/libwoff2) decompression
+└── woff2/                  # Bundled minimal libwoff2 decode-only sources (no external lib needed)
+    ├── include/woff2/{decode,output}.h   # Public API headers
+    ├── woff2_dec.cpp        # Main WOFF2→TTF/OTF decoder
+    ├── woff2_out.cpp        # WOFF2MemoryOut output class
+    ├── woff2_common.cpp     # Checksum & collection helpers
+    ├── table_tags.cpp       # SFNT table tag constants
+    └── variable_length.cpp  # Base128/255UShort variable-length encoding
 ```
 
-> **Implementation note:** `font_decompress` uses `.cpp` extension (not `.c` as originally proposed) because libwoff2's `WOFF2MemoryOut` API requires C++ construction. The `std::string` is eliminated by pre-computing the output size with `ComputeWOFF2FinalSize()` and arena-allocating the buffer, then using `WOFF2MemoryOut` with the pre-sized buffer directly.
+> **Note:** `font_decompress` uses `.cpp` (not `.c`) because libwoff2's `WOFF2MemoryOut` API requires C++ construction. The `std::string` is eliminated by pre-computing the output size with `ComputeWOFF2FinalSize()` and arena-allocating the buffer directly.
+>
+> The `woff2/` subdirectory contains a minimal decode-only subset of Google's libwoff2, copied from `mac-deps/woff2/src/` and renamed `.cc` → `.cpp` for build-system compatibility. This eliminates the external `libwoff2dec.a` / `libwoff2common.a` static library dependencies. Only `libbrotlidec` and `libbrotlicommon` remain as external libraries (also required by FreeType). Covered by `test/test_woff2_gtest.cpp` (26 tests).
 
 ### 3.2 Dependency Graph
 
@@ -248,1142 +101,505 @@ lib/font/
           │    │font_decompress │(internal)│              │
           │    └───────┬────────┘          │              │
           │            ▼                   │              │
-          │    zlib + libwoff2 + Brotli    │              │
-          │    (internal)                  │              │
+          │    zlib + woff2/ + Brotli      │              │
+          │    (bundled sources)            │              │
           ▼                                ▼              │
    font_platform                    Lambda pool/arena    │
    (CoreText / dirs / Win32)        allocators           │
 ```
 
-### 3.3 Key Design Principle: Opaque Handles
+### 3.3 Opaque Handle Design
 
 ```c
 // Public — callers see these
 typedef struct FontContext FontContext;        // opaque
 typedef struct FontHandle  FontHandle;         // opaque, ref-counted
-typedef uint32_t           GlyphId;            // FreeType glyph index, but type-aliased
+typedef uint32_t           GlyphId;            // FreeType glyph index, type-aliased
 
 // Internal — only font_internal.h sees FT_Face, FT_Library, etc.
 ```
 
-This means `view.hpp` and `layout.hpp` will never `#include <ft2build.h>` again. The `FontProp.ft_face` field (currently `void*`) becomes a `FontHandle*`.
+`view.hpp` and `layout.hpp` never `#include <ft2build.h>`. The `FontProp.ft_face` field (previously raw `FT_Face`) is replaced by `FontHandle*`.
 
-### 3.4 Font Format Support Matrix
+### 3.4 Font Format Support
 
-A core goal is that **every common font format works transparently**. The caller passes a file path (or data URI, or in-memory buffer) to `font_loader.c`; the loader detects the format, decompresses if needed, and hands raw SFNT bytes to FreeType.
+Every common font format works transparently. The caller passes a file path (or data URI, or in-memory buffer) to `font_loader.c`; the loader detects the format, decompresses if needed, and hands raw SFNT bytes to FreeType.
 
-| Format | Extension | Magic Bytes | Detection | Decompression | FreeType Load | Status Today | Status After |
-|--------|-----------|-------------|-----------|---------------|---------------|-------------|-------------|
-| **TrueType** | `.ttf` | `0x00010000` or `true` | `detect_font_format()` | None needed | `FT_New_Face` | ✅ Works | ✅ |
-| **OpenType/CFF** | `.otf` | `OTTO` | `detect_font_format()` | None needed | `FT_New_Face` | ✅ Works | ✅ |
-| **TrueType Collection** | `.ttc` | `ttcf` | `detect_font_format()` | None needed | `FT_New_Face(path, index)` | ✅ Works | ✅ |
-| **WOFF1** | `.woff` | `wOFF` | `detect_font_format()` | zlib per-table inflate | `FT_New_Memory_Face` | ❌ Detected but **no decompressor** | ✅ New |
-| **WOFF2** | `.woff2` | `wOF2` | `detect_font_format()` | Brotli via libwoff2 | `FT_New_Memory_Face` | ⚠️ Only via `@font-face` data URIs | ✅ Unified |
-| **Data URI (base64)** | N/A | `data:font/` | Prefix check | Base64 decode + format detect | `FT_New_Memory_Face` | ✅ Works (font_face.cpp) | ✅ |
+| Format | Extension | Magic Bytes | Decompression | Status |
+|--------|-----------|-------------|---------------|--------|
+| TrueType | `.ttf` | `0x00010000` / `true` | None | ✅ |
+| OpenType/CFF | `.otf` | `OTTO` | None | ✅ |
+| TrueType Collection | `.ttc` | `ttcf` | None | ✅ |
+| WOFF1 | `.woff` | `wOFF` | zlib per-table inflate | ✅ |
+| WOFF2 | `.woff2` | `wOF2` | Brotli via libwoff2 | ✅ |
+| Data URI (base64) | N/A | `data:font/` | Base64 decode + format detect | ✅ |
 
-#### Format Loading Pipeline
+**Loading pipeline:** detect format (magic bytes) → decompress if WOFF/WOFF2 → `FT_New_Memory_Face` → `FT_Set_Pixel_Sizes` → wrap in `FontHandle`.
 
-```
-  Input: file path / data URI / raw bytes
-    │
-    ▼
-┌──────────────────────────────────┐
-│  font_loader.c: font_load()     │
-│  1. Detect format (magic bytes)  │
-│  2. If WOFF1 → decompress_woff1()│  ← font_decompress.c (NEW)
-│  3. If WOFF2 → decompress_woff2()│  ← font_decompress.c (existing libwoff2)
-│  4. If data URI → base64_decode() + recurse │
-│  5. Raw SFNT → FT_New_Memory_Face│  ← all formats converge here
-│     or FT_New_Face (for files)  │
-│  6. FT_Set_Pixel_Sizes          │
-│  7. Wrap in FontHandle          │
-└──────────────────────────────────┘
-    │
-    ▼
-  Output: FontHandle* (opaque)
-```
+Key insight: WOFF1 and WOFF2 are just compressed containers around SFNT (TTF/OTF) data. Once decompressed, they're identical. The decompressed buffer is arena-allocated and lives as long as the `FontHandle`.
 
-Key insight: **WOFF1 and WOFF2 are just compressed containers around SFNT (TTF/OTF) data.** Once decompressed, they're identical to TTF/OTF. The loader decompresses into an arena-allocated buffer, then passes it to `FT_New_Memory_Face`. The buffer stays alive as long as the `FontHandle` is alive (arena lifetime).
+### 3.5 Font Database: 3-Phase Scan & Matching
 
-#### WOFF1 Decompression (`font_decompress.c`)
+`font_database.c` implements a **3-phase lazy scan** to minimize startup cost.
 
-WOFF1 is far simpler than WOFF2. The format is:
-```
-┌──────────────────────┐
-│ WOFF Header (44 bytes)│  signature, totalSfntSize, numTables, ...
-├──────────────────────┤
-│ Table Directory       │  tag, offset, compLength, origLength, origChecksum
-│  (numTables entries)  │
-├──────────────────────┤
-│ Font Tables           │  each table: zlib-compressed if compLength < origLength
-│  (concatenated)       │  otherwise stored raw
-└──────────────────────┘
-```
+**Phase 1 — Fast File Discovery (no parsing)**
+Recursively walk platform font directories. For each font file, create a `FontEntry` placeholder with family name heuristically extracted from the filename (strip extension, strip style suffixes like "Bold"/"Italic", split CamelCase). Skip files < 1KB or > 50MB.
 
-Decompression is ~80 lines of C using zlib `uncompress()` (already linked as a FreeType dependency). Output is a valid SFNT buffer allocated from the arena:
+**Phase 2 — Priority Font Parsing (web-safe fonts only)**
+Parse placeholders whose family names match priority fonts (Arial, Helvetica, Times, Courier, Verdana, Georgia, etc.). Read the name table for real family/subfamily/weight/style. Parse TTC collections.
 
-```c
-// font_decompress.c
+**Phase 3 — Organize into Families**
+Build hashmap: family_name → `FontFamily` (list of `FontEntry*`). Index by PostScript name and file path.
 
-// Decompress WOFF1 to raw SFNT bytes.
-// Output is arena-allocated and lives as long as the arena.
-bool decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
-                      uint8_t** out, size_t* out_len);
+**Lazy on-demand loading:** When a family not in the hashmap is requested, matching placeholders are parsed in-place and the family index is rebuilt. An uncommon font (e.g. "Papyrus") is never parsed unless actually requested by CSS.
 
-// Decompress WOFF2 to raw SFNT bytes.
-// Wraps libwoff2 API. Output is arena-allocated.
-// Replaces the current std::string-based code in font_face.cpp.
-bool decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
-                      uint8_t** out, size_t* out_len);
+**Match scoring** (100 max, additive with penalties):
 
-// Detect compressed format from magic bytes and decompress if needed.
-// Returns the raw buffer (may be the input itself if no decompression needed).
-// If decompression occurred, *out is arena-allocated.
-bool font_decompress_if_needed(Arena* arena, const uint8_t* data, size_t len,
-                               const uint8_t** out, size_t* out_len);
-```
+| Criterion | Points |
+|-----------|--------|
+| Family name (exact) | +40 |
+| Family name (generic fallback) | +25 |
+| Weight proximity (diff 0/≤100/≤200/≤300) | +20/+15/+10/+5 |
+| Style match (normal/italic/oblique) | +15 |
+| Unicode codepoint support | +15 |
+| Monospace preference | +10 |
+| Exact filename bonus ("Arial.ttf" for "Arial") | +10 |
+| Unicode variant penalty ("Arial Unicode.ttf") | −8 |
+| Oversized font penalty (> 5 MB) | −5 |
 
-#### System Font Scanning: All Formats
+### 3.6 Pool & Arena Memory Architecture
 
-The current `is_font_file()` in `font_config.c` **skips `.woff` and `.woff2`** with the comment *"less common and slower to parse"*. The unified module changes this:
+Every allocation inside the font module uses Lambda's `Pool` or `Arena`.
+
+| Allocator | What It's For | Lifetime |
+|-----------|---------------|----------|
+| **Pool** | Fixed-size recyclable objects: `FontHandle`, `GlyphInfo`, cache entries, hashmap nodes | Individual `pool_free` on eviction; bulk `pool_destroy` on shutdown |
+| **Arena** | Append-only long-lived data: strings, decompressed WOFF buffers, font file data | Bulk `arena_destroy` — no individual frees |
+| **Glyph Arena** | Glyph bitmap pixel data (separable for flush on font-size change) | `arena_reset` on full flush |
+
+Internal struct layout:
 
 ```c
-// BEFORE (font_config.c)
-static bool is_font_file(const char* filename) {
-    // checks .ttf, .otf, .ttc only
-    return false; // Skip woff/woff2 for now
-}
-
-// AFTER (font_database.c)
-static bool is_font_file(const char* filename) {
-    // checks .ttf, .otf, .ttc, .woff, .woff2
-    // WOFF/WOFF2 system fonts are uncommon but should be discovered.
-    // Decompression is deferred to load time (lazy), so scanning cost is minimal.
-}
-```
-
-For WOFF/WOFF2 files discovered during scanning, we parse metadata **without decompressing the full file**:
-- WOFF1: The `name` table offset/length are in the WOFF directory. We decompress only that one table (~1-2 KB) to extract family name, weight, style.
-- WOFF2: We defer to full loading since the WOFF2 format doesn't allow single-table extraction.
-
-### 3.5 Pool & Arena Memory Architecture
-
-Every allocation inside the font module goes through Lambda's `Pool` or `Arena`. This section defines exactly which allocator owns what.
-
-#### Allocator Roles
-
-| Allocator | What It's For | Lifetime | Deallocation |
-|-----------|---------------|----------|-------------|
-| **Pool** (`mempool.h`) | Fixed-size, recyclable objects: `FontHandle`, `GlyphInfo`, cache entries, hashmap nodes, `FontEntry`, `FontFamily` | Varies — objects are allocated and freed individually via `pool_alloc`/`pool_free` | Explicit `pool_free()` on eviction; bulk `pool_destroy()` on shutdown |
-| **Arena** (`arena.h`) | Append-only, long-lived data: strings (family names, file paths, PostScript names), decompressed WOFF buffers, font file data for `FT_New_Memory_Face` | Lives until `FontContext` is destroyed | Bulk `arena_destroy()` — no individual frees |
-
-#### Internal Struct Allocation Map
-
-```c
-// font_internal.h — internal layout (never exposed in font.h)
-
 struct FontContext {
-    Pool* pool;                     // pool_create() — owned
-    Arena* arena;                   // arena_create_default(pool) — owned
-    Arena* glyph_arena;             // separate arena for glyph bitmap data
+    Pool* pool;  Arena* arena;  Arena* glyph_arena;
     FT_Library ft_library;          // single FreeType instance
-    FontDatabase* database;         // pool_calloc(pool, sizeof(FontDatabase))
-    struct hashmap* face_cache;     // LRU cache: key → FontHandle*
-    struct hashmap* glyph_cache;    // LRU cache: (handle,codepoint) → GlyphInfo
-    struct hashmap* bitmap_cache;   // LRU cache: (handle,codepoint,mode) → GlyphBitmap
-    FontFaceDescriptor** face_descriptors; // registered font face descriptors
-    int face_descriptor_count;
-    int face_descriptor_capacity;
+    FontDatabase* database;
+    struct hashmap* face_cache;     // LRU: key → FontHandle*
+    struct hashmap* glyph_cache;    // LRU: (handle,codepoint) → GlyphInfo
+    struct hashmap* bitmap_cache;   // LRU: (handle,codepoint,mode) → GlyphBitmap
+    FontFaceDescriptor** face_descriptors;
     FontContextConfig config;
 };
 
 struct FontHandle {
-    FT_Face ft_face;                // internal FreeType face
-    int ref_count;                  // reference counting
-    FontMetrics metrics;            // computed once, cached inline
-    bool metrics_ready;
-    uint8_t* memory_buffer;         // arena-allocated: decompressed WOFF data or mmap'd file
-    size_t memory_buffer_size;      //   (FreeType requires buffer to outlive face)
-    struct hashmap* advance_cache;  // codepoint → advance_x (pool-allocated entries)
-    FontContext* ctx;               // back-pointer for pool access
-    uint32_t lru_tick;              // for LRU eviction in face cache
+    FT_Face ft_face;  int ref_count;  bool borrowed_face;
+    FontMetrics metrics;  bool metrics_ready;
+    uint8_t* memory_buffer;  size_t memory_buffer_size;
+    struct hashmap* advance_cache;   // codepoint → advance_x
+    FontContext* ctx;  uint32_t lru_tick;
 };
 ```
 
-#### Allocation Patterns by Operation
+**FreeType custom allocator:** FreeType's internal allocations route through `Pool` via `FT_Memory`, giving accurate memory accounting and deterministic cleanup.
 
-| Operation | Allocations | Allocator |
-|-----------|------------|----------|
-| **Font scanning** (discover files) | `FontEntry` structs, family/path strings | `pool_calloc` for entries, `arena_strdup` for strings |
-| **Font loading** (open face) | `FontHandle` struct | `pool_calloc(ctx->pool, sizeof(FontHandle))` |
-| **WOFF1/WOFF2 decompression** | Decompressed SFNT buffer (stays alive with handle) | `arena_alloc(ctx->arena, sfnt_size)` |
-| **Data URI decoding** | Base64-decoded bytes, then decompressed SFNT | `arena_alloc` for both stages |
-| **Glyph metrics query** | `GlyphInfo` cache entry | `pool_calloc` (recyclable on eviction) |
-| **Glyph bitmap render** | `GlyphBitmap` + pixel buffer | `pool_calloc` for struct, `arena_alloc(ctx->glyph_arena, pitch*height)` for pixels |
-| **Fallback chain** | `FontHandle*[]` array, codepoint→handle cache entries | `pool_alloc` for arrays, hashmap entries |
-| **Face descriptor registration** | `FontFaceDescriptor` struct, `FontFaceSrc` array, family/path strings | `pool_calloc` for descriptor and src array, `arena_strdup` for strings |
-| **Disk cache I/O** | Temporary read buffer | `arena_alloc` (reset after load) |
-| **String operations** | Family name normalization, path construction | `arena_sprintf`, `arena_strdup` — never `malloc`/`strdup` |
+**WOFF2 `std::string` elimination:** The `std::string` is confined to a single function in `font_decompress.cpp`. Output is pre-sized via `ComputeWOFF2FinalSize()` and written directly into an arena buffer via `WOFF2MemoryOut`.
 
-#### Why Two Arenas
+### 3.7 Four-Tier Cache
 
 ```
-ctx->arena        — long-lived strings and font data buffers
-                     Lives for the entire FontContext lifetime.
-                     Grows monotonically; reset only on destroy.
+Tier 1: Font Database Cache (disk)
+  ~/.lambda/font_cache.bin — persists scan results across restarts.
+  Invalidated by file mtime/size changes.
 
-ctx->glyph_arena  — glyph bitmap pixel data
-                     Can be reset when the bitmap cache is fully evicted
-                     (e.g., on font size change or document switch).
-                     Separating it avoids fragmenting the main arena
-                     with large, transient bitmap allocations.
+Tier 2: Face Cache (memory, LRU)
+  (family, weight, slant, size) → FontHandle — max 64 open faces.
+
+Tier 3: Glyph Metrics Cache (memory, per-face)
+  codepoint → GlyphInfo — 4096 entries per FontHandle, clear-on-full.
+
+Tier 4: Glyph Bitmap Cache (memory, LRU)
+  (glyph_id, size, render_mode) → GlyphBitmap — max 4096 entries.
+
+Fallback Resolution Cache:
+  codepoint → FontHandle — per fallback chain, with negative caching.
 ```
 
-#### WOFF2 libwoff2 Shim: Eliminating `std::string`
+### 3.8 `font_resolve()` Pipeline
 
-The current WOFF2 code uses `std::string` because the libwoff2 API requires it:
-```cpp
-// BEFORE (font_face.cpp) — violates project convention
-std::string output;
-woff2::ConvertWOFF2ToTTF(data, len, &output);
-// output.data() passed to FT_New_Memory_Face — lifetime tied to std::string
-```
+The top-level resolution function implements a 7-step pipeline:
 
-The fix: a thin C++ wrapper in `font_decompress.c` that immediately copies into the arena:
-```cpp
-// AFTER (font_decompress.c) — the ONLY file with any C++ in the font module
-bool decompress_woff2(Arena* arena, const uint8_t* data, size_t len,
-                      uint8_t** out, size_t* out_len) {
-    std::string output;  // temporary, scoped to this function only
-    if (!woff2::ConvertWOFF2ToTTF(data, len, &output)) return false;
-    *out_len = output.size();
-    *out = (uint8_t*)arena_alloc(arena, *out_len);  // arena owns the memory now
-    memcpy(*out, output.data(), *out_len);
-    return true;
-    // std::string destructor runs here — no leaked C++ memory
-}
-```
-
-This confines `std::string` to a single 8-line function. Everything else is pure C with pool/arena.
-
-#### FreeType Custom Memory Allocator
-
-FreeType supports pluggable memory allocation via `FT_Memory`. We route it through our pool:
-
-```c
-// font_context.c — FreeType uses our pool for all its internal allocations
-static void* ft_pool_alloc(FT_Memory memory, long size) {
-    Pool* pool = (Pool*)memory->user;
-    return pool_alloc(pool, (size_t)size);
-}
-static void ft_pool_free(FT_Memory memory, void* block) {
-    Pool* pool = (Pool*)memory->user;
-    pool_free(pool, block);
-}
-static void* ft_pool_realloc(FT_Memory memory, long cur_size, long new_size, void* block) {
-    Pool* pool = (Pool*)memory->user;
-    return pool_realloc(pool, block, (size_t)new_size);
-}
-
-static FT_MemoryRec_ ft_memory = {
-    .user    = NULL,  // set to pool at init time
-    .alloc   = ft_pool_alloc,
-    .free    = ft_pool_free,
-    .realloc = ft_pool_realloc,
-};
-
-FontContext* font_context_create(FontContextConfig* config) {
-    Pool* pool = config->pool ? config->pool : pool_create();
-    Arena* arena = config->arena ? config->arena : arena_create_default(pool);
-
-    FontContext* ctx = (FontContext*)pool_calloc(pool, sizeof(FontContext));
-    ctx->pool = pool;
-    ctx->arena = arena;
-    ctx->glyph_arena = arena_create(pool, 256 * 1024, 4 * 1024 * 1024); // 256KB–4MB chunks
-
-    // Route FreeType's internal allocations through our pool
-    ft_memory.user = pool;
-    FT_New_Library(&ft_memory, &ctx->ft_library);
-    FT_Add_Default_Modules(ctx->ft_library);
-    FT_Library_SetLcdFilter(ctx->ft_library, FT_LCD_FILTER_DEFAULT);
-
-    // ... database init, cache init ...
-    return ctx;
-}
-```
-
-This means **all memory** — FreeType internals, our structs, decompressed fonts, glyph bitmaps — flows through `Pool`, giving us:
-- Accurate memory accounting via `pool` stats.
-- Deterministic cleanup via `pool_destroy()` + `arena_destroy()`.
-- No memory leaks from forgotten `free()` calls.
-
-### 3.6 Font Database: 3-Phase Scan & Matching
-
-`font_database.c` implements a **3-phase lazy scan** designed to minimize startup cost. Only web-safe fonts are parsed upfront; everything else is deferred to first use.
-
-#### 3-Phase Scan (`font_database_scan_internal`)
-
-```
-Phase 1 — Fast File Discovery (no parsing)
-  Recursively walk platform font directories.
-  For each .ttf/.otf/.ttc/.woff/.woff2 file, create a FontEntry placeholder:
-    • family_name = heuristic from filename (e.g. "ArialBold.ttf" → "Arial")
-    • is_placeholder = true (not yet parsed)
-    • file_path, file_size, file_mtime recorded
-  Filters: skip cache/temp directories, skip files < 1KB or > 50MB.
-
-Phase 2 — Priority Font Parsing (web-safe fonts only)
-  Walk all placeholders. If family_name matches a priority font, parse it:
-    • TTF/OTF: read name table → real family, subfamily, weight, style
-    • TTC: parse up to MAX_TTC_FONTS (4) faces per collection
-  Priority list: Arial, Helvetica, Times, Times New Roman, Courier,
-    Courier New, Verdana, Georgia, Trebuchet MS, Helvetica Neue,
-    Monaco, Menlo, SF Pro, DejaVu Sans/Serif, Liberation Sans/Serif, etc.
-
-Phase 3 — Organize into Families
-  Build hashmap: family_name → FontFamily (list of FontEntry*).
-  Index by postscript_name and file_path for direct lookups.
-  Only fully-parsed entries are organized; placeholders remain in all_fonts[].
-```
-
-#### Lazy On-Demand Loading
-
-When `font_database_find_best_match_internal()` is called for a family not in the hashmap:
-
-1. Scan `all_fonts[]` for placeholders whose heuristic `family_name` matches.
-2. Parse each matching placeholder in-place (`parse_placeholder_font` / `parse_ttc_font_metadata`).
-3. Re-run `organize_fonts_into_families()` to add newly parsed entries.
-4. Score and return the best match from the now-populated family.
-
-This means an uncommon font (e.g. "Papyrus") is never parsed unless actually requested by CSS.
-
-#### Placeholder Family Name Heuristics
-
-`create_font_placeholder()` extracts a usable family name from the filename alone:
-
-1. Strip extension: `"ArialBold.ttf"` → `"ArialBold"`
-2. Strip dash-separated style suffixes: `"Arial-BoldItalic"` → `"Arial"`
-3. Strip space-separated style suffixes (3 passes for compounds): `"Arial Bold Italic"` → `"Arial"`
-4. Split CamelCase boundaries: `"HelveticaNeue"` → `"Helvetica Neue"`
-
-Suffixes stripped: `Bold`, `Italic`, `Oblique`, `Light`, `Thin`, `Medium`, `Heavy`, `Black`, `Regular`, `Condensed`, `Narrow`, `Wide`, `Extended`, `Semi`, `Demi`, `Extra`, `Ultra`.
-
-#### Match Scoring (`calculate_match_score`)
-
-Scoring is additive (100 max) with penalties for undesirable variants:
-
-| Criterion | Points | Notes |
-|-----------|--------|-------|
-| **Family name (exact)** | +40 | Case-insensitive `str_ieq` |
-| **Family name (generic fallback)** | +25 | e.g. "sans-serif" → Arial, Helvetica |
-| **Weight proximity** | +20/+15/+10/+5 | diff 0 / ≤100 / ≤200 / ≤300 |
-| **Style match** | +15 | normal/italic/oblique |
-| **Monospace preference** | +10 | When `prefer_monospace` set |
-| **Unicode codepoint support** | +15 | Required codepoint in ranges |
-| **Unicode variant penalty** | −8 | "Arial Unicode.ttf" when "Arial" requested |
-| **Oversized font penalty** | −5 | File > 5 MB (likely CJK/Unicode superset) |
-| **Exact filename bonus** | +10 | "Arial.ttf" for family "Arial" |
-
-The last three heuristics (ported from `font_config.c`) prevent selecting comprehensive Unicode fonts like "Arial Unicode.ttf" (23 MB) over the standard "Arial.ttf" (773 KB), which would produce text 25-33% taller than browser baselines.
+1. **Cache** — check face cache for exact match
+2. **@font-face** — check registered font face descriptors
+3. **Generic family** — resolve CSS generic families (serif → Times, sans-serif → Arial, etc.)
+4. **Database** — query font database with weight/slant scoring
+5. **Platform** — platform-specific discovery (CoreText on macOS)
+6. **Fallback** — try known fallback fonts for the codepoint
+7. **Default** — return system default font
 
 ---
 
-## 4. Public API Design (`font.h`)
+## 4. Public API (`font.h`)
 
 ```c
-#ifndef LAMBDA_FONT_H
-#define LAMBDA_FONT_H
-
-#include <stdint.h>
-#include <stdbool.h>
-
-// Forward declarations — all opaque
-typedef struct FontContext FontContext;
-typedef struct FontHandle  FontHandle;
-typedef uint32_t GlyphId;
-
-struct Pool;
-struct Arena;
-
-// ============================================================================
-// Font Context — replaces FT_Library + FontDatabase + UiContext font fields
-// ============================================================================
-
-typedef struct FontContextConfig {
-    struct Pool* pool;              // memory pool for allocations
-    struct Arena* arena;            // arena for string storage
-    float pixel_ratio;              // display pixel ratio (1.0, 2.0, etc.)
-    const char* cache_dir;          // disk cache directory (NULL = default ~/.lambda/)
-    int max_cached_faces;           // max open font faces (default 64)
-    int max_cached_glyphs;          // max cached glyph bitmaps (default 4096)
-    bool enable_lcd_rendering;      // subpixel rendering
-    bool enable_disk_cache;         // persist font database to disk
-} FontContextConfig;
-
+// Context lifecycle
 FontContext* font_context_create(FontContextConfig* config);
 void         font_context_destroy(FontContext* ctx);
+bool         font_context_scan(FontContext* ctx);
 
-// Trigger font directory scanning (auto-called on first lookup if needed)
-bool font_context_scan(FontContext* ctx);
-
-// ============================================================================
-// Font Style — input for font resolution (CSS-like)
-// ============================================================================
-
-typedef enum FontWeight {
-    FONT_WEIGHT_THIN       = 100,
-    FONT_WEIGHT_EXTRA_LIGHT = 200,
-    FONT_WEIGHT_LIGHT      = 300,
-    FONT_WEIGHT_NORMAL     = 400,
-    FONT_WEIGHT_MEDIUM     = 500,
-    FONT_WEIGHT_SEMI_BOLD  = 600,
-    FONT_WEIGHT_BOLD       = 700,
-    FONT_WEIGHT_EXTRA_BOLD = 800,
-    FONT_WEIGHT_BLACK      = 900,
-} FontWeight;
-
-typedef enum FontSlant {
-    FONT_SLANT_NORMAL,
-    FONT_SLANT_ITALIC,
-    FONT_SLANT_OBLIQUE,
-} FontSlant;
-
-typedef struct FontStyle {
-    const char* family;             // CSS font-family (comma-separated or single)
-    float       size_px;            // desired size in CSS pixels
-    FontWeight  weight;
-    FontSlant   slant;
-} FontStyle;
-
-// ============================================================================
-// Font Handle — an opened, sized font face (opaque, ref-counted)
-// ============================================================================
-
-// Resolve a FontStyle to a loaded, sized font handle.
-// Returns NULL on failure. Caller must release with font_handle_release().
+// Font resolution — the primary entry point
 FontHandle* font_resolve(FontContext* ctx, const FontStyle* style);
+FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyle* style, uint32_t cp);
 
-// Increment / decrement reference count
+// Handle management (ref-counted)
 FontHandle* font_handle_retain(FontHandle* handle);
 void        font_handle_release(FontHandle* handle);
+FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face, const FontStyle* style);
 
-// ============================================================================
-// Font Metrics — per-face, per-size metrics
-// ============================================================================
-
-typedef struct FontMetrics {
-    float ascender;             // above baseline (positive)
-    float descender;            // below baseline (negative)
-    float line_height;          // ascender - descender + line_gap
-    float line_gap;             // additional leading
-
-    // OpenType table metrics (for browser-compat line height)
-    float typo_ascender, typo_descender, typo_line_gap;
-    float win_ascent, win_descent;
-    float hhea_ascender, hhea_descender, hhea_line_gap;
-
-    // Useful typographic measures
-    float x_height;             // height of lowercase 'x'
-    float cap_height;           // height of uppercase letters
-    float space_width;          // advance width of U+0020 SPACE
-    float em_size;              // units per em (typically 1000 or 2048)
-
-    bool has_kerning;           // font contains kerning data
-} FontMetrics;
-
-// Get metrics for a resolved font handle (cached, zero-cost after first call)
+// Metrics (cached, zero-cost after first call)
 const FontMetrics* font_get_metrics(FontHandle* handle);
+float font_calc_normal_line_height(FontHandle* handle);
+float font_get_cell_height(FontHandle* handle);
+float font_get_x_height_ratio(FontHandle* handle);
 
-// ============================================================================
-// Glyph Info — per-glyph measurement (cached)
-// ============================================================================
-
-typedef struct GlyphInfo {
-    GlyphId id;                 // glyph index in the font
-    float   advance_x;         // horizontal advance
-    float   advance_y;         // vertical advance (usually 0 for horizontal text)
-    float   bearing_x;         // left side bearing
-    float   bearing_y;         // top side bearing
-    int     width, height;     // bitmap dimensions
-    bool    is_color;          // color emoji / COLR glyph
-} GlyphInfo;
-
-// Get glyph info for a codepoint (advance, bearings — cached)
+// Glyph operations (cached)
 GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint);
+uint32_t  font_get_glyph_index(FontHandle* handle, uint32_t codepoint);
+float     font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right);
+float     font_get_kerning_by_index(FontHandle* handle, uint32_t left_idx, uint32_t right_idx);
+const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t cp, GlyphRenderMode mode);
 
-// Get kerning between two codepoints (returns 0 if no kerning)
-float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right);
-
-// ============================================================================
-// Glyph Rasterization — bitmap rendering for display
-// ============================================================================
-
-typedef enum GlyphRenderMode {
-    GLYPH_RENDER_NORMAL,        // 8-bit anti-aliased
-    GLYPH_RENDER_LCD,           // LCD subpixel (3x width)
-    GLYPH_RENDER_MONO,          // 1-bit (for hit testing)
-    GLYPH_RENDER_SDF,           // signed distance field
-} GlyphRenderMode;
-
-typedef struct GlyphBitmap {
-    uint8_t* buffer;            // pixel data (owned by cache, valid until eviction)
-    int      width, height;     // bitmap dimensions
-    int      pitch;             // bytes per row
-    int      bearing_x;        // left offset from pen position
-    int      bearing_y;        // top offset from baseline
-    GlyphRenderMode mode;
-} GlyphBitmap;
-
-// Render a glyph to bitmap (result is cached; pointer valid until cache eviction)
-const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
-                                      GlyphRenderMode mode);
-
-// ============================================================================
-// Text Measurement — convenience for layout
-// ============================================================================
-
-typedef struct TextExtents {
-    float width;                // total advance width
-    float height;               // ascender - descender
-    int   glyph_count;          // number of glyphs shaped
-} TextExtents;
-
-// Measure a UTF-8 text string (applies kerning, handles multi-byte)
+// Text measurement
 TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len);
+float       font_measure_char(FontHandle* handle, uint32_t codepoint);
 
-// Measure width of a single codepoint (convenience wrapper)
-float font_measure_char(FontHandle* handle, uint32_t codepoint);
-
-// ============================================================================
-// Font Fallback — for codepoints not covered by the primary font
-// ============================================================================
-
-// Find a font that supports a specific codepoint, given a style hint.
-// Searches registered font face descriptors first, then system fonts.
-// Returns NULL if no font covers this codepoint.
-FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyle* style,
-                                        uint32_t codepoint);
-
-// Check whether a handle supports a codepoint (without loading glyph)
-bool font_supports_codepoint(FontHandle* handle, uint32_t codepoint);
-
-// ============================================================================
-// Font Face Management — register, query, and load font face descriptors
-// ============================================================================
-//
-// Separation of concerns:
-//   - CSS @font-face PARSING lives in Radiant (radiant/font_face.cpp).
-//     Radiant walks the stylesheet, extracts family/weight/style/src, and
-//     calls the registration API below.
-//   - Font face MANAGEMENT lives here: storing descriptors, matching them
-//     by criteria, loading the actual font data, and caching loaded faces.
-//
-
-// Descriptor for a single font face source (path or data URI + format hint)
-typedef struct FontFaceSrc {
-    const char* path;           // local file path or data URI
-    const char* format;         // "truetype", "opentype", "woff", "woff2", or NULL
-} FontFaceSrc;
-
-// Descriptor for a registered font face (one @font-face rule = one descriptor)
-typedef struct FontFaceDescriptor {
-    const char*   family;       // font-family value
-    FontWeight    weight;       // font-weight (100–900)
-    FontSlant     slant;        // font-style (normal/italic/oblique)
-    FontFaceSrc*  sources;      // ordered src list (tried in order)
-    int           source_count;
-} FontFaceDescriptor;
-
-// Register a font face descriptor (called by Radiant after parsing @font-face).
-// The descriptor is copied into the font module's pool/arena.
-// Returns true on success.
+// @font-face management
 bool font_face_register(FontContext* ctx, const FontFaceDescriptor* desc);
-
-// Find the best-matching registered font face for a given style.
-// Returns NULL if no registered face matches. Does NOT load the font;
-// use font_face_load() on the result to get a FontHandle.
 const FontFaceDescriptor* font_face_find(FontContext* ctx, const FontStyle* style);
-
-// List all registered descriptors for a family name.
-// Returns count; fills `out` up to `max_out` entries.
-int font_face_list(FontContext* ctx, const char* family,
-                   const FontFaceDescriptor** out, int max_out);
-
-// Load a font from a registered descriptor (tries sources in order,
-// handles all formats: TTF/OTF/TTC/WOFF/WOFF2/data URI).
-// Returns a cached FontHandle if already loaded.
-FontHandle* font_face_load(FontContext* ctx, const FontFaceDescriptor* desc,
-                            float size_px);
-
-// Remove all registered descriptors (e.g., on document unload)
+FontHandle* font_face_load(FontContext* ctx, const FontFaceDescriptor* desc, float size_px);
 void font_face_clear(FontContext* ctx);
 
-// ============================================================================
-// Direct Font Loading — for non-CSS use cases (PDF, CLI, tests)
-// ============================================================================
+// Direct loading (PDF, CLI, tests)
+FontHandle* font_load_from_file(FontContext* ctx, const char* path, const FontStyle* style);
+FontHandle* font_load_from_data_uri(FontContext* ctx, const char* uri, const FontStyle* style);
+FontHandle* font_load_from_memory(FontContext* ctx, const uint8_t* data, size_t len, const FontStyle* style);
 
-// Load a font from a local file path (any format: TTF/OTF/TTC/WOFF/WOFF2).
-FontHandle* font_load_from_file(FontContext* ctx, const char* path,
-                                const FontStyle* style);
+// Database queries
+bool font_family_exists(FontContext* ctx, const char* family);
+const char* font_find_path(FontContext* ctx, const char* family);
+FontMatchResult font_find_best_match(FontContext* ctx, const char* family, FontWeight w, FontSlant s);
 
-// Load a font from a data URI (base64-encoded, possibly WOFF2-compressed).
-FontHandle* font_load_from_data_uri(FontContext* ctx, const char* data_uri,
-                                     const FontStyle* style);
-
-// Load a font from raw bytes in memory (any format, auto-detected).
-// The buffer is copied into the arena; caller can free their copy.
-FontHandle* font_load_from_memory(FontContext* ctx, const uint8_t* data,
-                                   size_t len, const FontStyle* style);
-
-// ============================================================================
-// Cache Control
-// ============================================================================
-
-// Persist font database to disk (call on shutdown or periodically)
+// Cache control
 bool font_cache_save(FontContext* ctx);
-
-// Evict least-recently-used entries from glyph cache
 void font_cache_trim(FontContext* ctx);
-
-// Get cache statistics for diagnostics
-typedef struct FontCacheStats {
-    int face_count;             // currently loaded faces
-    int glyph_cache_count;      // cached glyph entries
-    int glyph_cache_hit_rate;   // percentage (0-100)
-    size_t memory_usage_bytes;  // approximate memory footprint
-    int database_font_count;    // fonts in database
-    int database_family_count;  // font families
-} FontCacheStats;
-
 FontCacheStats font_get_cache_stats(FontContext* ctx);
-
-#endif // LAMBDA_FONT_H
 ```
 
----
-
-## 5. Migration Strategy: From Current Code to Unified Module
-
-The key principle is **inherit, adapt, unify** — not rewrite. Every piece of the new module is sourced from existing code.
-
-### 5.1 Code Provenance Map
-
-| New File | Primary Source | What Changes |
-|----------|---------------|--------------|
-| `font_context.c` | `radiant/ui_context.cpp` (init code) | Extract `FT_Library` init, LCD filter setup, config into standalone context. One instance shared by layout + PDF. |
-| `font_database.c` | `lib/font_config.c` (~2100 lines) | Move as-is. Remove `g_global_font_db` singleton; `FontContext` owns the database. Implement the disk cache stubs. |
-| `font_loader.c` | `radiant/font.cpp` (`load_styled_font`, `try_load_font`) + `radiant/font_face.cpp` (`load_font_from_data_uri`, `load_local_font_file`) | Merge all face-loading paths into one. Unify the 4 duplicated `FT_Select_Size` code paths into a single `select_best_fixed_size()` helper. |
-| `font_metrics.c` | `radiant/font.cpp` (`setup_font` metric extraction) + `radiant/font_face.cpp` (`compute_enhanced_font_metrics`) + `radiant/font_lookup_platform.c` (`get_font_metrics_platform`) | Consolidate metric computation. Always read OS/2, hhea, typo tables. Cache per-face-size pair. |
-| `font_glyph.c` | `radiant/font.cpp` (`load_glyph`) | Same logic, plus add the missing advance cache. Unified fallback-glyph loading (currently in `load_glyph` with `glyph_fallback_cache`). |
-| `font_cache.c` | New, but logic exists scattered: face cache (`fontface_map`), fallback cache (`glyph_fallback_cache`), char width cache (per-descriptor), data URI cache | Centralize all caches. Use LRU eviction for glyph bitmaps. Implement disk cache for `FontDatabase`. |
-| `font_fallback.c` | `radiant/font.cpp` (`generic_families[]`, fallback logic in `setup_font`) + `radiant/font_face.cpp` (`build_fallback_chain`, `resolve_font_for_codepoint`) | Single fallback chain builder. Merge the two generic-family tables. Per-codepoint cache. |
-| `font_face.c` | `radiant/font_face.cpp` (`register_font_face`, font face matching/scoring, `FontFaceDescriptor` storage, `load_font_with_descriptors`) | Move descriptor registry, matching logic, and loading orchestration. CSS parsing stays in Radiant. |
-| `font_platform.c` | `radiant/font_lookup_platform.c` + macOS/Linux/Windows sections of `lib/font_config.c` | Merge platform discovery code. Keep CoreText metrics for macOS. Add Windows `DirectWrite` discovery (future). |
-
-**Boundary with Radiant:** CSS `@font-face` rule **parsing** (walking stylesheets, extracting `font-family`/`src`/`font-weight` from CSS AST) stays in `radiant/font_face.cpp`. After parsing, Radiant calls `font_face_register()` to hand the descriptor to the font module. All font face **management** (storing descriptors, matching by criteria, loading sources in format-priority order, caching loaded faces) lives in `lib/font/font_face.c`.
-| `font_decompress.c` | `radiant/font_face.cpp` (`decompress_woff2_to_ttf`) | Extract WOFF2 shim. **Add full WOFF1 decompressor** (~80 lines, uses zlib `uncompress()`). Replace `std::string` with arena-allocated buffer. All decompressed output is `arena_alloc`'d so it lives as long as the `FontHandle`. |
-| `font_internal.h` | New | All `FT_*` types, internal structs, helper macros. NOT included by any file outside `lib/font/`. |
-
-### 5.2 FreeType Source Inclusion
-
-Instead of linking FreeType as a system library, **vendor the specific source files we need** directly into the build:
-
-```
-lib/font/freetype/          # vendored from FreeType repo (git subtree or copy)
-├── include/                # FreeType public headers (only used by font_internal.h)
-├── src/
-│   ├── base/               # ft_init, ft_glyph, ft_bitmap, ft_sfnt, ft_system
-│   ├── truetype/           # TrueType interpreter
-│   ├── cff/                # CFF/OpenType support
-│   ├── sfnt/               # SFNT table parsing
-│   ├── smooth/             # Anti-aliased rasterizer
-│   ├── autofit/            # Auto-hinting
-│   ├── psnames/            # PostScript name mapping
-│   └── pshinter/           # PostScript hinting
-```
-
-**What we skip from FreeType:** BDF, PCF, PFR, Type1, Type42, WinFNT drivers — formats we never encounter.
-
-**Build integration:** Add as a static library target in `build_lambda_config.json`. Single compilation unit approach (FreeType supports `#include`-based amalgamation via `ftmodule.h`).
-
-### 5.3 libwoff2 + zlib Source Inclusion
-
-Already done for WOFF2 — sources live in `mac-deps/woff2/`. Continue building `libwoff2dec.a` + `libwoff2common.a` + Brotli from source. The only change is `font_decompress.c` wraps the C++ API with a pure-C interface that outputs into an arena buffer (see §3.5).
-
-For WOFF1, no new library is needed — `zlib` is already linked (FreeType dependency). The WOFF1 decompressor in `font_decompress.c` calls `uncompress()` per-table, writing into `arena_alloc`'d output.
-
-### 5.4 Phased Migration
-
-**Phase 1 — Foundation ✅ COMPLETE (2026-02-14)**
-- ✅ Create `lib/font/` directory structure.
-- ✅ Write `font.h` (public API, ~322 lines) and `font_internal.h` (~357 lines).
-- ✅ Implement `font_context.c`: single `FontContext` wrapping `FT_Library` + config (~353 lines).
-- ✅ Implement `font_database.c`: font discovery, TTF/OTF metadata parsing, matching (~950 lines).
-- ✅ Implement `font_platform.c`: macOS/Linux/Windows directory discovery (~180 lines).
-- ✅ Implement `font_loader.c`: unified face loading with format detection (~309 lines).
-- ✅ Implement `font_decompress.cpp`: WOFF1 (zlib) + WOFF2 (libwoff2) decompression (~280 lines).
-- ✅ Implement `font_metrics.c`: full OpenType metric extraction with OS/2, hhea, typo tables (~195 lines).
-- ✅ Implement `font_glyph.c`: glyph loading with per-handle advance cache (~257 lines).
-- ✅ Implement `font_cache.c`: face cache with LRU eviction + `font_resolve()` pipeline (~260 lines).
-- ✅ Implement `font_fallback.c`: unified generic-family table + codepoint fallback cache (~215 lines).
-- ✅ Implement `font_face.c`: @font-face descriptor registry with weight/slant scoring (~278 lines).
-- ✅ Update `build_lambda_config.json`: added `"lib/font"` to `source_dirs`.
-- ✅ **Build:** 0 errors, 0 warnings.
-- ✅ **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
-
-**Implementation notes (Phase 1):**
-- Old `lib/font_config.c` coexisted with new `lib/font/` module during Phases 1–6. **Phased out in Phase 7** — excluded from build, all callers migrated. Naming conflict on `font_add_scan_directory` resolved by renaming the new function to `font_context_add_scan_directory`.
-- New database functions use `_internal` suffix to avoid symbol collisions (originally to prevent link-time conflicts with `font_config.c`; suffix retained for clarity).
-- FreeType remains linked as system library (`/opt/homebrew/opt/freetype`) for now; vendoring deferred to Phase 4.
-- `font_decompress.cpp` (not `.c`) — the only C++ file, because libwoff2's `WOFF2MemoryOut` requires C++ construction. The `std::string` elimination uses `ComputeWOFF2FinalSize()` + arena pre-allocation instead.
-- `lib/` API discoveries during build: `arraylist_new(0)` / `arraylist_append()` (not `arraylist_create`/`arraylist_add`), `str_icmp` takes 4 args `(a, a_len, b, b_len)`, `base64_decode` returns `uint8_t*`, no `file_read()` utility exists (uses manual `fopen`/`fread`).
-
-**Phase 2 — Loading & Metrics (Week 3-4)**
-- Implement `font_loader.c` by extracting from `font.cpp` + `font_face.cpp`. Unified format pipeline: detect → decompress → FT_New_Memory_Face.
-- Implement `font_decompress.c`: WOFF2 wrapper (from existing `decompress_woff2_to_ttf`) + **new WOFF1 decompressor** (~80 lines using zlib). Replace `std::string` with `arena_alloc`.
-- Implement `font_metrics.c` with full OpenType metric reading.
-- Refactor `FontProp.ft_face` → `FontHandle*` in `view.hpp`.
-- Update `is_font_file()` in database to accept `.woff` and `.woff2` extensions.
-- **Test:** Layout tests still pass. Glyph metrics match old values exactly. WOFF1 + WOFF2 files load correctly.
-
-**Phase 3 — Caching & Fallback (Week 5-6) ✅ COMPLETE (2026-02-14)**
-- ✅ `font_cache.c` with LRU face cache + `font_resolve()` 7-step pipeline — already implemented in Phase 1.
-- ✅ `font_fallback.c` with unified generic-family table + codepoint fallback cache — already implemented in Phase 1.
-- ✅ `font_face.c`: descriptor registry, matching, and load orchestration — already implemented in Phase 1.
-- ✅ Disk cache for font database: binary format with magic/version header, length-prefixed strings, file mtime/size validation. `font_context_scan()` tries cache first, saves after full scan.
-- ✅ Bitmap cache: `BitmapCacheEntry` wired into `font_render_glyph()` with lazy hashmap init and clear-on-full eviction.
-- ✅ Advance cache eviction: `ADVANCE_CACHE_MAX_ENTRIES` (4096) per `FontHandle` with clear-on-full.
-- ✅ Bridge `radiant/font_face.cpp` → unified module: `register_font_face()` now calls `font_face_register()` with CssEnum→FontWeight/FontSlant conversion.
-- ✅ Slimmed `radiant/font_face.h`: removed 7 unused types and ~30 unused function declarations.
-- **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
-
-**Phase 4 — Cleanup (Week 7)**
-- ✅ Removed `FT_SFNT_NAMES_H` from `view.hpp` (unused — no callers use `FT_Get_Sfnt_Name`).
-- ✅ Removed redundant FT includes from `font_face.h` (already provided by `view.hpp`).
-- ✅ Slimmed `font.h`: removed `FontfaceEntry` type and `fontface_compare`/`fontface_entry_free` declarations (internal to `font.cpp`).
-- ✅ Removed ~335 lines of unused stubs from `font_face.cpp`: `EnhancedFontBox`, `FontMatchCriteria`, `FontMatchResult`, `FontFallbackChain` types and 12 stub functions (`calculate_font_match_score`, `find_best_font_match`, `build_fallback_chain`, `font_supports_codepoint`, `resolve_font_for_codepoint`, `cache_codepoint_font_mapping`, `compute_enhanced_font_metrics`, `calculate_line_height_from_css`, `apply_pixel_ratio_to_font_metrics`, `scale_font_size_for_display`, `ensure_pixel_ratio_compatibility`, `setup_font_enhanced`). All duplicated by `lib/font/` or never called.
-- ✅ Removed unused `cache_character_width`/`get_cached_char_width` declarations from `font_face.h`.
-- ✅ `FT_FREETYPE_H` removed from `view.hpp` in **Phase 6** — `FT_Face`/`FT_Library` replaced with `void*`, local FT includes added to files that still need direct FT access.
-- ✅ `lib/font_config.c/h` phased out in **Phase 7** — excluded from build, all callers migrated to `lib/font/` APIs.
-- ⏸ Kept `radiant/font.cpp`, `radiant/font_lookup_platform.c` — still actively used. `font_lookup_platform.c` provides CoreText metrics (CTFontGetAscent/Descent/Leading with Chrome's 15% hack) now consumed by `font_calc_normal_line_height()` and `font_get_cell_height()` in `lib/font/font_metrics.c` via extern linkage.
-- ⏸ PDF `FT_Library` kept separate — PDF font loading runs at lambda/input layer (no `UiContext` available), correctly isolated.
-- **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
-
-**Phase 5 — FT_Face → FontHandle Migration ✅ COMPLETE (2026-02-14)**
-- ✅ Surveyed all FreeType usage across `radiant/` — ~50 direct API call sites across 15+ files.
-- ✅ Added 8 new FontHandle-based APIs to `lib/font/font.h` with implementations in `font_context.c`, `font_metrics.c`, `font_glyph.c`.
-- ✅ Added `font_handle_wrap()` for borrowing existing FT_Face into FontHandle (with `borrowed_face` flag to prevent double-free).
-- ✅ Migrated all function signatures: `load_glyph`, `calc_normal_line_height`, `get_os2_typo_metrics` now take `FontHandle*`.
-- ✅ Migrated all callers across 15 files: null checks (`ft_face` → `font_handle`), metric accesses (`ft_face->size->metrics.*` → `FontMetrics`), glyph operations (`FT_Get_Char_Index` → `font_get_glyph_index`).
-- ✅ Added `hhea_line_height` field to `FontMetrics` for HHEA-only height (never overwritten by OS/2 typo metrics).
-- ✅ Fixed `font_get_x_height_ratio()` to use font-unit ratio (`sxHeight / units_per_EM`) matching old behavior.
-- ✅ Fixed `FontProp` population to use HHEA metrics (`hhea_ascender`/`hhea_descender`/`hhea_line_height`) for backward compatibility.
-- ✅ **Build:** 0 errors.
-- ✅ **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass (36 regressions found and fixed during development).
-
-**Phase 6 — Radiant Integration ✅ COMPLETE (2026-02-15)**
-- ✅ Removed FreeType includes from `view.hpp` — `FT_Face`/`FT_Library`/`FT_GlyphSlot` replaced with `void*` in all public structs and externs.
-- ✅ Removed dead `FontProp.ft_face` field.
-- ✅ Added `font_get_kerning_by_index()` and `FontMetrics.use_typo_metrics` to font module API.
-- ✅ Migrated layout-layer FT calls: `layout_text.cpp` (2 sites), `intrinsic_sizing.cpp` (6 sites), `event.cpp` (1 site), `layout.cpp` (1 site, now fully FT-free).
-- ✅ Added local FT includes + `void*` → FT casts to 11 files that still need direct FT access for rendering.
-- ✅ **Build:** 0 errors. **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
-
-**Phase 7 — Phaseout `lib/font_config.c` ✅ COMPLETE (2026-02-15)**
-
-Removed all remaining dependencies on `lib/font_config.c` and `lib/font_config.h`, migrated callers to `lib/font/` APIs, excluded `font_config.c` from build. Fixed 6 bugs discovered during regression testing (14 → 0 failures).
-
-**New public APIs added to `lib/font/font.h`:**
-- `font_family_exists(FontContext*, family)` — check if font family exists in database
-- `font_find_path(FontContext*, family)` — find best Regular-weight file path for a family
-- `font_find_best_match(FontContext*, family, weight, style)` → `FontMatchResult` — scored matching
-- `font_slant_to_string(FontSlant)` — enum-to-string conversion
-- `FontMatchResult` struct — `file_path`, `family_name`, `weight`, `style`, `face_index`, `match_score`, `found`
-
-**Callers migrated (4 files):**
-- `radiant/font.cpp` — `load_font_path(FontDatabase*)` → `load_font_path(FontContext*)`; `load_styled_font()` uses `font_find_best_match()` instead of `font_database_find_best_match()`; removed `#include "font_config.h"`
-- `radiant/font_face.cpp` — removed system font fallback from `load_font_with_descriptors()` (was bypassing `font_resolve()`); removed `#include "font_config.h"`
-- `radiant/ui_context.cpp` — removed `font_database_get_global()` init and `font_database_destroy()` cleanup; `load_font_path` declaration updated; removed `#include "font_config.h"`
-- `radiant/resolve_css_style.cpp` — `font_database_find_all_matches()` → `font_family_exists()`; removed `#include "font_config.h"`
-
-**Build config:**
-- `build_lambda_config.json` — added `"lib/font_config.c"` to `exclude_source_files`
-
-**View header cleanup:**
-- `radiant/view.hpp` — removed `FontDatabase` forward declaration and `UiContext.font_db` field
-
-**Bugs found and fixed (14 regression failures → 0):**
-
-1. **Generic family aliases in `font_get_generic_family()`** — concrete font names (Arial, Times, Courier) were mapped to generic family lists, causing `font_resolve()` step 4 to bypass weight/slant matching. Fix: removed concrete aliases, added comment.
-
-2. **Placeholder suffix stripping (space-separated)** — `create_font_placeholder("Arial Bold.ttf")` kept "Arial Bold" as family name because only dash-separated suffixes were stripped. Fix: added 3-pass space-separated suffix stripping loop for compound suffixes.
-
-3. **CamelCase font filename splitting** — `create_font_placeholder("HelveticaNeue.ttc")` produced "HelveticaNeue" (no space), not matching the priority font "Helvetica Neue" or CSS `font-family: Helvetica Neue`. Fix: added CamelCase → space-separated splitting (lowercase→uppercase boundary detection).
-
-4. **`load_font_with_descriptors()` system font fallback** — when no @font-face matched, this function called `load_styled_font()` directly, bypassing `font_resolve()` and its unified cache with correct weight/slant matching. Fix: removed system font fallback, let `setup_font` → `font_resolve` handle system fonts.
-
-5. **CSS enum weight collision in `setup_font()`** — `CSS_VALUE_NORMAL=307` fell in the 100-900 numeric weight range, causing `else if (fprop->font_weight >= 100 && fprop->font_weight <= 900)` to treat it as weight=307 instead of `FONT_WEIGHT_NORMAL=400`. Cache keys used wrong weights. Fix: replaced range check with explicit enum comparisons (`CSS_VALUE_BOLD`/`CSS_VALUE_BOLDER` → `FONT_WEIGHT_BOLD`, `CSS_VALUE_LIGHTER` → `FONT_WEIGHT_LIGHT`).
-
-6. **Phase 2 priority font parsing limit** — `priority_parsed < 20` cap prevented Times.ttc (at scan index 336) from being parsed in Phase 2. "Times" family had only 1 placeholder entry (weight=400), no Bold variant available. Fix: removed the arbitrary limit.
-
-- ✅ **Build:** 0 errors. **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
-
----
-
-### 6.1 Four-Tier Cache
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Tier 1: Font Database Cache (disk)                  │
-│  ~/.lambda/font_cache.bin                           │
-│  Persists scan results across process restarts.     │
-│  Invalidated by file mtime/size changes.            │
-│  ✅ Implemented (Phase 3)                            │
-└─────────────────────┬───────────────────────────────┘
-                      ▼
-┌─────────────────────────────────────────────────────┐
-│ Tier 2: Face Cache (memory, LRU)                    │
-│  (family, weight, slant, size) → FontHandle         │
-│  Max 64 open faces. LRU eviction closes FT_Face.    │
-│  ✅ Implemented (Phase 1)                            │
-└─────────────────────┬───────────────────────────────┘
-                      ▼
-┌─────────────────────────────────────────────────────┐
-│ Tier 3: Glyph Metrics Cache (memory, per-face)      │
-│  codepoint → GlyphInfo (advance, bearings)          │
-│  4096 entries per FontHandle, clear-on-full.         │
-│  ✅ Implemented (Phase 1 + Phase 3 eviction)         │
-└─────────────────────┬───────────────────────────────┘
-                      ▼
-┌─────────────────────────────────────────────────────┐
-│ Tier 4: Glyph Bitmap Cache (memory, LRU)            │
-│  (glyph_id, size, render_mode) → GlyphBitmap        │
-│  Max 4096 entries. Clear-on-full eviction.            │
-│  ✅ Implemented (Phase 3)                            │
-└─────────────────────────────────────────────────────┘
-```
-
-### 6.2 Fallback Resolution Cache
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Codepoint → FontHandle (per fallback chain)         │
-│  When a codepoint isn't in the primary font, the    │
-│  fallback chain is walked once. Result is cached.   │
-│  Includes negative caching (no font has this glyph).│
-│  ✅ Implemented (Phase 1)                            │
-└─────────────────────────────────────────────────────┘
-```
-
-### 6.3 Memory Management
-
-All cache memory uses Lambda's pool/arena allocators (see §3.5 for the full architecture):
-
-| Cache Tier | Data Stored | Allocator | Deallocation |
-|-----------|-------------|-----------|-------------|
-| **Tier 1 (disk)** | Serialized `FontEntry` records | Temp `arena_alloc` for read buffer, `arena_reset` after parse | Bulk reset |
-| **Tier 2 (faces)** | `FontHandle` structs (contain `FT_Face`) | `pool_calloc(ctx->pool, sizeof(FontHandle))` | `pool_free` on LRU eviction (after `FT_Done_Face`) |
-| **Tier 2 (faces)** | Decompressed WOFF1/WOFF2 buffers (must outlive `FT_Face`) | `arena_alloc(ctx->arena, sfnt_size)` | Lives until `arena_destroy` on shutdown |
-| **Tier 3 (metrics)** | `GlyphInfo` cache entries (~32 bytes each) | `pool_calloc` | Never evicted (tiny, per-face) |
-| **Tier 4 (bitmaps)** | `GlyphBitmap` structs + pixel buffers | Struct: `pool_calloc`. Pixels: `arena_alloc(ctx->glyph_arena, pitch*rows)` | `pool_free` struct on LRU eviction; `arena_reset(glyph_arena)` on full flush |
-| **Fallback cache** | Codepoint → `FontHandle*` mapping | Hashmap entries via `pool_calloc` | `pool_free` on invalidation |
-| **Strings** | Family names, file paths, PostScript names | `arena_strdup(ctx->arena, str)` | Lives until `arena_destroy` |
-
-**Invariant:** No `malloc`/`free` anywhere in `lib/font/`. No `std::string` or `std::vector` (the single `std::string` in `decompress_woff2` is scoped to one function and immediately copied into arena memory). FreeType's internal allocations also route through our pool via `FT_Memory` (see §3.5).
-
----
-
-## 7. Radiant Integration Changes
-
-### 7.1 UiContext Simplification
+### Key Types
 
 ```c
-// BEFORE (view.hpp)
+typedef struct FontStyle {
+    const char* family;  float size_px;  FontWeight weight;  FontSlant slant;
+} FontStyle;
+
+typedef struct FontMetrics {
+    float ascender, descender, line_height, line_gap;
+    float typo_ascender, typo_descender, typo_line_gap;
+    float win_ascent, win_descent;
+    float hhea_ascender, hhea_descender, hhea_line_gap, hhea_line_height;
+    float x_height, cap_height, space_width, em_size;
+    float underline_position, underline_thickness;
+    bool has_kerning, use_typo_metrics;
+} FontMetrics;
+
+typedef struct GlyphInfo {
+    GlyphId id;  float advance_x, advance_y, bearing_x, bearing_y;
+    int width, height;  bool is_color;
+} GlyphInfo;
+```
+
+---
+
+## 5. Radiant Integration
+
+### 5.1 UiContext Simplification
+
+```c
+// BEFORE — 9 font-related fields
 typedef struct {
-    FontDatabase *font_db;
-    FT_Library ft_library;
-    struct hashmap* fontface_map;
-    FontProp default_font;
-    FontProp legacy_default_font;
-    char** fallback_fonts;
-    FontFaceDescriptor** font_faces;
-    int font_face_count, font_face_capacity;
-    struct hashmap* glyph_fallback_cache;
-    float pixel_ratio;
-    // ... other fields
+    FontDatabase *font_db;  FT_Library ft_library;  struct hashmap* fontface_map;
+    FontProp default_font;  char** fallback_fonts;
+    FontFaceDescriptor** font_faces;  struct hashmap* glyph_fallback_cache;
+    float pixel_ratio;  ...
 } UiContext;
 
-// AFTER
+// AFTER — single opaque pointer
 typedef struct {
-    FontContext *font_ctx;          // ← single opaque pointer replaces 9 fields
-    float pixel_ratio;
-    // ... other fields (window, surface, mouse, document)
+    FontContext *font_ctx;
+    float pixel_ratio;  ...
 } UiContext;
 ```
 
-### 7.2 FontProp / FontBox Simplification
+### 5.2 FontProp / FontBox
 
 ```c
-// BEFORE
-struct FontProp {
-    char* family;
-    float font_size;
-    CssEnum font_style, font_weight;
-    float space_width, ascender, descender, font_height;
-    bool has_kerning;
-    void* ft_face;                  // raw FT_Face leaked into view layer
-};
+// BEFORE                              // AFTER
+struct FontProp {                      struct FontProp {
+    ...                                    ...
+    void* ft_face;  // leaked FT_Face      FontHandle* handle;  // opaque
+};                                     };
 
-struct FontBox {
-    FontProp *style;
-    FT_Face ft_face;                // FT_Face again
-    int current_font_size;
-};
-
-// AFTER
-struct FontProp {
-    char* family;
-    float font_size;
-    CssEnum font_style, font_weight;
-    CssEnum text_deco;
-    float letter_spacing;
-    // derived metrics (populated by font_resolve)
-    float space_width, ascender, descender, font_height;
-    bool has_kerning;
-    FontHandle* handle;             // opaque, ref-counted
-};
-
-struct FontBox {
-    FontProp *style;
-    FontHandle* handle;             // opaque — no FT_Face
-    int current_font_size;
-};
+struct FontBox {                       struct FontBox {
+    FT_Face ft_face;                       void* ft_face;       // void* for render layer
+    FontProp *style;                       FontHandle* handle;  // opaque
+    int current_font_size;                 FontProp *style;
+};                                     };
 ```
 
-### 7.3 Layout Integration
+### 5.3 Layout: setup_font
 
 ```c
-// BEFORE (setup_font in font.cpp — ~80 lines, direct FreeType calls)
+// BEFORE — ~80 lines, direct FreeType calls
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
-    // ... resolve generic family
-    // ... try @font-face descriptors (stays in radiant/font_face.cpp)
-    // ... try database lookup
-    // ... try platform fallback
-    // ... FT_Set_Pixel_Sizes
-    // ... extract metrics from FT_Face
+    // ... resolve generic family, try @font-face, try database, try platform
+    // ... FT_Set_Pixel_Sizes, extract metrics from FT_Face
 }
 
-// AFTER (thin wrapper — ~10 lines)
+// AFTER — thin wrapper, ~15 lines
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
-    FontStyle style = {
-        .family = fprop->family,
-        .size_px = fprop->font_size / uicon->pixel_ratio,
-        .weight = css_weight_to_font_weight(fprop->font_weight),
-        .slant = css_style_to_font_slant(fprop->font_style),
-    };
+    FontStyle style = { .family=fprop->family, .size_px=..., .weight=..., .slant=... };
     FontHandle* h = font_resolve(uicon->font_ctx, &style);
-    if (!h) return;
-
     const FontMetrics* m = font_get_metrics(h);
-    fprop->space_width  = m->space_width;
-    fprop->ascender     = m->ascender;
-    fprop->descender    = m->descender;
-    fprop->font_height  = m->line_height;
-    fprop->has_kerning  = m->has_kerning;
-    fprop->handle       = h;
-
+    fprop->space_width = m->space_width;
+    fprop->ascender    = m->hhea_ascender;
+    fprop->descender   = -(m->hhea_descender);
+    fprop->font_height = m->hhea_line_height;
+    fprop->has_kerning = m->has_kerning;
+    fprop->handle      = h;
     fbox->handle = h;
-    fbox->style = fprop;
-    fbox->current_font_size = (int)fprop->font_size;
 }
 ```
 
-### 7.4 Text Measurement in Layout
+### 5.4 Layout: Text Measurement
 
 ```c
-// BEFORE (layout_inline.cpp — direct FreeType glyph loading + manual kerning)
-FT_UInt gi = FT_Get_Char_Index(lycon->font.ft_face, ch);
-FT_Load_Glyph(lycon->font.ft_face, gi, FT_LOAD_DEFAULT);
-float advance = lycon->font.ft_face->glyph->advance.x / 64.0f;
-if (FT_HAS_KERNING(lycon->font.ft_face)) {
-    FT_Vector kern;
-    FT_Get_Kerning(lycon->font.ft_face, prev, gi, FT_KERNING_DEFAULT, &kern);
-    advance += kern.x / 64.0f;
-}
+// BEFORE — direct FreeType glyph loading + manual kerning
+FT_UInt gi = FT_Get_Char_Index(ft_face, ch);
+FT_Load_Glyph(ft_face, gi, FT_LOAD_DEFAULT);
+float advance = ft_face->glyph->advance.x / 64.0f;
+if (FT_HAS_KERNING(ft_face)) { FT_Get_Kerning(...); advance += kern.x / 64.0f; }
 
-// AFTER (one call, cached)
+// AFTER — one call, cached
 GlyphInfo g = font_get_glyph(fbox->handle, ch);
 float advance = g.advance_x + font_get_kerning(fbox->handle, prev_cp, ch);
 ```
 
-### 7.5 PDF Font Unification
+### 5.5 Separation of Concerns
 
-The PDF subsystem (`radiant/pdf/fonts.cpp`) currently creates its own `FT_Library`. After migration:
-
-```c
-// BEFORE
-static FT_Library pdf_ft_library;  // separate instance
-FT_Init_FreeType(&pdf_ft_library);
-
-// AFTER
-// PDF renderer receives the shared FontContext from the document
-FontHandle* h = font_resolve(doc->font_ctx, &style);
-```
+CSS `@font-face` rule **parsing** (walking stylesheets, extracting `font-family`/`src`/`font-weight` from CSS AST) stays in `radiant/font_face.cpp`. After parsing, Radiant calls `font_face_register()` to hand the descriptor to the font module. All font face **management** (storing, matching, loading, caching) lives in `lib/font/font_face.c`.
 
 ---
 
-## 8. Additional Recommendations
+## 6. Code Provenance
 
-### 8.1 Color Font Support (COLR/CPAL, sbix, CBDT/CBLC)
+Every piece of the new module is sourced from existing code — **reorganization and consolidation**, not rewrite.
 
-Beyond the core outline formats (TTF/OTF/WOFF/WOFF2), modern fonts include **color glyph data** for emoji and icons. FreeType already handles the three major color formats:
-- **Apple `sbix`**: Bitmap-based (Apple Color Emoji). Already works via `FT_Select_Size` in our codebase.
-- **Google `CBDT/CBLC`**: Bitmap-based (Noto Color Emoji). Same loading path as `sbix`.
-- **Microsoft `COLR/CPAL`**: Vector-based layered glyphs. FreeType 2.13+ renders these.
-
-The unified module's `GlyphInfo.is_color` flag already distinguishes color glyphs so renderers can handle them correctly (e.g., skip LCD subpixel filtering for emoji). No additional work needed — this comes free from FreeType.
-
-### 8.2 HarfBuzz Text Shaping (Future)
-
-The current system does character-by-character glyph loading with manual kerning. For proper international text (Arabic, Devanagari, Thai, advanced Latin ligatures), **HarfBuzz** shaping is needed. The unified font module makes this a clean addition:
-
-```c
-// Future API extension:
-typedef struct ShapedGlyph {
-    GlyphId id;
-    float x_offset, y_offset;
-    float x_advance, y_advance;
-    int cluster;                // maps back to source text position
-} ShapedGlyph;
-
-int font_shape_text(FontHandle* handle, const char* text, int byte_len,
-                    const char* language, ShapedGlyph* out, int max_glyphs);
-```
-
-HarfBuzz is already linked for FreeType on some platforms. Vendoring it alongside FreeType in `lib/font/harfbuzz/` would be consistent with the approach.
-
-### 8.3 Variable Font Support (Future)
-
-OpenType variable fonts (`.ttf` with `fvar` table) allow a single file to express a continuous range of weights, widths, and slants. FreeType already supports this via `FT_Set_Var_Design_Coordinates()`. The unified module can expose it cleanly:
-
-```c
-// Future API extension:
-typedef struct FontAxis {
-    uint32_t tag;               // e.g., 'wght', 'wdth', 'ital'
-    float min, max, default_val;
-} FontAxis;
-
-int font_get_axes(FontHandle* handle, FontAxis* axes, int max_axes);
-bool font_set_axis(FontHandle* handle, uint32_t tag, float value);
-```
-
-### 8.4 Font Subsetting for PDF Output
-
-When embedding fonts in PDF output, we currently embed entire font files. A font subsetter (keep only glyphs actually used in the document) would dramatically reduce PDF size. FreeType provides the glyph data; we just need a SFNT table builder. This is a natural fit for `font_loader.c`.
-
-### 8.5 Thread Safety Considerations
-
-FreeType's `FT_Library` is **not thread-safe** across faces. If Lambda ever moves to multi-threaded layout:
-- One `FT_Library` per thread, or
-- Mutex around face loading (face *access* after loading is thread-safe for read-only ops in FreeType 2.13+).
-
-The opaque `FontContext` makes either approach possible without API changes.
+| New File | Primary Source | What Changed |
+|----------|---------------|--------------|
+| `font_context.c` | `radiant/ui_context.cpp` | Extracted `FT_Library` init, LCD filter, config into standalone context |
+| `font_database.c` | `lib/font_config.c` (~2100 lines) | Removed global singleton; `FontContext` owns database; implemented disk cache |
+| `font_loader.c` | `radiant/font.cpp` + `radiant/font_face.cpp` | Merged all face-loading paths; unified 4 duplicated `FT_Select_Size` blocks |
+| `font_metrics.c` | `radiant/font.cpp` + `radiant/font_face.cpp` | Consolidated metric computation; always read OS/2, hhea, typo tables; cache per-face |
+| `font_glyph.c` | `radiant/font.cpp` (`load_glyph`) | Same logic + added advance cache (was open TODO) |
+| `font_cache.c` | Scattered across font.cpp, font_face.cpp | Centralized all caches with LRU eviction |
+| `font_fallback.c` | `radiant/font.cpp` + `radiant/font_face.cpp` | Merged two divergent generic-family tables into one |
+| `font_face.c` | `radiant/font_face.cpp` | Moved descriptor registry and matching; CSS parsing stays in Radiant |
+| `font_platform.c` | `radiant/font_lookup_platform.c` + `lib/font_config.c` | Merged platform discovery |
+| `font_decompress.cpp` | `radiant/font_face.cpp` | Extracted WOFF2 shim + added full WOFF1 decompressor |
 
 ---
 
-## 9. Build System Changes
+## 7. Implementation Progress
 
-### 9.1 `build_lambda_config.json` Updates
+### Phase Summary
 
-```jsonc
-{
-    // NEW: vendored FreeType (replaces system freetype dependency)
-    "name": "lambda_font",
-    "type": "static_lib",
-    "sources": [
-        "lib/font/*.c",
-        "lib/font/freetype/src/base/ftsystem.c",
-        "lib/font/freetype/src/base/ftinit.c",
-        "lib/font/freetype/src/base/ftglyph.c",
-        // ... selected FreeType source files
-    ],
-    "include": [
-        "lib/font/freetype/include"
-    ],
-    "links": [
-        "woff2dec", "woff2common",  // WOFF2 decompression
-        "brotlidec", "brotlicommon", // Brotli (WOFF2 dependency)
-        "z"                          // zlib (WOFF1 decompression + FreeType dependency)
-    ]
-}
-```
+| Phase | Description | Status | Date |
+|-------|-------------|--------|------|
+| **1** | Foundation — 12 source files in `lib/font/`, build config | ✅ Complete | 2026-02-14 |
+| **2** | Radiant migration — wire `FontContext` into `UiContext`, rewrite `setup_font()` | ✅ Complete | 2026-02-15 |
+| **3** | Caching & fallback — disk cache, bitmap cache, advance eviction, @font-face bridge | ✅ Complete | 2026-02-14 |
+| **4** | Cleanup — slim headers, remove ~335 lines of unused stubs | ✅ Complete | 2026-02-16 |
+| **5** | FT_Face migration — ~50 direct FreeType call sites → FontHandle API | ✅ Complete | 2026-02-14 |
+| **6** | Radiant integration — decouple FreeType from `view.hpp`, migrate layout FT calls | ✅ Complete | 2026-02-15 |
+| **7** | Phaseout `lib/font_config.c` — migrate all callers, exclude from build | ✅ Complete | 2026-02-15 |
 
-### 9.2 Removed Dependencies
+### Phase 1 — Foundation
 
-| Dependency | Status |
-|-----------|--------|
-| System `libfreetype.a` | **Replaced** by vendored sources |
-| `libwoff2dec.a` + `libwoff2common.a` | **Kept** (already built from source, wraps WOFF2 decompression) |
-| Brotli | **Kept** (WOFF2 dependency, already built from source) |
-| zlib | **Kept** (system lib, used by FreeType, WOFF1 decompression, and PNG) |
-| HarfBuzz (`libharfbuzz.a`) | **Kept** for now (FreeType may need it); evaluate vendoring later |
-
----
-
-## 10. Testing Plan
-
-| Test Category | Method |
-|--------------|--------|
-| **Unit tests** | New `test/test_font_gtest.cpp`: test `font_resolve`, `font_get_metrics`, `font_get_glyph`, `font_measure_text`, `font_face_register`, `font_face_find`, `font_face_load`, cache behavior |
-| **Regression** | All existing layout baseline tests (`make test-radiant-baseline`) must pass with identical output |
-| **Metrics compatibility** | Compare `font_get_metrics()` output against current `setup_font()` extracted metrics for the top 20 fonts. Differences must be zero. |
-| **Performance** | Benchmark `font_measure_text()` vs current inline FreeType path. Expect ≥2x speedup from advance caching |
-| **WOFF1** | Test loading `.woff` files from disk and data URI. Verify decompressed metrics match the equivalent `.ttf` |
-| **WOFF2** | Test loading `.woff2` files from disk and data URI. Verify metrics match TTF equivalent |
-| **All formats** | Round-trip test: for each of the top 5 fonts, load TTF, OTF, WOFF1, WOFF2 variants and verify identical `FontMetrics` |
-| **Cache** | Test LRU eviction, disk cache save/load, cache invalidation on font file change |
-| **Memory accounting** | Verify `font_get_cache_stats().memory_usage_bytes` tracks actual pool/arena usage. Verify zero leaked allocations after `font_context_destroy()` |
-| **Cross-platform** | CI runs on macOS (ARM), Linux (x86_64), Windows (MSYS2/MinGW) |
-
----
-
-## 11. Summary
-
-| Aspect | Before | After |
-|--------|--------|-------|
-| **Files** | 7+ across `lib/` and `radiant/` | 11 in `lib/font/` (font face management included) + `radiant/font_face.cpp` (only CSS @font-face parsing stays in Radiant) |
-| **Font formats** | TTF/OTF/TTC only (WOFF1 broken, WOFF2 partial) | TTF, OTF, TTC, WOFF1, WOFF2 — all first-class |
-| **Format pipeline** | Scattered across `font.cpp`, `font_face.cpp`, `font_config.c` | Single `font_loader.c` detect→decompress→load path |
-| **FT_* exposure** | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h` + `view.hpp` (FT_Face field kept for render layer; all layout call sites migrated to FontHandle in Phase 5) |
-| **FT_Library instances** | 2 (layout + PDF) | 1 (shared via FontContext) |
-| **FreeType memory** | Uses default `malloc`/`free` internally | Routed through `Pool` via `FT_Memory` |
-| **WOFF1 support** | ❌ Detected but silent failure | ✅ zlib decompression → arena buffer |
-| **WOFF2 support** | ⚠️ Only data URI path, uses `std::string` | ✅ File + data URI, arena-allocated output |
-| **System font scanning** | Skips `.woff`/`.woff2` files | Scans all font formats |
-| **Glyph advance cache** | ❌ none (TODO comment) | ✅ per-face hashmap (pool-allocated entries) |
-| **Glyph bitmap cache** | ❌ re-rasterized each frame | ✅ LRU cache (4096 entries, glyph_arena) |
-| **Disk font cache** | ❌ stubs | ✅ implemented |
-| **Generic family tables** | 2 divergent copies | 1 authoritative table |
-| **Fixed-size font handling** | 4 copy-pasted blocks | 1 `select_best_fixed_size()` |
-| **API surface for callers** | ~25 functions + raw FT types | ~15 functions, all opaque |
-| **Memory management** | Mixed `malloc`/`free`/`new`/`std::string` + some pool/arena | 100% pool/arena (`Pool` for objects, `Arena` for strings+buffers, `glyph_arena` for bitmaps) |
-| **`std::string` / `std::vector`** | Used in WOFF2 path, leaks C++ semantics | Confined to single 8-line shim function |
-
-The work is primarily **reorganization and consolidation**, not greenfield implementation. Every line of the new module traces back to existing, tested code. The result is a clean module boundary that isolates font complexity from the rest of the system and opens the door for future improvements (HarfBuzz shaping, variable fonts, font subsetting) without touching layout or rendering code.
-
-### Phase 1 Completed Files
+Created all 12 source files under `lib/font/`:
 
 | File | Lines | Key Contents |
 |------|------:|-------------|
-| `font.h` | 364 | Public API: `FontContext`, `FontHandle`, `FontMetrics`, `GlyphInfo`, `TextExtents`, `FontFaceDesc`, all `font_*()` functions. Phase 5 added `font_handle_wrap`, `font_calc_normal_line_height`, `font_get_cell_height`, `font_get_glyph_index`, `font_get_x_height_ratio`, size/family accessors, `hhea_line_height` field |
-| `font_internal.h` | 359 | Internal structs (`FontContext`, `FontHandle` full layout with `borrowed_face` flag), FT_* includes, helper macros, `_internal` function declarations |
-| `font_context.c` | 467 | `FT_Memory` pool routing, `font_context_create/destroy`, `font_handle_retain/release` (with borrowed check), `font_handle_wrap()`, `font_get_x_height_ratio()`, size/family accessors, disk cache integration |
-| `font_database.c` | 1200 | TTF table parsing (name, OS/2), directory scanning, metadata extraction, TTC support, format detection, **disk cache save/load** (binary format with mtime/size validation) |
-| `font_platform.c` | 180 | macOS (`/System/Library/Fonts`, `~/Library/Fonts`), Linux (`/usr/share/fonts`, `~/.fonts`), Windows stubs |
-| `font_loader.c` | 309 | Unified `font_load_from_file/data_uri/memory`, `select_best_fixed_size()`, format detect → decompress → `FT_New_Memory_Face` |
-| `font_decompress.cpp` | 280 | WOFF1 per-table zlib decompression, WOFF2 via `ComputeWOFF2FinalSize` + `WOFF2MemoryOut`, `font_decompress_if_needed()` dispatcher |
-| `font_metrics.c` | 357 | OS/2 table (typo metrics, `USE_TYPO_METRICS` bit 7), x_height/cap_height, space_width, kerning flag, `hhea_line_height`, underline metrics. Phase 5 added `font_calc_normal_line_height()` (Chrome algorithm with CoreText/OS2/HHEA), `font_get_cell_height()` |
-| `font_glyph.c` | 331 | Per-handle advance cache (hashmap, 4096 max with eviction), **bitmap cache** (lazy init, clear-on-full), `font_get_glyph/kerning`, `font_render_glyph`, `font_measure_text/char`, `font_get_glyph_index()` |
-| `font_cache.c` | 260 | Face cache ("family:weight:slant:size" key), LRU eviction, **`font_resolve()`** top-level pipeline: cache → @font-face → generic → database → platform → fallback |
-| `font_fallback.c` | 215 | Generic CSS families (serif, sans-serif, monospace, cursive, fantasy, system-ui, ui-monospace + Apple/cross-platform aliases), codepoint fallback with negative caching |
-| `font_face.c` | 278 | `font_face_register/find/list/load/clear`, weight/slant distance scoring, pool/arena-copied descriptors |
+| `font.h` | 364 | Public API: `FontContext`, `FontHandle`, `FontMetrics`, `GlyphInfo`, `TextExtents`, all `font_*()` functions |
+| `font_internal.h` | 359 | Internal structs, FT_* includes, `_internal` function declarations |
+| `font_context.c` | 467 | `FT_Memory` pool routing, create/destroy, `font_handle_retain/release/wrap`, accessors |
+| `font_database.c` | 1200 | TTF table parsing, directory scanning, metadata extraction, TTC support, disk cache save/load |
+| `font_platform.c` | 180 | macOS/Linux/Windows directory discovery |
+| `font_loader.c` | 309 | Unified `font_load_from_file/data_uri/memory`, `select_best_fixed_size()`, format pipeline |
+| `font_decompress.cpp` | 280 | WOFF1 zlib decompression, WOFF2 via libwoff2, `font_decompress_if_needed()` |
+| `font_metrics.c` | 357 | OS/2, hhea, typo metrics; x_height/cap_height; `font_calc_normal_line_height()` |
+| `font_glyph.c` | 331 | Advance cache (4096 max), bitmap cache, `font_get_glyph/kerning/glyph_index` |
+| `font_cache.c` | 260 | Face cache with LRU, `font_resolve()` 7-step pipeline |
+| `font_fallback.c` | 215 | Generic CSS families, codepoint fallback with negative caching |
+| `font_face.c` | 278 | `font_face_register/find/list/load/clear`, weight/slant scoring |
+
+**Implementation notes:**
+- Old `lib/font_config.c` coexisted during Phases 1–6; phased out in Phase 7.
+- New database functions use `_internal` suffix to avoid link-time conflicts.
+- FreeType linked as system library (`/opt/homebrew/opt/freetype`); vendoring deferred.
+- `font_decompress.cpp` — only C++ file; `std::string` eliminated via `ComputeWOFF2FinalSize()` + arena pre-allocation.
+
+### Phase 2 — Radiant Migration
+
+**Approach:** Hybrid migration — both `FT_Face` and `FontHandle*` coexist in `FontProp`/`FontBox` for backward compatibility. `setup_font()` is the single migration point.
+
+**Files modified:**
+- `radiant/view.hpp` — forward declarations for `FontContext`/`FontHandle`; added `font_handle` to `FontProp`/`FontBox`; added `font_ctx` to `UiContext`
+- `radiant/ui_context.cpp` — create `FontContext` with actual `pixel_ratio`; destroy in cleanup
+- `radiant/font.cpp` — rewritten `setup_font()`: try @font-face → `font_resolve()` → legacy fallback
+- `lib/font/font.h` — renamed `FontStyle` → `FontStyleDesc`, `FontFaceSrc` → `FontFaceSource` to avoid collisions
+
+### Phase 3 — Caching & Fallback
+
+Most Phase 3 features (LRU face cache, advance cache, fallback chains, @font-face registry) were already implemented in Phase 1. Phase 3 filled gaps:
+
+- **Disk cache** — `font_database_save_cache_internal()` / `load_cache_internal()` with binary format (magic `0x4C464E54`, version 1, mtime/size validation)
+- **Bitmap cache** — lazy hashmap init, clear-on-full eviction, wired into `font_render_glyph()`
+- **Advance cache eviction** — `ADVANCE_CACHE_MAX_ENTRIES` (4096) per `FontHandle`
+- **@font-face bridge** — `register_font_face()` converts CssEnum → FontWeight/FontSlant, calls `font_face_register()`
+- **Header cleanup** — removed 7 unused types and ~30 unused declarations from `radiant/font_face.h`
+
+### Phase 4 — Cleanup
+
+- Removed `FT_SFNT_NAMES_H` from `view.hpp` (unused)
+- Removed redundant FT includes from `font_face.h`
+- Slimmed `font.h`: removed `FontfaceEntry` and internal declarations
+- Removed ~335 lines of unused stubs from `font_face.cpp` (12 stub functions, 5 types)
+- Removed unused `cache_character_width`/`get_cached_char_width` declarations
+- FreeType header removal from `view.hpp` deferred to Phase 6
+- `lib/font_config.c` phaseout deferred to Phase 7
+
+### Phase 5 — FT_Face → FontHandle Migration
+
+**Scope:** ~50 direct FreeType API call sites, ~30 `size->metrics` accesses, ~10 `family_name` accesses across 15+ files.
+
+**New APIs added to `font.h`:**
+- `font_handle_wrap()` — wraps borrowed `FT_Face` without ownership transfer
+- `font_calc_normal_line_height()` — Chrome-compatible (CoreText → OS/2 → HHEA fallback)
+- `font_get_cell_height()` — text rect height with Apple 15% hack
+- `font_get_glyph_index()` — replaces `FT_Get_Char_Index`
+- `font_get_x_height_ratio()` — x-height / em-size for CSS `ex` unit
+- `font_handle_get_family_name()`, `font_handle_get_size_px()`, `font_handle_get_physical_size_px()`
+- `hhea_line_height`, `underline_position`, `underline_thickness` in `FontMetrics`
+
+**Key signature changes:**
+- `load_glyph(UiContext*, FT_Face, ...)` → `load_glyph(UiContext*, FontHandle*, ...)`
+- `calc_normal_line_height(FT_Face, ...)` → `calc_normal_line_height(FontHandle*)`
+- `FT_UInt prev_glyph_index` → `uint32_t prev_glyph_index` in `layout.hpp`
+
+**Borrowed FontHandle:** The legacy path wraps `FT_Face` via `font_handle_wrap()` with a `borrowed_face` flag that prevents `FT_Done_Face` on release, so `font_handle` is **always** populated after `setup_font()`.
+
+**Critical bugs found and fixed (36 regressions → 0):**
+
+1. **`FontMetrics.line_height` vs HHEA height confusion** — `ascender`/`descender` get overwritten by OS/2 typo values when `USE_TYPO_METRICS` is set, producing different heights. **Fix:** Added `hhea_line_height` field computed from HHEA values only.
+
+2. **`FontProp` ascender/descender using typo values** — must always use HHEA values for backward compatibility. **Fix:** Populate from `m->hhea_ascender` / `m->hhea_descender`.
+
+3. **`font_get_x_height_ratio()` wrong formula** — computed pixel-based ratio instead of font-unit ratio (`sxHeight / units_per_EM`). For Ahem font: 0.56 instead of correct 0.8, causing `font-size: 7.5ex` → 90px instead of 96px. Majority of the 36 failures. **Fix:** Read `sxHeight / units_per_EM` directly from `FT_Face`.
+
+### Phase 6 — Radiant Integration (FreeType Decoupling)
+
+**Type changes in `view.hpp`:**
+- Removed `#include <ft2build.h>` and `#include FT_FREETYPE_H`
+- Removed dead `FontProp.ft_face` field
+- `FontBox.ft_face`: `FT_Face` → `void*`; `UiContext.ft_library`: `FT_Library` → `void*`
+- `load_styled_font()` / `load_glyph()` returns → `void*`
+
+**New APIs:** `font_get_kerning_by_index()`, `FontMetrics.use_typo_metrics`
+
+**Layout files fully migrated (no FT includes):**
+- `layout_text.cpp` — `FT_Load_Char` → `font_get_glyph()`, `FT_Get_Kerning` → `font_get_kerning_by_index()`
+- `intrinsic_sizing.cpp` — 6 sites migrated
+- `event.cpp` — 1 site
+- `layout.cpp` — `FT_Get_Sfnt_Table` → `FontMetrics.use_typo_metrics` (fully FT-free)
+
+**Files with local FT includes** (still need direct FT access for rendering):
+`font.cpp`, `font_face.h/cpp`, `ui_context.cpp`, `render.cpp`, `render_form.cpp`, `render_svg.cpp`, `render_pdf.cpp`, `event.cpp`, `intrinsic_sizing.cpp`, `pdf/cmd_view_pdf.cpp`
+
+### Phase 7 — Phaseout `lib/font_config.c`
+
+Removed all dependencies on `lib/font_config.c/h`, migrated callers, excluded from build.
+
+**New APIs:** `font_family_exists()`, `font_find_path()`, `font_find_best_match()`, `font_slant_to_string()`
+
+**Callers migrated:**
+- `radiant/font.cpp` — `load_font_path(FontDatabase*)` → `load_font_path(FontContext*)`; uses `font_find_best_match()`
+- `radiant/font_face.cpp` — removed system font fallback that bypassed `font_resolve()`
+- `radiant/ui_context.cpp` — removed `font_database_get_global()` init/cleanup
+- `radiant/resolve_css_style.cpp` — `font_database_find_all_matches()` → `font_family_exists()`
+- `radiant/view.hpp` — removed `FontDatabase` forward declaration and `UiContext.font_db`
+
+**Bugs found and fixed (14 regressions → 0):**
+
+1. **Generic family aliases** — concrete font names (Arial, Times) mapped to generic lists, causing `font_resolve()` to bypass weight/slant matching. Fix: removed concrete aliases.
+
+2. **Placeholder suffix stripping** — `"Arial Bold.ttf"` kept "Arial Bold" because only dash-separated suffixes were stripped. Fix: added space-separated suffix stripping.
+
+3. **CamelCase splitting** — `"HelveticaNeue.ttc"` → "HelveticaNeue" didn't match "Helvetica Neue". Fix: added CamelCase → space-separated splitting.
+
+4. **`load_font_with_descriptors()` bypass** — system font fallback called `load_styled_font()` directly, bypassing `font_resolve()`. Fix: removed; let `setup_font` handle system fonts.
+
+5. **CSS enum weight collision** — `CSS_VALUE_NORMAL=307` fell in the 100–900 numeric range, treated as weight 307 instead of 400. Fix: explicit enum comparisons.
+
+6. **Priority font parsing limit** — `priority_parsed < 20` cap prevented Times.ttc from being parsed. Fix: removed arbitrary limit.
+
+---
+
+## 8. Before / After Summary
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| **Files** | 7+ across `lib/` and `radiant/` | 12 in `lib/font/` + `woff2/` (5 bundled) |
+| **Font formats** | TTF/OTF/TTC (WOFF1 broken, WOFF2 partial) | TTF, OTF, TTC, WOFF1, WOFF2 — all first-class |
+| **Format pipeline** | Scattered across 3 files | Single `font_loader.c` detect→decompress→load |
+| **FT_* exposure** | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h` (layout fully migrated) |
+| **FT_Library instances** | 2 (layout + PDF) | 1 shared via FontContext |
+| **Glyph advance cache** | ❌ (open TODO) | ✅ per-face hashmap, 4096 entries |
+| **Glyph bitmap cache** | ❌ re-rasterized each frame | ✅ LRU, 4096 entries |
+| **Disk font cache** | ❌ stubs | ✅ binary format with mtime validation |
+| **Generic family tables** | 2 divergent copies | 1 authoritative table |
+| **`FT_Select_Size` handling** | 4 copy-pasted blocks | 1 `select_best_fixed_size()` |
+| **Memory management** | Mixed malloc/free/new/std::string | 100% pool/arena |
+| **`std::string`** | Used in WOFF2 path | Confined to single function |
+| **libwoff2** | External `libwoff2dec.a` + `libwoff2common.a` | Bundled decode-only sources in `woff2/` |
+| **API surface** | ~25 functions + raw FT types | ~20 opaque functions |
+
+---
+
+## 9. Future Work
+
+### 9.1 Render Layer Migration
+Migrate render-layer `(FT_Face)` casts to FontHandle-based APIs (10 sites in `render.cpp`). Remove `FontBox.ft_face` field and local FT includes once fully migrated.
+
+### 9.2 HarfBuzz Text Shaping
+Current system does character-by-character glyph loading with manual kerning. For proper international text (Arabic, Devanagari, Thai), HarfBuzz shaping is needed. The opaque FontHandle makes this a clean addition.
+
+### 9.3 Variable Font Support
+OpenType variable fonts (`fvar` table) allow continuous weight/width/slant ranges. FreeType already supports this via `FT_Set_Var_Design_Coordinates()`.
+
+### 9.4 Font Subsetting for PDF
+Embed only glyphs actually used in the document instead of entire font files. Natural fit for `font_loader.c`.
+
+### 9.5 FreeType Vendoring
+Bundle selected FreeType source files directly (skip BDF, PCF, PFR, Type1 drivers). Currently linked as system library.
+
+### 9.6 Thread Safety
+FreeType's `FT_Library` is not thread-safe across faces. Options: per-thread library, or mutex around face loading. The opaque `FontContext` makes either approach possible without API changes.
