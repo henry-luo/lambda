@@ -880,6 +880,30 @@ static float calculate_match_score(FontEntry* entry, FontDatabaseCriteria* crite
         if (supported) score += 15.0f;
     }
 
+    // standard font preference — prefer standard variants over Unicode/specialty
+    // variants for better browser compatibility (ported from font_config.c)
+    if (entry->file_path) {
+        const char* filename = strrchr(entry->file_path, '/');
+        filename = filename ? filename + 1 : entry->file_path;
+
+        // penalty for Unicode variants when standard font requested
+        if (strstr(filename, "Unicode") && !strstr(criteria->family_name, "Unicode")) {
+            score -= 8.0f;
+        }
+
+        // penalty for oversized font files (likely comprehensive Unicode fonts)
+        if (entry->file_size > 5 * 1024 * 1024) { // > 5MB
+            score -= 5.0f;
+        }
+
+        // bonus for exact filename matches (e.g., "Arial.ttf" for "Arial")
+        char expected[256];
+        snprintf(expected, sizeof(expected), "%s.ttf", criteria->family_name);
+        if (str_ieq(filename, strlen(filename), expected, strlen(expected))) {
+            score += 10.0f;
+        }
+    }
+
     return score;
 }
 

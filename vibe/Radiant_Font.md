@@ -12,7 +12,7 @@
 | **Phase 4** | Cleanup — slim headers, remove ~335 lines of unused stubs from `font_face.cpp`                       | ✅ Complete | 2026-02-16 |
 | **Phase 5** | FT_Face migration — migrate ~50 direct FreeType API call sites across 15+ files to FontHandle API     | ✅ Complete | 2026-02-14 |
 | **Phase 6** | Radiant integration — decouple FreeType from `view.hpp`, migrate layout FT calls to font module APIs | ✅ Complete | 2026-02-15 |
-| **Phase 7** | Phaseout `lib/font_config.c` — migrate all callers to `lib/font/` APIs, exclude from build            | ✅ Complete | 2026-02-16 |
+| **Phase 7** | Phaseout `lib/font_config.c` — migrate all callers to `lib/font/` APIs, exclude from build            | ✅ Complete | 2026-02-15 |
 
 **Build:** 0 errors · **Lambda baseline:** 224/224 ✅ · **Radiant baseline:** 1972/1972 ✅
 
@@ -517,6 +517,75 @@ This means **all memory** — FreeType internals, our structs, decompressed font
 - Deterministic cleanup via `pool_destroy()` + `arena_destroy()`.
 - No memory leaks from forgotten `free()` calls.
 
+### 3.6 Font Database: 3-Phase Scan & Matching
+
+`font_database.c` implements a **3-phase lazy scan** designed to minimize startup cost. Only web-safe fonts are parsed upfront; everything else is deferred to first use.
+
+#### 3-Phase Scan (`font_database_scan_internal`)
+
+```
+Phase 1 — Fast File Discovery (no parsing)
+  Recursively walk platform font directories.
+  For each .ttf/.otf/.ttc/.woff/.woff2 file, create a FontEntry placeholder:
+    • family_name = heuristic from filename (e.g. "ArialBold.ttf" → "Arial")
+    • is_placeholder = true (not yet parsed)
+    • file_path, file_size, file_mtime recorded
+  Filters: skip cache/temp directories, skip files < 1KB or > 50MB.
+
+Phase 2 — Priority Font Parsing (web-safe fonts only)
+  Walk all placeholders. If family_name matches a priority font, parse it:
+    • TTF/OTF: read name table → real family, subfamily, weight, style
+    • TTC: parse up to MAX_TTC_FONTS (4) faces per collection
+  Priority list: Arial, Helvetica, Times, Times New Roman, Courier,
+    Courier New, Verdana, Georgia, Trebuchet MS, Helvetica Neue,
+    Monaco, Menlo, SF Pro, DejaVu Sans/Serif, Liberation Sans/Serif, etc.
+
+Phase 3 — Organize into Families
+  Build hashmap: family_name → FontFamily (list of FontEntry*).
+  Index by postscript_name and file_path for direct lookups.
+  Only fully-parsed entries are organized; placeholders remain in all_fonts[].
+```
+
+#### Lazy On-Demand Loading
+
+When `font_database_find_best_match_internal()` is called for a family not in the hashmap:
+
+1. Scan `all_fonts[]` for placeholders whose heuristic `family_name` matches.
+2. Parse each matching placeholder in-place (`parse_placeholder_font` / `parse_ttc_font_metadata`).
+3. Re-run `organize_fonts_into_families()` to add newly parsed entries.
+4. Score and return the best match from the now-populated family.
+
+This means an uncommon font (e.g. "Papyrus") is never parsed unless actually requested by CSS.
+
+#### Placeholder Family Name Heuristics
+
+`create_font_placeholder()` extracts a usable family name from the filename alone:
+
+1. Strip extension: `"ArialBold.ttf"` → `"ArialBold"`
+2. Strip dash-separated style suffixes: `"Arial-BoldItalic"` → `"Arial"`
+3. Strip space-separated style suffixes (3 passes for compounds): `"Arial Bold Italic"` → `"Arial"`
+4. Split CamelCase boundaries: `"HelveticaNeue"` → `"Helvetica Neue"`
+
+Suffixes stripped: `Bold`, `Italic`, `Oblique`, `Light`, `Thin`, `Medium`, `Heavy`, `Black`, `Regular`, `Condensed`, `Narrow`, `Wide`, `Extended`, `Semi`, `Demi`, `Extra`, `Ultra`.
+
+#### Match Scoring (`calculate_match_score`)
+
+Scoring is additive (100 max) with penalties for undesirable variants:
+
+| Criterion | Points | Notes |
+|-----------|--------|-------|
+| **Family name (exact)** | +40 | Case-insensitive `str_ieq` |
+| **Family name (generic fallback)** | +25 | e.g. "sans-serif" → Arial, Helvetica |
+| **Weight proximity** | +20/+15/+10/+5 | diff 0 / ≤100 / ≤200 / ≤300 |
+| **Style match** | +15 | normal/italic/oblique |
+| **Monospace preference** | +10 | When `prefer_monospace` set |
+| **Unicode codepoint support** | +15 | Required codepoint in ranges |
+| **Unicode variant penalty** | −8 | "Arial Unicode.ttf" when "Arial" requested |
+| **Oversized font penalty** | −5 | File > 5 MB (likely CJK/Unicode superset) |
+| **Exact filename bonus** | +10 | "Arial.ttf" for family "Arial" |
+
+The last three heuristics (ported from `font_config.c`) prevent selecting comprehensive Unicode fonts like "Arial Unicode.ttf" (23 MB) over the standard "Arial.ttf" (773 KB), which would produce text 25-33% taller than browser baselines.
+
 ---
 
 ## 4. Public API Design (`font.h`)
@@ -863,8 +932,8 @@ For WOFF1, no new library is needed — `zlib` is already linked (FreeType depen
 - ✅ **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
 
 **Implementation notes (Phase 1):**
-- Old `lib/font_config.c` coexists with new `lib/font/` module during migration. Naming conflict on `font_add_scan_directory` resolved by renaming the new function to `font_context_add_scan_directory`.
-- New database functions use `_internal` suffix to avoid symbol collisions.
+- Old `lib/font_config.c` coexisted with new `lib/font/` module during Phases 1–6. **Phased out in Phase 7** — excluded from build, all callers migrated. Naming conflict on `font_add_scan_directory` resolved by renaming the new function to `font_context_add_scan_directory`.
+- New database functions use `_internal` suffix to avoid symbol collisions (originally to prevent link-time conflicts with `font_config.c`; suffix retained for clarity).
 - FreeType remains linked as system library (`/opt/homebrew/opt/freetype`) for now; vendoring deferred to Phase 4.
 - `font_decompress.cpp` (not `.c`) — the only C++ file, because libwoff2's `WOFF2MemoryOut` requires C++ construction. The `std::string` elimination uses `ComputeWOFF2FinalSize()` + arena pre-allocation instead.
 - `lib/` API discoveries during build: `arraylist_new(0)` / `arraylist_append()` (not `arraylist_create`/`arraylist_add`), `str_icmp` takes 4 args `(a, a_len, b, b_len)`, `base64_decode` returns `uint8_t*`, no `file_read()` utility exists (uses manual `fopen`/`fread`).
@@ -895,7 +964,8 @@ For WOFF1, no new library is needed — `zlib` is already linked (FreeType depen
 - ✅ Removed ~335 lines of unused stubs from `font_face.cpp`: `EnhancedFontBox`, `FontMatchCriteria`, `FontMatchResult`, `FontFallbackChain` types and 12 stub functions (`calculate_font_match_score`, `find_best_font_match`, `build_fallback_chain`, `font_supports_codepoint`, `resolve_font_for_codepoint`, `cache_codepoint_font_mapping`, `compute_enhanced_font_metrics`, `calculate_line_height_from_css`, `apply_pixel_ratio_to_font_metrics`, `scale_font_size_for_display`, `ensure_pixel_ratio_compatibility`, `setup_font_enhanced`). All duplicated by `lib/font/` or never called.
 - ✅ Removed unused `cache_character_width`/`get_cached_char_width` declarations from `font_face.h`.
 - ✅ `FT_FREETYPE_H` removed from `view.hpp` in **Phase 6** — `FT_Face`/`FT_Library` replaced with `void*`, local FT includes added to files that still need direct FT access.
-- ⏸ Kept `radiant/font.cpp`, `radiant/font_lookup_platform.c`, `lib/font_config.c/h` — still actively used. `font_lookup_platform.c` provides CoreText metrics (CTFontGetAscent/Descent/Leading with Chrome's 15% hack) now consumed by `font_calc_normal_line_height()` and `font_get_cell_height()` in `lib/font/font_metrics.c` via extern linkage.
+- ✅ `lib/font_config.c/h` phased out in **Phase 7** — excluded from build, all callers migrated to `lib/font/` APIs.
+- ⏸ Kept `radiant/font.cpp`, `radiant/font_lookup_platform.c` — still actively used. `font_lookup_platform.c` provides CoreText metrics (CTFontGetAscent/Descent/Leading with Chrome's 15% hack) now consumed by `font_calc_normal_line_height()` and `font_get_cell_height()` in `lib/font/font_metrics.c` via extern linkage.
 - ⏸ PDF `FT_Library` kept separate — PDF font loading runs at lambda/input layer (no `UiContext` available), correctly isolated.
 - **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
 
@@ -919,7 +989,7 @@ For WOFF1, no new library is needed — `zlib` is already linked (FreeType depen
 - ✅ Added local FT includes + `void*` → FT casts to 11 files that still need direct FT access for rendering.
 - ✅ **Build:** 0 errors. **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
 
-**Phase 7 — Phaseout `lib/font_config.c` ✅ COMPLETE (2026-02-16)**
+**Phase 7 — Phaseout `lib/font_config.c` ✅ COMPLETE (2026-02-15)**
 
 Removed all remaining dependencies on `lib/font_config.c` and `lib/font_config.h`, migrated callers to `lib/font/` APIs, excluded `font_config.c` from build. Fixed 6 bugs discovered during regression testing (14 → 0 failures).
 
