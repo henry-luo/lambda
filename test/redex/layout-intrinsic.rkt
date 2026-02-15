@@ -181,12 +181,27 @@
           (cadar ps)]
          [else (loop (cdr ps))]))]))
 
-(define (extract-box-model styles)
+(define (extract-box-model styles [containing-width #f])
   (define-values (mt mr mb ml) (get-edges styles 'margin))
   (define-values (pt pr pb pl) (get-edges styles 'padding))
   (define-values (bt br bb bl) (get-edges styles 'border-width))
   (define bs (get-style-prop styles 'box-sizing 'content-box))
-  (box-model mt mr mb ml pt pr pb pl bt br bb bl bs))
+  ;; resolve percentage margins/paddings against containing block width
+  (define (resolve-edge v)
+    (match v
+      [`(% ,pct)
+       (if (and containing-width (number? containing-width)
+                (< containing-width +inf.0))
+           (* (/ pct 100) containing-width)
+           0)]
+      [(? number?) v]
+      ['auto 0]
+      [_ 0]))
+  (box-model (resolve-edge mt) (resolve-edge mr)
+             (resolve-edge mb) (resolve-edge ml)
+             (resolve-edge pt) (resolve-edge pr)
+             (resolve-edge pb) (resolve-edge pl)
+             bt br bb bl bs))
 
 (define (get-edges styles prop-name)
   (match styles
