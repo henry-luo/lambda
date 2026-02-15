@@ -79,8 +79,6 @@ inline T lerp(T a, T b, float t) {
 // Forward declarations
 struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
-struct FontDatabase;
-typedef struct FontDatabase FontDatabase;
 struct FontContext;
 struct FontHandle;
 
@@ -1207,7 +1205,6 @@ typedef struct {
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
-    FontDatabase *font_db;
     void* ft_library;  // opaque FT_Library handle (cast to FT_Library where needed)
     struct FontContext* font_ctx; // unified font context
     struct hashmap* fontface_map;  // cache of font faces loaded
