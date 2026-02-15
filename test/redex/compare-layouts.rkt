@@ -196,7 +196,12 @@
 (define (parse-view-node view)
   (match view
     [`(view ,id ,x ,y ,w ,h ,children)
-     (values (->num x) (->num y) (->num w) (->num h) children)]
+     ;; filter out view-text children (text nodes aren't in the reference expected tree)
+     (define element-children
+       (filter (lambda (c)
+                 (match c [`(view-text . ,_) #f] [_ #t]))
+               children))
+     (values (->num x) (->num y) (->num w) (->num h) element-children)]
     [`(view ,id ,x ,y ,w ,h)
      (values (->num x) (->num y) (->num w) (->num h) '())]
     [`(view-text ,id ,x ,y ,w ,h ,text)

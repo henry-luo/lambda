@@ -85,6 +85,9 @@
     [`(flex ,id ,styles (,children ...))
      (define avail-w (avail-width->number (cadr avail)))
      (define avail-h (avail-height->number (caddr avail)))
+     ;; detect intrinsic sizing mode (av-max-content or av-min-content)
+     (define is-intrinsic-width-sizing?
+       (or (eq? (cadr avail) 'av-max-content) (eq? (cadr avail) 'av-min-content)))
      (define bm (extract-box-model styles))
 
      ;; extract flex container properties
@@ -102,7 +105,19 @@
 
      ;; resolve container's content size
      ;; even if avail-w is #f (indefinite), explicit px widths still resolve
-     (define content-w (resolve-block-width styles (or avail-w 0)))
+     ;; per CSS spec: percentage widths against indefinite containing blocks behave as auto
+     (define css-width-raw (get-style-prop styles 'width 'auto))
+     (define pct-width-indefinite?
+       (and (not avail-w) (match css-width-raw [`(% ,_) #t] [_ #f])))
+     (define effective-styles-for-width
+       (if pct-width-indefinite?
+           ;; strip percentage width → treat as auto
+           (match styles
+             [`(style . ,props)
+              `(style ,@(filter (lambda (p) (not (and (pair? p) (eq? (car p) 'width)))) props))]
+             [_ styles])
+           styles))
+     (define content-w (resolve-block-width effective-styles-for-width (or avail-w 0)))
      (define explicit-h (resolve-block-height styles avail-h))
 
      ;; resolve percentage gaps:
@@ -123,9 +138,13 @@
      ;; for row: when the container has auto width and avail-w is indefinite (max-content mode),
      ;; main-avail must be +inf.0 so items don't erroneously shrink to 0.
      ;; content-w = 0 in that case (from resolve-block-width with auto/0), which is wrong for flex.
+     ;; percentage width with indefinite containing block also behaves as auto.
+     (define effective-width-auto?
+       (or (eq? (get-style-prop styles 'width 'auto) 'auto)
+           pct-width-indefinite?))
      (define main-avail
        (if is-row?
-           (if (and (eq? (get-style-prop styles 'width 'auto) 'auto) (not avail-w))
+           (if (and effective-width-auto? (not avail-w))
                +inf.0
                content-w)
            (or explicit-h +inf.0)))
@@ -152,7 +171,7 @@
      (define cross-gap (if is-row? row-gap col-gap))
 
      ;; === Phase 1: Collect flex items ===
-     (define items (collect-flex-items children styles is-row? main-avail dispatch-fn))
+     (define items (collect-flex-items children styles is-row? main-avail cross-avail dispatch-fn))
 
      ;; === Phase 2: Sort by order ===
      (define sorted-items
@@ -172,9 +191,11 @@
      ;; main-definite? = true when the container has a definite main-axis size
      ;; for row: explicit width OR definite available width from parent
      ;; for column: explicit height
+     ;; percentage width with indefinite containing block is NOT definite
      (define main-definite?
        (if is-row?
-           (or (not (eq? (get-style-prop styles 'width 'auto) 'auto))
+           (or (and (not effective-width-auto?)
+                    (not (eq? (get-style-prop styles 'width 'auto) 'auto)))
                (and avail-w #t))
            (and explicit-h #t)))
      (define resolved-lines
@@ -224,20 +245,73 @@
 
      ;; compute final container size
      ;; for auto-width row containers, use total-main to get intrinsic width
+     ;; percentage width with indefinite containing block → treated as auto
      (define has-explicit-width?
-       (not (eq? (get-style-prop styles 'width 'auto) 'auto)))
+       (and (not pct-width-indefinite?)
+            (not (eq? (get-style-prop styles 'width 'auto) 'auto))))
+     (define has-explicit-height?
+       (not (eq? (get-style-prop styles 'height 'auto) 'auto)))
+     (define aspect-ratio-val (get-style-prop styles 'aspect-ratio #f))
+     ;; for intrinsic row sizing: per CSS Flexbox §9.9.1, flex items with
+     ;; explicit flex-basis and flex-grow:0 contribute 0 to the container's
+     ;; intrinsic width (the flex-basis is a layout hint, not a content size)
+     (define intrinsic-row-adjust
+       (if (and is-row? (not has-explicit-width?) is-intrinsic-width-sizing?)
+           (for/sum ([line (in-list cross-sized-lines)])
+             (for/sum ([item (in-list (flex-line-items line))])
+               (define grow (flex-item-flex-grow item))
+               (define basis-val (get-style-prop (flex-item-styles item) 'flex-basis 'auto))
+               (define has-explicit-basis? (not (eq? basis-val 'auto)))
+               ;; items with explicit flex-basis and flex-grow:0 should not
+               ;; contribute their flex-basis to intrinsic width
+               (if (and has-explicit-basis? (= grow 0))
+                   (let ([item-bm (flex-item-bm item)])
+                     ;; subtract the flex-basis contribution, leaving 0 contribution
+                     (- 0 (+ (flex-item-main-size item)
+                             (horizontal-pb item-bm)
+                             (horizontal-margin item-bm))))
+                   0)))
+           0))
      (define final-content-w
-       (cond
-         [is-row?
-          (if has-explicit-width? content-w (max content-w total-main))]
-         [else (max content-w total-cross)]))
+       (let ([raw-w (cond
+                      [is-row?
+                       (if has-explicit-width? content-w (max content-w (+ total-main intrinsic-row-adjust)))]
+                      [else (max content-w total-cross)])])
+         ;; aspect-ratio: if width is auto and height is explicit (resolved), derive width
+         (if (and (not has-explicit-width?)
+                  has-explicit-height?
+                  explicit-h (number? explicit-h)
+                  aspect-ratio-val (number? aspect-ratio-val) (> aspect-ratio-val 0))
+             ;; aspect-ratio = width / height → width = height * ratio
+             (let* ([vert-pb (+ (box-model-padding-top bm) (box-model-padding-bottom bm)
+                                (box-model-border-top bm) (box-model-border-bottom bm))]
+                    [horiz-pb (+ (box-model-padding-left bm) (box-model-padding-right bm)
+                                 (box-model-border-left bm) (box-model-border-right bm))]
+                    [bb-h (+ explicit-h vert-pb)]
+                    [bb-w (* bb-h aspect-ratio-val)])
+               (max 0 (- bb-w horiz-pb)))
+             raw-w)))
      (define final-content-h
        (let ([raw-h (or explicit-h
                         (if is-row? total-cross total-main))])
+         ;; aspect-ratio: if height is auto and width is explicit, derive height
+         (define aspect-ratio (get-style-prop styles 'aspect-ratio #f))
+         (define ar-h
+           (if (and (not explicit-h)
+                    has-explicit-width?
+                    aspect-ratio (number? aspect-ratio) (> aspect-ratio 0))
+               ;; aspect-ratio = width / height → height = width / ratio
+               ;; use border-box width for calculation, then subtract vertical pb
+               (let* ([bb-w (compute-border-box-width bm content-w)]
+                      [bb-h (/ bb-w aspect-ratio)]
+                      [vert-pb (+ (box-model-padding-top bm) (box-model-padding-bottom bm)
+                                  (box-model-border-top bm) (box-model-border-bottom bm))])
+                 (max 0 (- bb-h vert-pb)))
+               raw-h))
          ;; apply min/max height even when height is auto
          (define min-h (resolve-min-height styles avail-h))
          (define max-h (resolve-max-height styles avail-h))
-         (max min-h (min max-h raw-h))))
+         (max min-h (min max-h ar-h))))
 
      ;; guard against +inf.0 in final sizes
      (define safe-content-h
@@ -402,7 +476,7 @@
 ;; Phase 1: Collect Flex Items
 ;; ============================================================
 
-(define (collect-flex-items children container-styles is-row? main-avail dispatch-fn)
+(define (collect-flex-items children container-styles is-row? main-avail cross-avail dispatch-fn)
   (for/list ([child (in-list children)]
              [child-idx (in-naturals)]
              #:unless (match child [`(none ,_) #t] [_ #f])
@@ -438,7 +512,10 @@
            ;; aspect-ratio: derive main from cross dimension
            [(and aspect-ratio (number? aspect-ratio) (> aspect-ratio 0))
             (define cross-prop (if is-row? 'height 'width))
-            (define cross-val (resolve-size-value (get-style-prop styles cross-prop 'auto) (if is-row? #f main-avail)))
+            ;; for row flex: resolve percentage cross (height) against container's cross size
+            ;; for column flex: resolve percentage cross (width) against main-avail
+            (define cross-ref (if is-row? cross-avail main-avail))
+            (define cross-val (resolve-size-value (get-style-prop styles cross-prop 'auto) cross-ref))
             (if cross-val
                 ;; cross is known, derive main via ratio
                 ;; aspect-ratio = width/height
@@ -838,8 +915,11 @@
       ;; so they shrink-to-fit to content (CSS §9.4 step 8)
       (define is-multi-line-wrapping? (not (eq? wrap-mode 'nowrap)))
       (define cross-size-prop (if is-row? 'height 'width))
+      (define cross-size-val (get-style-prop item-styles cross-size-prop 'auto))
       (define has-item-explicit-cross?
-        (not (eq? (get-style-prop item-styles cross-size-prop 'auto) 'auto)))
+        (not (eq? cross-size-val 'auto)))
+      ;; detect percentage cross sizes — they resolve to auto when cross-avail is indefinite
+      (define is-pct-cross? (match cross-size-val [`(% ,_) #t] [_ #f]))
       (define cross-avail-spec
         (cond
           [(and is-multi-line-wrapping? (> (length lines) 1))
@@ -848,6 +928,12 @@
           ;; non-stretch items without explicit cross size should shrink-to-fit
           [(and (not (eq? item-effective-align 'align-stretch))
                 (not has-item-explicit-cross?))
+           'indefinite]
+          ;; percentage cross sizes with indefinite cross-avail (0 from auto width) →
+          ;; treat as indefinite so the percentage resolves to auto
+          [(and is-pct-cross? (or (not (number? cross-avail))
+                                   (infinite? cross-avail)
+                                   (= cross-avail 0)))
            'indefinite]
           [(and (number? cross-avail) (not (infinite? cross-avail)))
            `(definite ,cross-avail)]
