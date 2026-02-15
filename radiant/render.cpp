@@ -10,10 +10,6 @@
 #include "form_control.hpp"
 #include "state_store.hpp"
 
-// FreeType for glyph rendering and font metric access
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "../lib/log.h"
 #include "../lib/font/font.h"
 #include "../lib/avl_tree.h"
@@ -118,20 +114,20 @@ static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
 }
 
 // draw a color glyph bitmap (BGRA format, used for color emoji) into the doc surface
-void draw_color_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
+void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     int left = max(rdcon->block.clip.left, x);
     int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
     int top = max(rdcon->block.clip.top, y);
-    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->rows);
+    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->height);
     if (left >= right || top >= bottom) return; // glyph outside the surface
     ImageSurface* surface = rdcon->ui_context->surface;
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
-        uint8_t* src_row = bitmap->buffer + i * bitmap->pitch;
+        uint8_t* glyph_row = bitmap->buffer + i * bitmap->pitch;
         for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
             // BGRA format: Blue, Green, Red, Alpha (4 bytes per pixel)
-            uint8_t* src = src_row + j * 4;
+            uint8_t* src = glyph_row + j * 4;
             uint8_t src_b = src[0], src_g = src[1], src_r = src[2], src_a = src[3];
             if (src_a > 0) {
                 uint8_t* dst = (uint8_t*)(row_pixels + (x + j) * 4);
@@ -155,28 +151,28 @@ void draw_color_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 }
 
 // draw a glyph bitmap into the doc surface
-void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
+void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
     // handle color emoji bitmaps (BGRA format)
-    if (bitmap->pixel_mode == FT_PIXEL_MODE_BGRA) {
+    if (bitmap->pixel_mode == GLYPH_PIXEL_BGRA) {
         draw_color_glyph(rdcon, bitmap, x, y);
         return;
     }
     int left = max(rdcon->block.clip.left, x);
     int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
     int top = max(rdcon->block.clip.top, y);
-    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->rows);
+    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->height);
     if (left >= right || top >= bottom) {
         log_debug("glyph clipped: x=%d, y=%d, bitmap=%dx%d, clip=[%.0f,%.0f,%.0f,%.0f]",
-            x, y, bitmap->width, bitmap->rows,
+            x, y, bitmap->width, bitmap->height,
             rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
         return; // glyph outside the surface
     }
     log_debug("[GLYPH RENDER] drawing glyph at x=%d y=%d size=%dx%d color=#%02x%02x%02x (c=0x%08x) pixel_mode=%d",
-        x, y, bitmap->width, bitmap->rows, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c, bitmap->pixel_mode);
+        x, y, bitmap->width, bitmap->height, rdcon->color.r, rdcon->color.g, rdcon->color.b, rdcon->color.c, bitmap->pixel_mode);
     ImageSurface* surface = rdcon->ui_context->surface;
 
     // handle monochrome bitmaps (1 bit per pixel) - common for some system fonts like Monaco
-    bool is_mono = (bitmap->pixel_mode == FT_PIXEL_MODE_MONO);
+    bool is_mono = (bitmap->pixel_mode == GLYPH_PIXEL_MONO);
 
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
@@ -513,12 +509,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 else { scan += bytes; }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, scan_codepoint, false);
+                FontStyleDesc _sd = font_style_desc_from_prop(rdcon->font.style);
+                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd, scan_codepoint, false);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
                 if (glyph) {
-                    natural_width += glyph->advance.x / 64.0;  // already in physical pixels
+                    natural_width += glyph->advance_x;  // already in physical pixels
                 } else {
                     natural_width += scaled_space_width;  // fallback width in physical pixels
                 }
@@ -607,7 +604,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 }
 
                 auto t1 = std::chrono::high_resolution_clock::now();
-                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(rdcon->ui_context, rdcon->font.font_handle, rdcon->font.style, codepoint, true);
+                FontStyleDesc _sd2 = font_style_desc_from_prop(rdcon->font.style);
+                LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &_sd2, codepoint, true);
                 auto t2 = std::chrono::high_resolution_clock::now();
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
@@ -626,14 +624,14 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {
-                        log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f (26.2=%.1f raw)",
+                        log_debug("[SEL-ADVANCE] char_index=%d codepoint=U+%04X '%c' x=%.1f advance=%.1f",
                             char_index, codepoint, (codepoint >= 32 && codepoint < 127) ? (char)codepoint : '?',
-                            x, glyph->advance.x / 64.0f, (float)glyph->advance.x);
+                            x, glyph->advance_x);
                     }
 
                     // Draw selection background BEFORE glyph (so text appears on top)
                     if (is_selected) {
-                        float glyph_width = glyph->advance.x / 64.0f;
+                        float glyph_width = glyph->advance_x;
                         Rect sel_rect = {x, y, glyph_width, text_rect->height * s};
                         fill_surface_rect(rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip);
                     }
@@ -643,19 +641,19 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     if (bitmap_debug_count < 50 && rdcon->font.font_handle &&
                         strcmp(font_handle_get_family_name(rdcon->font.font_handle), "Monaco") == 0) {
                         log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
-                                  codepoint, glyph->bitmap.width, glyph->bitmap.rows,
-                                  glyph->bitmap.pitch, glyph->bitmap_left, glyph->bitmap_top,
-                                  glyph->advance.x / 64.0, glyph->bitmap.pixel_mode);
+                                  codepoint, glyph->bitmap.width, glyph->bitmap.height,
+                                  glyph->bitmap.pitch, glyph->bitmap.bearing_x, glyph->bitmap.bearing_y,
+                                  glyph->advance_x, glyph->bitmap.pixel_mode);
                         bitmap_debug_count++;
                     }
 
                     auto t3 = std::chrono::high_resolution_clock::now();
-                    draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
+                    draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
                     auto t4 = std::chrono::high_resolution_clock::now();
                     g_render_draw_glyph_time += std::chrono::duration<double, std::milli>(t4 - t3).count();
                     g_render_draw_count++;
                     // advance to the next position
-                    x += glyph->advance.x / 64.0;
+                    x += glyph->advance_x;
                 }
             }
         }

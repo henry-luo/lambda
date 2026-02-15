@@ -56,7 +56,6 @@ void setup_text_flow_log_categories(void);
 // Structured logging for font operations
 void log_font_loading_attempt(const char* family_name, const char* path);
 void log_font_loading_result(const char* family_name, bool success, const char* error);
-void log_font_cache_hit(const char* family_name, int font_size);
 void log_font_fallback_triggered(const char* requested, const char* fallback);
 
 // ============================================================================

@@ -1,6 +1,6 @@
 # Unified Font Module for Lambda/Radiant
 
-> **Status:** All 8 phases complete — 0 build errors · Lambda 224/224 ✅ · Radiant 1972/1972 ✅
+> **Status:** All 9 phases complete — 0 build errors · Lambda 224/224 ✅ · Radiant 1972/1972 ✅
 
 ---
 
@@ -432,6 +432,7 @@ Every piece of the new module is sourced from existing code — **reorganization
 | **6** | Radiant integration — decouple FreeType from `view.hpp`, migrate layout FT calls | ✅ Complete | 2026-02-15 |
 | **7** | Phaseout `lib/font_config.c` — migrate all callers, exclude from build | ✅ Complete | 2026-02-15 |
 | **8** | Render layer migration — FT_Face casts → FontHandle API, remove `FontBox.ft_face` | ✅ Complete | 2026-02-18 |
+| **9** | Glyph abstraction — `LoadedGlyph`/`GlyphBitmap` replace `FT_GlyphSlot`/`FT_Bitmap` in all render + layout files | ✅ Complete | 2026-02-15 |
 
 ### Phase 1 — Foundation
 
@@ -583,6 +584,50 @@ Migrated all `(FT_Face)` cast sites in the render layer to `FontHandle`-based AP
 
 **FT includes still retained** in `render.cpp` and `render_form.cpp` for `FT_GlyphSlot` and `FT_Bitmap` types (used by `load_glyph()` return value and `draw_glyph()` parameter). Abstracting these behind opaque types is future work.
 
+### Phase 9 — Glyph Abstraction Layer
+
+Abstracted `FT_GlyphSlot` and `FT_Bitmap` behind opaque types defined in `font.h`. No render or layout file touches FreeType types anymore.
+
+**New types in `font.h`:**
+
+```c
+typedef enum GlyphPixelMode {
+    GLYPH_PIXEL_GRAY,   // 8-bit grayscale
+    GLYPH_PIXEL_MONO,   // 1-bit monochrome
+    GLYPH_PIXEL_BGRA,   // 32-bit BGRA (color emoji)
+    GLYPH_PIXEL_LCD,    // LCD sub-pixel
+} GlyphPixelMode;
+
+typedef struct LoadedGlyph {
+    GlyphBitmap bitmap;   // buffer, width, height, pitch, bearing_x, bearing_y, pixel_mode
+    float advance_x;      // horizontal advance (physical pixels, 26.6 already decoded)
+    float advance_y;
+} LoadedGlyph;
+```
+
+`GlyphBitmap` extended with `pixel_mode` field (replaces `FT_PIXEL_MODE_*` constants).
+
+**`load_glyph()` signature change:**
+`void* load_glyph(...)` → `LoadedGlyph* load_glyph(...)` — returns static `LoadedGlyph` filled from `FT_GlyphSlot` via `fill_loaded_glyph()`. Valid until next call (same lifetime semantics as raw `FT_GlyphSlot`).
+
+**`draw_glyph()` / `draw_color_glyph()` signature change:**
+`draw_glyph(RenderContext*, FT_Bitmap*, int, int)` → `draw_glyph(RenderContext*, GlyphBitmap*, int, int)` — uses `GlyphPixelMode` instead of `FT_PIXEL_MODE_*`.
+
+**Files migrated (FT includes removed):**
+
+| File | What Changed |
+|------|--------------|
+| `render.cpp` | `FT_GlyphSlot` → `LoadedGlyph*`; `glyph->advance.x / 64.0` → `glyph->advance_x`; `glyph->bitmap_left` → `glyph->bitmap.bearing_x`; `draw_glyph(FT_Bitmap*)` → `draw_glyph(GlyphBitmap*)`; `FT_PIXEL_MODE_BGRA/MONO` → `GLYPH_PIXEL_BGRA/MONO`; **FT includes removed** |
+| `render_form.cpp` | Same pattern; **FT includes removed** |
+| `render_svg.cpp` | `FT_GlyphSlot` → `LoadedGlyph*`; `advance.x / 64.0` → `advance_x` |
+| `layout_text.cpp` | `FT_GlyphSlot` → `LoadedGlyph*`; `advance.x / 64.0f` → `advance_x`; dead `get_font_cell_height(FT_Face)` removed; **FT includes removed** |
+| `intrinsic_sizing.cpp` | `FT_GlyphSlot` → `LoadedGlyph*`; `FT_UInt` → `uint32_t`; **FT includes removed** |
+| `event.cpp` | `FT_GlyphSlot` → `LoadedGlyph*`; `advance.x / 64.0` → `advance_x`; **FT includes removed** |
+| `font_glyph.c` | `GlyphBitmap` now populated with `pixel_mode` via FT→`GlyphPixelMode` mapping |
+
+**Remaining FT includes** (infrastructure only — not layout/render):
+`font.cpp`, `font_face.h/cpp`, `ui_context.cpp`, `render_texnode.cpp`, `pdf/fonts.cpp`, `pdf/cmd_view_pdf.cpp`, `window.cpp`
+
 ---
 
 ## 8. Before / After Summary
@@ -592,7 +637,7 @@ Migrated all `(FT_Face)` cast sites in the render layer to `FontHandle`-based AP
 | **Files**                     | 7+ across `lib/` and `radiant/`                   | 12 in `lib/font/` + `woff2/` (5 bundled)       |
 | **Font formats**              | TTF/OTF/TTC (WOFF1 broken, WOFF2 partial)         | TTF, OTF, TTC, WOFF1, WOFF2 — all first-class  |
 | **Format pipeline**           | Scattered across 3 files                          | Single `font_loader.c` detect→decompress→load  |
-| **FT_* exposure**             | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h`; layout + render PDF fully migrated; render.cpp/render_form.cpp retain FT includes only for `FT_GlyphSlot`/`FT_Bitmap` |
+| **FT_* exposure**             | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h`; layout + render fully FT-free via `LoadedGlyph`/`GlyphBitmap` |
 | **FT_Library instances**      | 2 (layout + PDF)                                  | 1 shared via FontContext                       |
 | **Glyph advance cache**       | ❌ (open TODO)                                     | ✅ per-face hashmap, 4096 entries               |
 | **Glyph bitmap cache**        | ❌ re-rasterized each frame                        | ✅ LRU, 4096 entries                            |
@@ -607,25 +652,79 @@ Migrated all `(FT_Face)` cast sites in the render layer to `FontHandle`-based AP
 
 ---
 
-## 9. Future Work
+## 9. Phase 10 — Load Glyph Consolidation
 
-### 9.1 Glyph Abstraction Layer
-`load_glyph()` returns `void*` (cast to `FT_GlyphSlot`) and `draw_glyph()` takes `FT_Bitmap*`. Abstract these behind opaque `GlyphBitmap*` to remove the last FT includes from `render.cpp` and `render_form.cpp`.
+### 9.1 Overview
+Consolidated Radiant's `load_glyph()` (in `font.cpp`, with fallback cache via `UiContext`) into the font module as `font_load_glyph()` in `lib/font/font_glyph.c`. Moved the fallback cache into `FontContext` so all callers benefit from unified fallback resolution without depending on `UiContext`.
 
-### 9.2 TeX Math Font Migration
+### 9.2 API Change
+
+**Before (Radiant-specific):**
+```cpp
+extern LoadedGlyph* load_glyph(UiContext* uicon, FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering);
+```
+
+**After (font module, C API):**
+```c
+LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style, uint32_t codepoint, bool for_rendering);
+```
+
+Key differences:
+- **No `UiContext` dependency** — fallback resolution goes through `FontContext` (accessed via `handle->ctx`)
+- **`FontStyleDesc*` instead of `FontProp*`** — uses font module's own style description for fallback matching
+- **Uses `font_find_codepoint_fallback()`** — the font module's codepoint fallback cache (in `FontContext.codepoint_fallback_cache`) with proper ref-counted `FontHandle*` entries, replacing `UiContext.glyph_fallback_cache` which stored raw `FT_Face` pointers
+
+### 9.3 Helper: `font_style_desc_from_prop()`
+Added inline conversion helper in `view.hpp`:
+```cpp
+inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp);
+```
+Maps `FontProp` (CssEnum-based weight/style) → `FontStyleDesc` (FontWeight/FontSlant enums) for callers that still work with Radiant's CSS property types.
+
+### 9.4 What Was Removed
+| Item | Location | Status |
+|------|----------|--------|
+| `GlyphFallbackEntry` struct | `font.cpp` | Removed — replaced by `CodepointFallbackEntry` in `font_fallback.c` |
+| `glyph_fallback_hash()` / `glyph_fallback_compare()` | `font.cpp` | Removed |
+| `s_loaded_glyph` (static) | `font.cpp` | Moved to `font_glyph.c` |
+| `fill_loaded_glyph()` | `font.cpp` | Moved to `font_glyph.c` as `fill_loaded_glyph_from_slot()` |
+| `load_glyph()` | `font.cpp` | Replaced by `font_load_glyph()` in `font_glyph.c` |
+| `UiContext.glyph_fallback_cache` | `view.hpp` | Removed — fallback cache lives in `FontContext` |
+| `extern load_glyph` | `view.hpp`, `cmd_view_pdf.cpp` | Removed |
+| `fontface_cleanup()` glyph cache free | `font.cpp` | Removed — `FontContext` owns the cache |
+
+### 9.5 Updated Callers (7 sites)
+All callers now construct a `FontStyleDesc` via `font_style_desc_from_prop()` and call `font_load_glyph()`:
+1. `render.cpp` — 2 sites (measurement scan + rendering)
+2. `render_form.cpp` — 1 site (form text rendering)
+3. `render_svg.cpp` — 1 site (SVG text measurement)
+4. `layout_text.cpp` — 1 site (inline text layout)
+5. `intrinsic_sizing.cpp` — 1 site (intrinsic width calculation)
+6. `event.cpp` — 1 site (click-to-character offset)
+
+### 9.6 Test Results
+- Lambda: 224/224 ✅
+- Radiant: 1972/1972 (1970 pass, 2 pre-existing failures)
+- 0 new regressions
+
+---
+
+## 10. Future Work
+
+### 10.1 TeX Math Font Migration
 `render_texnode.cpp` has its own font pipeline (`get_face_for_font()` → `load_font_face()` → `FT_Face`). Migrate to `FontHandle`-based API.
 
-### 9.3 HarfBuzz Text Shaping
+### 10.2 HarfBuzz Text Shaping
 Current system does character-by-character glyph loading with manual kerning. For proper international text (Arabic, Devanagari, Thai), HarfBuzz shaping is needed. The opaque FontHandle makes this a clean addition.
 
-### 9.4 Variable Font Support
+### 10.3 Variable Font Support
 OpenType variable fonts (`fvar` table) allow continuous weight/width/slant ranges. FreeType already supports this via `FT_Set_Var_Design_Coordinates()`.
 
-### 9.5 Font Subsetting for PDF
+### 10.4 Font Subsetting for PDF
 Embed only glyphs actually used in the document instead of entire font files. Natural fit for `font_loader.c`.
 
-### 9.6 FreeType Vendoring
+### 10.5 FreeType Vendoring
 Bundle selected FreeType source files directly (skip BDF, PCF, PFR, Type1 drivers). Currently linked as system library.
 
-### 9.7 Thread Safety
+### 10.6 Thread Safety
 FreeType's `FT_Library` is not thread-safe across faces. Options: per-thread library, or mutex around face loading. The opaque `FontContext` makes either approach possible without API changes.

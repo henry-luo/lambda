@@ -80,11 +80,6 @@ void log_font_loading_result(const char* family_name, bool success, const char* 
     }
 }
 
-void log_font_cache_hit(const char* family_name, int font_size) {
-    if (font_log) {
-    }
-}
-
 void log_font_fallback_triggered(const char* requested, const char* fallback) {
     if (font_log) {
         clog_warn(font_log, "Font fallback triggered: %s -> %s", requested, fallback);
@@ -308,30 +303,6 @@ void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
 }
 */
 
-FontFaceDescriptor* create_font_face_descriptor(LayoutContext* lycon) {
-    if (!lycon) {
-        clog_error(font_log, "Invalid LayoutContext for create_font_face_descriptor");
-        return NULL;
-    }
-
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
-    if (!descriptor) {
-        clog_error(font_log, "Failed to allocate FontFaceDescriptor");
-        return NULL;
-    }
-
-    memset(descriptor, 0, sizeof(FontFaceDescriptor));
-    descriptor->font_style = CSS_VALUE_NORMAL;
-    descriptor->font_weight = CSS_VALUE_NORMAL;
-    descriptor->font_display = CSS_VALUE_AUTO;
-    descriptor->is_loaded = false;
-    descriptor->loaded_face = NULL;
-    descriptor->char_width_cache = NULL;
-    descriptor->metrics_computed = false;
-
-    return descriptor;
-}
-
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     if (!uicon || !descriptor) {
         clog_error(font_log, "Invalid parameters for register_font_face");
@@ -422,41 +393,6 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
                        descriptor->family_name);
         }
     }
-}
-
-// Character width caching
-void cache_character_width(FontFaceDescriptor* descriptor, uint32_t codepoint, int width) {
-    if (!descriptor) return;
-
-    if (!descriptor->char_width_cache) {
-        descriptor->char_width_cache = hashmap_new(sizeof(uint32_t) + sizeof(int), 128, 0, 0,
-                                                  NULL, NULL, NULL, NULL);
-    }
-
-    if (descriptor->char_width_cache) {
-        // Store codepoint and width as key-value pair
-        struct { uint32_t codepoint; int width; } entry = {codepoint, width};
-        hashmap_set(descriptor->char_width_cache, &entry);
-
-        clog_debug(font_log, "Cached character width: U+%04X = %d", codepoint, width);
-    }
-}
-
-int get_cached_char_width(FontFaceDescriptor* descriptor, uint32_t codepoint) {
-    if (!descriptor || !descriptor->char_width_cache) {
-        return -1; // Cache miss
-    }
-
-    typedef struct { uint32_t codepoint; int width; } CharWidthEntry;
-    CharWidthEntry search_key = {codepoint, 0};
-    CharWidthEntry* entry = (CharWidthEntry*)hashmap_get(descriptor->char_width_cache, &search_key);
-
-    if (entry) {
-        clog_debug(font_log, "Character width cache hit: U+%04X = %d", codepoint, entry->width);
-        return entry->width;
-    }
-
-    return -1; // Cache miss
 }
 
 // Data URI font cache entry - stores decoded font data for FT_New_Memory_Face
@@ -775,28 +711,6 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
         face->size ? (face->size->metrics.height) : 0);
     log_font_loading_result(face->family_name, true, NULL);
     return face;
-}
-
-bool resolve_font_path_from_descriptor(FontFaceDescriptor* descriptor, char** resolved_path) {
-    if (!descriptor || !resolved_path) {
-        return false;
-    }
-
-    // Try local path first
-    if (descriptor->src_local_path) {
-        *resolved_path = mem_strdup(descriptor->src_local_path, MEM_CAT_LAYOUT);
-        clog_debug(font_log, "Resolved font path from local path: %s", *resolved_path);
-        return true;
-    }
-
-    // Try local name (would need FontConfig lookup)
-    if (descriptor->src_local_name) {
-        clog_debug(font_log, "Font resolution by local name not yet implemented: %s", descriptor->src_local_name);
-        return false;
-    }
-
-    clog_warn(font_log, "No resolvable font source in descriptor for: %s", descriptor->family_name);
-    return false;
 }
 
 FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,

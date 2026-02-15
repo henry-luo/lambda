@@ -3,10 +3,6 @@
 #include "form_control.hpp"
 #include "../lib/font/font.h"
 
-// FreeType for font metric access in form control rendering
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <string.h>
@@ -18,7 +14,7 @@
  */
 
 // External declaration for glyph rendering from render.cpp
-extern void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y);
+extern void draw_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y);
 
 // Helper to create a Color from RGBA values
 static inline Color make_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
@@ -132,7 +128,8 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
         p += bytes;
 
         // Load glyph
-        FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(rdcon->ui_context, fbox.font_handle, font, codepoint, true);
+        FontStyleDesc _sd = font_style_desc_from_prop(font);
+        LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &_sd, codepoint, true);
         if (!glyph) {
             pen_x += font->font_size * 0.5f;  // fallback advance
             continue;
@@ -140,11 +137,11 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
 
         // Draw the glyph
         draw_glyph(rdcon, &glyph->bitmap,
-                   (int)(pen_x + glyph->bitmap_left),
-                   (int)(y + ascender - glyph->bitmap_top));
+                   (int)(pen_x + glyph->bitmap.bearing_x),
+                   (int)(y + ascender - glyph->bitmap.bearing_y));
 
         // Advance pen position
-        pen_x += glyph->advance.x / 64.0f;
+        pen_x += glyph->advance_x;
     }
 
     // Restore color
