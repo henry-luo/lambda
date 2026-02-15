@@ -400,10 +400,10 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // Try @font-face descriptors first (managed by Radiant CSS parser)
     const char* family_to_load = fprop->family;
     bool is_fallback = false;
-    fbox->ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
+    FT_Face face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
 
     // ---- New path: use unified font module for system font resolution ----
-    if (!fbox->ft_face && uicon->font_ctx) {
+    if (!face && uicon->font_ctx) {
         // map CssEnum weight/style → FontWeight/FontSlant
         FontWeight fw = FONT_WEIGHT_NORMAL;
         if (fprop->font_weight == CSS_VALUE_BOLD || fprop->font_weight == CSS_VALUE_BOLDER) fw = FONT_WEIGHT_BOLD;
@@ -422,7 +422,6 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         FontHandle* handle = font_resolve(uicon->font_ctx, &style);
         if (handle) {
             fbox->font_handle = handle;
-            fbox->ft_face = (FT_Face)font_handle_get_ft_face(handle);
             fprop->font_handle = handle;
 
             // populate FontProp derived fields from unified metrics
@@ -443,15 +442,15 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // ---- Legacy fallback path: direct FreeType loading ----
 
     // If @font-face loading failed, fall back to original method
-    if (!fbox->ft_face) {
+    if (!face) {
         // Check if this is a CSS generic font family (serif, sans-serif, monospace, etc.)
         const char** generic_fonts = resolve_generic_family(family_to_load);
         if (generic_fonts) {
             // Try each font in the generic family's preference list
-            for (int i = 0; generic_fonts[i] && !fbox->ft_face; i++) {
+            for (int i = 0; generic_fonts[i] && !face; i++) {
                 log_debug("Resolving generic family '%s' to '%s'", family_to_load, generic_fonts[i]);
-                fbox->ft_face = load_styled_font(uicon, generic_fonts[i], fprop);
-                if (fbox->ft_face) {
+                face = (FT_Face)load_styled_font(uicon, generic_fonts[i], fprop);
+                if (face) {
                     log_info("Resolved generic family '%s' to '%s'", family_to_load, generic_fonts[i]);
                 }
             }
@@ -462,7 +461,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             if (family_exists) {
                 // Family exists in database - do full styled lookup (weight, style matching)
                 log_debug("Font family '%s' exists in database, doing styled lookup", family_to_load);
-                fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
+                face = (FT_Face)load_styled_font(uicon, family_to_load, fprop);
             } else {
                 // Family doesn't exist in database - skip expensive platform lookup, go straight to fallbacks
                 log_debug("Font family '%s' not in database, skipping styled lookup (early-exit)", family_to_load);
@@ -471,7 +470,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     }
 
     // If font loading failed, try fallback fonts
-    if (!fbox->ft_face) {
+    if (!face) {
         log_debug("Font '%s' not found, trying fallbacks...", family_to_load);
 
         // Try common cross-platform fallback fonts (prioritize Liberation/DejaVu on Linux, system fonts on Mac)
@@ -489,17 +488,17 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             NULL
         };
 
-        for (int i = 0; fallbacks[i] && !fbox->ft_face; i++) {
+        for (int i = 0; fallbacks[i] && !face; i++) {
             log_debug("Trying fallback font: %s", fallbacks[i]);
-            fbox->ft_face = load_styled_font(uicon, fallbacks[i], fprop);
-            if (fbox->ft_face) {
+            face = (FT_Face)load_styled_font(uicon, fallbacks[i], fprop);
+            if (face) {
                 log_info("Using fallback font: %s for requested font: %s", fallbacks[i], family_to_load);
                 break;
             }
         }
     }
 
-    if (!fbox->ft_face) {
+    if (!face) {
         log_error("Failed to setup font: %s (and all fallbacks)", family_to_load);
         return;
     }
@@ -508,7 +507,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // The FontHandle is "borrowed" — it won't call FT_Done_Face on release
     if (uicon->font_ctx) {
         float css_size = fprop->font_size;
-        FontHandle* handle = font_handle_wrap(uicon->font_ctx, (void*)fbox->ft_face, css_size);
+        FontHandle* handle = font_handle_wrap(uicon->font_ctx, (void*)face, css_size);
         if (handle) {
             fbox->font_handle = handle;
             fprop->font_handle = handle;
@@ -532,7 +531,6 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     // Use sub-pixel rendering flags for better quality
     FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
-    FT_Face face = (FT_Face)fbox->ft_face;
     if (FT_Load_Char(face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", family_to_load);
         // Fallback: use y_ppem if available, otherwise derive from font_size
