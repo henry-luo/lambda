@@ -161,9 +161,10 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                 if (bytes <= 0) { scan++; }
                 else { scan += bytes; }
 
-                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(ctx->ui_context, ctx->font.font_handle, ctx->font.style, codepoint, false);
+                FontStyleDesc _sd = font_style_desc_from_prop(ctx->font.style);
+                LoadedGlyph* glyph = font_load_glyph(ctx->font.font_handle, &_sd, codepoint, false);
                 if (glyph) {
-                    natural_width += glyph->advance.x / 64.0;
+                    natural_width += glyph->advance_x;
                 } else {
                     natural_width += ctx->font.style->space_width;
                 }
@@ -663,7 +664,6 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
 
     // Initialize font from default
     ctx.font.style = &uicon->default_font;
-    ctx.font.ft_face = NULL; // Will be set if needed
     ctx.font.font_handle = NULL;
 
     // SVG header
