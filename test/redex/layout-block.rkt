@@ -30,7 +30,7 @@
     [`(block ,id ,styles (,children ...))
      (define avail-w (avail-width->number (cadr avail)))
      (define avail-h (avail-height->number (caddr avail)))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
 
      ;; resolve content width (CSS 2.2 §10.3.3)
      ;; even if avail-w is #f (indefinite), explicit px widths still resolve
@@ -113,7 +113,7 @@
 
           ;; extract child's box model for margin handling
           (define child-styles (get-box-styles child))
-          (define child-bm (extract-box-model child-styles))
+          (define child-bm (extract-box-model child-styles avail-w))
 
           ;; collapse top margin with previous bottom margin
           (define collapsed-margin

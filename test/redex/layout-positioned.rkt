@@ -23,7 +23,7 @@
 (define (layout-positioned box containing-w containing-h dispatch-fn)
   (match box
     [`(,box-type ,id ,styles . ,rest)
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles containing-w))
 
      ;; resolve inset properties
      (define css-top (get-style-prop styles 'top 'auto))
@@ -114,6 +114,24 @@
              (max 0 (- max-h (vertical-pb bm)))
              max-h))
        (set! content-h (max min-h-c (min max-h-c content-h))))
+
+     ;; === aspect-ratio support ===
+     ;; If aspect-ratio is set, derive the missing dimension from the known one.
+     ;; width takes precedence when both axes are determinate.
+     (define ar (get-style-prop styles 'aspect-ratio #f))
+     (when (and ar (number? ar) (> ar 0))
+       (define has-definite-w (or resolved-w (and left-val right-val)))
+       (define has-definite-h (or resolved-h (and top-val bottom-val)))
+       (cond
+         ;; width is definite (explicit or from insets) → derive height
+         [has-definite-w
+          (set! content-h (/ content-w ar))]
+         ;; height is definite → derive width (override shrink-to-fit)
+         [(and has-definite-h content-h)
+          (set! content-w (* content-h ar))]
+         ;; neither axis definite, but min-width may have increased content-w
+         [(> content-w 0)
+          (set! content-h (/ content-w ar))]))
 
      ;; lay out children to determine auto height
      ;; override position to static to avoid infinite recursion
