@@ -1,0 +1,15 @@
+{
+  "font_name": "Ahem",
+  "units_per_em": 1000,
+  "ascender": 800,
+  "descender": -200,
+  "line_gap": 0,
+  "typo_ascender": 800,
+  "typo_descender": -200,
+  "typo_line_gap": 0,
+  "win_ascent": 800,
+  "win_descent": 200,
+  "default_glyph_width": 1000,
+  "zero_width_codepoints": [],
+  "glyph_widths": {}
+}
