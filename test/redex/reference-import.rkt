@@ -421,6 +421,18 @@
       ;; normalize invalid "no-wrap" to "nowrap" (Chrome ignores invalid values)
       (define normalized (if (string=? v "no-wrap") "nowrap" v))
       (add! 'flex-wrap (string->symbol normalized))))
+  ;; flex-flow shorthand: <flex-direction> || <flex-wrap>
+  (let ([v (cdr-or-false 'flex-flow inline-alist)])
+    (when v
+      (define parts (string-split (string-trim v)))
+      (define direction-keywords '("row" "row-reverse" "column" "column-reverse"))
+      (define wrap-keywords '("nowrap" "wrap" "wrap-reverse"))
+      (for ([part (in-list parts)])
+        (cond
+          [(member part direction-keywords)
+           (add! 'flex-direction (string->symbol part))]
+          [(member part wrap-keywords)
+           (add! 'flex-wrap (string->symbol part))]))))
   (let ([v (cdr-or-false 'justify-content inline-alist)])
     (when v (add! 'justify-content (map-justify-content v))))
   (let ([v (cdr-or-false 'align-items inline-alist)])
@@ -1025,14 +1037,46 @@
 (define (expand-auto-repeat defs explicit-size styles)
   (if (null? defs)
       defs
-      (apply append
-        (for/list ([d (in-list defs)])
-          (match d
-            [`(auto-fill . ,track-defs)
-             (expand-auto-fill-tracks track-defs explicit-size styles #f)]
-            [`(auto-fit . ,track-defs)
-             (expand-auto-fill-tracks track-defs explicit-size styles #t)]
-            [_ (list d)])))))
+      ;; compute space consumed by non-auto-fill/auto-fit tracks
+      ;; auto-fill must only use the remaining available space
+      (let* ([avail-num
+              (if (and explicit-size (pair? explicit-size))
+                  (match explicit-size [`(px ,n) n] [_ #f])
+                  #f)]
+             [fixed-space
+              (if avail-num
+                  (for/sum ([d (in-list defs)])
+                    (match d
+                      [`(auto-fill . ,_) 0]
+                      [`(auto-fit . ,_) 0]
+                      [`(px ,n) n]
+                      [`(% ,pct) (* (/ pct 100) avail-num)]
+                      [`(minmax ,mn ,_mx)
+                       (match mn [`(px ,n) n] [`(% ,pct) (* (/ pct 100) avail-num)] [_ 0])]
+                      [`(fr ,_) 0]
+                      [_ 0]))
+                  0)]
+             ;; count fixed tracks for gap calculation
+             [fixed-count
+              (for/sum ([d (in-list defs)])
+                (match d
+                  [`(auto-fill . ,_) 0]
+                  [`(auto-fit . ,_) 0]
+                  [_ 1]))]
+             [gap-val (get-style-prop styles 'column-gap 0)]
+             [fixed-gaps (* gap-val fixed-count)]  ;; gaps between fixed tracks and the auto-fill group
+             [reduced-avail
+              (if avail-num
+                  `(px ,(max 0 (- avail-num fixed-space fixed-gaps)))
+                  explicit-size)])
+        (apply append
+          (for/list ([d (in-list defs)])
+            (match d
+              [`(auto-fill . ,track-defs)
+               (expand-auto-fill-tracks track-defs reduced-avail styles #f)]
+              [`(auto-fit . ,track-defs)
+               (expand-auto-fill-tracks track-defs reduced-avail styles #t)]
+              [_ (list d)]))))))
 
 ;; calculate how many times to repeat auto-fill tracks
 (define (expand-auto-fill-tracks track-defs explicit-size styles is-auto-fit?)
@@ -1171,12 +1215,14 @@
 (define (reference->expected-layout ref-json)
   (define layout-tree (hash-ref ref-json 'layout_tree (hash)))
   ;; navigate: html → body → first div (test root)
-  (define test-root (find-test-root layout-tree))
+  (define-values (test-root body-abs-x body-abs-y) (find-test-root layout-tree))
   (if test-root
-      (layout-node->expected test-root)
+      ;; use body position as parent reference so test-root coords are body-relative
+      (layout-node->expected test-root body-abs-x body-abs-y)
       #f))
 
 ;; find the test root element (body > div#test-root or first body > div)
+;; returns: (values test-root-node body-abs-x body-abs-y)
 (define (find-test-root html-node)
   (define html-children (hash-ref html-node 'children '()))
   ;; find body
@@ -1185,12 +1231,16 @@
                 #:when (equal? (hash-ref c 'tag #f) "body"))
       c))
   (if body-node
-      ;; find first div child of body
-      (for/first ([c (in-list (hash-ref body-node 'children '()))]
-                  #:when (and (equal? (hash-ref c 'nodeType #f) "element")
-                              (equal? (hash-ref c 'tag #f) "div")))
-        c)
-      #f))
+      (let* ([body-layout (hash-ref body-node 'layout (hash))]
+             [body-x (hash-ref body-layout 'x 0)]
+             [body-y (hash-ref body-layout 'y 0)]
+             [test-root
+              (for/first ([c (in-list (hash-ref body-node 'children '()))]
+                          #:when (and (equal? (hash-ref c 'nodeType #f) "element")
+                                      (equal? (hash-ref c 'tag #f) "div")))
+                c)])
+        (values test-root body-x body-y))
+      (values #f 0 0)))
 
 ;; convert a text node to an expected layout node.
 ;; uses bounding box of all layout rects, converted to parent-relative.
