@@ -1191,6 +1191,25 @@
         c)
       #f))
 
+;; convert a text node to an expected layout node.
+;; uses bounding box of all layout rects, converted to parent-relative.
+(define (text-node->expected node parent-abs-x parent-abs-y)
+  (define layout (hash-ref node 'layout (hash)))
+  (define rects (hash-ref layout 'rects '()))
+  (if (null? rects)
+      #f
+      (let* ([xs  (map (lambda (r) (hash-ref r 'x 0)) rects)]
+             [ys  (map (lambda (r) (hash-ref r 'y 0)) rects)]
+             [x2s (map (lambda (r) (+ (hash-ref r 'x 0) (hash-ref r 'width 0))) rects)]
+             [y2s (map (lambda (r) (+ (hash-ref r 'y 0) (hash-ref r 'height 0))) rects)]
+             [abs-x (apply min xs)]
+             [abs-y (apply min ys)]
+             [w (- (apply max x2s) abs-x)]
+             [h (- (apply max y2s) abs-y)]
+             [rel-x (- abs-x parent-abs-x)]
+             [rel-y (- abs-y parent-abs-y)])
+        `(expected text ,rel-x ,rel-y ,w ,h ()))))
+
 ;; convert a reference layout node to expected layout structure
 ;; Converts absolute browser coordinates to parent-relative coordinates.
 ;; returns: (expected id x y width height (children ...))
@@ -1206,17 +1225,25 @@
   (define rel-x (- abs-x parent-abs-x))
   (define rel-y (- abs-y parent-abs-y))
 
-  ;; recursively process children, skipping non-element/display:none nodes
+  ;; recursively process children (elements + text nodes with layout)
   ;; children are relative to this node's absolute position
   (define children
     (filter-map
      (lambda (c)
-       (and (equal? (hash-ref c 'nodeType #f) "element")
-            (not (member (hash-ref c 'tag #f) '("script" "style" "link" "meta" "title")))
-            ;; skip display:none elements — they produce no view in Redex
-            (let ([computed (hash-ref c 'computed (hash))])
-              (not (equal? (hash-ref computed 'display #f) "none")))
-            (layout-node->expected c abs-x abs-y)))
+       (define node-type (hash-ref c 'nodeType #f))
+       (cond
+         ;; element nodes: skip script/style/display:none
+         [(equal? node-type "element")
+          (and (not (member (hash-ref c 'tag #f) '("script" "style" "link" "meta" "title")))
+               (let ([computed (hash-ref c 'computed (hash))])
+                 (not (equal? (hash-ref computed 'display #f) "none")))
+               (layout-node->expected c abs-x abs-y))]
+         ;; text nodes with visible layout
+         [(equal? node-type "text")
+          (let ([layout (hash-ref c 'layout (hash))])
+            (and (hash-ref layout 'hasLayout #f)
+                 (text-node->expected c abs-x abs-y)))]
+         [else #f]))
      (hash-ref node 'children '())))
 
   `(expected ,(if (string? node-id) (string->symbol node-id) 'anon)
