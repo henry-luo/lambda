@@ -10,6 +10,7 @@
 
 #include "font_internal.h"
 #include <time.h>
+#include "../memtrack.h"
 
 // ============================================================================
 // FreeType Custom Memory Allocator — routes through Lambda Pool
@@ -359,6 +360,83 @@ int font_get_font_count(FontContext* ctx) {
 int font_get_family_count(FontContext* ctx) {
     if (!ctx || !ctx->database || !ctx->database->families) return 0;
     return (int)hashmap_count(ctx->database->families);
+}
+
+bool font_family_exists(FontContext* ctx, const char* family) {
+    if (!ctx || !ctx->database || !family) return false;
+    ArrayList* matches = font_database_find_all_matches_internal(ctx->database, family);
+    bool exists = (matches && matches->length > 0);
+    if (matches) arraylist_free(matches);
+    return exists;
+}
+
+char* font_find_path(FontContext* ctx, const char* family) {
+    if (!ctx || !ctx->database || !family) return NULL;
+
+    ArrayList* matches = font_database_find_all_matches_internal(ctx->database, family);
+    if (!matches || matches->length == 0) {
+        if (matches) arraylist_free(matches);
+        // try platform-specific fallback
+        char* result = font_platform_find_fallback(family);
+        return result;  // may be NULL
+    }
+
+    // prefer Regular/Normal style font over Bold/Italic variants
+    FontEntry* best_font = NULL;
+    int best_score = -1;
+    for (int i = 0; i < matches->length; i++) {
+        FontEntry* font = (FontEntry*)matches->data[i];
+        int score = 0;
+        if (font->weight == 400) score += 10;       // regular weight
+        else if (font->weight < 500) score += 5;    // light to normal
+        if (font->style == FONT_SLANT_NORMAL) score += 10; // not italic
+        // avoid TTC files (ThorVG doesn't support TrueType Collections)
+        if (font->file_path && !strstr(font->file_path, ".ttc")) score += 5;
+        if (score > best_score) {
+            best_score = score;
+            best_font = font;
+        }
+    }
+
+    FontEntry* font = best_font ? best_font : (FontEntry*)matches->data[0];
+    char* result = mem_strdup(font->file_path, MEM_CAT_FONT);
+    arraylist_free(matches);
+    return result;
+}
+
+const char* font_slant_to_string(FontSlant slant) {
+    switch (slant) {
+        case FONT_SLANT_NORMAL:  return "normal";
+        case FONT_SLANT_ITALIC:  return "italic";
+        case FONT_SLANT_OBLIQUE: return "oblique";
+        default:                 return "unknown";
+    }
+}
+
+FontMatchResult font_find_best_match(FontContext* ctx,
+                                      const char* family,
+                                      int weight,
+                                      FontSlant style) {
+    FontMatchResult result = {0};
+    if (!ctx || !ctx->database || !family) return result;
+
+    FontDatabaseCriteria criteria;
+    memset(&criteria, 0, sizeof(criteria));
+    strncpy(criteria.family_name, family, sizeof(criteria.family_name) - 1);
+    criteria.weight = weight;
+    criteria.style = style;
+
+    FontDatabaseResult db_result = font_database_find_best_match_internal(ctx->database, &criteria);
+    if (db_result.font && db_result.font->file_path) {
+        result.file_path = db_result.font->file_path;
+        result.family_name = db_result.font->family_name;
+        result.weight = db_result.font->weight;
+        result.style = db_result.font->style;
+        result.face_index = db_result.font->is_collection ? db_result.font->collection_index : 0;
+        result.match_score = db_result.match_score;
+        result.found = true;
+    }
+    return result;
 }
 
 void font_context_add_scan_directory(FontContext* ctx, const char* directory) {

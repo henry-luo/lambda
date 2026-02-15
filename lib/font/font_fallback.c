@@ -69,13 +69,10 @@ const char** font_get_generic_family(const char* family) {
     if (strcmp(family, "-apple-system") == 0) return system_ui_fonts;
     if (strcmp(family, "BlinkMacSystemFont") == 0) return system_ui_fonts;
 
-    // Cross-platform font aliases
-    if (strcmp(family, "Times New Roman") == 0 || strcmp(family, "Times") == 0)
-        return serif_fonts;
-    if (strcmp(family, "Arial") == 0 || strcmp(family, "Helvetica") == 0)
-        return sans_serif_fonts;
-    if (strcmp(family, "Courier New") == 0 || strcmp(family, "Courier") == 0)
-        return monospace_fonts;
+    // NOTE: Concrete font names like "Arial", "Times New Roman", "Courier New"
+    // are NOT CSS generic families. They should go through the database lookup
+    // path (step 5) in font_resolve() so that weight/slant matching works
+    // correctly (e.g., Arial Bold vs Arial Regular).
 
     return NULL;
 }
