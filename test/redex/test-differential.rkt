@@ -220,8 +220,9 @@
   (define filter-pattern (make-parameter #f))
   (define limit (make-parameter #f))
   (define verbose? (make-parameter #f))
-  (define base-tol (make-parameter 5))
+  (define base-tol (make-parameter 3))
   (define prop-tol (make-parameter 0.03))
+  (define max-tol (make-parameter 10))
   (define suites-str (make-parameter "baseline"))
 
   (command-line
@@ -233,17 +234,20 @@
     (limit (string->number n))]
    ["--verbose" "Show per-test details"
     (verbose? #t)]
-   ["--base-tolerance" t "Base tolerance in px (default: 5)"
+   ["--base-tolerance" t "Base tolerance in px (default: 3)"
     (base-tol (string->number t))]
    ["--proportional-tolerance" t "Proportional tolerance fraction (default: 0.03)"
     (prop-tol (string->number t))]
+   ["--max-tolerance" t "Maximum tolerance cap in px (default: 10)"
+    (max-tol (string->number t))]
    ["--suite" s "Comma-separated list of suites to run (default: baseline). Use 'all' for all suites. Available: baseline,flex,grid,position,table,basic,box,page,flex-nest,text_flow"
     (suites-str s)])
 
   (define config
     (make-compare-config
      #:base-tolerance (base-tol)
-     #:proportional-tolerance (prop-tol)))
+     #:proportional-tolerance (prop-tol)
+     #:max-tolerance (max-tol)))
 
   ;; parse suite list
   (define suites

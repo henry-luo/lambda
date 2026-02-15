@@ -609,8 +609,14 @@
          (cond
            ;; overflow not visible → auto min = 0
            [(not (eq? main-overflow 'visible)) 0]
-           ;; item has definite main size → auto min = 0
-           [has-explicit-main? 0]
+           ;; item has definite main size → auto min = min(specified, content-based)
+           ;; per CSS Flexbox §4.5: "the automatic minimum size is the smaller of
+           ;; the item's content size suggestion and its specified size suggestion"
+           ;; content size suggestion = min-content with explicit main size stripped
+           [has-explicit-main?
+            (define measured (measure-flex-item-content-min child is-row? main-avail dispatch-fn))
+            (define content-min (max 0 (- measured main-pb)))
+            (min basis content-min)]
            [else
             ;; content-based minimum: measure item's min-content contribution
             ;; result is border-box, convert to content-box
@@ -651,6 +657,30 @@
   (define measure-avail
     `(avail ,(if is-row? 'av-max-content `(definite ,main-avail))
             ,(if is-row? `(definite ,main-avail) 'av-max-content)))
+  (define view (dispatch-fn stripped-child measure-avail))
+  (if is-row? (view-width view) (view-height view)))
+
+;; measure min-content size of a flex item with explicit main size stripped
+;; used for "content size suggestion" in CSS Flexbox §4.5 when item has a specified main size
+(define (measure-flex-item-content-min child is-row? main-avail dispatch-fn)
+  (define child-styles (get-box-styles child))
+  (define main-prop (if is-row? 'width 'height))
+  ;; strip explicit main size, min/max so measurement reflects pure content minimum
+  (define stripped-styles
+    (match child-styles
+      [`(style . ,props)
+       `(style ,(list main-prop 'auto)
+               ,(list (if is-row? 'min-width 'min-height) 'auto)
+               ,(list (if is-row? 'max-width 'max-height) 'none)
+               ,@props)]))
+  (define stripped-child
+    (match child
+      [`(,type ,id ,_styles . ,rest) `(,type ,id ,stripped-styles ,@rest)]
+      [_ child]))
+  ;; measure at min-content on main axis
+  (define measure-avail
+    `(avail ,(if is-row? 'av-min-content `(definite ,main-avail))
+            ,(if is-row? `(definite ,main-avail) 'av-min-content)))
   (define view (dispatch-fn stripped-child measure-avail))
   (if is-row? (view-width view) (view-height view)))
 
@@ -1454,11 +1484,12 @@
              [(align-stretch) cross-margin-before]
              [(align-baseline)
               ;; baseline alignment: shift so item's baseline aligns with line's max baseline
+              ;; cross-offset positions the border box, so add margin-before
               (if is-row?
                   (let* ([item-bm (flex-item-bm item)]
                          [mt (box-model-margin-top item-bm)]
                          [item-outer-baseline (+ mt (flex-item-baseline item))])
-                    (- line-max-baseline item-outer-baseline))
+                    (+ cross-margin-before (- line-max-baseline item-outer-baseline)))
                   ;; for column direction, baseline falls back to flex-start
                   cross-margin-before)]
              [else cross-margin-before])]))
