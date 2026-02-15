@@ -222,11 +222,8 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
 // Chrome-compatible normal line-height computation
 // ============================================================================
 
-// platform-specific font metrics — implemented in radiant/font_lookup_platform.c
-// returns 1 if metrics retrieved, 0 to fall back to FreeType
-extern int get_font_metrics_platform(const char* font_family, float font_size,
-                                     float* out_ascent, float* out_descent,
-                                     float* out_line_height);
+// get_font_metrics_platform() — implemented in font_platform.c
+// declared in font_internal.h
 
 /**
  * Calculate normal CSS line-height following Chrome/Blink exactly.

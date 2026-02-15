@@ -13,9 +13,12 @@
 
 #include "font_internal.h"
 #include "../strbuf.h"
+#include "../memtrack.h"
+#include "../str.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -114,7 +117,7 @@ static char* find_font_path_macos(const char* font_name) {
     CFRelease(url);
 
     if (ok) {
-        return arena_strdup(NULL, path); // caller must handle memory
+        return mem_strdup(path, MEM_CAT_FONT); // caller frees with mem_free()
     }
     return NULL;
 }
@@ -202,3 +205,98 @@ char* font_platform_find_fallback(const char* font_name) {
     return NULL;
 #endif
 }
+
+// ============================================================================
+// Platform-specific font metrics
+// ============================================================================
+
+#ifdef __APPLE__
+
+/**
+ * get_font_metrics_platform - Get font metrics using CoreText (macOS)
+ *
+ * This matches Chrome's Blink implementation exactly:
+ * 1. Get ascent/descent from CTFontGetAscent/CTFontGetDescent (Skia does this)
+ * 2. Round each component individually (SkScalarRoundToScalar)
+ * 3. Apply 15% adjustment for Times, Helvetica, Courier (crbug.com/445830)
+ * 4. LineSpacing = rounded_ascent + rounded_descent + rounded_leading
+ *
+ * See: third_party/blink/renderer/platform/fonts/font_metrics.cc
+ *      third_party/blink/renderer/platform/fonts/simple_font_data.cc
+ *      third_party/skia/src/ports/SkScalerContext_mac_ct.cpp
+ *
+ * @param font_family The font family name
+ * @param font_size The font size in CSS pixels
+ * @param out_ascent Output: rounded ascent (after macOS hack if applicable)
+ * @param out_descent Output: rounded descent
+ * @param out_line_height Output: final line height (line spacing)
+ * @return 1 if metrics were successfully retrieved, 0 otherwise
+ */
+int get_font_metrics_platform(const char* font_family, float font_size,
+                              float* out_ascent, float* out_descent, float* out_line_height) {
+    if (!font_family || font_size <= 0) return 0;
+
+    // create CFString from font family name
+    CFStringRef cf_family = CFStringCreateWithCString(NULL, font_family, kCFStringEncodingUTF8);
+    if (!cf_family) return 0;
+
+    // create CTFont at the specified size
+    CTFontRef ct_font = CTFontCreateWithName(cf_family, (CGFloat)font_size, NULL);
+    CFRelease(cf_family);
+
+    if (!ct_font) {
+        log_debug("CoreText: could not create font for '%s'", font_family);
+        return 0;
+    }
+
+    // get metrics from CoreText (this is what Skia does on macOS)
+    CGFloat ct_ascent  = CTFontGetAscent(ct_font);
+    CGFloat ct_descent = CTFontGetDescent(ct_font);
+    CGFloat ct_leading = CTFontGetLeading(ct_font);
+
+    CFRelease(ct_font);
+
+    // round each component individually (matches Chrome's SkScalarRoundToScalar)
+    float ascent  = roundf((float)ct_ascent);
+    float descent = roundf((float)ct_descent);
+    float leading = roundf((float)ct_leading);
+
+    // macOS-specific adjustment for classic Mac fonts
+    // Chrome applies a 15% adjustment to ascent ONLY for Apple's classic fonts:
+    // "Times", "Helvetica", "Courier" — to match their Microsoft equivalents
+    // (the de facto web standard). See: font_metrics.cc lines 129-142, crbug.com/445830
+    if (strcmp(font_family, "Times") == 0 ||
+        strcmp(font_family, "Helvetica") == 0 ||
+        strcmp(font_family, "Courier") == 0) {
+        float adjustment = floorf(((ascent + descent) * 0.15f) + 0.5f);
+        ascent += adjustment;
+        log_debug("CoreText macOS font hack: +%.0f for %s (asc=%.0f, desc=%.0f)",
+                  adjustment, font_family, ascent, descent);
+    }
+
+    float line_height = ascent + descent + leading;
+
+    if (out_ascent) *out_ascent = ascent;
+    if (out_descent) *out_descent = descent;
+    if (out_line_height) *out_line_height = line_height;
+
+    log_debug("CoreText metrics for %s@%.1f: ascent=%.0f, descent=%.0f, leading=%.0f, lineHeight=%.0f",
+              font_family, font_size, ascent, descent, leading, line_height);
+
+    return 1;
+}
+
+#else
+
+/**
+ * Non-macOS stub: Font metrics via FreeType only.
+ * Returns 0 to indicate platform metrics not available.
+ */
+int get_font_metrics_platform(const char* font_family, float font_size,
+                              float* out_ascent, float* out_descent, float* out_line_height) {
+    (void)font_family; (void)font_size;
+    (void)out_ascent; (void)out_descent; (void)out_line_height;
+    return 0;
+}
+
+#endif

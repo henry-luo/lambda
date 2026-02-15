@@ -22,7 +22,6 @@ int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
 void ui_context_cleanup(UiContext* uicon); // From window.cpp
 void ui_context_create_surface(UiContext* uicon, int width, int height); // From window.cpp
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file); // From window.cpp
-extern void* load_glyph(UiContext* uicon, struct FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering); // From font.cpp
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style); // From font.cpp
 
 // External declarations
