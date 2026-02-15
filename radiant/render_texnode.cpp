@@ -6,16 +6,10 @@
 #include "render_texnode.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "lib/log.h"
-
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
+#include "../lib/font/font.h"
 
 #include <cstring>
 #include <cmath>
-
-// Forward declaration from font.cpp
-FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size);
 
 // Import tex conversion functions
 using tex::pt_to_px;
@@ -95,15 +89,20 @@ int32_t tex_char_to_unicode(int32_t codepoint, const char* tex_font) {
 // Render Context Helper Functions
 // ============================================================================
 
-// Get FreeType face for a font - integrated with Radiant font system
-static FT_Face get_face_for_font(RenderContext* ctx, const char* font_name, float size_pt) {
-    if (!ctx || !ctx->ui_context || !font_name) return nullptr;
+// Get font handle for a font - integrated with unified font module
+static FontHandle* get_font_for_tex(RenderContext* ctx, const char* font_name, float size_pt) {
+    if (!ctx || !ctx->ui_context || !ctx->ui_context->font_ctx || !font_name) return nullptr;
 
-    // Convert points to CSS pixels for the font system
-    // Radiant's load_font_face expects pixel size, but handles HiDPI internally
+    // convert points to CSS pixels for the font system
     float size_px = pt_to_px(size_pt);
 
-    return load_font_face(ctx->ui_context, font_name, size_px);
+    FontStyleDesc style = {};
+    style.family  = font_name;
+    style.size_px = size_px;
+    style.weight  = FONT_WEIGHT_NORMAL;
+    style.slant   = FONT_SLANT_NORMAL;
+
+    return font_resolve(ctx->ui_context->font_ctx, &style);
 }
 
 // Draw a filled rectangle using Radiant's surface
@@ -156,63 +155,54 @@ static void draw_rect(RenderContext* ctx, float x, float y, float w, float h, ui
     }
 }
 
-// Draw a glyph at position - uses same approach as render_math.cpp
-static void draw_glyph(RenderContext* ctx, FT_Face face, int32_t codepoint, float x, float y, uint32_t color) {
-    if (!face || !ctx || !ctx->ui_context) return;
+// Draw a glyph at position using the unified font module
+static void draw_glyph(RenderContext* ctx, FontHandle* handle, const FontStyleDesc* style,
+                       int32_t codepoint, float x, float y, uint32_t color) {
+    if (!handle || !ctx || !ctx->ui_context) return;
 
     ImageSurface* surface = ctx->ui_context->surface;
     if (!surface || !surface->pixels) return;
 
-    // Load glyph
-    FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
-    if (glyph_index == 0) {
-        log_debug("draw_glyph: missing glyph for codepoint U+%04X", codepoint);
+    // load glyph with automatic codepoint fallback
+    LoadedGlyph* loaded = font_load_glyph(handle, style, (uint32_t)codepoint, true);
+    if (!loaded) {
+        log_debug("draw_glyph: no glyph for codepoint U+%04X", codepoint);
         return;
     }
 
-    if (FT_Load_Glyph(face, glyph_index, FT_LOAD_RENDER)) {
-        log_debug("draw_glyph: failed to load glyph for codepoint U+%04X", codepoint);
-        return;
-    }
-
-    FT_GlyphSlot slot = face->glyph;
-    FT_Bitmap* bitmap = &slot->bitmap;
-
-    if (bitmap->width == 0 || bitmap->rows == 0) {
-        // Empty glyph (space or similar)
-        return;
-    }
+    GlyphBitmap* bmp = &loaded->bitmap;
+    if (bmp->width == 0 || bmp->height == 0) return; // empty glyph (space)
 
     float s = ctx->scale;  // HiDPI scale factor
 
-    // Calculate render position - scale CSS pixels to physical pixels
-    // y is the baseline position, bitmap_top is offset from baseline to top of bitmap
-    float render_x = x * s + slot->bitmap_left;
-    float render_y = y * s - slot->bitmap_top;
+    // calculate render position — scale CSS pixels to physical pixels
+    // y is the baseline position, bearing_y is offset from baseline to top of bitmap
+    float render_x = x * s + bmp->bearing_x;
+    float render_y = y * s - bmp->bearing_y;
 
-    // Get color components (RGBA)
+    // extract color components (RGBA)
     uint8_t r = (color >> 24) & 0xFF;
     uint8_t g = (color >> 16) & 0xFF;
     uint8_t b = (color >> 8) & 0xFF;
 
-    // Render bitmap to surface
-    for (unsigned int row = 0; row < bitmap->rows; row++) {
+    // render bitmap to surface
+    for (int row = 0; row < bmp->height; row++) {
         int dst_y = (int)render_y + row;
         if (dst_y < 0 || dst_y >= surface->height) continue;
 
         uint8_t* dst_row = (uint8_t*)surface->pixels + dst_y * surface->pitch;
 
-        for (unsigned int col = 0; col < bitmap->width; col++) {
+        for (int col = 0; col < bmp->width; col++) {
             int dst_x = (int)render_x + col;
             if (dst_x < 0 || dst_x >= surface->width) continue;
 
             uint8_t alpha;
-            if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) {
-                alpha = bitmap->buffer[row * bitmap->pitch + col];
-            } else if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) {
+            if (bmp->pixel_mode == GLYPH_PIXEL_GRAY) {
+                alpha = bmp->buffer[row * bmp->pitch + col];
+            } else if (bmp->pixel_mode == GLYPH_PIXEL_MONO) {
                 int byte_offset = col / 8;
                 int bit_offset = 7 - (col % 8);
-                alpha = (bitmap->buffer[row * bitmap->pitch + byte_offset] >> bit_offset) & 1 ? 255 : 0;
+                alpha = (bmp->buffer[row * bmp->pitch + byte_offset] >> bit_offset) & 1 ? 255 : 0;
             } else {
                 alpha = 255;
             }
@@ -391,12 +381,17 @@ void render_texnode_char(RenderContext* ctx, tex::TexNode* node, float x, float 
     const char* system_font = tex_font_to_system_font(font_name);
     int32_t unicode_cp = tex_char_to_unicode(codepoint, font_name);
 
-    // Get font face
-    FT_Face face = get_face_for_font(ctx, system_font, font_size);
+    // Resolve font via unified module
+    FontHandle* handle = get_font_for_tex(ctx, system_font, font_size);
+    FontStyleDesc style = {};
+    style.family  = system_font;
+    style.size_px = pt_to_px(font_size);
+    style.weight  = FONT_WEIGHT_NORMAL;
+    style.slant   = FONT_SLANT_NORMAL;
 
     // Draw glyph
     uint32_t text_color = 0x000000FF;  // Black
-    draw_glyph(ctx, face, unicode_cp, x, y, text_color);
+    draw_glyph(ctx, handle, &style, unicode_cp, x, y, text_color);
 
     log_debug("render_texnode_char: '%c' (0x%X→0x%X) at (%.1f, %.1f) font=%s",
               codepoint >= 32 && codepoint < 127 ? codepoint : '?',
@@ -525,9 +520,14 @@ void render_texnode_delimiter(RenderContext* ctx, tex::TexNode* node, float x, f
     const char* system_font = tex_font_to_system_font(font_name);
     int32_t unicode_cp = tex_char_to_unicode(codepoint, font_name);
 
-    FT_Face face = get_face_for_font(ctx, system_font, font_size);
+    FontHandle* handle = get_font_for_tex(ctx, system_font, font_size);
+    FontStyleDesc style = {};
+    style.family  = system_font;
+    style.size_px = pt_to_px(font_size);
+    style.weight  = FONT_WEIGHT_NORMAL;
+    style.slant   = FONT_SLANT_NORMAL;
 
-    draw_glyph(ctx, face, unicode_cp, x, y, 0x000000FF);
+    draw_glyph(ctx, handle, &style, unicode_cp, x, y, 0x000000FF);
 
     log_debug("render_texnode_delimiter: '%c' at (%.1f, %.1f)",
               codepoint >= 32 && codepoint < 127 ? codepoint : '?', x, y);
