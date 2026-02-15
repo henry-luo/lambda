@@ -8,6 +8,7 @@
         "lib",
         "lib/serve",
         "lib/font",
+        "lib/font/woff2",
         "lambda",
         "lambda/input",
         "lambda/input/css",
@@ -40,6 +41,7 @@
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "mac-deps/rpmalloc-install/include",
+        "lib/font/woff2/include",
         "mac-deps/thorvg/src/bindings/capi"
     ],
     "libraries": [
@@ -157,19 +159,6 @@
             "name": "freetype",
             "include": "/opt/homebrew/opt/freetype/include/freetype2",
             "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
-            "link": "static"
-        },
-        {
-            "name": "woff2dec",
-            "description": "WOFF2 font decompression library (built from source)",
-            "include": "mac-deps/woff2/include",
-            "lib": "mac-deps/woff2/out/libwoff2dec.a",
-            "link": "static"
-        },
-        {
-            "name": "woff2common",
-            "description": "WOFF2 common library (built from source)",
-            "lib": "mac-deps/woff2/out/libwoff2common.a",
             "link": "static"
         },
         {
@@ -1143,6 +1132,39 @@
                         ],
                         "binary": "test_font_config_gtest.exe",
                         "icon": "\ud83d\udd24"
+                    },
+                    {
+                        "source": "test_woff2_gtest.cpp",
+                        "name": "WOFF2 Font Decompression Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "freetype",
+                            "zlib",
+                            "brotlidec",
+                            "brotlicommon"
+                        ],
+                        "additional_sources": [
+                            "lib/font/font_decompress.cpp",
+                            "lib/font/woff2/woff2_dec.cpp",
+                            "lib/font/woff2/woff2_out.cpp",
+                            "lib/font/woff2/woff2_common.cpp",
+                            "lib/font/woff2/table_tags.cpp",
+                            "lib/font/woff2/variable_length.cpp",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/log.c",
+                            "lib/hashmap.c",
+                            "lib/arraylist.c",
+                            "lib/strbuf.c",
+                            "lib/str.c"
+                        ],
+                        "binary": "test_woff2_gtest.exe",
+                        "icon": "\ud83e\uddf1"
                     },
                     {
                         "source": "test_url_gtest.cpp",
