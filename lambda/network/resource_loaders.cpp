@@ -16,6 +16,7 @@
 #include "../../radiant/view.hpp"
 #include "../../radiant/layout.hpp"
 #include "../../radiant/font_face.h"
+#include "../../lib/font/font.h"
 #include <string.h>
 #include <stdlib.h>
 #include <strings.h>  // for strcasecmp
@@ -215,23 +216,22 @@ void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* f
 
     UiContext* uicon = (UiContext*)res->manager->ui_context;
 
-    // create a default FontProp for loading (can be refined later)
-    FontProp default_style = {0};
-    default_style.font_size = 16.0f;  // default size, will be scaled per-use
-    default_style.font_weight = CSS_VALUE_NORMAL;
-    default_style.font_style = font_face->font_style;
+    // load font file using the unified font module
+    FontStyleDesc style = {};
+    style.family = font_face->family_name ? font_face->family_name : "unknown";
+    style.size_px = 16.0f;  // default size, will be scaled per-use
+    style.weight = FONT_WEIGHT_NORMAL;
+    style.slant = (font_face->font_style == CSS_VALUE_ITALIC) ? FONT_SLANT_ITALIC : FONT_SLANT_NORMAL;
 
-    // load font file using the font loading system
-    FT_Face face = load_local_font_file(uicon, res->local_path, &default_style);
-    if (!face) {
+    FontHandle* handle = font_load_from_file(uicon->font_ctx, res->local_path, &style);
+    if (!handle) {
         log_error("network: failed to load font: %s", res->local_path);
         return;
     }
 
-    log_debug("network: loaded font: family='%s', style='%s', %d glyphs",
-              face->family_name ? face->family_name : "(unknown)",
-              face->style_name ? face->style_name : "(unknown)",
-              (int)face->num_glyphs);
+    const FontMetrics* m = font_get_metrics(handle);
+    log_debug("network: loaded font: family='%s', size=%.0f",
+              style.family, style.size_px);
 
     // update font_face descriptor with the loaded path
     // so that future text layout can find this font

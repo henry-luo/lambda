@@ -1219,7 +1219,6 @@ typedef struct {
     // font handling
     void* ft_library;  // opaque FT_Library handle (cast to FT_Library where needed)
     struct FontContext* font_ctx; // unified font context
-    struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     char** fallback_fonts;  // fallback fonts
