@@ -54,7 +54,7 @@
     [`(grid ,id ,styles (grid-def (,row-defs ...) (,col-defs ...)) (,children ...))
      (define avail-w (avail-width->number (cadr avail)))
      (define avail-h (avail-height->number (caddr avail)))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
 
      ;; extract grid properties
      (define row-gap (resolve-gap (get-style-prop styles 'row-gap 0) avail-h))
@@ -90,7 +90,7 @@
      ;; shifting all positions to non-negative and returning the offsets
      (define-values (items row-before-count col-before-count)
        (place-grid-items flow-children styles
-                         (length row-tracks) (length col-tracks)))
+                         (length row-tracks) (length col-tracks) content-w))
 
      ;; === Phase 3.5: Create implicit tracks before/after the explicit grid ===
      ;; create "before" implicit tracks with REVERSE auto-track cycling
@@ -605,6 +605,9 @@
           (when grew? (loop))))))
 
   ;; phase 4: distribute fr units using remaining space after non-fr maximization
+  ;; CSS Grid §12.7.1: Find the size of an fr using the "Expand Flexible Tracks" algorithm.
+  ;; Tracks whose base-size exceeds their hypothetical fr-based share are "frozen" and
+  ;; their base-size is subtracted from the available space before re-distributing.
   (define fixed-total
     (for/sum ([t (in-list tracks)]
               #:when (not (fr-track? t)))
@@ -627,15 +630,32 @@
       (get-fr-value t)))
 
   (when (> total-fr 0)
-    (define fr-size (/ fr-space total-fr))
-    (for ([t (in-list tracks)]
-          #:when (fr-track? t))
-      (define n (get-fr-value t))
-      (define size (* n fr-size))
-      ;; for minmax tracks, fr allocation must not go below base-size (the minimum)
-      (define final-size (max (track-base-size t) size))
-      (set-track-base-size! t final-size)
-      (set-track-growth-limit! t final-size)))
+    ;; iterative freeze algorithm: freeze tracks whose base-size > hypothetical share
+    (let loop ([active-tracks (filter fr-track? tracks)]
+               [space fr-space])
+      (define sum-fr (for/sum ([t (in-list active-tracks)]) (get-fr-value t)))
+      (when (> sum-fr 0)
+        ;; CSS Grid §12.7.1: if sum of flex factors < 1, use 1 as divisor
+        ;; (tracks don't expand to fill the entire space when fr sum < 1)
+        (define effective-sum (max sum-fr 1))
+        (define hyp-fr-size (/ space effective-sum))
+        ;; partition into frozen (base > proportional share) and unfrozen
+        (define-values (frozen unfrozen)
+          (partition (lambda (t) (> (track-base-size t) (* (get-fr-value t) hyp-fr-size)))
+                     active-tracks))
+        (cond
+          [(null? frozen)
+           ;; no more tracks need freezing: assign final fr sizes
+           (for ([t (in-list active-tracks)])
+             (define size (max (track-base-size t) (* (get-fr-value t) hyp-fr-size)))
+             (set-track-base-size! t size)
+             (set-track-growth-limit! t size))]
+          [else
+           ;; freeze oversize tracks at base-size, redistribute remaining space
+           (for ([t (in-list frozen)])
+             (set-track-growth-limit! t (track-base-size t)))
+           (define frozen-total (for/sum ([t (in-list frozen)]) (track-base-size t)))
+           (loop unfrozen (max 0 (- space frozen-total)))]))))
 
   ;; phase 5: maximize remaining auto tracks
   ;; per CSS Grid spec 12.5: distribute free space equally among ALL auto tracks
@@ -784,7 +804,7 @@
 
   (values row-start row-end col-start col-end r-span c-span))
 
-(define (place-grid-items children container-styles num-rows num-cols)
+(define (place-grid-items children container-styles num-rows num-cols [containing-width #f])
   (define auto-flow (get-style-prop container-styles 'grid-auto-flow 'grid-row))
   (define is-dense? (or (eq? auto-flow 'grid-row-dense) (eq? auto-flow 'grid-column-dense)))
   (define is-column-flow? (or (eq? auto-flow 'grid-column) (eq? auto-flow 'grid-column-dense)))
@@ -798,7 +818,7 @@
     (for/list ([child (in-list children)]
                [idx (in-naturals)])
       (define styles (get-box-styles child))
-      (define item-bm (extract-box-model styles))
+      (define item-bm (extract-box-model styles containing-width))
       (define rs (get-grid-line styles 'grid-row-start))
       (define re (get-grid-line styles 'grid-row-end))
       (define cs (get-grid-line styles 'grid-column-start))

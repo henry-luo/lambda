@@ -88,7 +88,7 @@
      ;; detect intrinsic sizing mode (av-max-content or av-min-content)
      (define is-intrinsic-width-sizing?
        (or (eq? (cadr avail) 'av-max-content) (eq? (cadr avail) 'av-min-content)))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
 
      ;; extract flex container properties
      (define direction (get-style-prop styles 'flex-direction 'row))
@@ -171,7 +171,10 @@
      (define cross-gap (if is-row? row-gap col-gap))
 
      ;; === Phase 1: Collect flex items ===
-     (define items (collect-flex-items children styles is-row? main-avail cross-avail dispatch-fn))
+     ;; for percentage margin/padding resolution, items resolve against the
+     ;; container's inline-size (content-w for row, or cross/main avail)
+     (define items (collect-flex-items children styles is-row? main-avail cross-avail dispatch-fn
+                                      content-w))
 
      ;; === Phase 2: Sort by order ===
      (define sorted-items
@@ -201,6 +204,42 @@
      (define resolved-lines
        (for/list ([line (in-list lines)])
          (resolve-flex-lengths line main-avail main-gap is-row? main-definite?)))
+
+     ;; === Phase 5b: Re-resolve when min/max-main constrains indefinite main axis ===
+     ;; Per CSS Flexbox spec, when an auto main-size is clamped by min/max constraints,
+     ;; the clamped size becomes definite and items must be re-resolved.
+     (when (and (not main-definite?) (infinite? main-avail))
+       (define min-main-content
+         (if is-row?
+             (let ([mn-val (get-style-prop styles 'min-width 'auto)])
+               (let ([mn (resolve-size-value mn-val (or avail-w 0))])
+                 (if mn
+                     (if (eq? (box-model-box-sizing bm) 'border-box)
+                         (max 0 (- mn (horizontal-pb bm)))
+                         mn)
+                     0)))
+             (resolve-min-height styles avail-h)))
+       (define max-main-content
+         (if is-row?
+             (let ([mx-val (get-style-prop styles 'max-width 'none)])
+               (let ([mx (resolve-size-value mx-val (or avail-w 0))])
+                 (if mx
+                     (if (eq? (box-model-box-sizing bm) 'border-box)
+                         (max 0 (- mx (horizontal-pb bm)))
+                         mx)
+                     +inf.0)))
+             (resolve-max-height styles avail-h)))
+       ;; compute total main-axis size across all lines
+       (define current-total
+         (for/fold ([s 0]) ([line (in-list resolved-lines)])
+           (+ s (flex-line-main-size line))))
+       (define clamped-main (max min-main-content (min max-main-content current-total)))
+       (when (and (> (abs (- clamped-main current-total)) 0.01)
+                  (not (infinite? clamped-main)))
+         ;; content exceeds max or falls below min → re-resolve with constrained size
+         (set! resolved-lines
+           (for/list ([line (in-list lines)])
+             (resolve-flex-lengths line clamped-main main-gap is-row? #t)))))
 
      ;; === Phase 6: Determine cross sizes ===
      (define cross-sized-lines
@@ -349,7 +388,7 @@
          (define child-h (view-height raw-view))
 
          ;; child's own margins for static position
-         (define child-bm (extract-box-model child-styles))
+         (define child-bm (extract-box-model child-styles content-w))
          (define child-ml (box-model-margin-left child-bm))
          (define child-mr (box-model-margin-right child-bm))
          (define child-mt (box-model-margin-top child-bm))
@@ -476,7 +515,8 @@
 ;; Phase 1: Collect Flex Items
 ;; ============================================================
 
-(define (collect-flex-items children container-styles is-row? main-avail cross-avail dispatch-fn)
+(define (collect-flex-items children container-styles is-row? main-avail cross-avail dispatch-fn
+                             [containing-width #f])
   (for/list ([child (in-list children)]
              [child-idx (in-naturals)]
              #:unless (match child [`(none ,_) #t] [_ #f])
@@ -484,7 +524,7 @@
                         (let ([pos (get-style-prop s 'position 'static)])
                           (or (eq? pos 'absolute) (eq? pos 'fixed)))))
     (define styles (get-box-styles child))
-    (define bm (extract-box-model styles))
+    (define bm (extract-box-model styles containing-width))
     (define order (get-style-prop styles 'order 0))
     (define grow (get-style-prop styles 'flex-grow 0))
     (define shrink (get-style-prop styles 'flex-shrink 1))

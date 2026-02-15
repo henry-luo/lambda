@@ -140,16 +140,42 @@
    box-sizing)
   #:transparent)
 
-;; extract box-model from styles
-(define (extract-box-model styles)
+;; resolve an edge value: handles plain numbers, (% N) percentages, and 'auto
+;; per CSS spec, percentage margins AND paddings all resolve against the
+;; containing block's inline-size (width in horizontal writing mode)
+(define (resolve-edge-value v containing-width)
+  (match v
+    [`(% ,pct)
+     (if (and containing-width (number? containing-width)
+              (not (infinite? containing-width)))
+         (* (/ pct 100) containing-width)
+         0)]   ; percentage against indefinite → 0
+    [(? number?) v]
+    ['auto v]   ; keep 'auto for margin calculations
+    [_ 0]))
+
+;; extract box-model from styles, resolving percentage margins/paddings
+;; against the containing block's inline-size (width).
+;; containing-width: the containing block's width for resolving percentages,
+;; or #f if indefinite.
+(define (extract-box-model styles [containing-width #f])
   (define-values (mt mr mb ml) (get-edges styles 'margin))
   (define-values (pt pr pb pl) (get-edges styles 'padding))
   (define-values (bt br bb bl) (get-edges styles 'border-width))
   (define bs (get-style-prop styles 'box-sizing 'content-box))
-  ;; convert 'auto margins to 0 for general box-model calculations
-  (define (safe-margin v) (if (eq? v 'auto) 0 v))
-  (box-model (safe-margin mt) (safe-margin mr) (safe-margin mb) (safe-margin ml)
-             pt pr pb pl bt br bb bl bs))
+  ;; resolve percentage margins and paddings against containing block width
+  ;; per CSS spec: both horizontal AND vertical percentages resolve against width
+  (define (resolve-margin v)
+    (define resolved (resolve-edge-value v containing-width))
+    (if (eq? resolved 'auto) 0 resolved))
+  (define (resolve-padding v)
+    (define resolved (resolve-edge-value v containing-width))
+    (if (eq? resolved 'auto) 0 resolved))
+  (box-model (resolve-margin mt) (resolve-margin mr)
+             (resolve-margin mb) (resolve-margin ml)
+             (resolve-padding pt) (resolve-padding pr)
+             (resolve-padding pb) (resolve-padding pl)
+             bt br bb bl bs))
 
 ;; compute content-area width given the resolved CSS width and box model
 (define (compute-content-width bm css-width)
@@ -213,7 +239,7 @@
 ;; the constraint: margin-left + border-left + padding-left + width +
 ;;                 padding-right + border-right + margin-right = containing-width
 (define (resolve-block-width styles containing-width)
-  (define bm (extract-box-model styles))
+  (define bm (extract-box-model styles containing-width))
   (define css-width-val (get-style-prop styles 'width 'auto))
   (define resolved-w (resolve-size-value css-width-val containing-width))
   (define content-w
@@ -247,6 +273,9 @@
 (define (resolve-block-height styles containing-height)
   (define css-h-val (get-style-prop styles 'height 'auto))
   (define resolved-h (resolve-size-value css-h-val containing-height))
+  ;; note: percentage margins/paddings all resolve against width (inline-size),
+  ;; but we don't have the width here — pass #f to skip percentage resolution.
+  ;; callers should have already resolved percentage margins before calling.
   (define bm (extract-box-model styles))
   (define content-h
     (cond
