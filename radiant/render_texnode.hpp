@@ -18,8 +18,6 @@
 
 // Forward declarations
 struct DomElement;
-struct FT_FaceRec_;
-typedef struct FT_FaceRec_* FT_Face;
 
 namespace radiant {
 

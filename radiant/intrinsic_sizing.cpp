@@ -10,10 +10,6 @@
 #include "grid.hpp"         // For GridTrackList
 #include "../lib/font/font.h"
 
-// FreeType for fallback glyph loading via load_glyph
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include <cmath>
@@ -68,7 +64,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     float current_word = 0.0f;
     float longest_word = 0.0f;
 
-    FT_UInt prev_glyph = 0;
+    uint32_t prev_glyph = 0;
     bool has_kerning = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
     const unsigned char* str = (const unsigned char*)text;
     bool is_word_start = true;  // for text-transform: capitalize
@@ -163,14 +159,15 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // Get glyph index for the (possibly transformed) codepoint
         uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
         if (!glyph_index) {
-            // Glyph not found in primary font - try font fallback via load_glyph
+            // Glyph not found in primary font - try font fallback via font_load_glyph
             // This ensures intrinsic sizing uses the same fallback fonts as layout_text.cpp
-            FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(lycon->ui_context, lycon->font.font_handle, lycon->font.style, codepoint, false);
+            FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+            LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
             if (glyph) {
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                float advance = glyph->advance.x / 64.0f / pixel_ratio;
+                float advance = glyph->advance_x / pixel_ratio;
                 // Apply letter-spacing
                 if (i + bytes < length && lycon->font.style) {
                     advance += lycon->font.style->letter_spacing;
