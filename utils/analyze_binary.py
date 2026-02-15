@@ -350,6 +350,26 @@ def get_library_symbols(lib_path):
     return symbols
 
 
+def get_library_code_size(lib_path):
+    """Sum __TEXT + __DATA section sizes from .o files in a .a archive.
+
+    Excludes __DWARF (debug info) and __LD (compact unwind) sections.
+    This gives the actual code+data footprint — a much tighter upper
+    bound than the .a file size, which includes archive metadata,
+    symbol tables, and debug info.
+    """
+    lines = run_tool(["size", "-m", lib_path], timeout=30)
+    total = 0
+    for line in lines:
+        line = line.strip()
+        # Match: "Section (__TEXT, __text): 92104"  or  "Section (__DATA, __const): 6984"
+        if line.startswith("Section (") and "__DWARF" not in line and "__LD" not in line:
+            m = re.search(r':\s*(\d+)', line)
+            if m:
+                total += int(m.group(1))
+    return total
+
+
 # ── Resolve library path (macOS) ──────────────────────────────────────
 
 def resolve_library_path(lib_info, platform_libs):
@@ -437,8 +457,8 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
     group_sym_details = defaultdict(list)  # group -> [(name, size), ...]
 
     groups = defaultdict(lambda: {
-        "size": 0, "symbols": 0, "lib_file_size": 0,
-        "notes": [], "matched_count": 0, "libs": [],
+        "size": 0, "symbols": 0, "lib_file_size": 0, "obj_code_size": 0,
+        "notes": [], "matched_count": 0, "libs": [], "lib_paths": [],
     })
 
     for lib_info in config.get("libraries", []):
@@ -450,8 +470,10 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
 
         lib_file_size = os.path.getsize(lib_path)
         groups[group]["lib_file_size"] += lib_file_size
+        groups[group]["obj_code_size"] += get_library_code_size(lib_path)
         if name not in groups[group]["libs"]:
             groups[group]["libs"].append(name)
+        groups[group]["lib_paths"].append(lib_path)
 
         lib_syms = get_library_symbols(lib_path)
         matched = 0
@@ -468,18 +490,20 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
         groups[group]["size"] += matched_size
         groups[group]["symbols"] += matched
 
-    # ── 3b. Cap nm-measured sizes at .a file size ───────────────────
-    # With LTO + symbol stripping, big gaps between visible symbols
-    # can attribute code from OTHER libraries to one symbol.  The .a
-    # file size is a hard upper bound on linked contribution (it's
-    # usually much less due to dead-code elimination, but it prevents
-    # gross overestimates).
+    # ── 3b. Cap nm-measured sizes at .o code size ──────────────────
+    # The .o code size (sum of __TEXT + __DATA sections from object
+    # files inside the .a archive) is a tight upper bound on the
+    # library's linked contribution.  It excludes archive metadata,
+    # symbol tables, and debug info — much tighter than .a file size.
+    # With LTO + dead-code elimination, actual contribution is often
+    # smaller, but this prevents gross overestimates from nm gaps.
     for group, d in groups.items():
-        if d["lib_file_size"] > 0 and d["size"] > d["lib_file_size"]:
+        cap = d["obj_code_size"]
+        if cap > 0 and d["size"] > cap:
             d["notes"].append(
-                f"capped: nm {fmt_tbl(d['size'])} > .a {fmt_tbl(d['lib_file_size'])}"
+                f"capped at .o code size; nm measured {fmt_tbl(d['size'])}"
             )
-            d["size"] = d["lib_file_size"]
+            d["size"] = cap
 
     # ── 3c. Apply stub-link overrides ─────────────────────────────────
     for group, verified_size in STUB_LINK_OVERRIDES.items():
@@ -601,7 +625,7 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
     print(f"- **__LINKEDIT**: {fmt_size(linkedit_seg)}")
     print(f"- **Visible symbols**: {len(sorted_addrs)}")
     print()
-    print("| Group | Size | % | Symbols | .a File | Notes |")
+    print("| Group | Size | % | Symbols | .o Code | Notes |")
     print("|-------|-----:|--:|--------:|--------:|-------|")
 
     grand = 0
@@ -610,12 +634,12 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
         sz = d["size"]
         pct = sz / binary_size * 100 if binary_size else 0
         syms = d["symbols"]
-        lsz = d["lib_file_size"]
+        obj_sz = d["obj_code_size"]
         notes = "; ".join(d["notes"]) if d["notes"] else ""
         sym_s = str(syms) if syms > 0 else "—"
-        lsz_s = fmt_tbl(lsz) if lsz > 0 else "—"
+        obj_s = fmt_tbl(obj_sz) if obj_sz > 0 else "—"
         print(f"| **{name}** | {fmt_tbl(sz)} | {pct:.1f}% "
-              f"| {sym_s} | {lsz_s} | {notes} |")
+              f"| {sym_s} | {obj_s} | {notes} |")
         grand += sz
         grand_syms += syms
 
