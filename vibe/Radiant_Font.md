@@ -11,6 +11,8 @@
 | **Phase 3** | Caching & fallback — disk cache, bitmap cache, advance eviction, @font-face bridge                   | ✅ Complete | 2026-02-14 |
 | **Phase 4** | Cleanup — slim headers, remove ~335 lines of unused stubs from `font_face.cpp`                       | ✅ Complete | 2026-02-16 |
 | **Phase 5** | FT_Face migration — migrate ~50 direct FreeType API call sites across 15+ files to FontHandle API     | ✅ Complete | 2026-02-14 |
+| **Phase 6** | Radiant integration — decouple FreeType from `view.hpp`, migrate layout FT calls to font module APIs | ✅ Complete | 2026-02-15 |
+| **Phase 7** | Phaseout `lib/font_config.c` — migrate all callers to `lib/font/` APIs, exclude from build            | ✅ Complete | 2026-02-16 |
 
 **Build:** 0 errors · **Lambda baseline:** 224/224 ✅ · **Radiant baseline:** 1972/1972 ✅
 
@@ -92,10 +94,66 @@ After completing the migration, 36 out of 1972 Radiant baseline tests failed. Ro
 
 3. **`font_get_x_height_ratio()` wrong formula** — The old `get_font_x_height_ratio()` returned `sxHeight / units_per_EM`, a dimensionless font-unit ratio used for CSS `ex` unit resolution. The new `font_get_x_height_ratio()` computed `m->x_height / (m->ascender − m->descender)`, which is completely different — `x_height` is in CSS pixels and `ascender − descender` is also in CSS pixels but ≠ em_size. For the Ahem test font, this produced a ratio of ~0.56 instead of the correct 0.8, causing `font-size: 7.5ex` to resolve to 90px instead of 96px. This single bug accounted for the majority of the 36 test failures (font-size, table-height, table-layout, text-indent, white-space tests). **Fix:** Rewrote `font_get_x_height_ratio()` to directly read `sxHeight / units_per_EM` from the underlying `FT_Face`, with a fallback to measuring the `'x'` glyph in design units — matching the old behavior exactly.
 
-**Remaining work (deferred):**
-- Remove `#include FT_FREETYPE_H` from `view.hpp` — requires moving `FT_Library ft_library` out of `UiContext` and `FT_Face ft_face` out of `FontBox`
-- Remove `ft_face` field from `FontBox` — render files still access it for physical-pixel rendering via `font_handle_get_ft_face()`
-- Migrate remaining direct FT_Face accesses in render files to use FontHandle-based APIs
+**Remaining work (resolved in Phase 6):**
+- ✅ Removed `#include FT_FREETYPE_H` from `view.hpp` — `FT_Library` → `void*` in `UiContext`, `FT_Face` → `void*` in `FontBox`
+- ✅ Removed dead `FontProp.ft_face` field (write-only, never read)
+- ✅ Migrated layout-layer FT calls to font module APIs (`font_get_glyph`, `font_get_kerning_by_index`, `font_get_glyph_index`)
+- ⏸ `FontBox.ft_face` kept as `void*` — render files still access via `(FT_Face)` cast for physical-pixel glyph rendering
+- ⏸ `load_glyph()` / `load_styled_font()` return `void*` — callers cast to `FT_GlyphSlot` / `FT_Face` locally
+
+#### Phase 6 Changes — Radiant Integration (Section 7)
+
+**Approach:** Remove all FreeType type dependencies from `view.hpp` (the most-included Radiant header), replacing `FT_Face`/`FT_Library`/`FT_GlyphSlot` with `void*` in public struct fields and extern declarations. Migrate layout-layer FreeType API calls to opaque font module APIs. Files that still need direct FT access get their own local `#include <ft2build.h>` and cast `void*` back to FT types internally.
+
+**New APIs added to `lib/font/font.h`:**
+- `font_get_kerning_by_index(FontHandle*, uint32_t left_index, uint32_t right_index)` — kerning by glyph indices (returns CSS px). Use when glyph indices are already available from `font_get_glyph_index()`.
+- `FontMetrics.use_typo_metrics` — `bool` indicating OS/2 `fsSelection` bit 7 (`USE_TYPO_METRICS`) is set. Eliminates the need to call `FT_Get_Sfnt_Table` in layout code.
+
+**Type changes in `radiant/view.hpp`:**
+- Removed `#include <ft2build.h>` and `#include FT_FREETYPE_H`
+- Removed `FontProp.ft_face` (dead field — assigned in `pdf/fonts.cpp` but never read)
+- `FontBox.ft_face`: `FT_Face` → `void*`
+- `UiContext.ft_library`: `FT_Library` → `void*`
+- `load_styled_font()` extern return: `FT_Face` → `void*`
+- `load_glyph()` extern return: `FT_GlyphSlot` → `void*`
+
+**Layout files migrated (FreeType calls → font module APIs):**
+- `radiant/layout_text.cpp` — `FT_Load_Char` + `slot->advance.x` → `font_get_glyph().advance_x`; `FT_Get_Kerning` → `font_get_kerning_by_index()`
+- `radiant/intrinsic_sizing.cpp` — `FT_Get_Char_Index` → `font_get_glyph_index()` (3 sites); `FT_Get_Kerning` → `font_get_kerning_by_index()` (2 sites); `FT_Load_Glyph` + advance → `font_get_glyph()` (1 site)
+- `radiant/event.cpp` — `FT_Load_Char` + advance → `font_get_glyph()` (1 site)
+- `radiant/layout.cpp` — `FT_Get_Sfnt_Table` + `fsSelection` check → `FontMetrics.use_typo_metrics` (removes **all** FT includes from this file)
+
+**Files with local FT includes added (still need direct FT access for rendering):**
+- `radiant/font.cpp` — `load_styled_font()` / `load_glyph()` definitions, `FT_New_Face` calls
+- `radiant/font_face.h` — `FT_Face` type used in function declarations
+- `radiant/font_face.cpp` — `FT_New_Face` / `FT_New_Memory_Face` calls
+- `radiant/ui_context.cpp` — `FT_Init_FreeType` / `FT_Done_FreeType`
+- `radiant/render.cpp` — `FT_Face` member access for glyph rendering (10 sites), `FT_GlyphSlot` from `load_glyph` (2 sites)
+- `radiant/render_form.cpp` — `FT_GlyphSlot` from `load_glyph`, `FT_Face` metric access
+- `radiant/render_svg.cpp` — `FT_GlyphSlot` from `load_glyph`
+- `radiant/render_pdf.cpp` — FT types for PDF font embedding
+- `radiant/event.cpp` — `FT_GlyphSlot` from `load_glyph` (fallback path)
+- `radiant/intrinsic_sizing.cpp` — `FT_GlyphSlot` from `load_glyph` (fallback path)
+- `radiant/pdf/cmd_view_pdf.cpp` — extern declarations, `FT_Face` cast
+
+**Dead code removed:**
+- `FontProp.ft_face` assignment in `radiant/pdf/fonts.cpp` (only write site, no readers)
+- `OS2_FS_SELECTION_USE_TYPO_METRICS` constant in `radiant/layout.cpp` (replaced by `FontMetrics.use_typo_metrics`)
+
+**Files modified (19 files, +140/−111 lines):**
+- `lib/font/font.h`, `lib/font/font_glyph.c`, `lib/font/font_metrics.c`
+- `radiant/view.hpp`, `radiant/layout.cpp`, `radiant/layout_text.cpp`
+- `radiant/intrinsic_sizing.cpp`, `radiant/event.cpp`
+- `radiant/font.cpp`, `radiant/font_face.h`, `radiant/font_face.cpp`
+- `radiant/ui_context.cpp`, `radiant/render.cpp`, `radiant/render_form.cpp`
+- `radiant/render_svg.cpp`, `radiant/render_pdf.cpp`, `radiant/resolve_css_style.cpp`
+- `radiant/pdf/cmd_view_pdf.cpp`, `radiant/pdf/fonts.cpp`
+
+**Remaining work (deferred to future phases):**
+- Migrate render-layer `(FT_Face)rdcon->font.ft_face->` accesses to FontHandle-based rendering APIs (10 sites in `render.cpp`)
+- Migrate `load_glyph()` callers to a FontHandle-based glyph rendering API (eliminating `FT_GlyphSlot` casts)
+- Remove `FontBox.ft_face` field entirely once render layer is fully migrated
+- Remove local FT includes from non-core files once rendering uses opaque APIs
 
 ---
 
@@ -836,7 +894,7 @@ For WOFF1, no new library is needed — `zlib` is already linked (FreeType depen
 - ✅ Slimmed `font.h`: removed `FontfaceEntry` type and `fontface_compare`/`fontface_entry_free` declarations (internal to `font.cpp`).
 - ✅ Removed ~335 lines of unused stubs from `font_face.cpp`: `EnhancedFontBox`, `FontMatchCriteria`, `FontMatchResult`, `FontFallbackChain` types and 12 stub functions (`calculate_font_match_score`, `find_best_font_match`, `build_fallback_chain`, `font_supports_codepoint`, `resolve_font_for_codepoint`, `cache_codepoint_font_mapping`, `compute_enhanced_font_metrics`, `calculate_line_height_from_css`, `apply_pixel_ratio_to_font_metrics`, `scale_font_size_for_display`, `ensure_pixel_ratio_compatibility`, `setup_font_enhanced`). All duplicated by `lib/font/` or never called.
 - ✅ Removed unused `cache_character_width`/`get_cached_char_width` declarations from `font_face.h`.
-- ⏸ Kept `FT_FREETYPE_H` in `view.hpp` — 15+ downstream files depend on `FT_Face`/`FT_Library` types. **Phase 5 migrated all layout call sites to use `FontHandle`**, but the include and `FT_Face` field remain for render-layer access. Full header removal deferred.
+- ✅ `FT_FREETYPE_H` removed from `view.hpp` in **Phase 6** — `FT_Face`/`FT_Library` replaced with `void*`, local FT includes added to files that still need direct FT access.
 - ⏸ Kept `radiant/font.cpp`, `radiant/font_lookup_platform.c`, `lib/font_config.c/h` — still actively used. `font_lookup_platform.c` provides CoreText metrics (CTFontGetAscent/Descent/Leading with Chrome's 15% hack) now consumed by `font_calc_normal_line_height()` and `font_get_cell_height()` in `lib/font/font_metrics.c` via extern linkage.
 - ⏸ PDF `FT_Library` kept separate — PDF font loading runs at lambda/input layer (no `UiContext` available), correctly isolated.
 - **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
@@ -853,9 +911,54 @@ For WOFF1, no new library is needed — `zlib` is already linked (FreeType depen
 - ✅ **Build:** 0 errors.
 - ✅ **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass (36 regressions found and fixed during development).
 
----
+**Phase 6 — Radiant Integration ✅ COMPLETE (2026-02-15)**
+- ✅ Removed FreeType includes from `view.hpp` — `FT_Face`/`FT_Library`/`FT_GlyphSlot` replaced with `void*` in all public structs and externs.
+- ✅ Removed dead `FontProp.ft_face` field.
+- ✅ Added `font_get_kerning_by_index()` and `FontMetrics.use_typo_metrics` to font module API.
+- ✅ Migrated layout-layer FT calls: `layout_text.cpp` (2 sites), `intrinsic_sizing.cpp` (6 sites), `event.cpp` (1 site), `layout.cpp` (1 site, now fully FT-free).
+- ✅ Added local FT includes + `void*` → FT casts to 11 files that still need direct FT access for rendering.
+- ✅ **Build:** 0 errors. **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
 
-## 6. Caching Architecture
+**Phase 7 — Phaseout `lib/font_config.c` ✅ COMPLETE (2026-02-16)**
+
+Removed all remaining dependencies on `lib/font_config.c` and `lib/font_config.h`, migrated callers to `lib/font/` APIs, excluded `font_config.c` from build. Fixed 6 bugs discovered during regression testing (14 → 0 failures).
+
+**New public APIs added to `lib/font/font.h`:**
+- `font_family_exists(FontContext*, family)` — check if font family exists in database
+- `font_find_path(FontContext*, family)` — find best Regular-weight file path for a family
+- `font_find_best_match(FontContext*, family, weight, style)` → `FontMatchResult` — scored matching
+- `font_slant_to_string(FontSlant)` — enum-to-string conversion
+- `FontMatchResult` struct — `file_path`, `family_name`, `weight`, `style`, `face_index`, `match_score`, `found`
+
+**Callers migrated (4 files):**
+- `radiant/font.cpp` — `load_font_path(FontDatabase*)` → `load_font_path(FontContext*)`; `load_styled_font()` uses `font_find_best_match()` instead of `font_database_find_best_match()`; removed `#include "font_config.h"`
+- `radiant/font_face.cpp` — removed system font fallback from `load_font_with_descriptors()` (was bypassing `font_resolve()`); removed `#include "font_config.h"`
+- `radiant/ui_context.cpp` — removed `font_database_get_global()` init and `font_database_destroy()` cleanup; `load_font_path` declaration updated; removed `#include "font_config.h"`
+- `radiant/resolve_css_style.cpp` — `font_database_find_all_matches()` → `font_family_exists()`; removed `#include "font_config.h"`
+
+**Build config:**
+- `build_lambda_config.json` — added `"lib/font_config.c"` to `exclude_source_files`
+
+**View header cleanup:**
+- `radiant/view.hpp` — removed `FontDatabase` forward declaration and `UiContext.font_db` field
+
+**Bugs found and fixed (14 regression failures → 0):**
+
+1. **Generic family aliases in `font_get_generic_family()`** — concrete font names (Arial, Times, Courier) were mapped to generic family lists, causing `font_resolve()` step 4 to bypass weight/slant matching. Fix: removed concrete aliases, added comment.
+
+2. **Placeholder suffix stripping (space-separated)** — `create_font_placeholder("Arial Bold.ttf")` kept "Arial Bold" as family name because only dash-separated suffixes were stripped. Fix: added 3-pass space-separated suffix stripping loop for compound suffixes.
+
+3. **CamelCase font filename splitting** — `create_font_placeholder("HelveticaNeue.ttc")` produced "HelveticaNeue" (no space), not matching the priority font "Helvetica Neue" or CSS `font-family: Helvetica Neue`. Fix: added CamelCase → space-separated splitting (lowercase→uppercase boundary detection).
+
+4. **`load_font_with_descriptors()` system font fallback** — when no @font-face matched, this function called `load_styled_font()` directly, bypassing `font_resolve()` and its unified cache with correct weight/slant matching. Fix: removed system font fallback, let `setup_font` → `font_resolve` handle system fonts.
+
+5. **CSS enum weight collision in `setup_font()`** — `CSS_VALUE_NORMAL=307` fell in the 100-900 numeric weight range, causing `else if (fprop->font_weight >= 100 && fprop->font_weight <= 900)` to treat it as weight=307 instead of `FONT_WEIGHT_NORMAL=400`. Cache keys used wrong weights. Fix: replaced range check with explicit enum comparisons (`CSS_VALUE_BOLD`/`CSS_VALUE_BOLDER` → `FONT_WEIGHT_BOLD`, `CSS_VALUE_LIGHTER` → `FONT_WEIGHT_LIGHT`).
+
+6. **Phase 2 priority font parsing limit** — `priority_parsed < 20` cap prevented Times.ttc (at scan index 336) from being parsed in Phase 2. "Times" family had only 1 placeholder entry (weight=400), no Bold variant available. Fix: removed the arbitrary limit.
+
+- ✅ **Build:** 0 errors. **Test:** Lambda baseline 224/224, Radiant baseline 1972/1972 — all pass.
+
+---
 
 ### 6.1 Four-Tier Cache
 

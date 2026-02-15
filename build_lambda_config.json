@@ -30,7 +30,8 @@
         "lambda/schema_builder.cpp",
         "radiant/radiant.cpp",
         "lambda/format/format_latex_html_v2.cpp",
-        "lambda/input/input-adoc.cpp"
+        "lambda/input/input-adoc.cpp",
+        "lib/font_config.c"
     ],
     "includes": [
         ".",
