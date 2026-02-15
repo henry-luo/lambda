@@ -6,9 +6,6 @@
 #include "../lib/avl_tree.h"
 #include "../lib/font/font.h"
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "../lib/log.h"
 #include <chrono>
 #include <cctype>
@@ -233,53 +230,6 @@ CssEnum get_white_space_value(DomNode* node) {
         current = current->parent;
     }
     return CSS_VALUE_NORMAL;  // default
-}
-
-// Platform-specific font metrics function (defined in font_lookup_platform.c)
-// Returns 1 if metrics were retrieved, 0 to fall back to FreeType
-extern "C" int get_font_metrics_platform(const char* font_family, float font_size,
-                                          float* out_ascent, float* out_descent, float* out_line_height);
-
-// Get font cell height for text rect height
-// This matches browser's Range.getClientRects() which uses font metrics, not CSS line-height
-// Note: For most fonts, browser uses FreeType metrics.height. But for Apple's classic fonts
-// (Times, Helvetica, Courier), Chrome applies a 15% ascent hack on macOS for web compatibility.
-// pixel_ratio: fonts are loaded at physical size, divide by pixel_ratio for CSS pixels
-static float get_font_cell_height(FT_Face face, float pixel_ratio) {
-    const char* family = face->family_name;
-    // y_ppem is in physical pixels, divide by pixel_ratio to get CSS font size
-    // CRITICAL: Some WOFF fonts have y_ppem=0, derive from height if needed
-    float font_size;
-    if (face->size && face->size->metrics.y_ppem != 0) {
-        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
-    } else {
-        // Fallback: derive from height metric (height ≈ ppem * 1.2 * 64)
-        float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
-        font_size = height_px / 1.2f / pixel_ratio;
-    }
-
-    // Check if this is one of Apple's classic fonts that needs the 15% hack
-    // These are the only fonts where CoreText metrics differ significantly from FreeType
-    bool needs_mac_hack = family && (
-        strcmp(family, "Times") == 0 ||
-        strcmp(family, "Helvetica") == 0 ||
-        strcmp(family, "Courier") == 0
-    );
-
-    if (needs_mac_hack) {
-        // Use CoreText with 15% hack for Apple's classic fonts
-        // Pass CSS font size, platform metrics return CSS pixel values
-        float ascent, descent, line_height;
-        if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
-            // Return ascent + descent (without leading) - ascent already has the 15% adjustment
-            return ascent + descent;
-        }
-    }
-
-    // For all other fonts, use FreeType metrics.height directly
-    // This matches browser's Range.getClientRects() behavior
-    // Divide by pixel_ratio to convert from physical to CSS pixels
-    return face->size->metrics.height / 64.0f / pixel_ratio;
 }
 
 // ============================================================================
@@ -908,11 +858,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Use Unicode-specified width (fraction of em)
                 wd = unicode_space_em * lycon->font.current_font_size;
             } else {
-                FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(lycon->ui_context, lycon->font.font_handle, lycon->font.style, codepoint, false);
+                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
+                LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
                 // Font is loaded at physical pixel size, so advance is in physical pixels
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                wd = glyph ? ((float)glyph->advance.x / 64.0f / pixel_ratio) : lycon->font.style->space_width;
+                wd = glyph ? (glyph->advance_x / pixel_ratio) : lycon->font.style->space_width;
             }
             // Apply letter-spacing (add to character width)
             // Note: letter-spacing is NOT applied after the last character (CSS spec)

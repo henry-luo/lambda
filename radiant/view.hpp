@@ -5,6 +5,7 @@
 #include "../lib/str.h"
 #include "../lib/url.h"
 #include "../lib/mempool.h"
+#include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -79,8 +80,6 @@ inline T lerp(T a, T b, float t) {
 // Forward declarations
 struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
-struct FontContext;
-struct FontHandle;
 
 // Define lexbor tag and CSS value constants first, before including headers that need them
 enum {
@@ -379,6 +378,20 @@ struct FontProp {
     bool has_kerning;  // whether the font has kerning
     struct FontHandle* font_handle; // unified font handle (populated by setup_font)
 };
+
+// build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
+inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
+    FontStyleDesc sd = {};
+    sd.family  = fp->family;
+    sd.size_px = fp->font_size;
+    sd.weight  = (fp->font_weight == CSS_VALUE_BOLD || fp->font_weight == CSS_VALUE_BOLDER)
+                 ? FONT_WEIGHT_BOLD : (fp->font_weight == CSS_VALUE_LIGHTER)
+                 ? FONT_WEIGHT_LIGHT : FONT_WEIGHT_NORMAL;
+    sd.slant   = (fp->font_style == CSS_VALUE_ITALIC)  ? FONT_SLANT_ITALIC
+               : (fp->font_style == CSS_VALUE_OBLIQUE) ? FONT_SLANT_OBLIQUE
+               : FONT_SLANT_NORMAL;
+    return sd;
+}
 
 struct GridItemProp {
     // Grid item properties (following flex pattern)
@@ -848,8 +861,7 @@ typedef struct BlockProp {
 
 typedef struct FontBox {
     FontProp *style;  // current font style
-    void* ft_face;    // opaque FreeType face pointer (cast to FT_Face where needed)
-    struct FontHandle* font_handle; // unified font handle
+    struct FontHandle* font_handle; // unified font handle (opaque, ref-counted)
     int current_font_size;  // font size of current element
 } FontBox;
 
@@ -1207,7 +1219,6 @@ typedef struct {
     // font handling
     void* ft_library;  // opaque FT_Library handle (cast to FT_Library where needed)
     struct FontContext* font_ctx; // unified font context
-    struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     char** fallback_fonts;  // fallback fonts
@@ -1220,16 +1231,12 @@ typedef struct {
     // image cache
     struct hashmap* image_cache;  // cache for images loaded
 
-    // glyph fallback cache: maps codepoint -> fallback FT_Face that successfully rendered it
-    struct hashmap* glyph_fallback_cache;
-
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     DomDocument* document;  // current document
     MouseState mouse_state; // current mouse state
 } UiContext;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
-extern void* load_glyph(UiContext* uicon, struct FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 extern Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface);

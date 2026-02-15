@@ -252,6 +252,14 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     bmp->bearing_y = slot->bitmap_top;
     bmp->mode      = mode;
 
+    // map FreeType pixel_mode to our GlyphPixelMode enum
+    switch (slot->bitmap.pixel_mode) {
+        case FT_PIXEL_MODE_MONO:  bmp->pixel_mode = GLYPH_PIXEL_MONO; break;
+        case FT_PIXEL_MODE_BGRA:  bmp->pixel_mode = GLYPH_PIXEL_BGRA; break;
+        case FT_PIXEL_MODE_LCD:   bmp->pixel_mode = GLYPH_PIXEL_LCD;  break;
+        default:                  bmp->pixel_mode = GLYPH_PIXEL_GRAY;  break;
+    }
+
     // copy bitmap data into glyph arena
     size_t buf_size = (size_t)(abs(bmp->pitch) * bmp->height);
     if (buf_size > 0 && slot->bitmap.buffer) {
@@ -279,6 +287,73 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     }
 
     return bmp;
+}
+
+// ============================================================================
+// font_load_glyph — glyph loading with automatic codepoint fallback
+// ============================================================================
+
+// static storage for the loaded glyph (valid until next font_load_glyph call)
+static LoadedGlyph s_loaded_glyph;
+
+// fill the static LoadedGlyph from an FT_GlyphSlot
+static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot) {
+    s_loaded_glyph.bitmap.buffer    = slot->bitmap.buffer;
+    s_loaded_glyph.bitmap.width     = slot->bitmap.width;
+    s_loaded_glyph.bitmap.height    = slot->bitmap.rows;
+    s_loaded_glyph.bitmap.pitch     = slot->bitmap.pitch;
+    s_loaded_glyph.bitmap.bearing_x = slot->bitmap_left;
+    s_loaded_glyph.bitmap.bearing_y = slot->bitmap_top;
+    s_loaded_glyph.bitmap.mode      = GLYPH_RENDER_NORMAL;
+    switch (slot->bitmap.pixel_mode) {
+        case FT_PIXEL_MODE_MONO: s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_MONO; break;
+        case FT_PIXEL_MODE_BGRA: s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_BGRA; break;
+        case FT_PIXEL_MODE_LCD:  s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_LCD;  break;
+        default:                 s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_GRAY;  break;
+    }
+    s_loaded_glyph.advance_x = slot->advance.x / 64.0f;
+    s_loaded_glyph.advance_y = slot->advance.y / 64.0f;
+    return &s_loaded_glyph;
+}
+
+// try loading a glyph from a specific face with the given load flags.
+// returns LoadedGlyph* on success, NULL on failure.
+static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_Int32 load_flags) {
+    if (!h || !h->ft_face) return NULL;
+    FT_Face face = h->ft_face;
+    FT_UInt idx = FT_Get_Char_Index(face, codepoint);
+    if (idx == 0) return NULL;
+    FT_Error err = FT_Load_Glyph(face, idx, load_flags);
+    if (err) return NULL;
+    return fill_loaded_glyph_from_slot(face->glyph);
+}
+
+LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
+                              uint32_t codepoint, bool for_rendering) {
+    if (!handle || !handle->ft_face) return NULL;
+
+    // FT_LOAD_NO_HINTING matches browser closely
+    // FT_LOAD_COLOR is required for color emoji fonts
+    FT_Int32 load_flags = for_rendering
+        ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
+        : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
+
+    // step 1: try the primary font
+    LoadedGlyph* result = try_load_from_handle(handle, codepoint, load_flags);
+    if (result) return result;
+
+    // step 2: try codepoint fallback via FontContext
+    FontContext* ctx = handle->ctx;
+    if (!ctx || !style) return NULL;
+
+    FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
+    if (fallback) {
+        result = try_load_from_handle(fallback, codepoint, load_flags);
+        font_handle_release(fallback); // release the ref from font_find_codepoint_fallback
+        if (result) return result;
+    }
+
+    return NULL;
 }
 
 // ============================================================================
