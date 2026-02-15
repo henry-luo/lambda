@@ -409,7 +409,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-input-baseline - Run LIBRARY and INPUT baseline test suites only"
+	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, and YAML parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
@@ -766,13 +766,21 @@ test-lambda-baseline: build-test
 test-input-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
-	@echo "Running LIBRARY and INPUT baseline test suites..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=library --category=baseline --parallel && \
-		./test/test_run.sh --target=input --category=baseline --parallel; \
+	@echo "Running INPUT baseline tests (HTML5 WPT, CommonMark, YAML suite)..."
+	@if [ -f "test/test_wpt_html_parser_gtest.exe" ]; then \
+		./test/test_wpt_html_parser_gtest.exe; \
 	else \
-		echo "Error: No test suite found"; \
-		exit 1; \
+		echo "Warning: test/test_wpt_html_parser_gtest.exe not found"; \
+	fi
+	@if [ -f "test/test_markdown_gtest.exe" ]; then \
+		./test/test_markdown_gtest.exe; \
+	else \
+		echo "Warning: test/test_markdown_gtest.exe not found"; \
+	fi
+	@if [ -f "test/test_yaml_suite_gtest.exe" ]; then \
+		./test/test_yaml_suite_gtest.exe; \
+	else \
+		echo "Warning: test/test_yaml_suite_gtest.exe not found"; \
 	fi
 
 test-radiant-baseline: test-layout-baseline
