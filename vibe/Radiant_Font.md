@@ -1,6 +1,6 @@
 # Unified Font Module for Lambda/Radiant
 
-> **Status:** All 7 phases complete — 0 build errors · Lambda 224/224 ✅ · Radiant 1972/1972 ✅
+> **Status:** All 8 phases complete — 0 build errors · Lambda 224/224 ✅ · Radiant 1972/1972 ✅
 
 ---
 
@@ -349,9 +349,9 @@ struct FontProp {                      struct FontProp {
 };                                     };
 
 struct FontBox {                       struct FontBox {
-    FT_Face ft_face;                       void* ft_face;       // void* for render layer
-    FontProp *style;                       FontHandle* handle;  // opaque
-    int current_font_size;                 FontProp *style;
+    FT_Face ft_face;                       FontHandle* font_handle;  // opaque
+    FontProp *style;                       FontProp *style;
+    int current_font_size;                 int current_font_size;
 };                                     };
 ```
 
@@ -431,6 +431,7 @@ Every piece of the new module is sourced from existing code — **reorganization
 | **5** | FT_Face migration — ~50 direct FreeType call sites → FontHandle API | ✅ Complete | 2026-02-14 |
 | **6** | Radiant integration — decouple FreeType from `view.hpp`, migrate layout FT calls | ✅ Complete | 2026-02-15 |
 | **7** | Phaseout `lib/font_config.c` — migrate all callers, exclude from build | ✅ Complete | 2026-02-15 |
+| **8** | Render layer migration — FT_Face casts → FontHandle API, remove `FontBox.ft_face` | ✅ Complete | 2026-02-18 |
 
 ### Phase 1 — Foundation
 
@@ -520,7 +521,7 @@ Most Phase 3 features (LRU face cache, advance cache, fallback chains, @font-fac
 **Type changes in `view.hpp`:**
 - Removed `#include <ft2build.h>` and `#include FT_FREETYPE_H`
 - Removed dead `FontProp.ft_face` field
-- `FontBox.ft_face`: `FT_Face` → `void*`; `UiContext.ft_library`: `FT_Library` → `void*`
+- `FontBox.ft_face`: `FT_Face` → `void*` (fully removed in Phase 8); `UiContext.ft_library`: `FT_Library` → `void*`
 - `load_styled_font()` / `load_glyph()` returns → `void*`
 
 **New APIs:** `font_get_kerning_by_index()`, `FontMetrics.use_typo_metrics`
@@ -561,45 +562,70 @@ Removed all dependencies on `lib/font_config.c/h`, migrated callers, excluded fr
 
 6. **Priority font parsing limit** — `priority_parsed < 20` cap prevented Times.ttc from being parsed. Fix: removed arbitrary limit.
 
+### Phase 8 — Render Layer Migration
+
+Migrated all `(FT_Face)` cast sites in the render layer to `FontHandle`-based APIs. Removed the `FontBox.ft_face` field entirely.
+
+**Sites migrated per file:**
+
+| File | Sites | What Changed |
+|------|------:|--------------|
+| `render.cpp` | 7 | Debug logging (`family_name` → `font_handle_get_family_name()`); missing-glyph box (`y_ppem` → `font_handle_get_physical_size_px()`, `height/64` → `font_get_metrics()->hhea_line_height * rdcon->scale`); ascender access (2 sites → `hhea_ascender * rdcon->scale`); underline thickness → `font_get_metrics()->underline_thickness`; Monaco debug log → `font_handle` |
+| `render_form.cpp` | 1 | Ascender: `((FT_Face)fbox.ft_face)->size->metrics.ascender / 64.0f` → `font_get_metrics(fbox.font_handle)->hhea_ascender * rdcon->scale` |
+| `render_pdf.cpp` | 4 | Two text-measurement loops (`FT_Get_Char_Index` + `FT_Load_Glyph` + `glyph->advance.x / 64.0f` → `font_measure_char()` per character); **FT includes fully removed** |
+| `render_svg.cpp` | 1 | Removed `ctx.font.ft_face = NULL` initialization |
+| `font.cpp` | — | Rewrote `setup_font()`: local `FT_Face face` variable replaces `fbox->ft_face`; wraps in `FontHandle` via `font_handle_wrap()` |
+| `view.hpp` | — | **Removed `FontBox.ft_face` field** entirely; `FontBox` now has 3 fields: `FontProp *style`, `FontHandle* font_handle`, `int current_font_size` |
+
+**Coordinate system insight:** `FontMetrics` values are in CSS pixels (divided by `pixel_ratio`). The render layer works in physical pixels. All metric accesses multiply by `rdcon->scale` to convert.
+
+**Deferred:** `render_texnode.cpp` — has its own independent font pipeline (`get_face_for_font()` → `load_font_face()` → `FT_Face`) for TeX math rendering. Requires a separate migration.
+
+**FT includes still retained** in `render.cpp` and `render_form.cpp` for `FT_GlyphSlot` and `FT_Bitmap` types (used by `load_glyph()` return value and `draw_glyph()` parameter). Abstracting these behind opaque types is future work.
+
 ---
 
 ## 8. Before / After Summary
 
-| Aspect | Before | After |
-|--------|--------|-------|
-| **Files** | 7+ across `lib/` and `radiant/` | 12 in `lib/font/` + `woff2/` (5 bundled) |
-| **Font formats** | TTF/OTF/TTC (WOFF1 broken, WOFF2 partial) | TTF, OTF, TTC, WOFF1, WOFF2 — all first-class |
-| **Format pipeline** | Scattered across 3 files | Single `font_loader.c` detect→decompress→load |
-| **FT_* exposure** | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h` (layout fully migrated) |
-| **FT_Library instances** | 2 (layout + PDF) | 1 shared via FontContext |
-| **Glyph advance cache** | ❌ (open TODO) | ✅ per-face hashmap, 4096 entries |
-| **Glyph bitmap cache** | ❌ re-rasterized each frame | ✅ LRU, 4096 entries |
-| **Disk font cache** | ❌ stubs | ✅ binary format with mtime validation |
-| **Generic family tables** | 2 divergent copies | 1 authoritative table |
-| **`FT_Select_Size` handling** | 4 copy-pasted blocks | 1 `select_best_fixed_size()` |
-| **Memory management** | Mixed malloc/free/new/std::string | 100% pool/arena |
-| **`std::string`** | Used in WOFF2 path | Confined to single function |
-| **libwoff2** | External `libwoff2dec.a` + `libwoff2common.a` | Bundled decode-only sources in `woff2/` |
-| **API surface** | ~25 functions + raw FT types | ~20 opaque functions |
+| Aspect                        | Before                                            | After                                          |
+| ----------------------------- | ------------------------------------------------- | ---------------------------------------------- |
+| **Files**                     | 7+ across `lib/` and `radiant/`                   | 12 in `lib/font/` + `woff2/` (5 bundled)       |
+| **Font formats**              | TTF/OTF/TTC (WOFF1 broken, WOFF2 partial)         | TTF, OTF, TTC, WOFF1, WOFF2 — all first-class  |
+| **Format pipeline**           | Scattered across 3 files                          | Single `font_loader.c` detect→decompress→load  |
+| **FT_* exposure**             | `view.hpp`, `layout.hpp`, `font.h`, `font_face.h` | Only `font_internal.h`; layout + render PDF fully migrated; render.cpp/render_form.cpp retain FT includes only for `FT_GlyphSlot`/`FT_Bitmap` |
+| **FT_Library instances**      | 2 (layout + PDF)                                  | 1 shared via FontContext                       |
+| **Glyph advance cache**       | ❌ (open TODO)                                     | ✅ per-face hashmap, 4096 entries               |
+| **Glyph bitmap cache**        | ❌ re-rasterized each frame                        | ✅ LRU, 4096 entries                            |
+| **Disk font cache**           | ❌ stubs                                           | ✅ binary format with mtime validation          |
+| **Generic family tables**     | 2 divergent copies                                | 1 authoritative table                          |
+| **`FT_Select_Size` handling** | 4 copy-pasted blocks                              | 1 `select_best_fixed_size()`                   |
+| **Memory management**         | Mixed malloc/free/new/std::string                 | 100% pool/arena                                |
+| **`std::string`**             | Used in WOFF2 path                                | Eliminated from font module code; only inside bundled libwoff2 internals |
+| **libwoff2**                  | External `libwoff2dec.a` + `libwoff2common.a`     | Bundled decode-only sources in `woff2/`        |
+| **`FontBox.ft_face`**         | Raw `FT_Face` exposed in `view.hpp`               | Field removed; `FontHandle*` only              |
+| **API surface**               | ~25 functions + raw FT types                      | ~20 opaque functions                           |
 
 ---
 
 ## 9. Future Work
 
-### 9.1 Render Layer Migration
-Migrate render-layer `(FT_Face)` casts to FontHandle-based APIs (10 sites in `render.cpp`). Remove `FontBox.ft_face` field and local FT includes once fully migrated.
+### 9.1 Glyph Abstraction Layer
+`load_glyph()` returns `void*` (cast to `FT_GlyphSlot`) and `draw_glyph()` takes `FT_Bitmap*`. Abstract these behind opaque `GlyphBitmap*` to remove the last FT includes from `render.cpp` and `render_form.cpp`.
 
-### 9.2 HarfBuzz Text Shaping
+### 9.2 TeX Math Font Migration
+`render_texnode.cpp` has its own font pipeline (`get_face_for_font()` → `load_font_face()` → `FT_Face`). Migrate to `FontHandle`-based API.
+
+### 9.3 HarfBuzz Text Shaping
 Current system does character-by-character glyph loading with manual kerning. For proper international text (Arabic, Devanagari, Thai), HarfBuzz shaping is needed. The opaque FontHandle makes this a clean addition.
 
-### 9.3 Variable Font Support
+### 9.4 Variable Font Support
 OpenType variable fonts (`fvar` table) allow continuous weight/width/slant ranges. FreeType already supports this via `FT_Set_Var_Design_Coordinates()`.
 
-### 9.4 Font Subsetting for PDF
+### 9.5 Font Subsetting for PDF
 Embed only glyphs actually used in the document instead of entire font files. Natural fit for `font_loader.c`.
 
-### 9.5 FreeType Vendoring
+### 9.6 FreeType Vendoring
 Bundle selected FreeType source files directly (skip BDF, PCF, PFR, Type1 drivers). Currently linked as system library.
 
-### 9.6 Thread Safety
+### 9.7 Thread Safety
 FreeType's `FT_Library` is not thread-safe across faces. Options: per-thread library, or mutex around face loading. The opaque `FontContext` makes either approach possible without API changes.

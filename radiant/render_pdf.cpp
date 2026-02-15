@@ -3,10 +3,6 @@
 #include "layout.hpp"
 #include "font_face.h"
 
-// FreeType for PDF glyph metrics
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
 extern "C" {
@@ -228,16 +224,12 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     }
 
     if (ctx->font.font_handle) {
-        FT_Face _pdf_face = (FT_Face)font_handle_get_ft_face(ctx->font.font_handle);
         for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
             if (text_content[i] == ' ') {
                 natural_width += space_width;
                 space_count++;
             } else {
-                FT_UInt glyph_index = FT_Get_Char_Index(_pdf_face, text_content[i]);
-                if (FT_Load_Glyph(_pdf_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
-                    natural_width += _pdf_face->glyph->advance.x / 64.0f;
-                }
+                natural_width += font_measure_char(ctx->font.font_handle, (uint32_t)text_content[i]);
             }
         }
     }
@@ -270,14 +262,10 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                     HPDF_Page_TextOut(ctx->current_page, x, pdf_y, word);
                     HPDF_Page_EndText(ctx->current_page);
 
-                    // Calculate word width using FreeType
+                    // Calculate word width using font metrics
                     if (ctx->font.font_handle) {
-                        FT_Face _pdf_face2 = (FT_Face)font_handle_get_ft_face(ctx->font.font_handle);
                         for (size_t j = 0; j < word_len; j++) {
-                            FT_UInt glyph_index = FT_Get_Char_Index(_pdf_face2, word[j]);
-                            if (FT_Load_Glyph(_pdf_face2, glyph_index, FT_LOAD_DEFAULT) == 0) {
-                                x += _pdf_face2->glyph->advance.x / 64.0f;
-                            }
+                            x += font_measure_char(ctx->font.font_handle, (uint32_t)word[j]);
                         }
                     }
                 }
