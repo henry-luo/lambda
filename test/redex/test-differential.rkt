@@ -39,18 +39,36 @@
 (define (reference-dir)
   (build-path test-dir "layout" "reference"))
 
+;; suite name → directory mapping
+(define suite-dirs
+  (hash "baseline" "baseline"
+        "flex"     "flex"
+        "grid"     "grid"
+        "position" "position"
+        "table"    "table"
+        "basic"    "basic"
+        "box"      "box"
+        "page"     "page"
+        "flex-nest" "flex-nest"
+        "text_flow" "text_flow"))
+
+;; all suite names in default order
+(define all-suite-names
+  '("baseline" "flex" "grid" "position" "table" "basic" "box"
+    "page" "flex-nest" "text_flow"))
+
 ;; ============================================================
 ;; Test Discovery
 ;; ============================================================
 
-;; find all test pairs: (html-path . ref-path) for simple baseline tests
-(define (discover-tests #:filter-pattern [pattern #f]
-                        #:limit [limit #f])
-  (define html-dir (baseline-html-dir))
-  (define ref-dir (reference-dir))
-
+;; discover tests from a single directory.
+;; returns list of (html-path . ref-path) pairs.
+(define (discover-tests-in-dir html-dir ref-dir
+                                #:filter-pattern [pattern #f]
+                                #:classify? [classify? #t])
   (define html-files
-    (sort (filter (lambda (f) (regexp-match? #rx"\\.html$" (path->string f)))
+    (sort (filter (lambda (f)
+                    (regexp-match? #rx"\\.(html|htm)$" (path->string f)))
                   (directory-list html-dir))
           string<? #:key path->string))
 
@@ -62,15 +80,9 @@
                 html-files)
         html-files))
 
-  ;; limit count
-  (define limited
-    (if limit
-        (take filtered (min limit (length filtered)))
-        filtered))
-
   ;; pair with reference JSONs, keeping only those that:
   ;; 1. have a matching reference JSON
-  ;; 2. are classified as 'simple (inline-only, no <style> blocks)
+  ;; 2. are classified as 'simple (when classify? is #t)
   (filter-map
    (lambda (html-file)
      (define stem (path-replace-extension html-file #""))
@@ -78,9 +90,37 @@
                                    (string-append (path->string stem) ".json")))
      (define html-path (build-path html-dir html-file))
      (and (file-exists? ref-file)
-          (eq? (classify-html-test (path->string html-path)) 'simple)
+          (or (not classify?)
+              (eq? (classify-html-test (path->string html-path)) 'simple))
           (cons (path->string html-path) (path->string ref-file))))
-   limited))
+   filtered))
+
+;; find all test pairs: (html-path . ref-path) for simple tests across suites
+(define (discover-tests #:filter-pattern [pattern #f]
+                        #:limit [limit #f]
+                        #:suites [suites '("baseline")])
+  (define ref-dir (reference-dir))
+
+  (define all-pairs
+    (apply append
+      (for/list ([suite-name (in-list suites)])
+        (define sub-dir (hash-ref suite-dirs suite-name #f))
+        (if sub-dir
+            (let ([html-dir (build-path test-dir "layout" "data" sub-dir)])
+              (if (directory-exists? html-dir)
+                  (discover-tests-in-dir html-dir ref-dir
+                                          #:filter-pattern pattern)
+                  '()))
+            '()))))
+
+  ;; sort all pairs by filename for deterministic ordering
+  (define sorted-pairs
+    (sort all-pairs string<? #:key car))
+
+  ;; apply limit
+  (if limit
+      (take sorted-pairs (min limit (length sorted-pairs)))
+      sorted-pairs))
 
 ;; ============================================================
 ;; Single Test Runner
@@ -182,6 +222,7 @@
   (define verbose? (make-parameter #f))
   (define base-tol (make-parameter 5))
   (define prop-tol (make-parameter 0.03))
+  (define suites-str (make-parameter "baseline"))
 
   (command-line
    #:program "test-differential"
@@ -195,23 +236,34 @@
    ["--base-tolerance" t "Base tolerance in px (default: 5)"
     (base-tol (string->number t))]
    ["--proportional-tolerance" t "Proportional tolerance fraction (default: 0.03)"
-    (prop-tol (string->number t))])
+    (prop-tol (string->number t))]
+   ["--suite" s "Comma-separated list of suites to run (default: baseline). Use 'all' for all suites. Available: baseline,flex,grid,position,table,basic,box,page,flex-nest,text_flow"
+    (suites-str s)])
 
   (define config
     (make-compare-config
      #:base-tolerance (base-tol)
      #:proportional-tolerance (prop-tol)))
 
-  (printf "Discovering tests...\n")
+  ;; parse suite list
+  (define suites
+    (let ([s (suites-str)])
+      (cond
+        [(string=? s "all") all-suite-names]
+        [else (string-split s ",")])))
+
+  (printf "Discovering tests (suites: ~a)...\n" (string-join suites ", "))
   (define tests
     (discover-tests #:filter-pattern (filter-pattern)
-                    #:limit (limit)))
-  (printf "Found ~a simple baseline tests\n\n" (length tests))
+                    #:limit (limit)
+                    #:suites suites))
+  (printf "Found ~a simple tests across ~a suite(s)\n\n"
+          (length tests) (length suites))
 
   (when (null? tests)
     (printf "No tests found! Check paths.\n")
-    (printf "  HTML dir: ~a\n" (baseline-html-dir))
-    (printf "  Ref dir:  ~a\n" (reference-dir))
+    (printf "  Test dir: ~a\n" test-dir)
+    (printf "  Suites:   ~a\n" (string-join suites ", "))
     (exit 1))
 
   (define-values (passed failed errors)

@@ -23,7 +23,7 @@
 (define (layout-positioned box containing-w containing-h dispatch-fn)
   (match box
     [`(,box-type ,id ,styles . ,rest)
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles containing-w))
 
      ;; resolve inset properties
      (define css-top (get-style-prop styles 'top 'auto))
@@ -51,16 +51,22 @@
          ;; shrink-to-fit: measure content with max-content, clamp to containing block
          [else
           (define shrink-avail (max 0 (- containing-w (horizontal-pb bm) (horizontal-margin bm))))
-          ;; measure intrinsic width by laying out with max-content
+          ;; measure max-content (preferred) width
           (define static-s (override-position styles 'static))
           (define static-b (replace-box-styles box static-s))
           (define measure-avail `(avail av-max-content indefinite))
           (define measure-view (dispatch-fn static-b measure-avail))
           (define intrinsic-w (view-width measure-view))
-          ;; shrink-to-fit: min(available, max(preferred, minimum))
+          ;; measure min-content (preferred minimum) width
+          (define min-measure-avail `(avail av-min-content indefinite))
+          (define min-measure-view (dispatch-fn static-b min-measure-avail))
+          (define min-intrinsic-w (view-width min-measure-view))
+          ;; shrink-to-fit: min(max(preferred-minimum, available), preferred)
+          ;; per CSS 2.2 §10.3.7
           ;; content width = intrinsic minus pb (since intrinsic is border-box)
           (define content-intrinsic (max 0 (- intrinsic-w (horizontal-pb bm))))
-          (min shrink-avail content-intrinsic)]))
+          (define min-content-intrinsic (max 0 (- min-intrinsic-w (horizontal-pb bm))))
+          (min content-intrinsic (max min-content-intrinsic shrink-avail))]))
 
      ;; apply min/max width constraints
      (define min-w-val (get-style-prop styles 'min-width 'auto))
@@ -109,13 +115,41 @@
              max-h))
        (set! content-h (max min-h-c (min max-h-c content-h))))
 
+     ;; === aspect-ratio support ===
+     ;; If aspect-ratio is set, derive the missing dimension from the known one.
+     ;; width takes precedence when both axes are determinate.
+     (define ar (get-style-prop styles 'aspect-ratio #f))
+     (when (and ar (number? ar) (> ar 0))
+       (define has-definite-w (or resolved-w (and left-val right-val)))
+       (define has-definite-h (or resolved-h (and top-val bottom-val)))
+       (cond
+         ;; width is definite (explicit or from insets) → derive height
+         [has-definite-w
+          (set! content-h (/ content-w ar))]
+         ;; height is definite → derive width (override shrink-to-fit)
+         [(and has-definite-h content-h)
+          (set! content-w (* content-h ar))]
+         ;; neither axis definite, but min-width may have increased content-w
+         [(> content-w 0)
+          (set! content-h (/ content-w ar))]))
+
      ;; lay out children to determine auto height
      ;; override position to static to avoid infinite recursion
      ;; (dispatch checks position and would re-call layout-positioned)
      (define static-styles (override-position styles 'static))
      (define static-box (replace-box-styles box static-styles))
-     (define avail `(avail (definite ,content-w)
-                           ,(if content-h `(definite ,content-h) 'indefinite)))
+     ;; avail must include our own padding+border+margin so dispatch's
+     ;; resolve-block-width can re-derive the correct content-w:
+     ;;   content-w = avail-w - horizontal-pb - horizontal-margin
+     (define avail-w-for-dispatch (+ content-w (horizontal-pb bm) (horizontal-margin bm)))
+     (define avail-h-for-dispatch
+       (if content-h
+           (+ content-h (vertical-pb bm) (vertical-margin bm))
+           #f))
+     (define avail `(avail (definite ,avail-w-for-dispatch)
+                           ,(if avail-h-for-dispatch
+                                `(definite ,avail-h-for-dispatch)
+                                'indefinite)))
      (define child-view (dispatch-fn static-box avail))
      ;; actual-h is content height; when auto, use child-view's height
      ;; but child-view returns border-box height, so convert back to content height
@@ -154,7 +188,9 @@
 
 ;; apply relative offset to an already-laid-out view.
 ;; does not affect layout of siblings.
-(define (apply-relative-offset view styles)
+;; containing-w / containing-h are optional containing-block dimensions
+;; for resolving percentage offsets (left/right use width, top/bottom use height).
+(define (apply-relative-offset view styles [containing-w #f] [containing-h #f])
   (define pos (get-style-prop styles 'position 'static))
   (cond
     [(eq? pos 'relative)
@@ -164,15 +200,16 @@
      (define css-right (get-style-prop styles 'right 'auto))
 
      ;; top takes precedence over bottom; left over right
+     ;; percentage offsets resolve against the containing block dimensions
      (define dx
        (cond
-         [(resolve-size-value css-left #f) => identity]
-         [(resolve-size-value css-right #f) => (λ (v) (- v))]
+         [(resolve-size-value css-left containing-w) => identity]
+         [(resolve-size-value css-right containing-w) => (λ (v) (- v))]
          [else 0]))
      (define dy
        (cond
-         [(resolve-size-value css-top #f) => identity]
-         [(resolve-size-value css-bottom #f) => (λ (v) (- v))]
+         [(resolve-size-value css-top containing-h) => identity]
+         [(resolve-size-value css-bottom containing-h) => (λ (v) (- v))]
          [else 0]))
 
      (offset-view view dx dy)]
