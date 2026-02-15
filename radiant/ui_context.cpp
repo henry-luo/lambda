@@ -7,7 +7,6 @@
 #include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
 
 #include "../lib/log.h"
-#include "../lib/font_config.h"
 #include "../lib/font/font.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
@@ -16,7 +15,7 @@
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
-char* load_font_path(FontDatabase *font_db, const char* font_name);
+char* load_font_path(FontContext *font_ctx, const char* font_name);
 void scroll_config_init(int pixel_ratio);
 
 char *fallback_fonts[] = {
@@ -80,13 +79,6 @@ int ui_context_init(UiContext* uicon, bool headless) {
     } else {
         log_debug("LCD filter enabled for sub-pixel rendering");
     }
-    // Use global font database singleton for performance
-    uicon->font_db = font_database_get_global();
-    if (!uicon->font_db) {
-        fprintf(stderr, "Failed to initialize global font database\n");
-        return EXIT_FAILURE;
-    }
-
     if (headless) {
         // Headless mode: no window creation
         printf("Running in headless mode (no window)\n");
@@ -136,7 +128,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
                (int)uicon->window_width, (int)uicon->window_height);
     }
 
-    // Create unified font context (Phase 2: coexists with old font_db/ft_library)
+    // Create unified font context — owns font database internally
     // Created after window so pixel_ratio is known
     FontContextConfig font_cfg = {};
     font_cfg.pixel_ratio = uicon->pixel_ratio;
@@ -165,7 +157,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
         nullptr
     };
     for (int i = 0; tvg_fonts[i]; i++) {
-        char* font_path = load_font_path(uicon->font_db, tvg_fonts[i]);
+        char* font_path = load_font_path(uicon->font_ctx, tvg_fonts[i]);
         if (font_path) {
             tvg_font_load(font_path);
             mem_free(font_path);
@@ -216,7 +208,6 @@ void ui_context_cleanup(UiContext* uicon) {
         uicon->font_ctx = NULL;
     }
     FT_Done_FreeType((FT_Library)uicon->ft_library);
-    font_database_destroy(uicon->font_db);
 
     log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache
