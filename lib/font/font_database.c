@@ -612,6 +612,42 @@ static FontEntry* create_font_placeholder(const char* file_path, Pool* pool, Are
         }
     }
 
+    // also strip space-separated style suffixes (e.g. "Arial Bold" → "Arial")
+    // loop to handle compound suffixes like "Bold Italic" → strip "Italic" then "Bold"
+    for (int strip_pass = 0; strip_pass < 3; strip_pass++) {
+        char* space = strrchr(buf, ' ');
+        if (!space) break;
+        if (strcasecmp(space, " Regular") == 0 || strcasecmp(space, " Bold") == 0 ||
+            strcasecmp(space, " Italic") == 0 || strcasecmp(space, " Light") == 0 ||
+            strcasecmp(space, " Medium") == 0 || strcasecmp(space, " Semibold") == 0 ||
+            strcasecmp(space, " Thin") == 0 || strcasecmp(space, " Black") == 0 ||
+            strcasecmp(space, " Heavy") == 0 || strcasecmp(space, " Narrow") == 0 ||
+            strcasecmp(space, " Condensed") == 0 || strcasecmp(space, " Oblique") == 0) {
+            *space = '\0';
+        } else {
+            break;
+        }
+    }
+
+    // split CamelCase into space-separated words (e.g. "HelveticaNeue" → "Helvetica Neue")
+    // only if the name has no spaces and contains internal uppercase letters
+    if (!strchr(buf, ' ') && !strchr(buf, '-')) {
+        char split[MAX_FONT_FAMILY_NAME];
+        int j = 0;
+        for (int i = 0; buf[i] && j < (int)sizeof(split) - 2; i++) {
+            if (i > 0 && buf[i] >= 'A' && buf[i] <= 'Z' && buf[i-1] >= 'a' && buf[i-1] <= 'z') {
+                split[j++] = ' ';
+            }
+            split[j++] = buf[i];
+        }
+        split[j] = '\0';
+        // only use split result if it actually changed (has spaces now)
+        if (strchr(split, ' ')) {
+            strncpy(buf, split, sizeof(buf) - 1);
+            buf[sizeof(buf) - 1] = '\0';
+        }
+    }
+
     entry->family_name = arena_strdup(arena, buf);
     return entry;
 }
@@ -844,6 +880,30 @@ static float calculate_match_score(FontEntry* entry, FontDatabaseCriteria* crite
         if (supported) score += 15.0f;
     }
 
+    // standard font preference — prefer standard variants over Unicode/specialty
+    // variants for better browser compatibility (ported from font_config.c)
+    if (entry->file_path) {
+        const char* filename = strrchr(entry->file_path, '/');
+        filename = filename ? filename + 1 : entry->file_path;
+
+        // penalty for Unicode variants when standard font requested
+        if (strstr(filename, "Unicode") && !strstr(criteria->family_name, "Unicode")) {
+            score -= 8.0f;
+        }
+
+        // penalty for oversized font files (likely comprehensive Unicode fonts)
+        if (entry->file_size > 5 * 1024 * 1024) { // > 5MB
+            score -= 5.0f;
+        }
+
+        // bonus for exact filename matches (e.g., "Arial.ttf" for "Arial")
+        char expected[256];
+        snprintf(expected, sizeof(expected), "%s.ttf", criteria->family_name);
+        if (str_ieq(filename, strlen(filename), expected, strlen(expected))) {
+            score += 10.0f;
+        }
+    }
+
     return score;
 }
 
@@ -967,7 +1027,7 @@ bool font_database_scan_internal(FontDatabase* db) {
     // Phase 2: Parse priority fonts (web-safe fonts for fast startup)
     log_info("font_database_scan: Phase 2 — parsing priority fonts");
     int priority_parsed = 0;
-    for (int i = 0; i < db->all_fonts->length && priority_parsed < 20; i++) {
+    for (int i = 0; i < db->all_fonts->length; i++) {
         FontEntry* e = (FontEntry*)db->all_fonts->data[i];
         if (!e || !e->is_placeholder || !e->family_name) continue;
 
