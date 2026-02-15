@@ -1,7 +1,7 @@
 #include "layout.hpp"
 #include "grid.hpp"
 #include "form_control.hpp"
-#include "font_face.h"  // for FontFaceDescriptor (also provides FT includes)
+#include "font_face.h"  // for FontFaceDescriptor
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -10,7 +10,6 @@
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <cmath>
-#include FT_TRUETYPE_TABLES_H  // for TT_OS2 in get_font_x_height_ratio
 
 // Forward declaration for CSS variable lookup
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
@@ -49,39 +48,6 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
     }
 
     return nullptr;
-}
-
-/**
- * Get x-height ratio for a font (x-height / em-size).
- * Tries OS/2 sxHeight first, then measures 'x' glyph, fallback to 0.5.
- */
-static float get_font_x_height_ratio(FT_Face face) {
-    if (!face) return 0.5f;
-
-    // Try to get sxHeight from OS/2 table (most accurate)
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
-        float ratio = (float)os2->sxHeight / face->units_per_EM;
-        log_debug("x-height ratio from OS/2 sxHeight: %.3f (sxHeight=%d, unitsPerEM=%d)",
-                  ratio, os2->sxHeight, face->units_per_EM);
-        return ratio;
-    }
-
-    // Fallback: measure the 'x' glyph height
-    FT_UInt x_index = FT_Get_Char_Index(face, 'x');
-    if (x_index > 0) {
-        FT_Error error = FT_Load_Glyph(face, x_index, FT_LOAD_NO_SCALE);
-        if (!error && face->units_per_EM > 0) {
-            float ratio = (float)face->glyph->metrics.height / face->units_per_EM;
-            log_debug("x-height ratio from 'x' glyph: %.3f (height=%ld, unitsPerEM=%d)",
-                      ratio, face->glyph->metrics.height, face->units_per_EM);
-            return ratio;
-        }
-    }
-
-    // Ultimate fallback: typical serif font ratio
-    log_debug("x-height ratio: using default 0.5");
-    return 0.5f;
 }
 
 // Helper: resolve var() function to get the actual CSS value

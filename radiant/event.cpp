@@ -3,10 +3,6 @@
 #include "form_control.hpp"
 #include "../lib/font/font.h"
 
-// FreeType for glyph slot access from load_glyph
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #include "../lib/log.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
@@ -1371,15 +1367,16 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
                 bytes = 1;
                 codepoint = *p;
             }
-            // Use load_glyph to match layout calculation
-            FT_GlyphSlot glyph = (FT_GlyphSlot)load_glyph(evcon->ui_context, evcon->font.font_handle, evcon->font.style, codepoint, false);
+            // Use font_load_glyph to match layout calculation
+            FontStyleDesc _sd = font_style_desc_from_prop(evcon->font.style);
+            LoadedGlyph* glyph = font_load_glyph(evcon->font.font_handle, &_sd, codepoint, false);
             if (!glyph) {
                 log_error("Could not load codepoint U+%04X", codepoint);
                 p += bytes;
                 byte_offset += bytes;
                 continue;
             }
-            wd = glyph->advance.x / 64.0 / pixel_ratio;
+            wd = glyph->advance_x / pixel_ratio;
         }
 
         // Add letter-spacing (applied after each character except the last)

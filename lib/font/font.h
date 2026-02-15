@@ -165,18 +165,48 @@ typedef enum GlyphRenderMode {
     GLYPH_RENDER_SDF,           // signed distance field
 } GlyphRenderMode;
 
+// pixel format of a rasterized glyph bitmap (replaces FT_PIXEL_MODE_*)
+typedef enum GlyphPixelMode {
+    GLYPH_PIXEL_GRAY,           // 8-bit grayscale (1 byte per pixel)
+    GLYPH_PIXEL_MONO,           // 1-bit monochrome (8 pixels per byte, MSB first)
+    GLYPH_PIXEL_BGRA,           // 32-bit BGRA (color emoji)
+    GLYPH_PIXEL_LCD,            // LCD sub-pixel (3 bytes per pixel, horizontal RGB)
+} GlyphPixelMode;
+
 typedef struct GlyphBitmap {
     uint8_t* buffer;            // pixel data (owned by cache, valid until eviction)
     int      width, height;     // bitmap dimensions
     int      pitch;             // bytes per row
-    int      bearing_x;         // left offset from pen position
+    int      bearing_x;        // left offset from pen position
     int      bearing_y;         // top offset from baseline
     GlyphRenderMode mode;
+    GlyphPixelMode  pixel_mode; // actual pixel format of buffer data
 } GlyphBitmap;
+
+// a fully loaded glyph ready for rendering — combines bitmap + advance.
+// returned by font_load_glyph(), replaces raw FT_GlyphSlot in the render layer.
+typedef struct LoadedGlyph {
+    GlyphBitmap  bitmap;        // rasterized bitmap (buffer, dimensions, bearings)
+    float        advance_x;     // horizontal advance in physical pixels (26.6 already decoded)
+    float        advance_y;     // vertical advance (usually 0 for horizontal text)
+} LoadedGlyph;
 
 // render a glyph to bitmap (result is cached; pointer valid until cache eviction)
 const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
                                       GlyphRenderMode mode);
+
+// load a glyph with automatic codepoint fallback. tries the primary handle
+// first; if the glyph is missing, resolves a fallback font via FontContext's
+// codepoint fallback cache and fallback_fonts chain.
+//
+// for_rendering=true:  loads with FT_LOAD_RENDER (bitmap data populated)
+// for_rendering=false: loads with FT_LOAD_DEFAULT (measurement only, advance valid)
+//
+// returns a pointer to static LoadedGlyph storage (valid until next call).
+// advance_x/advance_y are in physical pixels (26.6 decoded).
+// returns NULL if no font (primary or fallback) has the codepoint.
+LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
+                              uint32_t codepoint, bool for_rendering);
 
 // ============================================================================
 // Text Measurement — convenience for layout
@@ -197,6 +227,10 @@ float font_measure_char(FontHandle* handle, uint32_t codepoint);
 // ============================================================================
 // Font Fallback — for codepoints not covered by the primary font
 // ============================================================================
+
+// platform-specific font path fallback (CoreText on macOS, directory search on Linux/Win).
+// returns a mem_strdup'd path that the caller must free with mem_free(), or NULL.
+char* font_platform_find_fallback(const char* font_name);
 
 // find a font that supports a specific codepoint, given a style hint.
 // searches registered font face descriptors first, then system fonts.
