@@ -5,7 +5,6 @@
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
-#include "../lib/font_config.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include <string.h>
@@ -2508,11 +2507,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
                 // Check system font database
-                if (lycon->ui_context && lycon->ui_context->font_db) {
-                    ArrayList* matches = font_database_find_all_matches(lycon->ui_context->font_db, family);
-                    bool exists = (matches && matches->length > 0);
-                    if (matches) arraylist_free(matches);
-                    return exists;
+                if (lycon->ui_context && lycon->ui_context->font_ctx) {
+                    return font_family_exists(lycon->ui_context->font_ctx, family);
                 }
                 return false;  // No database available, can't verify
             };

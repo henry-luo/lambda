@@ -319,6 +319,36 @@ void font_context_add_scan_directory(FontContext* ctx, const char* directory);
 int font_get_font_count(FontContext* ctx);
 int font_get_family_count(FontContext* ctx);
 
+// check whether a font family name exists in the system font database.
+// returns true if at least one font with that family name is installed.
+bool font_family_exists(FontContext* ctx, const char* family);
+
+// find the file path of the best Regular-weight font for a given family name.
+// returns a mem_strdup'd path (caller must mem_free), or NULL if not found.
+// prefers weight=400, non-italic, non-.ttc files — suitable for ThorVG loading.
+char* font_find_path(FontContext* ctx, const char* family);
+
+// convert FontSlant enum to string ("normal", "italic", "oblique")
+const char* font_slant_to_string(FontSlant slant);
+
+// result of a font database best-match query
+typedef struct FontMatchResult {
+    const char* file_path;          // font file path (valid until database is freed)
+    const char* family_name;        // matched font family name
+    int         weight;             // matched font weight (100-900)
+    FontSlant   style;              // matched font style
+    int         face_index;         // face index for TTC collections (0 for single-face)
+    float       match_score;        // 0.0-1.0 match quality
+    bool        found;              // true if a match was found
+} FontMatchResult;
+
+// find the best-matching system font for given criteria.
+// score_threshold: minimum match_score to accept (use 0.5 for typical CSS matching).
+FontMatchResult font_find_best_match(FontContext* ctx,
+                                      const char* family,
+                                      int weight,
+                                      FontSlant style);
+
 // ============================================================================
 // Cache Control
 // ============================================================================

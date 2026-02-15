@@ -11,7 +11,6 @@
 #include FT_FREETYPE_H
 
 #include "../lib/log.h"
-#include "../lib/font_config.h"
 #include "../lib/font/font.h"
 #include "../lib/memtrack.h"
 
@@ -115,54 +114,14 @@ uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
 }
 
-char* load_font_path(FontDatabase *font_db, const char* font_name) {
-    if (!font_db || !font_name) {
-        log_warn("Invalid parameters: font_db=%p, font_name=%p", font_db, font_name);
+char* load_font_path(FontContext *font_ctx, const char* font_name) {
+    if (!font_ctx || !font_name) {
+        log_warn("load_font_path: invalid parameters: font_ctx=%p, font_name=%p", font_ctx, font_name);
         return NULL;
     }
 
-    // Simple font lookup by family name - find any font in the family
-    ArrayList* matches = font_database_find_all_matches(font_db, font_name);
-    if (!matches || matches->length == 0) {
-        if (font_log) {
-            clog_warn(font_log, "Font not found in database: %s", font_name);
-        } else {
-            log_warn("Font not found in database: %s", font_name);
-        }
-        if (matches) arraylist_free(matches);
-
-        // Fallback: Try platform-specific font lookup
-        char* result = find_font_path_fallback(font_name);
-        if (result) {
-            return result;
-        }
-        return NULL;
-    }
-
-    // Prefer Regular/Normal style font over Bold/Italic variants
-    // Iterate through matches to find the best match
-    FontEntry* best_font = nullptr;
-    int best_score = -1;
-    for (int i = 0; i < matches->length; i++) {
-        FontEntry* font = (FontEntry*)matches->data[i];
-        int score = 0;
-        // Prefer non-italic, non-bold fonts
-        if (font->weight == 400) score += 10;  // Regular weight
-        else if (font->weight < 500) score += 5;  // Light to normal weight
-        if (font->style == FONT_STYLE_NORMAL) score += 10;  // Not italic
-        // Avoid TTC files for ThorVG (it doesn't support TrueType Collections)
-        if (font->file_path && !strstr(font->file_path, ".ttc")) score += 5;
-
-        if (score > best_score) {
-            best_score = score;
-            best_font = font;
-        }
-    }
-
-    FontEntry* font = best_font ? best_font : (FontEntry*)matches->data[0];
-    char* result = mem_strdup(font->file_path, MEM_CAT_FONT);
-    arraylist_free(matches);
-    return result;
+    // Use the unified font module to find the best Regular-weight font file path
+    return font_find_path(font_ctx, font_name);
 }
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size) {
@@ -184,7 +143,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
     }
 
     FT_Face face = NULL;
-    char* font_path = load_font_path(uicon->font_db, font_name);
+    char* font_path = load_font_path(uicon->font_ctx, font_name);
     if (font_path) {
         // load the font
         log_font_loading_attempt(font_name, font_path);
@@ -276,24 +235,20 @@ void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_s
         }
     }
 
-    // Cache miss - do the full database lookup
-    FontDatabaseCriteria criteria;
-    memset(&criteria, 0, sizeof(criteria));
-    strncpy(criteria.family_name, font_name, sizeof(criteria.family_name) - 1);
-    criteria.weight = (font_style->font_weight == CSS_VALUE_BOLD) ? 700 : 400;
-    criteria.style = (font_style->font_style == CSS_VALUE_ITALIC) ? FONT_STYLE_ITALIC : FONT_STYLE_NORMAL;
+    // Cache miss - do the full database lookup via unified font module
+    int weight = (font_style->font_weight == CSS_VALUE_BOLD) ? 700 : 400;
+    FontSlant slant = (font_style->font_style == CSS_VALUE_ITALIC) ? FONT_SLANT_ITALIC : FONT_SLANT_NORMAL;
 
-    FontDatabaseResult result = font_database_find_best_match(uicon->font_db, &criteria);
+    FontMatchResult result = font_find_best_match(uicon->font_ctx, font_name, weight, slant);
     FT_Face face = NULL;
 
     const float SCORE_THRESHOLD = 0.5f;
-    bool use_database_result = (result.font && result.font->file_path && result.match_score >= SCORE_THRESHOLD);
+    bool use_database_result = (result.found && result.file_path && result.match_score >= SCORE_THRESHOLD);
 
     if (use_database_result) {
-        FontEntry* font = result.font;
-        FT_Long face_index = font->is_collection ? font->collection_index : 0;
-        log_debug("[FONT PATH] Loading font: %s from path: %s (index=%ld)", font_name, font->file_path, face_index);
-        if (FT_New_Face((FT_Library)uicon->ft_library, font->file_path, face_index, &face) == 0) {
+        FT_Long face_index = result.face_index;
+        log_debug("[FONT PATH] Loading font: %s from path: %s (index=%ld)", font_name, result.file_path, face_index);
+        if (FT_New_Face((FT_Library)uicon->ft_library, result.file_path, face_index, &face) == 0) {
             // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
             if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
                 (face->face_flags & FT_FACE_FLAG_COLOR) &&
@@ -309,9 +264,9 @@ void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_s
                 FT_Set_Pixel_Sizes(face, 0, physical_font_size);
             }
             log_info("Loading styled font: %s (family: %s, weight: %d, style: %s, physical_size: %.0f)",
-                font_name, font->family_name, font->weight, font_style_to_string(font->style), physical_font_size);
+                font_name, result.family_name, result.weight, font_slant_to_string(result.style), physical_font_size);
         } else {
-            log_error("Failed to load font face for: %s (found font: %s)", font_name, font->file_path);
+            log_error("Failed to load font face for: %s (found font: %s)", font_name, result.file_path);
         }
     } else {
         // Font not found in database, fall back to platform-specific lookup
@@ -451,9 +406,8 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (!fbox->ft_face && uicon->font_ctx) {
         // map CssEnum weight/style → FontWeight/FontSlant
         FontWeight fw = FONT_WEIGHT_NORMAL;
-        if (fprop->font_weight == CSS_VALUE_BOLD) fw = FONT_WEIGHT_BOLD;
-        // numeric weight stored directly in CssEnum (100-900 range)
-        else if (fprop->font_weight >= 100 && fprop->font_weight <= 900) fw = (FontWeight)fprop->font_weight;
+        if (fprop->font_weight == CSS_VALUE_BOLD || fprop->font_weight == CSS_VALUE_BOLDER) fw = FONT_WEIGHT_BOLD;
+        else if (fprop->font_weight == CSS_VALUE_LIGHTER) fw = FONT_WEIGHT_LIGHT;
 
         FontSlant fs = FONT_SLANT_NORMAL;
         if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
@@ -503,19 +457,15 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             }
         } else {
             // Not a generic family - check database for exact match
-            ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_to_load);
-            bool family_exists = (family_matches && family_matches->length > 0);
-            int match_count = family_matches ? family_matches->length : 0;
+            bool family_exists = font_family_exists(uicon->font_ctx, family_to_load);
 
             if (family_exists) {
                 // Family exists in database - do full styled lookup (weight, style matching)
-                log_debug("Font family '%s' exists in database (%d matches), doing styled lookup", family_to_load, match_count);
-                arraylist_free(family_matches);
+                log_debug("Font family '%s' exists in database, doing styled lookup", family_to_load);
                 fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
             } else {
                 // Family doesn't exist in database - skip expensive platform lookup, go straight to fallbacks
                 log_debug("Font family '%s' not in database, skipping styled lookup (early-exit)", family_to_load);
-                if (family_matches) arraylist_free(family_matches);
             }
         }
     }
