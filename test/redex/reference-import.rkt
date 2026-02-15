@@ -1081,10 +1081,11 @@
 (define (element->box-tree elem counter is-root? [parent-w #f])
   (match elem
     [`(element ,tag ,id ,class ,inline-alist ,children)
+     ;; encode tag:name in id for element-name matching in comparator
      (define box-id
        (if id
-           (string->symbol id)
-           (string->symbol (format "box~a" (unbox counter)))))
+           (string->symbol (format "~a:~a" tag id))
+           (string->symbol (format "~a:box~a" tag (unbox counter)))))
      (set-box! counter (add1 (unbox counter)))
 
      (define styles (inline-styles->redex-styles inline-alist is-root? class))
@@ -1193,6 +1194,7 @@
 
 ;; convert a text node to an expected layout node.
 ;; uses bounding box of all layout rects, converted to parent-relative.
+;; returns: (expected-text text x y w h) — distinct form from element nodes
 (define (text-node->expected node parent-abs-x parent-abs-y)
   (define layout (hash-ref node 'layout (hash)))
   (define rects (hash-ref layout 'rects '()))
@@ -1208,14 +1210,19 @@
              [h (- (apply max y2s) abs-y)]
              [rel-x (- abs-x parent-abs-x)]
              [rel-y (- abs-y parent-abs-y)])
-        `(expected text ,rel-x ,rel-y ,w ,h ()))))
+        `(expected-text text ,rel-x ,rel-y ,w ,h))))
 
 ;; convert a reference layout node to expected layout structure
 ;; Converts absolute browser coordinates to parent-relative coordinates.
-;; returns: (expected id x y width height (children ...))
+;; returns: (expected tag:id x y width height (children ...))
+;; id encodes the HTML tag for structural matching: tag:htmlid or tag:anon
 (define (layout-node->expected node [parent-abs-x 0] [parent-abs-y 0])
   (define layout-data (hash-ref node 'layout (hash)))
-  (define node-id (or (hash-ref node 'id #f) "anon"))
+  (define node-tag (hash-ref node 'tag "div"))
+  (define node-id-str
+    (let ([raw (hash-ref node 'id #f)])
+      (if (and raw (string? raw)) raw "anon")))
+  (define exp-id (string->symbol (format "~a:~a" node-tag node-id-str)))
   (define abs-x (hash-ref layout-data 'x 0))
   (define abs-y (hash-ref layout-data 'y 0))
   (define w (hash-ref layout-data 'width 0))
@@ -1246,7 +1253,7 @@
          [else #f]))
      (hash-ref node 'children '())))
 
-  `(expected ,(if (string? node-id) (string->symbol node-id) 'anon)
+  `(expected ,exp-id
              ,rel-x ,rel-y ,w ,h
              ,children))
 

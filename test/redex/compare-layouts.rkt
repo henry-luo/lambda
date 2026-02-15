@@ -100,7 +100,7 @@
 
 (define (failure->string f)
   (format "  ~a.~a: expected=~a, actual=~a (tol=~a)"
-          (string-join (map symbol->string (layout-failure-path f)) " > ")
+          (string-join (map id->display-string (layout-failure-path f)) " > ")
           (layout-failure-property f)
           (real->decimal-string* (layout-failure-expected f))
           (real->decimal-string* (layout-failure-actual f))
@@ -130,6 +130,21 @@
 
   (define (walk! view-node exp-node path)
     (set-box! total (add1 (unbox total)))
+
+    ;; check node-type match (element vs text)
+    (define v-kind (node-kind view-node))
+    (define e-kind (node-kind exp-node))
+    (unless (eq? v-kind e-kind)
+      (set! failures
+            (cons (layout-failure path 'node-type e-kind v-kind 0) failures)))
+
+    ;; check element tag match (only for element nodes)
+    (when (and (eq? v-kind 'element) (eq? e-kind 'element))
+      (let ([v-tag (extract-tag (extract-id view-node))]
+            [e-tag (extract-tag (extract-id exp-node))])
+        (when (and v-tag e-tag (not (equal? v-tag e-tag)))
+          (set! failures
+                (cons (layout-failure path 'element-tag e-tag v-tag 0) failures)))))
 
     ;; extract view values
     (define-values (v-x v-y v-w v-h v-children)
@@ -196,6 +211,23 @@
 ;; Node Parsing Helpers
 ;; ============================================================
 
+;; classify node as 'element or 'text
+(define (node-kind node)
+  (match node
+    [`(view . ,_) 'element]
+    [`(view-text . ,_) 'text]
+    [`(expected . ,_) 'element]
+    [`(expected-text . ,_) 'text]
+    [_ 'unknown]))
+
+;; extract the tag prefix from a tag:name encoded id symbol.
+;; e.g. 'div:box0 → "div", 'div:anon → "div"
+;; returns #f if no tag prefix found.
+(define (extract-tag id)
+  (define s (if (symbol? id) (symbol->string id) (format "~a" id)))
+  (define parts (string-split s ":"))
+  (if (> (length parts) 1) (car parts) #f))
+
 ;; parse a Redex view node
 (define (parse-view-node view)
   (match view
@@ -215,15 +247,22 @@
      (values (->num x) (->num y) (->num w) (->num h) children)]
     [`(expected ,id ,x ,y ,w ,h)
      (values (->num x) (->num y) (->num w) (->num h) '())]
+    [`(expected-text ,id ,x ,y ,w ,h)
+     (values (->num x) (->num y) (->num w) (->num h) '())]
     [_ (values 0 0 0 0 '())]))
 
 ;; extract id from an expected or view node
 (define (extract-id node)
   (match node
     [`(expected ,id . ,_) id]
+    [`(expected-text ,id . ,_) id]
     [`(view ,id . ,_) id]
     [`(view-text ,id . ,_) id]
     [_ 'unknown]))
+
+;; format an id for display (strip tag prefix)
+(define (id->display-string id)
+  (if (symbol? id) (symbol->string id) (format "~a" id)))
 
 ;; ensure numeric
 (define (->num v)
