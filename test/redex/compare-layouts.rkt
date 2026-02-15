@@ -8,10 +8,12 @@
 ;; expected layout tree. Reports per-element pass/fail with configurable
 ;; tolerance, matching the comparison infrastructure in compare-layout.js.
 ;;
-;; Tolerance model:
-;;   base tolerance: 5px (absolute)
-;;   proportional: 3% of reference dimension (for width/height)
-;;   effective tolerance = max(base, proportional)
+;; Matching rules:
+;;   1. Tree structure must match 100% (including text nodes).
+;;      If child counts differ at any level, the test fails immediately.
+;;   2. Property tolerance (only when structure matches):
+;;      tolerance = min(max(3, 0.03 × |reference_value|), 10)
+;;      Minimum 3px, maximum 10px (CSS logical pixels).
 
 (require racket/match
          racket/list
@@ -42,6 +44,7 @@
 (struct compare-config
   (base-tolerance         ; absolute tolerance in px (default: 5)
    proportional-tolerance ; fraction of reference value (default: 0.03 = 3%)
+   max-tolerance          ; cap tolerance in px (default: 12)
    check-x?              ; whether to compare x positions
    check-y?              ; whether to compare y positions
    check-width?          ; whether to compare widths
@@ -50,16 +53,17 @@
   #:transparent)
 
 (define default-config
-  (compare-config 5 0.03 #t #t #t #t))
+  (compare-config 3 0.03 10 #t #t #t #t))
 
 (define (make-compare-config
-         #:base-tolerance [base 5]
+         #:base-tolerance [base 3]
          #:proportional-tolerance [prop 0.03]
+         #:max-tolerance [max-tol 10]
          #:check-x? [cx #t]
          #:check-y? [cy #t]
          #:check-width? [cw #t]
          #:check-height? [ch #t])
-  (compare-config base prop cx cy cw ch))
+  (compare-config base prop max-tol cx cy cw ch))
 
 ;; ============================================================
 ;; Comparison Result
@@ -96,7 +100,7 @@
 
 (define (failure->string f)
   (format "  ~a.~a: expected=~a, actual=~a (tol=~a)"
-          (string-join (map symbol->string (layout-failure-path f)) " > ")
+          (string-join (map id->display-string (layout-failure-path f)) " > ")
           (layout-failure-property f)
           (real->decimal-string* (layout-failure-expected f))
           (real->decimal-string* (layout-failure-actual f))
@@ -126,6 +130,21 @@
 
   (define (walk! view-node exp-node path)
     (set-box! total (add1 (unbox total)))
+
+    ;; check node-type match (element vs text)
+    (define v-kind (node-kind view-node))
+    (define e-kind (node-kind exp-node))
+    (unless (eq? v-kind e-kind)
+      (set! failures
+            (cons (layout-failure path 'node-type e-kind v-kind 0) failures)))
+
+    ;; check element tag match (only for element nodes)
+    (when (and (eq? v-kind 'element) (eq? e-kind 'element))
+      (let ([v-tag (extract-tag (extract-id view-node))]
+            [e-tag (extract-tag (extract-id exp-node))])
+        (when (and v-tag e-tag (not (equal? v-tag e-tag)))
+          (set! failures
+                (cons (layout-failure path 'element-tag e-tag v-tag 0) failures)))))
 
     ;; extract view values
     (define-values (v-x v-y v-w v-h v-children)
@@ -160,24 +179,24 @@
           (set! failures
                 (cons (layout-failure path 'height e-h v-h tol) failures)))))
 
-    ;; recurse into children (pair up by index)
+    ;; recurse into children — structure must match 100%
     (define v-kids (or v-children '()))
     (define e-kids (or e-children '()))
-    (define min-count (min (length v-kids) (length e-kids)))
 
-    (for ([i (in-range min-count)])
-      (define v-child (list-ref v-kids i))
-      (define e-child (list-ref e-kids i))
-      (define child-id (extract-id e-child))
-      (walk! v-child e-child
-             (append path (list child-id))))
-
-    ;; if child counts differ, report as well
-    (when (not (= (length v-kids) (length e-kids)))
-      (set! failures
-            (cons (layout-failure path 'child-count
-                                  (length e-kids) (length v-kids) 0)
-                  failures))))
+    (cond
+      ;; structural mismatch: fail immediately, don't recurse into misaligned children
+      [(not (= (length v-kids) (length e-kids)))
+       (set! failures
+             (cons (layout-failure path 'child-count
+                                   (length e-kids) (length v-kids) 0)
+                   failures))]
+      [else
+       (for ([i (in-range (length e-kids))])
+         (define v-child (list-ref v-kids i))
+         (define e-child (list-ref e-kids i))
+         (define child-id (extract-id e-child))
+         (walk! v-child e-child
+                (append path (list child-id))))]))
 
   ;; start the walk
   (when (and view expected)
@@ -192,16 +211,29 @@
 ;; Node Parsing Helpers
 ;; ============================================================
 
+;; classify node as 'element or 'text
+(define (node-kind node)
+  (match node
+    [`(view . ,_) 'element]
+    [`(view-text . ,_) 'text]
+    [`(expected . ,_) 'element]
+    [`(expected-text . ,_) 'text]
+    [_ 'unknown]))
+
+;; extract the tag prefix from a tag:name encoded id symbol.
+;; e.g. 'div:box0 → "div", 'div:anon → "div"
+;; returns #f if no tag prefix found.
+(define (extract-tag id)
+  (define s (if (symbol? id) (symbol->string id) (format "~a" id)))
+  (define parts (string-split s ":"))
+  (if (> (length parts) 1) (car parts) #f))
+
 ;; parse a Redex view node
 (define (parse-view-node view)
   (match view
     [`(view ,id ,x ,y ,w ,h ,children)
-     ;; filter out view-text children (text nodes aren't in the reference expected tree)
-     (define element-children
-       (filter (lambda (c)
-                 (match c [`(view-text . ,_) #f] [_ #t]))
-               children))
-     (values (->num x) (->num y) (->num w) (->num h) element-children)]
+     ;; include all children (elements + text) for structural comparison
+     (values (->num x) (->num y) (->num w) (->num h) children)]
     [`(view ,id ,x ,y ,w ,h)
      (values (->num x) (->num y) (->num w) (->num h) '())]
     [`(view-text ,id ,x ,y ,w ,h ,text)
@@ -215,15 +247,22 @@
      (values (->num x) (->num y) (->num w) (->num h) children)]
     [`(expected ,id ,x ,y ,w ,h)
      (values (->num x) (->num y) (->num w) (->num h) '())]
+    [`(expected-text ,id ,x ,y ,w ,h)
+     (values (->num x) (->num y) (->num w) (->num h) '())]
     [_ (values 0 0 0 0 '())]))
 
 ;; extract id from an expected or view node
 (define (extract-id node)
   (match node
     [`(expected ,id . ,_) id]
+    [`(expected-text ,id . ,_) id]
     [`(view ,id . ,_) id]
     [`(view-text ,id . ,_) id]
     [_ 'unknown]))
+
+;; format an id for display (strip tag prefix)
+(define (id->display-string id)
+  (if (symbol? id) (symbol->string id) (format "~a" id)))
 
 ;; ensure numeric
 (define (->num v)
@@ -237,11 +276,12 @@
 ;; ============================================================
 
 ;; compute effective tolerance:
-;;   max(base_tolerance, proportional_tolerance * |reference_value|)
+;;   min(max(base_tolerance, proportional_tolerance * |reference_value|), max_tolerance)
 (define (effective-tolerance ref-val config)
   (define base (compare-config-base-tolerance config))
   (define prop (compare-config-proportional-tolerance config))
-  (max base (* prop (abs (->num ref-val)))))
+  (define cap (compare-config-max-tolerance config))
+  (min cap (max base (* prop (abs (->num ref-val))))))
 
 ;; check if actual is within tolerance of expected
 (define (within-tolerance? actual expected tolerance)
