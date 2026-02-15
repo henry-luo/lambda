@@ -766,22 +766,83 @@ test-lambda-baseline: build-test
 test-input-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
-	@echo "Running INPUT baseline tests (HTML5 WPT, CommonMark, YAML suite)..."
-	@if [ -f "test/test_wpt_html_parser_gtest.exe" ]; then \
-		./test/test_wpt_html_parser_gtest.exe; \
+	@echo "=============================================================="
+	@echo "🧪 Running INPUT baseline tests"
+	@echo "=============================================================="
+	@total_passed=0; \
+	total_failed=0; \
+	total_skipped=0; \
+	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
+	md_passed=0; md_failed=0; md_skipped=0; md_status="⏭️  SKIP"; \
+	yaml_passed=0; yaml_failed=0; yaml_skipped=0; yaml_status="⏭️  SKIP"; \
+	\
+	echo ""; \
+	echo "📦 HTML5 WPT Parser Tests:"; \
+	if [ -f "test/test_wpt_html_parser_gtest.exe" ]; then \
+		output=$$(./test/test_wpt_html_parser_gtest.exe 2>&1) || true; \
+		echo "$$output" | tail -20; \
+		wpt_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		wpt_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		wpt_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		wpt_passed=$${wpt_passed:-0}; wpt_failed=$${wpt_failed:-0}; wpt_skipped=$${wpt_skipped:-0}; \
+		if [ "$$wpt_failed" = "0" ] || [ -z "$$wpt_failed" ]; then wpt_status="✅ PASS"; wpt_failed=0; else wpt_status="❌ FAIL"; fi; \
 	else \
-		echo "Warning: test/test_wpt_html_parser_gtest.exe not found"; \
-	fi
-	@if [ -f "test/test_markdown_gtest.exe" ]; then \
-		./test/test_markdown_gtest.exe; \
+		echo "   ⚠️  test/test_wpt_html_parser_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 CommonMark Markdown Tests:"; \
+	if [ -f "test/test_markdown_gtest.exe" ]; then \
+		output=$$(./test/test_markdown_gtest.exe 2>&1) || true; \
+		echo "$$output" | tail -20; \
+		md_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		md_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		md_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		md_passed=$${md_passed:-0}; md_failed=$${md_failed:-0}; md_skipped=$${md_skipped:-0}; \
+		if [ "$$md_failed" = "0" ] || [ -z "$$md_failed" ]; then md_status="✅ PASS"; md_failed=0; else md_status="❌ FAIL"; fi; \
 	else \
-		echo "Warning: test/test_markdown_gtest.exe not found"; \
-	fi
-	@if [ -f "test/test_yaml_suite_gtest.exe" ]; then \
-		./test/test_yaml_suite_gtest.exe; \
+		echo "   ⚠️  test/test_markdown_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 YAML Suite Tests:"; \
+	if [ -f "test/test_yaml_suite_gtest.exe" ]; then \
+		output=$$(./test/test_yaml_suite_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^===|^Total|^Pass rate" | head -10; \
+		yaml_total=$$(echo "$$output" | grep "Total test cases:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		yaml_json_passed=$$(echo "$$output" | grep "JSON Comparison Results" -A1 | grep "Total:" | grep -oE "Passed: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
+		yaml_json_failed=$$(echo "$$output" | grep "JSON Comparison Results" -A1 | grep "Total:" | grep -oE "Failed: [0-9]+" | grep -oE "[0-9]+" || echo "0"); \
+		yaml_error_passed=$$(echo "$$output" | grep "Error Test Results" -A1 | grep "Total:" | grep -oE "Passed[^:]*: [0-9]+" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		yaml_parse_passed=$$(echo "$$output" | grep "Parse-Only Test Results" -A1 | grep "Total:" | grep -oE "Passed[^:]*: [0-9]+" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		yaml_passed=$$((yaml_json_passed + yaml_error_passed + yaml_parse_passed)); \
+		yaml_passed=$${yaml_passed:-0}; yaml_json_failed=$${yaml_json_failed:-0}; \
+		yaml_failed=$${yaml_json_failed:-0}; yaml_skipped=0; \
+		if [ "$$yaml_failed" = "0" ] || [ -z "$$yaml_failed" ]; then yaml_status="✅ PASS"; yaml_failed=0; else yaml_status="❌ FAIL"; fi; \
 	else \
-		echo "Warning: test/test_yaml_suite_gtest.exe not found"; \
-	fi
+		echo "   ⚠️  test/test_yaml_suite_gtest.exe not found"; \
+	fi; \
+	\
+	total_passed=$$((wpt_passed + md_passed + yaml_passed)); \
+	total_failed=$$((wpt_failed + md_failed + yaml_failed)); \
+	total_tests=$$((total_passed + total_failed)); \
+	\
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🏁 INPUT BASELINE TEST RESULTS"; \
+	echo "=============================================================="; \
+	echo ""; \
+	echo "📊 Test Results by Suite:"; \
+	echo "   ├── HTML5 WPT Parser    $$wpt_status  ($$wpt_passed passed, $$wpt_failed failed)"; \
+	echo "   ├── CommonMark Markdown $$md_status  ($$md_passed passed, $$md_failed failed)"; \
+	echo "   └── YAML Suite          $$yaml_status  ($$yaml_passed passed, $$yaml_failed failed)"; \
+	echo ""; \
+	echo "📊 Overall Results:"; \
+	echo "   Total Tests: $$total_tests"; \
+	echo "   ✅ Passed:   $$total_passed"; \
+	if [ $$total_failed -gt 0 ]; then \
+		echo "   ❌ Failed:   $$total_failed"; \
+	fi; \
+	echo "=============================================================="
 
 test-radiant-baseline: test-layout-baseline
 
