@@ -302,6 +302,15 @@
 
 (define (view->json view)
   (match view
+    [`(view ,id ,x ,y ,w ,h (,children ...) ,baseline)
+     (define jh (make-hash))
+     (hash-set! jh 'id (if (symbol? id) (symbol->string id) (~a id)))
+     (hash-set! jh 'x (exact->inexact x))
+     (hash-set! jh 'y (exact->inexact y))
+     (hash-set! jh 'width (exact->inexact w))
+     (hash-set! jh 'height (exact->inexact h))
+     (hash-set! jh 'children (map view->json children))
+     jh]
     [`(view ,id ,x ,y ,w ,h (,children ...))
      (define jh (make-hash))
      (hash-set! jh 'id (if (symbol? id) (symbol->string id) (~a id)))
