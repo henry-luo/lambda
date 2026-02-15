@@ -101,7 +101,7 @@ FontHandle* font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style) 
 
             FontDatabaseResult result = font_database_find_best_match_internal(
                 ctx->database, &criteria);
-            if (result.font && result.font->file_path && result.match_score >= 0.5f) {
+            if (result.font && result.font->file_path && result.exact_family_match) {
                 int face_index = result.font->is_collection ? result.font->collection_index : 0;
                 FontHandle* handle = font_load_face_internal(
                     ctx, result.font->file_path, face_index,
@@ -186,7 +186,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
 
             FontDatabaseResult result = font_database_find_best_match_internal(
                 ctx->database, &criteria);
-            if (result.font && result.font->file_path) {
+            // only use the result if it's an exact family match — avoid picking
+            // a random font (e.g. Menlo) when the requested family isn't installed
+            if (result.font && result.font->file_path && result.exact_family_match) {
                 int face_index = result.font->is_collection ? result.font->collection_index : 0;
                 FontHandle* handle = font_load_face_internal(
                     ctx, result.font->file_path, face_index,
