@@ -848,8 +848,7 @@ typedef struct BlockProp {
 
 typedef struct FontBox {
     FontProp *style;  // current font style
-    void* ft_face;    // opaque FreeType face pointer (cast to FT_Face where needed)
-    struct FontHandle* font_handle; // unified font handle
+    struct FontHandle* font_handle; // unified font handle (opaque, ref-counted)
     int current_font_size;  // font size of current element
 } FontBox;
 

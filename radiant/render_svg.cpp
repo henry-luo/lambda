@@ -663,7 +663,6 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
 
     // Initialize font from default
     ctx.font.style = &uicon->default_font;
-    ctx.font.ft_face = NULL; // Will be set if needed
     ctx.font.font_handle = NULL;
 
     // SVG header
