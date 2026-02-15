@@ -270,13 +270,13 @@
 ;; ============================================================
 
 ;; resolve explicit height, or return #f for auto
-(define (resolve-block-height styles containing-height)
+;; containing-width: needed to correctly resolve percentage paddings (which resolve
+;; against inline-size) when converting border-box height to content-box height.
+(define (resolve-block-height styles containing-height [containing-width #f])
   (define css-h-val (get-style-prop styles 'height 'auto))
   (define resolved-h (resolve-size-value css-h-val containing-height))
-  ;; note: percentage margins/paddings all resolve against width (inline-size),
-  ;; but we don't have the width here — pass #f to skip percentage resolution.
-  ;; callers should have already resolved percentage margins before calling.
-  (define bm (extract-box-model styles))
+  ;; resolve box model with containing-width so percentage paddings are correct
+  (define bm (extract-box-model styles containing-width))
   (define content-h
     (cond
       [resolved-h
@@ -329,8 +329,11 @@
 ;; ============================================================
 
 ;; create a view node from layout results
-(define (make-view id x y width height children)
-  `(view ,id ,x ,y ,width ,height ,children))
+;; optional baseline: if provided, stored as 8th element for flex baseline export
+(define (make-view id x y width height children [baseline #f])
+  (if baseline
+      `(view ,id ,x ,y ,width ,height ,children ,baseline)
+      `(view ,id ,x ,y ,width ,height ,children)))
 
 ;; create a text view node
 (define (make-text-view id x y width height text)
@@ -347,3 +350,6 @@
 (define (view-height v) (list-ref v 5))
 (define (view-children v) (list-ref v 6))
 (define (view-id v) (list-ref v 1))
+;; extract stored baseline (returns #f if not stored)
+(define (view-baseline v)
+  (if (> (length v) 7) (list-ref v 7) #f))
