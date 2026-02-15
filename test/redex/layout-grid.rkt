@@ -150,7 +150,7 @@
      ;; when the grid has a definite height, pass it as cross-axis available
      ;; so that percentage heights and aspect-ratio can resolve during column sizing
      (define col-cross-avail (or explicit-h +inf.0))
-     (resolve-track-sizes! col-tracks col-available items 'col dispatch-fn avail col-gap row-gap col-cross-avail)
+     (resolve-track-sizes! col-tracks col-available items 'col dispatch-fn avail col-gap row-gap col-cross-avail content-w)
 
      ;; === Phase 5: Resolve row track sizes ===
      (define total-row-gaps (* row-gap (max 0 (sub1 (length row-tracks)))))
@@ -158,7 +158,7 @@
        (if explicit-h
            (- explicit-h total-row-gaps)
            +inf.0))
-     (resolve-track-sizes! row-tracks row-available items 'row dispatch-fn avail col-gap row-gap content-w)
+     (resolve-track-sizes! row-tracks row-available items 'row dispatch-fn avail col-gap row-gap content-w content-w)
 
      ;; === Phase 5.5: Collapse empty auto-fit tracks ===
      (collapse-empty-auto-fit-tracks! col-tracks items 'col)
@@ -210,12 +210,20 @@
          (define ji (resolve-item-alignment item-styles 'justify-self justify-items))
          (define ai (resolve-item-alignment item-styles 'align-self align-items))
 
+         ;; extract item margins for alignment positioning
+         ;; percentage margins resolve against grid area inline size (cell-w)
+         (define item-bm (extract-box-model item-styles cell-w))
+         (define ml (box-model-margin-left item-bm))
+         (define mr (box-model-margin-right item-bm))
+         (define mt (box-model-margin-top item-bm))
+         (define mb (box-model-margin-bottom item-bm))
+
          ;; check if item has explicit width/height
          (define item-has-width (has-explicit-size? item-styles 'width))
          (define item-has-height (has-explicit-size? item-styles 'height))
          (define item-has-aspect-ratio (get-style-prop item-styles 'aspect-ratio #f))
 
-         ;; for stretch: inject cell size as definite width/height
+         ;; for stretch: inject cell size minus margins as definite width/height
          ;; for non-stretch: use cell size as available but don't force it
          ;; when aspect-ratio is set with one explicit dimension, don't stretch the other
          ;; when aspect-ratio is set and both would stretch, stretch only block axis (height)
@@ -228,11 +236,15 @@
                                #f raw-stretch-w))
          (define stretch-h raw-stretch-h)
 
+         ;; when stretching, subtract margins from cell size
+         (define stretch-cell-w (max 0 (- cell-w ml mr)))
+         (define stretch-cell-h (max 0 (- cell-h mt mb)))
+
          ;; lay out child with cell dimensions
-         ;; when stretching, inject the cell dimension into the child's styles
+         ;; when stretching, inject the cell dimension minus margins into the child's styles
          (define actual-box
            (if (or stretch-w stretch-h)
-               (inject-stretch-size (grid-item-box item) stretch-w cell-w stretch-h cell-h)
+               (inject-stretch-size (grid-item-box item) stretch-w stretch-cell-w stretch-h stretch-cell-h)
                (grid-item-box item)))
          ;; when item is NOT stretched in an axis, use max-content so it shrink-wraps
          ;; rather than filling the cell. The cell size is used as a cap during alignment.
@@ -248,24 +260,24 @@
            `(avail ,avail-w-for-child ,avail-h-for-child))
          (define child-view (dispatch-fn actual-box child-avail))
 
-         ;; apply alignment offsets within the cell
+         ;; apply alignment offsets within the cell, accounting for item margins
          (define cview-w (view-width child-view))
          (define cview-h (view-height child-view))
 
          (define align-x
            (case ji
-             [(align-start) 0]
-             [(align-end) (- cell-w cview-w)]
-             [(align-center) (/ (- cell-w cview-w) 2)]
-             [(align-stretch) 0]
-             [else 0]))
+             [(align-start) ml]
+             [(align-end) (- cell-w cview-w mr)]
+             [(align-center) (+ ml (/ (- cell-w cview-w ml mr) 2))]
+             [(align-stretch) ml]
+             [else ml]))
          (define align-y
            (case ai
-             [(align-start) 0]
-             [(align-end) (- cell-h cview-h)]
-             [(align-center) (/ (- cell-h cview-h) 2)]
-             [(align-stretch) 0]
-             [else 0]))
+             [(align-start) mt]
+             [(align-end) (- cell-h cview-h mb)]
+             [(align-center) (+ mt (/ (- cell-h cview-h mt mb) 2))]
+             [(align-stretch) mt]
+             [else mt]))
 
          (cons dom-idx
                (set-view-pos child-view
@@ -484,7 +496,7 @@
 ;; Track Size Resolution
 ;; ============================================================
 
-(define (resolve-track-sizes! tracks available items axis dispatch-fn avail col-gap row-gap [cross-avail +inf.0])
+(define (resolve-track-sizes! tracks available items axis dispatch-fn avail col-gap row-gap [cross-avail +inf.0] [containing-width #f])
   ;; phase 1: initialize track sizes from definitions
   (for ([t (in-list tracks)])
     (define raw-ts (track-track-size t))
@@ -531,7 +543,7 @@
       (when (or (eq? ts 'auto) (eq? ts 'min-content) (eq? ts 'max-content)
                 (and (pair? ts) (eq? (car ts) 'minmax))
                 (and (pair? ts) (eq? (car ts) 'fr)))
-        (define item-size (measure-grid-item-min item axis dispatch-fn avail cross-avail))
+        (define item-size (measure-grid-item-min item axis dispatch-fn avail cross-avail containing-width))
         (when (> item-size (track-base-size t))
           (set-track-base-size! t
             (if (infinite? (track-growth-limit t))
@@ -559,7 +571,7 @@
       (for/list ([i (in-range start (min end (length tracks)))])
         (list-ref tracks i)))
     (when (not (null? span-tracks))
-      (define item-size (measure-grid-item-min item axis dispatch-fn avail cross-avail))
+      (define item-size (measure-grid-item-min item axis dispatch-fn avail cross-avail containing-width))
       (define current-sum (for/sum ([t (in-list span-tracks)]) (track-base-size t)))
       (define gap-total (* (max 0 (- (length span-tracks) 1))
                            (if (eq? axis 'col) col-gap row-gap)))
@@ -716,7 +728,7 @@
 ;; measure minimum size of a grid item in the given axis
 ;; cross-avail: definite cross-axis available size (e.g. container height when sizing columns)
 ;; allows percentage sizes and aspect-ratio to resolve during intrinsic sizing
-(define (measure-grid-item-min item axis dispatch-fn avail [cross-avail +inf.0])
+(define (measure-grid-item-min item axis dispatch-fn avail [cross-avail +inf.0] [containing-width #f])
   (define child-avail
     (if (and (number? cross-avail) (not (infinite? cross-avail)))
         (if (eq? axis 'col)
@@ -724,7 +736,15 @@
             `(avail (definite ,cross-avail) av-min-content))
         `(avail av-min-content av-min-content)))
   (define view (dispatch-fn (grid-item-box item) child-avail))
-  (if (eq? axis 'col) (view-width view) (view-height view)))
+  (define border-box-size (if (eq? axis 'col) (view-width view) (view-height view)))
+  ;; add item margins to get the outer size for track contribution
+  ;; per CSS spec, all percentage margins resolve against containing block inline size
+  (define item-bm (extract-box-model (grid-item-styles item) containing-width))
+  (define margin-sum
+    (if (eq? axis 'col)
+        (+ (box-model-margin-left item-bm) (box-model-margin-right item-bm))
+        (+ (box-model-margin-top item-bm) (box-model-margin-bottom item-bm))))
+  (+ border-box-size margin-sum))
 
 ;; ============================================================
 ;; Item Placement
