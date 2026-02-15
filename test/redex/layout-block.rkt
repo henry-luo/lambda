@@ -30,7 +30,7 @@
     [`(block ,id ,styles (,children ...))
      (define avail-w (avail-width->number (cadr avail)))
      (define avail-h (avail-height->number (caddr avail)))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
 
      ;; resolve content width (CSS 2.2 §10.3.3)
      ;; even if avail-w is #f (indefinite), explicit px widths still resolve
@@ -47,7 +47,12 @@
        (layout-block-children children child-avail bm dispatch-fn))
 
      ;; final content height: explicit or determined by children
-     (define final-content-h (or explicit-h content-height))
+     ;; apply min-height / max-height even for auto (content-determined) height
+     (define final-content-h
+       (let ([raw-h (or explicit-h content-height)])
+         (define min-h (resolve-min-height styles avail-h))
+         (define max-h (resolve-max-height styles avail-h))
+         (max min-h (min max-h raw-h))))
 
      ;; compute border-box dimensions
      (define border-box-w (compute-border-box-width bm content-w))
@@ -108,7 +113,7 @@
 
           ;; extract child's box model for margin handling
           (define child-styles (get-box-styles child))
-          (define child-bm (extract-box-model child-styles))
+          (define child-bm (extract-box-model child-styles avail-w))
 
           ;; collapse top margin with previous bottom margin
           (define collapsed-margin
@@ -123,7 +128,8 @@
           (define positioned-view (set-view-position child-view child-x child-y))
 
           ;; apply relative positioning offset after block positioning
-          (define final-view (apply-relative-offset positioned-view child-styles))
+          ;; pass containing block dimensions for percentage resolution
+          (define final-view (apply-relative-offset positioned-view child-styles avail-w avail-h))
 
           ;; advance y by child's border-box height
           (define child-h (view-height child-view))
