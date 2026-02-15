@@ -597,10 +597,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 // Debug: Log the font face being used for this glyph
                 static int glyph_debug_count = 0;
                 if (glyph_debug_count < 500) {
-                    FT_Face f = (FT_Face)font_handle_get_ft_face(rdcon->font.font_handle);
                     log_debug("[GLYPH DEBUG] loading glyph U+%04X from font '%s' (family=%s) y_ppem=%d css_size=%.2f",
                               codepoint,
-                              f ? f->family_name : "NULL",
+                              rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : "NULL",
                               rdcon->font.style ? rdcon->font.style->family : "NULL",
                               rdcon->font.font_handle ? (int)font_handle_get_physical_size_px(rdcon->font.font_handle) : -1,
                               rdcon->font.style ? rdcon->font.style->font_size : -1.0f);
@@ -614,18 +613,16 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 g_render_glyph_count++;
                 if (!glyph) {
                     // draw a square box for missing glyph (scaled_space_width is in physical pixels)
-                    // Use y_ppem if available, otherwise derive from height (y_ppem=0 for some WOFF fonts)
-                    FT_Face _face = (FT_Face)font_handle_get_ft_face(rdcon->font.font_handle);
-                    float box_height = (_face->size->metrics.y_ppem != 0)
-                        ? (_face->size->metrics.y_ppem / 64.0f)
-                        : (_face->size->metrics.height / 64.0f / 1.2f);
+                    float phys_size = font_handle_get_physical_size_px(rdcon->font.font_handle);
+                    const FontMetrics* _m = font_get_metrics(rdcon->font.font_handle);
+                    float box_height = (phys_size > 0) ? phys_size : (_m ? (_m->hhea_line_height * rdcon->scale / 1.2f) : 16.0f);
                     Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
                     fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
                     x += scaled_space_width;
                 }
                 else {
-                    // draw the glyph to the image buffer
-                    float ascend = ((FT_Face)font_handle_get_ft_face(rdcon->font.font_handle))->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    // draw the glyph to the image buffer — use hhea ascender (CSS px) * scale for physical px
+                    float ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
 
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {
@@ -643,8 +640,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                     static int bitmap_debug_count = 0;
-                    if (bitmap_debug_count < 50 && rdcon->font.ft_face &&
-                        strcmp(((FT_Face)rdcon->font.ft_face)->family_name, "Monaco") == 0) {
+                    if (bitmap_debug_count < 50 && rdcon->font.font_handle &&
+                        strcmp(font_handle_get_family_name(rdcon->font.font_handle), "Monaco") == 0) {
                         log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
                                   codepoint, glyph->bitmap.width, glyph->bitmap.rows,
                                   glyph->bitmap.pitch, glyph->bitmap_left, glyph->bitmap_top,
@@ -664,13 +661,14 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         }
         // render text deco (positions in physical pixels)
         if (rdcon->font.style->text_deco != CSS_VALUE_NONE) {
-            float thinkness = max(((FT_Face)rdcon->font.ft_face)->underline_thickness / 64.0, 1);
+            const FontMetrics* _deco_m = font_get_metrics(rdcon->font.font_handle);
+            float thinkness = max(_deco_m ? _deco_m->underline_thickness : 1.0, 1.0);
             Rect rect;
             // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // underline drawn at baseline, with a gap of thickness
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s +
-                    (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0) + thinkness;
+                    (_deco_m ? (_deco_m->hhea_ascender * s) : 12.0) + thinkness;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s;
@@ -773,9 +771,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     switch (marker_type) {
         case CSS_VALUE_DISC: {
             // Filled circle - center vertically in line, positioned at right side of marker box
-            // Note: y_ppem is already in pixels, but ascender is in 26.6 fixed point
-            float font_size = rdcon->font.ft_face ? (float)((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem : 16.0f;
-            float baseline_offset = rdcon->font.ft_face ? (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0f) : 12.0f;
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
             // Position bullet center: x at right side of marker box (with small gap), y at middle of x-height
             float cx = x + width - bullet_size - 4.0f;  // 4px gap from right edge
             float cy = y + baseline_offset - font_size * 0.35f;  // center on x-height
@@ -795,8 +793,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
         case CSS_VALUE_CIRCLE: {
             // Stroked circle (outline only)
-            float font_size = rdcon->font.ft_face ? (float)((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem : 16.0f;
-            float baseline_offset = rdcon->font.ft_face ? (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0f) : 12.0f;
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
             float cx = x + width - bullet_size - 4.0f;
             float cy = y + baseline_offset - font_size * 0.35f;
             float radius = bullet_size / 2.0f;
@@ -816,8 +815,9 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
         case CSS_VALUE_SQUARE: {
             // Filled square
-            float font_size = rdcon->font.ft_face ? (float)((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem : 16.0f;
-            float baseline_offset = rdcon->font.ft_face ? (((FT_Face)rdcon->font.ft_face)->size->metrics.ascender / 64.0f) : 12.0f;
+            const FontMetrics* _mk = rdcon->font.font_handle ? font_get_metrics(rdcon->font.font_handle) : NULL;
+            float font_size = _mk ? font_handle_get_physical_size_px(rdcon->font.font_handle) : 16.0f;
+            float baseline_offset = _mk ? (_mk->hhea_ascender * rdcon->scale) : 12.0f;
             float sx = x + width - bullet_size - 4.0f;
             float sy = y + baseline_offset - font_size * 0.35f - bullet_size/2;
 

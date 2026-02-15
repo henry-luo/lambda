@@ -117,7 +117,8 @@ static void render_simple_string(RenderContext* rdcon, const char* text, float x
     rdcon->color = color;
 
     // Get font metrics (all in physical pixels after setup_font)
-    float ascender = ((FT_Face)fbox.ft_face)->size->metrics.ascender / 64.0f;
+    const FontMetrics* _fm = font_get_metrics(fbox.font_handle);
+    float ascender = _fm ? (_fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
 
     // Render each character
     const unsigned char* p = (const unsigned char*)text;
