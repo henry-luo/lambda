@@ -185,6 +185,102 @@ STUB_LINK_OVERRIDES = {
     # "freetype":     87 * 1024,    # font rendering core
 }
 
+# ── Module categorization for project .o files ────────────────────────
+# Maps source directory → display module name.
+# Order matters for sub-directories: more-specific paths must come first
+# to avoid matching the parent directory.
+SOURCE_DIR_MODULES = [
+    ("lambda/input/markup/block",   "Input parsers & markup"),
+    ("lambda/input/markup/inline",  "Input parsers & markup"),
+    ("lambda/input/markup/format",  "Input parsers & markup"),
+    ("lambda/input/markup",         "Input parsers & markup"),
+    ("lambda/input/html5",          "HTML5 parser"),
+    ("lambda/input/css",            "CSS engine"),
+    ("lambda/input",                "Input parsers & markup"),
+    ("lambda/format",               "Output formatters"),
+    ("lambda/validator",            "Validator"),
+    ("lambda/tex",                  "TeX/LaTeX engine"),
+    ("lambda/js",                   "JavaScript runtime"),
+    ("lambda/network",              "Network & resource loaders"),
+    ("lambda",                      "Lambda core runtime"),
+    ("radiant/pdf",                 "PDF engine"),
+    ("radiant/webdriver",           "WebDriver (testing)"),
+    ("lib/font/woff2",              "Fonts & woff2"),
+    ("lib/font",                    "Fonts & woff2"),
+    ("lib/serve",                   "HTTP server"),
+    ("lib",                         "Misc/lib"),
+]
+
+# Radiant sub-categorization: files within radiant/ get finer grouping.
+# Mapping basename → module.  Files not listed go to a default radiant module.
+RADIANT_FILE_MODULES = {
+    # CSS layout
+    "layout":                "Radiant: CSS layout",
+    "layout_alignment":      "Radiant: CSS layout",
+    "layout_block":          "Radiant: CSS layout",
+    "layout_counters":       "Radiant: CSS layout",
+    "layout_flex":           "Radiant: CSS layout",
+    "layout_flex_measurement": "Radiant: CSS layout",
+    "layout_flex_multipass": "Radiant: CSS layout",
+    "layout_form":           "Radiant: CSS layout",
+    "layout_graph":          "Radiant: CSS layout",
+    "layout_grid":           "Radiant: CSS layout",
+    "layout_grid_multipass": "Radiant: CSS layout",
+    "layout_inline":         "Radiant: CSS layout",
+    "layout_multicol":       "Radiant: CSS layout",
+    "layout_positioned":     "Radiant: CSS layout",
+    "layout_table":          "Radiant: CSS layout",
+    "layout_text":           "Radiant: CSS layout",
+    "intrinsic_sizing":      "Radiant: CSS layout",
+    "grid_advanced":         "Radiant: CSS layout",
+    "grid_positioning":      "Radiant: CSS layout",
+    "grid_sizing":           "Radiant: CSS layout",
+    "grid_utils":            "Radiant: CSS layout",
+    "block_context":         "Radiant: CSS layout",
+    # rendering
+    "render":                "Radiant: rendering",
+    "render_background":     "Radiant: rendering",
+    "render_border":         "Radiant: rendering",
+    "render_dvi":            "Radiant: rendering",
+    "render_filter":         "Radiant: rendering",
+    "render_form":           "Radiant: rendering",
+    "render_img":            "Radiant: rendering",
+    "render_pdf":            "Radiant: rendering",
+    "render_svg":            "Radiant: rendering",
+    "render_svg_inline":     "Radiant: rendering",
+    "render_texnode":        "Radiant: rendering",
+    "surface":               "Radiant: rendering",
+    # DOM/view
+    "view_pool":             "Radiant: DOM/view",
+    "resolve_css_style":     "Radiant: DOM/view",
+    "resolve_htm_style":     "Radiant: DOM/view",
+    "symbol_resolver":       "Radiant: DOM/view",
+    # fonts
+    "font":                  "Radiant: fonts",
+    "font_face":             "Radiant: fonts",
+    # GUI/window/events
+    "event":                 "GUI/window/events",
+    "event_sim":             "GUI/window/events",
+    "window":                "GUI/window/events",
+    "scroller":              "GUI/window/events",
+    "state_store":           "GUI/window/events",
+    "ui_context":            "GUI/window/events",
+    # graph utilities
+    "graph_dagre":           "Graph utilities",
+    "graph_edge_utils":      "Graph utilities",
+    "graph_theme":           "Graph utilities",
+    "graph_to_svg":          "Graph utilities",
+    # CLI/commands
+    "cmd_layout":            "CLI/commands",
+}
+
+# Files from lambda/ that should be categorized as CLI/commands
+LAMBDA_CLI_FILES = {"main", "main-repl", "runner"}
+
+# Files from lambda/ that should be Data builders
+LAMBDA_DATA_BUILDER_FILES = {"mark_builder", "mark_editor", "mark_reader",
+                             "name_pool", "shape_pool", "shape_builder"}
+
 
 # ── Helper: run an external tool ──────────────────────────────────────
 
@@ -410,6 +506,226 @@ def classify_unclaimed(name):
     return None
 
 
+def classify_source_file(source_dir, basename):
+    """Classify a source file into a project module.
+
+    Args:
+        source_dir: The source directory (e.g. 'radiant', 'lambda/input')
+        basename:   The file stem without extension, may have Premake
+                    collision suffix (e.g. 'font_face1')
+
+    Returns:
+        Module display name string.
+    """
+    # Strip Premake collision suffix for lookup (font_face1 → font_face)
+    stripped = re.sub(r'\d+$', '', basename)
+
+    # Radiant sub-categorization
+    if source_dir == "radiant":
+        mod = RADIANT_FILE_MODULES.get(stripped) or RADIANT_FILE_MODULES.get(basename)
+        if mod:
+            return mod
+        # fallback for any un-mapped radiant file
+        return "Radiant: CSS layout"
+
+    # Lambda special cases
+    if source_dir == "lambda":
+        if stripped in LAMBDA_CLI_FILES or basename in LAMBDA_CLI_FILES:
+            return "CLI/commands"
+        if stripped in LAMBDA_DATA_BUILDER_FILES or basename in LAMBDA_DATA_BUILDER_FILES:
+            return "Data builders"
+
+    # Generic source_dir matching (most-specific path first)
+    for dir_prefix, module in SOURCE_DIR_MODULES:
+        if source_dir == dir_prefix or source_dir.startswith(dir_prefix + "/"):
+            return module
+
+    return "Misc/lib"
+
+
+def get_obj_code_size_for_o(o_path):
+    """Get __TEXT + __DATA section sizes from a single .o file using `size -m`."""
+    lines = run_tool(["size", "-m", o_path], timeout=10)
+    total = 0
+    for line in lines:
+        line = line.strip()
+        if line.startswith("Section (") and "__DWARF" not in line and "__LD" not in line:
+            m = re.search(r':\s*(\d+)', line)
+            if m:
+                total += int(m.group(1))
+    return total
+
+
+# ── Project code analysis ─────────────────────────────────────────────
+
+def analyze_project_code(config, binary_name):
+    """Analyze project .o files by module.
+
+    Scans the build config for source directories, finds corresponding .o
+    files in both Debug and Release build dirs, and categorizes them by
+    module.
+
+    Returns:
+        modules: dict  {module_name: {"o_size": int, "files": int,
+                        "file_details": [(basename, size), ...]}}
+        total_o_size: int  total .o debug size
+        total_files: int   total file count
+    """
+    source_dirs = config.get("source_dirs", [])
+    excludes = set(config.get("exclude_source_files", []))
+    build_dir = config.get("build_dir", "build")
+
+    # Determine obj dir.  Premake names the project after the config's "name".
+    proj_name = config.get("name", "lambda")
+    debug_obj_dir = os.path.join(build_dir, "obj", proj_name, "native", "Debug")
+    release_obj_dir = os.path.join(build_dir, "obj", proj_name, "native", "Release")
+
+    # Pick whichever exists; prefer Debug for "debug" sizes
+    obj_dir = debug_obj_dir if os.path.isdir(debug_obj_dir) else release_obj_dir
+    if not os.path.isdir(obj_dir):
+        print(f"  Warning: obj dir '{obj_dir}' not found; skipping project code analysis.",
+              file=sys.stderr)
+        return {}, 0, 0
+
+    # Build basename → source_dir mapping (handles collision via Premake's
+    # numeric suffix, e.g. font.o vs font1.o — we track both).
+    basename_to_dir = {}  # basename → source_dir
+    seen_basenames = defaultdict(int)  # for detecting collisions
+
+    for src_dir in source_dirs:
+        import glob as _glob
+        c_files = sorted(_glob.glob(os.path.join(src_dir, "*.c")))
+        cpp_files = sorted(_glob.glob(os.path.join(src_dir, "*.cpp")))
+        for f in c_files + cpp_files:
+            if f in excludes:
+                continue
+            stem = os.path.splitext(os.path.basename(f))[0]
+            count = seen_basenames[stem]
+            seen_basenames[stem] += 1
+            # Premake appends a numeric suffix for collisions: foo.o, foo1.o, foo2.o...
+            o_name = stem if count == 0 else f"{stem}{count}"
+            basename_to_dir[o_name] = src_dir
+
+    # Scan .o files and categorize
+    modules = defaultdict(lambda: {"o_size": 0, "files": 0, "file_details": []})
+    total_o_size = 0
+    total_files = 0
+
+    for o_name, src_dir in sorted(basename_to_dir.items()):
+        o_path = os.path.join(obj_dir, o_name + ".o")
+        if not os.path.exists(o_path):
+            continue
+
+        o_size = os.path.getsize(o_path)
+        module = classify_source_file(src_dir, o_name)
+
+        modules[module]["o_size"] += o_size
+        modules[module]["files"] += 1
+        modules[module]["file_details"].append((o_name, o_size))
+        total_o_size += o_size
+        total_files += 1
+
+    return dict(modules), total_o_size, total_files
+
+
+def render_project_code_section(modules, total_o_size, total_files,
+                                binary_project_size, binary_name, top_n=3):
+    """Render the 'Project Code Contributions' Markdown section."""
+    if not modules:
+        return
+
+    print()
+    print("---")
+    print()
+    print(f"## Project Code Contributions "
+          f"({fmt_size(binary_project_size)} in binary, "
+          f"{fmt_size(total_o_size)} .o debug)")
+    print()
+    print(f"{total_files} object files compiled into `{binary_name}`, "
+          f"categorized by module:")
+    print()
+    print("| Module | .o Size (Debug) | Files | Top Contributors |")
+    print("|--------|----------------:|------:|-----------------|")
+
+    # Sort modules by .o size descending
+    sorted_mods = sorted(modules.items(), key=lambda x: x[1]["o_size"],
+                         reverse=True)
+
+    for mod_name, data in sorted_mods:
+        o_size = data["o_size"]
+        files = data["files"]
+        # Top contributors by .o file size
+        details = sorted(data["file_details"], key=lambda x: x[1], reverse=True)
+        top = details[:top_n]
+        # Strip Premake collision suffix from display names (font_face1 → font_face)
+        top_str = ", ".join(
+            f"{re.sub(r'[0-9]+$', '', name)} ({fmt_size(sz)})"
+            for name, sz in top
+        )
+        print(f"| **{mod_name}** | {fmt_size(o_size)} | {files} | {top_str} |")
+
+    print()
+
+
+# ── Largest symbols analysis ──────────────────────────────────────────
+
+def demangle_symbol(name):
+    """Try to demangle a C++ symbol name.  Returns the demangled name or
+    the original if demangling fails."""
+    try:
+        r = subprocess.run(["c++filt", name], capture_output=True,
+                           text=True, timeout=5)
+        demangled = r.stdout.strip()
+        if demangled and demangled != name:
+            return demangled
+    except Exception:
+        pass
+    return None
+
+
+def render_largest_symbols_section(sorted_addrs, symbol_sizes, sections,
+                                   claimed_groups, top_n=20):
+    """Render the 'Largest Symbols in Binary' section.
+
+    Args:
+        sorted_addrs:   [(addr, name), ...] from nm
+        symbol_sizes:   {name: size} from consecutive-address computation
+        sections:       [(start, end, seg, sect), ...]
+        claimed_groups: {symbol_name: group_name} for library attribution
+        top_n:          number of symbols to show
+    """
+    # Build list of (size, name) and sort descending
+    sym_list = [(sz, name) for name, sz in symbol_sizes.items() if sz > 0]
+    sym_list.sort(reverse=True)
+
+    if not sym_list:
+        return
+
+    print("---")
+    print()
+    print("## Largest Symbols in Binary")
+    print()
+    print("| Size | Symbol | Source |")
+    print("|------|--------|--------|")
+
+    for sz, name in sym_list[:top_n]:
+        # Clean display name: strip leading underscore
+        display = name[1:] if name.startswith("_") else name
+        # Try demangling C++ symbols
+        if "_Z" in name:
+            demangled = demangle_symbol(name)
+            if demangled:
+                # Truncate long demangled names
+                if len(demangled) > 60:
+                    demangled = demangled[:57] + "..."
+                display = demangled
+        # Determine source
+        source = claimed_groups.get(name, "project code")
+        print(f"| {fmt_size(sz)} | `{display}` | {source} |")
+
+    print()
+
+
 # ── Main analysis ─────────────────────────────────────────────────────
 
 def analyze(binary_path, config_path, verbose=False, top_n=5):
@@ -452,6 +768,7 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
     # ── 3. Match .a symbols → binary ──────────────────────────────────
     print("  Matching library symbols...", file=sys.stderr)
     claimed = set()
+    claimed_groups = {}  # symbol_name → group_name (for largest symbols report)
 
     # Track per-group symbol details for verbose output
     group_sym_details = defaultdict(list)  # group -> [(name, size), ...]
@@ -481,6 +798,7 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
         for sym in lib_syms:
             if sym in sym_info and sym not in claimed:
                 claimed.add(sym)
+                claimed_groups[sym] = group
                 matched += 1
                 sz = symbol_sizes.get(sym, 0)
                 matched_size += sz
@@ -538,6 +856,7 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
             prefix_extra[grp]["count"] += 1
             group_sym_details[grp].append((name, sz))
             claimed.add(name)
+            claimed_groups[name] = grp
         else:
             project_size += sz
             project_count += 1
@@ -669,6 +988,25 @@ def analyze(binary_path, config_path, verbose=False, top_n=5):
                 rest = sum(s for _, s in details[top_n:])
                 print(f"| *... {len(details) - top_n} more* | *{fmt_tbl(rest)}* |")
             print()
+
+    # ── 10. Project code contributions by module ──────────────────────
+    print("  Analyzing project .o files...", file=sys.stderr)
+    proj_modules, total_o_size, total_o_files = analyze_project_code(
+        config, binary_name
+    )
+    project_binary_size = groups.get(
+        "Project code + LTO-hidden", {}
+    ).get("size", 0)
+    render_project_code_section(
+        proj_modules, total_o_size, total_o_files,
+        project_binary_size, binary_name, top_n=3
+    )
+
+    # ── 11. Largest symbols in the binary ─────────────────────────────
+    render_largest_symbols_section(
+        sorted_addrs, symbol_sizes, sections,
+        claimed_groups, top_n=20
+    )
 
     # ── Dynamic deps ──────────────────────────────────────────────────
     print("### Dynamic Dependencies")
