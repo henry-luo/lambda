@@ -11,8 +11,9 @@
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/font/font.h"
 
-// FreeType for direct glyph rendering in PDF viewer
+// FreeType for direct glyph rendering in PDF viewer (OpenGL bitmap textures)
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
@@ -22,7 +23,6 @@ int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
 void ui_context_cleanup(UiContext* uicon); // From window.cpp
 void ui_context_create_surface(UiContext* uicon, int width, int height); // From window.cpp
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file); // From window.cpp
-extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style); // From font.cpp
 
 // External declarations
 extern bool do_redraw;
@@ -48,7 +48,17 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
     }
 
     const char* font_family = font_prop->family ? font_prop->family : "Arial";
-    FT_Face face = (FT_Face)load_styled_font(uicon, font_family, font_prop);
+
+    // Resolve font via unified font module
+    FontWeight fw = (font_prop->font_weight == CSS_VALUE_BOLD) ? FONT_WEIGHT_BOLD : FONT_WEIGHT_NORMAL;
+    FontSlant fs = (font_prop->font_style == CSS_VALUE_ITALIC) ? FONT_SLANT_ITALIC : FONT_SLANT_NORMAL;
+    FontStyleDesc style = {};
+    style.family = font_family;
+    style.size_px = font_prop->font_size;
+    style.weight = fw;
+    style.slant = fs;
+    FontHandle* handle = font_resolve(uicon->font_ctx, &style);
+    FT_Face face = handle ? (FT_Face)font_handle_get_ft_face(handle) : NULL;
     if (!face) {
         log_warn("No font face available for text rendering");
         return;
