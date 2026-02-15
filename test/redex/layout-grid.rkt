@@ -17,9 +17,24 @@
          racket/list
          racket/math
          "css-layout-lang.rkt"
-         "layout-common.rkt")
+         "layout-common.rkt"
+         "layout-positioned.rkt")
 
 (provide layout-grid)
+
+;; ============================================================
+;; Baseline Computation
+;; ============================================================
+
+;; compute the first baseline of a view recursively
+;; if no children, synthesized baseline = bottom of box
+(define (compute-view-baseline view)
+  (define h (view-height view))
+  (define children (view-children view))
+  (if (or (null? children) (not (pair? children)))
+      h  ;; synthesized baseline: bottom of box
+      (let ([first-child (car children)])
+        (+ (view-y first-child) (compute-view-baseline first-child)))))
 
 ;; ============================================================
 ;; Grid Item — internal representation
@@ -70,7 +85,7 @@
 
      ;; resolve container content width/height
      (define content-w (if avail-w (resolve-block-width styles avail-w) 0))
-     (define explicit-h (resolve-block-height styles avail-h))
+     (define explicit-h (resolve-block-height styles avail-h avail-w))
 
      ;; === Phase 1: Create tracks from definitions ===
      (define col-tracks (create-tracks col-defs))
@@ -152,6 +167,22 @@
      (define col-cross-avail (or explicit-h +inf.0))
      (resolve-track-sizes! col-tracks col-available items 'col dispatch-fn avail col-gap row-gap col-cross-avail content-w)
 
+     ;; === Phase 4.5: Re-resolve column tracks for indefinite containers ===
+     ;; CSS Grid spec: intrinsic sizing determines the container width, then the
+     ;; grid is laid out with that definite width. The fr distribution may differ
+     ;; because the "find size of an fr" algorithm (§11.7.1) with definite space
+     ;; applies the max(sum,1) clamping differently than the indefinite flex fraction.
+     (define col-indefinite-for-rerun? (or (infinite? col-available) (<= col-available 0)))
+     (define intrinsic-col-total #f)
+     (when (and col-indefinite-for-rerun? (ormap fr-track? col-tracks))
+       (set! intrinsic-col-total (+ (tracks-total-size col-tracks) total-col-gaps))
+       (define definite-col-avail (max 0 (- intrinsic-col-total total-col-gaps)))
+       ;; reset column tracks for re-resolution with definite width
+       (for ([t (in-list col-tracks)])
+         (set-track-base-size! t 0)
+         (set-track-growth-limit! t +inf.0))
+       (resolve-track-sizes! col-tracks definite-col-avail items 'col dispatch-fn avail col-gap row-gap col-cross-avail intrinsic-col-total))
+
      ;; === Phase 5: Resolve row track sizes ===
      (define total-row-gaps (* row-gap (max 0 (sub1 (length row-tracks)))))
      (define row-available
@@ -169,6 +200,42 @@
      (define non-collapsed-rows (filter (lambda (t) (> (track-base-size t) 0)) row-tracks))
      (define effective-col-gaps (* col-gap (max 0 (sub1 (length non-collapsed-cols)))))
      (define effective-row-gaps (* row-gap (max 0 (sub1 (length non-collapsed-rows)))))
+
+     ;; === Phase 5.7: Resolve percentage tracks for indefinite containers ===
+     ;; When the grid container's size is indefinite, percentage tracks were treated
+     ;; as auto during intrinsic sizing (Phases 4-5). Now resolve them against
+     ;; the content-determined grid size.
+     (define has-explicit-w (has-explicit-size? styles 'width))
+     (define col-indefinite? (or (infinite? col-available) (<= col-available 0)))
+     (define row-indefinite? (or (infinite? row-available) (<= row-available 0)))
+     (define has-pct-col-tracks?
+       (ormap (lambda (t) (match (track-track-size t) [`(% ,_) #t] [_ #f])) col-tracks))
+     (define has-pct-row-tracks?
+       (ormap (lambda (t) (match (track-track-size t) [`(% ,_) #t] [_ #f])) row-tracks))
+
+     ;; save content-determined totals before percentage resolution
+     (define content-det-col-total (+ (tracks-total-size col-tracks) effective-col-gaps))
+     (define content-det-row-total (+ (tracks-total-size row-tracks) effective-row-gaps))
+
+     (when (and col-indefinite? has-pct-col-tracks?)
+       (define resolve-base (max content-w content-det-col-total))
+       (for ([t (in-list col-tracks)])
+         (match (track-track-size t)
+           [`(% ,pct)
+            (define resolved (* (/ pct 100) resolve-base))
+            (set-track-base-size! t resolved)
+            (set-track-growth-limit! t resolved)]
+           [_ (void)])))
+
+     (when (and row-indefinite? has-pct-row-tracks?)
+       (define resolve-base content-det-row-total)
+       (for ([t (in-list row-tracks)])
+         (match (track-track-size t)
+           [`(% ,pct)
+            (define resolved (* (/ pct 100) resolve-base))
+            (set-track-base-size! t resolved)
+            (set-track-growth-limit! t resolved)]
+           [_ (void)])))
 
      ;; === Phase 6: Apply content alignment ===
      (define total-col-size (+ (tracks-total-size col-tracks) effective-col-gaps))
@@ -190,7 +257,8 @@
      (define offset-x (+ (box-model-padding-left bm) (box-model-border-left bm)))
      (define offset-y (+ (box-model-padding-top bm) (box-model-border-top bm)))
 
-     (define child-views
+     ;; --- Pass 1: Layout all items (compute child views, store layout info) ---
+     (define layout-infos
        (for/list ([item (in-list items)]
                   [flow-idx (in-naturals)])
          (define dom-idx (list-ref flow-dom-indices flow-idx))
@@ -218,36 +286,50 @@
          (define mt (box-model-margin-top item-bm))
          (define mb (box-model-margin-bottom item-bm))
 
+         ;; check for auto margins — per CSS Grid spec, auto margins take precedence
+         ;; over justify-self/align-self and consume free space in the grid area
+         (define-values (raw-mt raw-mr raw-mb raw-ml) (get-raw-margins item-styles))
+         (define margin-left-auto? (eq? raw-ml 'auto))
+         (define margin-right-auto? (eq? raw-mr 'auto))
+         (define margin-top-auto? (eq? raw-mt 'auto))
+         (define margin-bottom-auto? (eq? raw-mb 'auto))
+
          ;; check if item has explicit width/height
          (define item-has-width (has-explicit-size? item-styles 'width))
          (define item-has-height (has-explicit-size? item-styles 'height))
          (define item-has-aspect-ratio (get-style-prop item-styles 'aspect-ratio #f))
 
          ;; for stretch: inject cell size minus margins as definite width/height
-         ;; for non-stretch: use cell size as available but don't force it
          ;; when aspect-ratio is set with one explicit dimension, don't stretch the other
-         ;; when aspect-ratio is set and both would stretch, stretch only block axis (height)
+         ;; baseline-aligned items do NOT stretch (per CSS spec)
+         (define effective-ai (if (eq? ai 'align-baseline) 'align-start ai))
          (define raw-stretch-w (and (eq? ji 'align-stretch) (not item-has-width)
                                     (not (and item-has-aspect-ratio item-has-height))))
-         (define raw-stretch-h (and (eq? ai 'align-stretch) (not item-has-height)
+         (define raw-stretch-h (and (eq? effective-ai 'align-stretch) (not item-has-height)
                                     (not (and item-has-aspect-ratio item-has-width))))
-         ;; per CSS spec: when aspect-ratio + both stretch → only stretch block axis
-         (define stretch-w (if (and item-has-aspect-ratio raw-stretch-w raw-stretch-h)
-                               #f raw-stretch-w))
-         (define stretch-h raw-stretch-h)
+         ;; per CSS Grid Level 2 §6.6.1: when aspect-ratio + both stretch →
+         ;; decide which axis to stretch based on transferred minimum sizes.
+         (define-values (stretch-w stretch-h)
+           (if (and item-has-aspect-ratio raw-stretch-w raw-stretch-h)
+               (let* ([ar item-has-aspect-ratio]
+                      [min-h-val (get-style-prop item-styles 'min-height 'auto)]
+                      [min-h-px (or (resolve-size-value min-h-val cell-h) 0)]
+                      [transferred-min-w (if (> min-h-px 0) (* min-h-px ar) 0)]
+                      [inner-cell-w (max 0 (- cell-w ml mr))])
+                 (if (and (> transferred-min-w 0) (>= transferred-min-w inner-cell-w))
+                     (values #f raw-stretch-h)
+                     (values raw-stretch-w #f)))
+               (values raw-stretch-w raw-stretch-h)))
 
          ;; when stretching, subtract margins from cell size
          (define stretch-cell-w (max 0 (- cell-w ml mr)))
          (define stretch-cell-h (max 0 (- cell-h mt mb)))
 
          ;; lay out child with cell dimensions
-         ;; when stretching, inject the cell dimension minus margins into the child's styles
          (define actual-box
            (if (or stretch-w stretch-h)
                (inject-stretch-size (grid-item-box item) stretch-w stretch-cell-w stretch-h stretch-cell-h)
                (grid-item-box item)))
-         ;; when item is NOT stretched in an axis, use max-content so it shrink-wraps
-         ;; rather than filling the cell. The cell size is used as a cap during alignment.
          (define avail-w-for-child
            (if (or stretch-w item-has-width)
                `(definite ,cell-w)
@@ -255,38 +337,176 @@
          (define avail-h-for-child
            (if (or stretch-h item-has-height)
                `(definite ,cell-h)
-               `(definite ,cell-h)))  ;; height always definite for percentage resolution
+               `(definite ,cell-h)))
          (define child-avail
            `(avail ,avail-w-for-child ,avail-h-for-child))
          (define child-view (dispatch-fn actual-box child-avail))
 
-         ;; apply alignment offsets within the cell, accounting for item margins
+         ;; compute baseline for this item
+         (define item-baseline (compute-view-baseline child-view))
+
+         ;; store all info needed for positioning
+         (list dom-idx item-styles child-view item-baseline
+               item-x item-y cell-w cell-h
+               ji ai ml mr mt mb
+               margin-left-auto? margin-right-auto? margin-top-auto? margin-bottom-auto?
+               row-start row-end)))
+
+     ;; --- Baseline pass: compute per-row max baselines ---
+     (define num-rows (length row-tracks))
+     (define row-max-baselines (make-vector (max 1 num-rows) 0))
+     (for ([info (in-list layout-infos)])
+       (define ai (list-ref info 9))
+       (define row-start (list-ref info 18))
+       (define row-end (list-ref info 19))
+       (define mt (list-ref info 12))
+       (define item-baseline (list-ref info 3))
+       ;; only single-row baseline items participate
+       (when (and (eq? ai 'align-baseline)
+                  (= (- row-end row-start) 1)
+                  (< row-start num-rows))
+         (define outer-baseline (+ mt item-baseline))
+         (when (> outer-baseline (vector-ref row-max-baselines row-start))
+           (vector-set! row-max-baselines row-start outer-baseline))))
+
+     ;; --- Baseline-induced row growth ---
+     ;; Per CSS Grid spec: baseline alignment may increase the row track size
+     ;; to accommodate items shifted down for baseline alignment.
+     ;; For each row, compute the maximum total height needed:
+     ;; max(baseline-shift + item-border-box-height + margin-bottom) across baseline items
+     (define row-baseline-min-heights (make-vector (max 1 num-rows) 0))
+     (for ([info (in-list layout-infos)])
+       (define ai (list-ref info 9))
+       (define row-start (list-ref info 18))
+       (define row-end (list-ref info 19))
+       (define mt (list-ref info 12))
+       (define mb (list-ref info 13))
+       (define child-view (list-ref info 2))
+       (define item-baseline (list-ref info 3))
+       (when (and (eq? ai 'align-baseline)
+                  (= (- row-end row-start) 1)
+                  (< row-start num-rows))
+         (define cview-h (view-height child-view))
+         (define row-max-bl (vector-ref row-max-baselines row-start))
+         ;; baseline shift = row-max-bl - item-baseline (item shifts down this much)
+         (define shift (- row-max-bl (+ mt item-baseline)))
+         ;; total needed = margin-top + shift + item-height + margin-bottom
+         (define needed (+ mt shift cview-h mb))
+         (when (> needed (vector-ref row-baseline-min-heights row-start))
+           (vector-set! row-baseline-min-heights row-start needed))))
+     ;; grow row tracks if needed
+     (define rows-grew? #f)
+     (for ([r (in-range num-rows)])
+       (define needed (vector-ref row-baseline-min-heights r))
+       (define track (list-ref row-tracks r))
+       (when (> needed (track-base-size track))
+         (set-track-base-size! track needed)
+         (set! rows-grew? #t)))
+     ;; if rows grew, recompute row offsets for content alignment
+     (when rows-grew?
+       (define new-total-row-size (+ (tracks-total-size row-tracks) effective-row-gaps))
+       (define new-content-h (or explicit-h new-total-row-size))
+       (define new-row-offsets
+         (compute-content-alignment-offsets
+          align-content row-tracks row-gap new-content-h))
+       ;; update the layout-infos with new item-y values
+       (set! layout-infos
+             (for/list ([info (in-list layout-infos)])
+               (define row-start (list-ref info 18))
+               (define row-end (list-ref info 19))
+               (define col-start (let ([ci (list-ref info 4)])
+                                   ;; need to reverse-compute col-start from item-x
+                                   ;; but we don't have col-start stored... use row-start to look up
+                                   ci))  ; keep original item-x
+               ;; recompute item-y using new row offsets
+               (define new-item-y (track-offset-with-alignment row-tracks row-start row-gap new-row-offsets))
+               ;; also recompute cell-h since row track may have grown
+               (define new-cell-h (track-span-size row-tracks row-start row-end row-gap))
+               ;; update info: item-y is at index 5, cell-h is at index 7
+               (list (list-ref info 0) (list-ref info 1) (list-ref info 2) (list-ref info 3)
+                     (list-ref info 4) new-item-y (list-ref info 6) new-cell-h
+                     (list-ref info 8) (list-ref info 9) (list-ref info 10) (list-ref info 11)
+                     (list-ref info 12) (list-ref info 13)
+                     (list-ref info 14) (list-ref info 15) (list-ref info 16) (list-ref info 17)
+                     (list-ref info 18) (list-ref info 19)))))
+
+     ;; --- Pass 2: Position items using alignment and baselines ---
+     (define child-views
+       (for/list ([info (in-list layout-infos)])
+         (define dom-idx (list-ref info 0))
+         (define item-styles (list-ref info 1))
+         (define child-view (list-ref info 2))
+         (define item-baseline (list-ref info 3))
+         (define item-x (list-ref info 4))
+         (define item-y (list-ref info 5))
+         (define cell-w (list-ref info 6))
+         (define cell-h (list-ref info 7))
+         (define ji (list-ref info 8))
+         (define ai (list-ref info 9))
+         (define ml (list-ref info 10))
+         (define mr (list-ref info 11))
+         (define mt (list-ref info 12))
+         (define mb (list-ref info 13))
+         (define margin-left-auto? (list-ref info 14))
+         (define margin-right-auto? (list-ref info 15))
+         (define margin-top-auto? (list-ref info 16))
+         (define margin-bottom-auto? (list-ref info 17))
+         (define row-start (list-ref info 18))
+         (define row-end (list-ref info 19))
+
          (define cview-w (view-width child-view))
          (define cview-h (view-height child-view))
+         (define free-w (- cell-w cview-w ml mr))
+         (define free-h (- cell-h cview-h mt mb))
 
          (define align-x
-           (case ji
-             [(align-start) ml]
-             [(align-end) (- cell-w cview-w mr)]
-             [(align-center) (+ ml (/ (- cell-w cview-w ml mr) 2))]
-             [(align-stretch) ml]
-             [else ml]))
+           (cond
+             [(and margin-left-auto? margin-right-auto?)
+              (+ ml (/ (max 0 free-w) 2))]
+             [margin-left-auto?
+              (+ ml (max 0 free-w))]
+             [margin-right-auto?
+              ml]
+             [else
+              (case ji
+                [(align-start) ml]
+                [(align-end) (- cell-w cview-w mr)]
+                [(align-center) (+ ml (/ free-w 2))]
+                [(align-stretch) ml]
+                [else ml])]))
          (define align-y
-           (case ai
-             [(align-start) mt]
-             [(align-end) (- cell-h cview-h mb)]
-             [(align-center) (+ mt (/ (- cell-h cview-h mt mb) 2))]
-             [(align-stretch) mt]
-             [else mt]))
+           (cond
+             [(and margin-top-auto? margin-bottom-auto?)
+              (+ mt (/ (max 0 free-h) 2))]
+             [margin-top-auto?
+              (+ mt (max 0 free-h))]
+             [margin-bottom-auto?
+              mt]
+             [else
+              (case ai
+                [(align-start) mt]
+                [(align-end) (- cell-h cview-h mb)]
+                [(align-center) (+ mt (/ free-h 2))]
+                [(align-stretch) mt]
+                [(align-baseline)
+                 ;; baseline alignment: shift item down so its baseline aligns
+                 ;; with the row's max baseline
+                 (if (and (= (- row-end row-start) 1) (< row-start num-rows))
+                     (let* ([outer-baseline (+ mt item-baseline)]
+                            [row-max-bl (vector-ref row-max-baselines row-start)])
+                       (- row-max-bl item-baseline))
+                     mt)]  ; multi-row fallback to start
+                [else mt])]))
 
          (cons dom-idx
-               (set-view-pos child-view
-                             (+ offset-x item-x align-x)
-                             (+ offset-y item-y align-y)))))
+               (let ([positioned-view
+                      (set-view-pos child-view
+                                    (+ offset-x item-x align-x)
+                                    (+ offset-y item-y align-y))])
+                 (apply-relative-offset positioned-view item-styles cell-w cell-h)))))
 
      ;; === Phase 8: Layout absolute children ===
      ;; if container has explicit width/height, use that; otherwise use content size
-     (define has-explicit-w (has-explicit-size? styles 'width))
      ;; per CSS spec: when a percentage width resolves to 0 in a measurement context
      ;; (e.g., containing block is shrink-to-fit), treat width as auto and use
      ;; the intrinsic content-based width from track sizes
@@ -295,10 +515,23 @@
        (and (match css-width-val [`(% ,_) #t] [_ #f])
             (= content-w 0)))
      (define final-content-w
-       (if (and has-explicit-w (not width-is-pct-zero?))
-           content-w
-           (max content-w total-col-size)))
-     (define final-content-h (or explicit-h total-row-size))
+       (cond
+         [(and has-explicit-w (not width-is-pct-zero?)) content-w]
+         ;; indefinite container with percentage tracks: use content-determined total
+         ;; (percentage tracks resolve against this but don't inflate the container)
+         [(and col-indefinite? has-pct-col-tracks?)
+          (max content-w content-det-col-total)]
+         ;; indefinite container with fr tracks: use the intrinsic width from the
+         ;; first pass (before re-resolution), as the container width is determined
+         ;; by intrinsic sizing, not by the re-resolved track sizes
+         [(and intrinsic-col-total) (max content-w intrinsic-col-total)]
+         [else (max content-w total-col-size)]))
+     (define final-content-h
+       (cond
+         [explicit-h explicit-h]
+         ;; indefinite container with percentage tracks: use content-determined total
+         [(and row-indefinite? has-pct-row-tracks?) content-det-row-total]
+         [else total-row-size]))
 
      ;; absolute children are positioned relative to the padding box
      (define padding-box-w (+ final-content-w
@@ -310,16 +543,117 @@
      (define abs-offset-x (box-model-border-left bm))
      (define abs-offset-y (box-model-border-top bm))
 
+     ;; number of explicit track definitions (for grid-line resolution)
+     (define num-explicit-cols (length col-defs))
+     (define num-explicit-rows (length row-defs))
+
+     ;; helper: compute position of an explicit grid line within the content area.
+     ;; idx is a 0-based explicit grid line index (0 = before first explicit track,
+     ;; num-explicit = after last explicit track).
+     (define (explicit-grid-line-content-pos axis idx)
+       (define tracks (if (eq? axis 'col) col-tracks row-tracks))
+       (define offsets (if (eq? axis 'col) col-offsets row-offsets))
+       (define gap (if (eq? axis 'col) col-gap row-gap))
+       (define before (if (eq? axis 'col) col-before-count row-before-count))
+       (define full-idx (+ before idx))
+       (cond
+         [(null? tracks) 0]
+         [(< full-idx 0)
+          (track-offset-with-alignment tracks 0 gap offsets)]
+         [(>= full-idx (length tracks))
+          (let ([last-idx (sub1 (length tracks))])
+            (+ (track-offset-with-alignment tracks last-idx gap offsets)
+               (track-base-size (list-ref tracks last-idx))))]
+         [else
+          (track-offset-with-alignment tracks full-idx gap offsets)]))
+
+     ;; helper: resolve a CSS grid line value to a position within the padding box.
+     ;; returns #f for auto/span (no definite grid line).
+     (define (grid-line-to-pb-pos line-val axis)
+       (define num-explicit (if (eq? axis 'col) num-explicit-cols num-explicit-rows))
+       (define idx (resolve-line-value line-val num-explicit))
+       (and idx
+            (let ([pad-start (if (eq? axis 'col)
+                                 (box-model-padding-left bm)
+                                 (box-model-padding-top bm))])
+              (+ pad-start (explicit-grid-line-content-pos axis idx)))))
+
      (define abs-views
        (for/list ([child (in-list abs-children)]
                   [abs-idx (in-naturals)])
          (define dom-idx (list-ref abs-dom-indices abs-idx))
-         (define abs-avail
-           `(avail (definite ,padding-box-w) (definite ,padding-box-h)))
+         (define child-styles (get-box-styles child))
+
+         ;; === Containing block from grid placement (CSS Grid §9.2) ===
+         ;; If a grid placement property specifies a line, that line is the
+         ;; containing block edge.  If auto, the padding edge is used.
+         (define gc-start (get-grid-line child-styles 'grid-column-start))
+         (define gc-end   (get-grid-line child-styles 'grid-column-end))
+         (define gr-start (get-grid-line child-styles 'grid-row-start))
+         (define gr-end   (get-grid-line child-styles 'grid-row-end))
+
+         (define cb-left   (or (grid-line-to-pb-pos gc-start 'col) 0))
+         (define cb-right  (or (grid-line-to-pb-pos gc-end   'col) padding-box-w))
+         (define cb-top    (or (grid-line-to-pb-pos gr-start 'row) 0))
+         (define cb-bottom (or (grid-line-to-pb-pos gr-end   'row) padding-box-h))
+
+         (define cb-w (max 0 (- cb-right cb-left)))
+         (define cb-h (max 0 (- cb-bottom cb-top)))
+
+         ;; lay out the child with the grid-line-based containing block
+         (define abs-avail `(avail (definite ,cb-w) (definite ,cb-h)))
          (define raw-view (dispatch-fn child abs-avail))
-         ;; shift from padding-box coordinates to border-box coordinates
-         (define shifted-view (offset-abs-view raw-view abs-offset-x abs-offset-y))
-         (cons dom-idx shifted-view)))
+
+         ;; === Alignment for axes where all insets are auto (CSS Grid §10.8) ===
+         (define css-top-v    (get-style-prop child-styles 'top 'auto))
+         (define css-bottom-v (get-style-prop child-styles 'bottom 'auto))
+         (define css-left-v   (get-style-prop child-styles 'left 'auto))
+         (define css-right-v  (get-style-prop child-styles 'right 'auto))
+
+         (define h-inset? (or (not (eq? css-left-v 'auto))
+                              (not (eq? css-right-v 'auto))))
+         (define v-inset? (or (not (eq? css-top-v 'auto))
+                              (not (eq? css-bottom-v 'auto))))
+
+         (define vw (view-width raw-view))
+         (define vh (view-height raw-view))
+
+         ;; extract child margins for alignment (only when needed)
+         (define child-bm-for-align
+           (if (or (not h-inset?) (not v-inset?))
+               (extract-box-model child-styles cb-w)
+               #f))
+
+         ;; horizontal position
+         (define final-x
+           (if h-inset?
+               ;; insets determined position via layout-positioned
+               (+ abs-offset-x cb-left (view-x raw-view))
+               ;; no insets: apply justify-self alignment
+               (let ()
+                 (define ji (resolve-item-alignment child-styles 'justify-self justify-items))
+                 (define ml (box-model-margin-left child-bm-for-align))
+                 (define mr (box-model-margin-right child-bm-for-align))
+                 (case ji
+                   [(align-end)    (+ abs-offset-x cb-left (- cb-w vw mr))]
+                   [(align-center) (+ abs-offset-x cb-left ml (/ (- cb-w vw ml mr) 2))]
+                   [else           (+ abs-offset-x cb-left ml)]))))
+
+         ;; vertical position
+         (define final-y
+           (if v-inset?
+               (+ abs-offset-y cb-top (view-y raw-view))
+               (let ()
+                 (define ai (resolve-item-alignment child-styles 'align-self align-items))
+                 (define mt (box-model-margin-top child-bm-for-align))
+                 (define mb (box-model-margin-bottom child-bm-for-align))
+                 (case ai
+                   [(align-end)    (+ abs-offset-y cb-top (- cb-h vh mb))]
+                   [(align-center) (+ abs-offset-y cb-top mt (/ (- cb-h vh mt mb) 2))]
+                   [else           (+ abs-offset-y cb-top mt)]))))
+
+         (define final-view (set-view-pos raw-view final-x final-y))
+         (cons dom-idx final-view)))
 
      ;; === Phase 9: Compute final container size ===
      (define border-box-w (compute-border-box-width bm final-content-w))
@@ -436,7 +770,7 @@
     [(self-end) 'align-end]
     [(self-center) 'align-center]
     [(self-stretch) 'align-stretch]
-    [(self-baseline) 'align-start]  ; baseline fallback
+    [(self-baseline) 'align-baseline]  ; pass through for per-row baseline computation
     [else container-default]))
 
 ;; ============================================================
@@ -497,6 +831,8 @@
 ;; ============================================================
 
 (define (resolve-track-sizes! tracks available items axis dispatch-fn avail col-gap row-gap [cross-avail +inf.0] [containing-width #f])
+  ;; flag: is the available space indefinite? (auto-sizing container)
+  (define indefinite? (or (infinite? available) (<= available 0)))
   ;; phase 1: initialize track sizes from definitions
   (for ([t (in-list tracks)])
     (define raw-ts (track-track-size t))
@@ -509,11 +845,15 @@
        (set-track-base-size! t n)
        (set-track-growth-limit! t n)]
       [`(% ,pct)
-       (define resolved (if (and (number? available) (not (infinite? available)))
-                            (* (/ pct 100) available)
-                            0))
-       (set-track-base-size! t resolved)
-       (set-track-growth-limit! t resolved)]
+       (if indefinite?
+           ;; indefinite container: treat percentage tracks as auto for intrinsic sizing
+           (begin
+             (set-track-base-size! t 0)
+             (set-track-growth-limit! t +inf.0))
+           ;; definite container: resolve percentage against available space
+           (let ([resolved (* (/ pct 100) available)])
+             (set-track-base-size! t resolved)
+             (set-track-growth-limit! t resolved)))]
       ['auto
        (set-track-base-size! t 0)
        (set-track-growth-limit! t +inf.0)]
@@ -526,12 +866,28 @@
       [`(minmax ,min-sv ,max-sv)
        (define min-v (or (resolve-track-value min-sv available) 0))
        (define max-v (or (resolve-track-value max-sv available) +inf.0))
-       (set-track-base-size! t min-v)
+       ;; per CSS Grid spec: when the container auto-sizes (available ≤ 0 or infinite)
+       ;; and both min and max are definite, use max as the base size
+       (define base-v
+         (if (and (or (infinite? available) (<= available 0))
+                  (not (infinite? max-v)))
+             max-v
+             min-v))
+       (set-track-base-size! t base-v)
        (set-track-growth-limit! t max-v)]
       [`(fr ,_)
        (set-track-base-size! t 0)
        (set-track-growth-limit! t +inf.0)]
       [_ (void)]))
+
+  ;; helper to extract fr value from a track (used in phases 2.5 and 4)
+  (define (get-fr-value t)
+    (match (track-track-size t)
+      [`(fr ,n) n]
+      [`(auto-fit-track (fr ,n)) n]
+      [`(minmax ,_ (fr ,n)) n]
+      [`(auto-fit-track (minmax ,_ (fr ,n))) n]
+      [_ 0]))
 
   ;; phase 2: size items spanning single tracks
   (for ([item (in-list items)])
@@ -542,7 +898,8 @@
       (define ts (track-track-size t))
       (when (or (eq? ts 'auto) (eq? ts 'min-content) (eq? ts 'max-content)
                 (and (pair? ts) (eq? (car ts) 'minmax))
-                (and (pair? ts) (eq? (car ts) 'fr)))
+                (and (pair? ts) (eq? (car ts) 'fr))
+                (and indefinite? (pair? ts) (eq? (car ts) '%)))
         (define item-size (measure-grid-item-min item axis dispatch-fn avail cross-avail containing-width))
         (when (> item-size (track-base-size t))
           (set-track-base-size! t
@@ -584,13 +941,25 @@
                         (eq? (track-track-size t) 'min-content)
                         (eq? (track-track-size t) 'max-content)
                         (and (pair? (track-track-size t)) (eq? (car (track-track-size t)) 'fr))
-                        (and (pair? (track-track-size t)) (eq? (car (track-track-size t)) 'minmax))))
+                        (and (pair? (track-track-size t)) (eq? (car (track-track-size t)) 'minmax))
+                        (and indefinite? (pair? (track-track-size t)) (eq? (car (track-track-size t)) '%))))
                   span-tracks))
         ;; if no growable tracks, grow all of them
         (define targets (if (null? growable) span-tracks growable))
-        (define per-track (/ extra (length targets)))
+        ;; check if all growable targets are fr tracks: distribute proportionally by fr value
+        (define all-fr? (andmap fr-track? targets))
+        (define total-fr-val
+          (if all-fr?
+              (for/sum ([t (in-list targets)]) (get-fr-value t))
+              0))
         (for ([t (in-list targets)])
-          (set-track-base-size! t (+ (track-base-size t) per-track))))))
+          (define share
+            (if (and all-fr? (> total-fr-val 0))
+                ;; proportional distribution by fr value
+                (* extra (/ (get-fr-value t) total-fr-val))
+                ;; equal distribution for non-fr tracks
+                (/ extra (length targets))))
+          (set-track-base-size! t (+ (track-base-size t) share))))))
 
   ;; phase 3: grow non-fr tracks up to their growth limit
   ;; this must happen BEFORE fr distribution so fr uses remaining space
@@ -616,58 +985,102 @@
               (set! grew? #t)))
           (when grew? (loop))))))
 
-  ;; phase 4: distribute fr units using remaining space after non-fr maximization
-  ;; CSS Grid §12.7.1: Find the size of an fr using the "Expand Flexible Tracks" algorithm.
-  ;; Tracks whose base-size exceeds their hypothetical fr-based share are "frozen" and
-  ;; their base-size is subtracted from the available space before re-distributing.
-  (define fixed-total
-    (for/sum ([t (in-list tracks)]
-              #:when (not (fr-track? t)))
-      (track-base-size t)))
+  ;; "Find the size of an fr" sub-algorithm (CSS Grid §11.7.1)
+  ;; Given a set of tracks and a space to fill, returns the hypothetical fr size.
+  (define (find-fr-size given-tracks space)
+    (define non-flex-total
+      (for/sum ([t (in-list given-tracks)]
+                #:when (not (fr-track? t)))
+        (track-base-size t)))
+    (define leftover (max 0 (- space non-flex-total)))
+    (let loop ([active (filter fr-track? given-tracks)]
+               [space leftover])
+      (define sum-fr (for/sum ([t (in-list active)]) (get-fr-value t)))
+      (if (<= sum-fr 0)
+          0
+          (let* ([effective-sum (max sum-fr 1)]
+                 [hyp (/ space effective-sum)])
+            (define-values (frozen unfrozen)
+              (partition (lambda (t) (> (track-base-size t) (* (get-fr-value t) hyp)))
+                         active))
+            (if (null? frozen)
+                hyp
+                (let ([frozen-total (for/sum ([t (in-list frozen)]) (track-base-size t))])
+                  (loop unfrozen (max 0 (- space frozen-total)))))))))
 
-  (define fr-space (max 0 (- (if (infinite? available) 0 available) fixed-total)))
-
-  ;; helper to extract fr value from a track
-  (define (get-fr-value t)
-    (match (track-track-size t)
-      [`(fr ,n) n]
-      [`(auto-fit-track (fr ,n)) n]
-      [`(minmax ,_ (fr ,n)) n]
-      [`(auto-fit-track (minmax ,_ (fr ,n))) n]
-      [_ 0]))
-
+  ;; phase 4: distribute fr units (CSS Grid §11.7: "Expand Flexible Tracks")
   (define total-fr
     (for/sum ([t (in-list tracks)]
               #:when (fr-track? t))
       (get-fr-value t)))
 
   (when (> total-fr 0)
-    ;; iterative freeze algorithm: freeze tracks whose base-size > hypothetical share
-    (let loop ([active-tracks (filter fr-track? tracks)]
-               [space fr-space])
-      (define sum-fr (for/sum ([t (in-list active-tracks)]) (get-fr-value t)))
-      (when (> sum-fr 0)
-        ;; CSS Grid §12.7.1: if sum of flex factors < 1, use 1 as divisor
-        ;; (tracks don't expand to fill the entire space when fr sum < 1)
-        (define effective-sum (max sum-fr 1))
-        (define hyp-fr-size (/ space effective-sum))
-        ;; partition into frozen (base > proportional share) and unfrozen
-        (define-values (frozen unfrozen)
-          (partition (lambda (t) (> (track-base-size t) (* (get-fr-value t) hyp-fr-size)))
-                     active-tracks))
-        (cond
-          [(null? frozen)
-           ;; no more tracks need freezing: assign final fr sizes
-           (for ([t (in-list active-tracks)])
-             (define size (max (track-base-size t) (* (get-fr-value t) hyp-fr-size)))
-             (set-track-base-size! t size)
-             (set-track-growth-limit! t size))]
-          [else
-           ;; freeze oversize tracks at base-size, redistribute remaining space
-           (for ([t (in-list frozen)])
-             (set-track-growth-limit! t (track-base-size t)))
-           (define frozen-total (for/sum ([t (in-list frozen)]) (track-base-size t)))
-           (loop unfrozen (max 0 (- space frozen-total)))]))))
+    (cond
+      ;; === Indefinite container: compute used flex fraction directly (§11.7) ===
+      [indefinite?
+       ;; Per-track contributions: if fr > 1, base/fr; else base (§11.7)
+       (define flex-fraction-from-tracks
+         (for/fold ([best 0]) ([t (in-list tracks)] #:when (fr-track? t))
+           (define fv (get-fr-value t))
+           (max best (if (> fv 1) (/ (track-base-size t) fv) (track-base-size t)))))
+       ;; Per-item contributions: for spanning items crossing flexible tracks,
+       ;; run "find the size of an fr" with those tracks and the item's max-content
+       (define flex-fraction-from-items
+         (for/fold ([best 0]) ([item (in-list items)])
+           (define start (if (eq? axis 'col) (grid-item-col-start item) (grid-item-row-start item)))
+           (define end (if (eq? axis 'col) (grid-item-col-end item) (grid-item-row-end item)))
+           (if (and (> (- end start) 1) (< start (length tracks)))
+               (let* ([item-tracks
+                       (for/list ([i (in-range start (min end (length tracks)))])
+                         (list-ref tracks i))]
+                      [has-flex? (ormap fr-track? item-tracks)])
+                 (if has-flex?
+                     (let* ([item-size (measure-grid-item-min item axis dispatch-fn avail cross-avail containing-width)]
+                            [fr-size (find-fr-size item-tracks item-size)])
+                       (max best fr-size))
+                     best))
+               best)))
+       ;; Used flex fraction = max of per-track and per-item contributions
+       (define used-flex-fraction (max flex-fraction-from-tracks flex-fraction-from-items))
+       ;; Apply directly — no freeze loop for indefinite (§11.7)
+       (for ([t (in-list tracks)] #:when (fr-track? t))
+         (define fv (get-fr-value t))
+         (define new-size (* fv used-flex-fraction))
+         (when (> new-size (track-base-size t))
+           (set-track-base-size! t new-size)
+           (set-track-growth-limit! t new-size)))]
+      ;; === Definite container: "Find the size of an fr" with freeze loop (§11.7.1) ===
+      [else
+       (define fixed-total
+         (for/sum ([t (in-list tracks)]
+                   #:when (not (fr-track? t)))
+           (track-base-size t)))
+       (define fr-space (max 0 (- available fixed-total)))
+       ;; iterative freeze algorithm
+       (let loop ([active-tracks (filter fr-track? tracks)]
+                  [space fr-space])
+         (define sum-fr (for/sum ([t (in-list active-tracks)]) (get-fr-value t)))
+         (when (> sum-fr 0)
+           ;; CSS Grid §11.7.1: if sum of flex factors < 1, use 1 as divisor
+           (define effective-sum (max sum-fr 1))
+           (define hyp-fr-size (/ space effective-sum))
+           ;; partition into frozen (base > proportional share) and unfrozen
+           (define-values (frozen unfrozen)
+             (partition (lambda (t) (> (track-base-size t) (* (get-fr-value t) hyp-fr-size)))
+                        active-tracks))
+           (cond
+             [(null? frozen)
+              ;; no more tracks need freezing: assign final fr sizes
+              (for ([t (in-list active-tracks)])
+                (define size (max (track-base-size t) (* (get-fr-value t) hyp-fr-size)))
+                (set-track-base-size! t size)
+                (set-track-growth-limit! t size))]
+             [else
+              ;; freeze oversize tracks at base-size, redistribute remaining space
+              (for ([t (in-list frozen)])
+                (set-track-growth-limit! t (track-base-size t)))
+              (define frozen-total (for/sum ([t (in-list frozen)]) (track-base-size t)))
+              (loop unfrozen (max 0 (- space frozen-total)))])))]))
 
   ;; phase 5: maximize remaining auto tracks
   ;; per CSS Grid spec 12.5: distribute free space equally among ALL auto tracks
@@ -1115,6 +1528,8 @@
 
 (define (set-view-pos view x y)
   (match view
+    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
     [`(view ,id ,_ ,_ ,w ,h ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,_ ,_ ,w ,h ,text)
@@ -1158,6 +1573,8 @@
 ;; offset an absolute child view from padding-box to border-box coordinates
 (define (offset-abs-view view dx dy)
   (match view
+    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
+     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children ,baseline)]
     [`(view ,id ,x ,y ,w ,h ,children)
      `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children)]
     [`(view-text ,id ,x ,y ,w ,h ,text)

@@ -3,10 +3,6 @@
 #include "view.hpp"
 #include "../lib/log.h"
 
-// FreeType types needed for font face loading API
-#include <ft2build.h>
-#include FT_FREETYPE_H
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -24,6 +20,9 @@ typedef struct FontFaceSrc {
 } FontFaceSrc;
 
 // Font face descriptor for @font-face support
+// Descriptors are registered with the unified font module (lib/font) via
+// font_face_register(). Actual font loading is handled entirely by the
+// unified module; this struct only stores the CSS @font-face metadata.
 typedef struct FontFaceDescriptor {
     char* family_name;           // font-family value
     char* src_local_path;        // local font file path (no web URLs) - first/fallback
@@ -34,11 +33,6 @@ typedef struct FontFaceDescriptor {
     CssEnum font_weight;        // 100-900, normal, bold
     CssEnum font_display;       // auto, block, swap, fallback, optional
     bool is_loaded;              // loading state
-    FT_Face loaded_face;         // cached FT_Face when loaded
-
-    // Performance optimizations
-    struct hashmap* char_width_cache;  // Unicode codepoint -> width cache
-    bool metrics_computed;             // Font metrics computed flag
 } FontFaceDescriptor;
 
 // ============================================================================
@@ -76,17 +70,6 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesh
 
 // Process all @font-face rules from all stylesheets in a document
 void process_document_font_faces(UiContext* uicon, struct DomDocument* doc);
-
-// ============================================================================
-// Font loading
-// ============================================================================
-
-// Load a font by family name, trying @font-face descriptors first, then system fonts
-FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
-                                   FontProp* style, bool* is_fallback);
-
-// Load a font from a local file path or data URI
-FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* style);
 
 #ifdef __cplusplus
 }

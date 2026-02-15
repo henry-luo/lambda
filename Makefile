@@ -354,7 +354,7 @@ clean-tree-sitter-minimal:
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
-	    lambda format lint check docs intellisense analyze-size \
+	    lambda format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
@@ -453,7 +453,6 @@ help:
 	@echo "  check         - Run basic code checks (TODO/FIXME finder)"
 	@echo "  format        - Format source code with clang-format"
 	@echo "  lint          - Run linter (cppcheck) on source files"
-	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo "  count-loc     - Count lines of code in the repository"
 	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
 	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
@@ -1490,15 +1489,9 @@ lint:
 		exit 1; \
 	fi
 
-# Executable size analysis
-analyze-size: build
-	@echo "Analyzing executable size breakdown..."
-	@if [ -f "utils/analyze_size.sh" ]; then \
-		./utils/analyze_size.sh; \
-	else \
-		echo "utils/analyze_size.sh not found. Please ensure it exists in the utils directory."; \
-		exit 1; \
-	fi
+# Binary size analysis by library group
+analyze-binary:
+	@python3 utils/analyze_binary.py lambda.exe -v
 
 # Clang-tidy static analysis
 tidy:
