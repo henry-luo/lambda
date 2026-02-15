@@ -8,10 +8,12 @@
 ;; expected layout tree. Reports per-element pass/fail with configurable
 ;; tolerance, matching the comparison infrastructure in compare-layout.js.
 ;;
-;; Tolerance model:
-;;   base tolerance: 5px (absolute)
-;;   proportional: 3% of reference dimension (for width/height)
-;;   effective tolerance = max(base, proportional)
+;; Matching rules:
+;;   1. Tree structure must match 100% (including text nodes).
+;;      If child counts differ at any level, the test fails immediately.
+;;   2. Property tolerance (only when structure matches):
+;;      tolerance = min(max(3, 0.03 × |reference_value|), 10)
+;;      Minimum 3px, maximum 10px (CSS logical pixels).
 
 (require racket/match
          racket/list
@@ -42,6 +44,7 @@
 (struct compare-config
   (base-tolerance         ; absolute tolerance in px (default: 5)
    proportional-tolerance ; fraction of reference value (default: 0.03 = 3%)
+   max-tolerance          ; cap tolerance in px (default: 12)
    check-x?              ; whether to compare x positions
    check-y?              ; whether to compare y positions
    check-width?          ; whether to compare widths
@@ -50,16 +53,17 @@
   #:transparent)
 
 (define default-config
-  (compare-config 5 0.03 #t #t #t #t))
+  (compare-config 3 0.03 10 #t #t #t #t))
 
 (define (make-compare-config
-         #:base-tolerance [base 5]
+         #:base-tolerance [base 3]
          #:proportional-tolerance [prop 0.03]
+         #:max-tolerance [max-tol 10]
          #:check-x? [cx #t]
          #:check-y? [cy #t]
          #:check-width? [cw #t]
          #:check-height? [ch #t])
-  (compare-config base prop cx cy cw ch))
+  (compare-config base prop max-tol cx cy cw ch))
 
 ;; ============================================================
 ;; Comparison Result
@@ -160,24 +164,24 @@
           (set! failures
                 (cons (layout-failure path 'height e-h v-h tol) failures)))))
 
-    ;; recurse into children (pair up by index)
+    ;; recurse into children — structure must match 100%
     (define v-kids (or v-children '()))
     (define e-kids (or e-children '()))
-    (define min-count (min (length v-kids) (length e-kids)))
 
-    (for ([i (in-range min-count)])
-      (define v-child (list-ref v-kids i))
-      (define e-child (list-ref e-kids i))
-      (define child-id (extract-id e-child))
-      (walk! v-child e-child
-             (append path (list child-id))))
-
-    ;; if child counts differ, report as well
-    (when (not (= (length v-kids) (length e-kids)))
-      (set! failures
-            (cons (layout-failure path 'child-count
-                                  (length e-kids) (length v-kids) 0)
-                  failures))))
+    (cond
+      ;; structural mismatch: fail immediately, don't recurse into misaligned children
+      [(not (= (length v-kids) (length e-kids)))
+       (set! failures
+             (cons (layout-failure path 'child-count
+                                   (length e-kids) (length v-kids) 0)
+                   failures))]
+      [else
+       (for ([i (in-range (length e-kids))])
+         (define v-child (list-ref v-kids i))
+         (define e-child (list-ref e-kids i))
+         (define child-id (extract-id e-child))
+         (walk! v-child e-child
+                (append path (list child-id))))]))
 
   ;; start the walk
   (when (and view expected)
@@ -196,12 +200,8 @@
 (define (parse-view-node view)
   (match view
     [`(view ,id ,x ,y ,w ,h ,children)
-     ;; filter out view-text children (text nodes aren't in the reference expected tree)
-     (define element-children
-       (filter (lambda (c)
-                 (match c [`(view-text . ,_) #f] [_ #t]))
-               children))
-     (values (->num x) (->num y) (->num w) (->num h) element-children)]
+     ;; include all children (elements + text) for structural comparison
+     (values (->num x) (->num y) (->num w) (->num h) children)]
     [`(view ,id ,x ,y ,w ,h)
      (values (->num x) (->num y) (->num w) (->num h) '())]
     [`(view-text ,id ,x ,y ,w ,h ,text)
@@ -237,11 +237,12 @@
 ;; ============================================================
 
 ;; compute effective tolerance:
-;;   max(base_tolerance, proportional_tolerance * |reference_value|)
+;;   min(max(base_tolerance, proportional_tolerance * |reference_value|), max_tolerance)
 (define (effective-tolerance ref-val config)
   (define base (compare-config-base-tolerance config))
   (define prop (compare-config-proportional-tolerance config))
-  (max base (* prop (abs (->num ref-val)))))
+  (define cap (compare-config-max-tolerance config))
+  (min cap (max base (* prop (abs (->num ref-val))))))
 
 ;; check if actual is within tolerance of expected
 (define (within-tolerance? actual expected tolerance)
