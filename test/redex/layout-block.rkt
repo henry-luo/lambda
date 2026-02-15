@@ -37,7 +37,7 @@
      (define content-w (resolve-block-width styles (or avail-w 0)))
 
      ;; resolve explicit height (or #f for auto)
-     (define explicit-h (resolve-block-height styles avail-h))
+     (define explicit-h (resolve-block-height styles avail-h avail-w))
 
      ;; lay out children within the content area
      (define child-avail
@@ -163,6 +163,8 @@
 
 (define (set-view-position view x y)
   (match view
+    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
     [`(view ,id ,_ ,_ ,w ,h ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,_ ,_ ,w ,h ,text)

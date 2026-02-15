@@ -168,11 +168,17 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
     // 3. check @font-face descriptors
     const FontFaceEntry* face_entry = font_face_find_internal(ctx, style->family,
                                                                style->weight, style->slant);
-    if (face_entry && face_entry->loaded_handle) {
-        handle = face_entry->loaded_handle;
-        font_handle_retain(handle);
-        font_cache_insert(ctx, key, handle);
-        return handle;
+    if (face_entry) {
+        // delegate to font_face_load() which handles caching-by-size internally
+        const FontFaceDesc* desc = font_face_find(ctx, style);
+        if (desc) {
+            handle = font_face_load(ctx, desc, style->size_px);
+            if (handle) {
+                log_info("font_resolve: loaded @font-face for '%s'", style->family);
+                font_cache_insert(ctx, key, handle);
+                return handle;
+            }
+        }
     }
 
     // 4. resolve generic family (serif, sans-serif, monospace, etc.)
