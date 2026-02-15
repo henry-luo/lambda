@@ -171,13 +171,14 @@ if ! command -v meson >/dev/null 2>&1; then
     fi
 fi
 
-# Check for openssl (needed for libcurl with HTTP/2)
-if ! brew list openssl@3 >/dev/null 2>&1; then
-    echo "Installing openssl@3..."
+# Check for mbedtls (needed for libcurl with TLS support)
+if ! brew list mbedtls@3 >/dev/null 2>&1; then
+    echo "Installing mbedtls@3..."
     if command -v brew >/dev/null 2>&1; then
-        brew install openssl@3
+        brew install mbedtls@3
+        brew link mbedtls@3
     else
-        echo "Warning: openssl not found. libcurl with HTTP/2 may not build correctly."
+        echo "Warning: mbedtls not found. libcurl with TLS may not build correctly."
     fi
 fi
 
@@ -289,19 +290,21 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
-# Function to build MIR for Mac
+# Function to build MIR for Mac (local to project, no sudo required)
 build_mir_for_mac() {
-    echo "Building MIR for Mac..."
+    echo "Building MIR for Mac (local install to mac-deps/mir)..."
 
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
-        echo "MIR already installed in system location"
+    # Check if already built locally
+    if [ -f "mac-deps/mir/libmir.a" ] && [ -f "mac-deps/mir/mir.h" ] && [ -f "mac-deps/mir/mir-dlist.h" ]; then
+        echo "✅ MIR already built in mac-deps/mir"
         return 0
     fi
 
-    if [ ! -d "build_temp/mir" ]; then
+    mkdir -p mac-deps
+
+    if [ ! -d "mac-deps/mir" ]; then
         echo "Cloning MIR repository..."
-        cd build_temp
+        cd mac-deps
         git clone https://github.com/vnmakarov/mir.git || {
             echo "Warning: Could not clone MIR repository"
             cd - > /dev/null
@@ -310,32 +313,14 @@ build_mir_for_mac() {
         cd - > /dev/null
     fi
 
-    cd "build_temp/mir" || {
-        echo "Error: Could not enter build_temp/mir directory"
+    cd "mac-deps/mir" || {
+        echo "Error: Could not enter mac-deps/mir directory"
         return 1
     }
 
     echo "Building MIR..."
     if make -j$(sysctl -n hw.ncpu); then
-        echo "Installing MIR to system location (requires sudo)..."
-        # Create directories and copy files manually
-        sudo mkdir -p "$SYSTEM_PREFIX/lib"
-        sudo mkdir -p "$SYSTEM_PREFIX/include"
-
-        # Copy the static library
-        if [ -f "libmir.a" ]; then
-            sudo cp "libmir.a" "$SYSTEM_PREFIX/lib/"
-        fi
-
-        # Copy headers
-        if [ -f "mir.h" ]; then
-            sudo cp "mir.h" "$SYSTEM_PREFIX/include/"
-        fi
-        if [ -f "mir-gen.h" ]; then
-            sudo cp "mir-gen.h" "$SYSTEM_PREFIX/include/"
-        fi
-
-        echo "✅ MIR built successfully"
+        echo "✅ MIR built successfully in mac-deps/mir"
         cd - > /dev/null
         return 0
     fi
@@ -972,9 +957,9 @@ build_nghttp2_for_mac() {
     return 1
 }
 
-# Function to build libcurl with HTTP/2 support for Mac (using OpenSSL)
+# Function to build libcurl with HTTP/2 support for Mac (using mbedTLS)
 build_curl_with_http2_for_mac() {
-    echo "Building libcurl with HTTP/2 and OpenSSL support for Mac..."
+    echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
 
     # Check if already built
     if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
@@ -997,31 +982,31 @@ build_curl_with_http2_for_mac() {
 
     cd mac-deps/curl-8.10.1
 
-    # Get OpenSSL path from Homebrew
+    # Get mbedTLS path from Homebrew
     if command -v brew >/dev/null 2>&1; then
-        OPENSSL_PATH=$(brew --prefix openssl@3)
-        if [ ! -d "$OPENSSL_PATH" ]; then
-            echo "❌ OpenSSL not found in Homebrew. Install it with: brew install openssl@3"
+        MBEDTLS_PATH=$(brew --prefix mbedtls@3)
+        if [ ! -d "$MBEDTLS_PATH" ]; then
+            echo "❌ mbedTLS not found in Homebrew. Install it with: brew install mbedtls@3"
             cd - > /dev/null
             return 1
         fi
     else
-        echo "❌ Homebrew required for OpenSSL path"
+        echo "❌ Homebrew required for mbedTLS path"
         cd - > /dev/null
         return 1
     fi
 
-    # Configure libcurl with HTTP/2 and OpenSSL support
-    echo "Configuring libcurl with HTTP/2 and OpenSSL support..."
-    echo "OpenSSL path: $OPENSSL_PATH"
+    # Configure libcurl with HTTP/2 and mbedTLS support
+    echo "Configuring libcurl with HTTP/2 and mbedTLS support..."
+    echo "mbedTLS path: $MBEDTLS_PATH"
     
-    # Set PKG_CONFIG_PATH for OpenSSL discovery
-    export PKG_CONFIG_PATH="$OPENSSL_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
+    # Set PKG_CONFIG_PATH for mbedTLS discovery
+    export PKG_CONFIG_PATH="$MBEDTLS_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
     
     if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
         --enable-static --disable-shared \
-        --with-openssl="$OPENSSL_PATH" \
-        --without-mbedtls --without-gnutls --without-wolfssl \
+        --with-mbedtls="$MBEDTLS_PATH" \
+        --without-openssl --without-gnutls --without-wolfssl \
         --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
         --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
@@ -1041,14 +1026,14 @@ build_curl_with_http2_for_mac() {
         if make -j$(sysctl -n hw.ncpu); then
             echo "Installing libcurl..."
             if make install; then
-                echo "✅ libcurl with HTTP/2 and OpenSSL built successfully"
+                echo "✅ libcurl with HTTP/2 and mbedTLS built successfully"
 
-                # Verify OpenSSL linkage
-                echo "Verifying SSL linkage..."
-                if otool -L lib/.libs/libcurl.a 2>/dev/null | grep -q libssl; then
-                    echo "✅ libcurl is properly linked with OpenSSL"
+                # Verify mbedTLS linkage
+                echo "Verifying TLS linkage..."
+                if otool -L lib/.libs/libcurl.a 2>/dev/null | grep -q mbedtls; then
+                    echo "✅ libcurl is properly linked with mbedTLS"
                 else
-                    echo "⚠️  Note: Static library linkage verification may not show OpenSSL (normal for .a files)"
+                    echo "⚠️  Note: Static library linkage verification may not show mbedTLS (normal for .a files)"
                 fi
 
                 cd - > /dev/null
@@ -1259,8 +1244,8 @@ fi
 
 # Build MIR for Mac (Lambda dependency)
 echo "Setting up MIR..."
-if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
-    echo "MIR already available"
+if [ -f "mac-deps/mir/libmir.a" ] && [ -f "mac-deps/mir/mir.h" ]; then
+    echo "MIR already available in mac-deps/mir"
 else
     if ! build_mir_for_mac; then
         echo "Warning: MIR build failed"
@@ -1500,7 +1485,7 @@ else
     echo "- Homebrew not available for dependency checks"
 fi
 
-echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- MIR: $([ -f "mac-deps/mir/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- rpmalloc: $([ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
