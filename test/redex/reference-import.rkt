@@ -610,7 +610,7 @@
        (cond
          [(not v) 0]
          [(equal? v "auto") 'auto]
-         [else (or (parse-css-px v) 0)]))
+         [else (or (parse-css-px-or-pct v) 0)]))
      (define tv (parse-margin-val t))
      (define rv (parse-margin-val r))
      (define bv (parse-margin-val b))
@@ -630,7 +630,7 @@
   (define vals (map (lambda (p)
                       (cond
                         [(equal? p "auto") 'auto]
-                        [else (or (parse-css-px p) 0)]))
+                        [else (or (parse-css-px-or-pct p) 0)]))
                     parts))
   (match vals
     [(list a) `(edges ,a ,a ,a ,a)]
@@ -1005,7 +1005,16 @@
   (if resolved
       (let-values ([(pt pr pb pl) (get-edges styles 'padding)]
                    [(bt br bb bl) (get-edges styles 'border-width)])
-        (- resolved pl pr bl br))
+        ;; resolve percentage padding against parent width
+        (define (resolve-pct v)
+          (match v
+            [`(% ,pct)
+             (if (and parent-w (number? parent-w))
+                 (* (/ pct 100) parent-w)
+                 0)]
+            [(? number?) v]
+            [_ 0]))
+        (- resolved (resolve-pct pl) (resolve-pct pr) bl br))
       ;; if no explicit width, pass through parent-w as an approximation
       ;; (this covers display:block which takes full parent width)
       parent-w))
@@ -1109,6 +1118,15 @@
        [(block) `(block ,box-id ,styles ,child-boxes)]
        [(inline) `(inline ,box-id ,styles ,child-boxes)]
        [(inline-block) `(inline-block ,box-id ,styles ,child-boxes)]
+       [(inline-flex)
+        ;; inline-flex behaves like flex for layout purposes
+        `(flex ,box-id ,styles ,child-boxes)]
+       [(table table-row table-row-group table-header-group
+               table-footer-group table-cell table-column table-column-group
+               table-caption inline-table)
+        ;; table display types — approximate as block for now
+        ;; (proper table layout requires structured TableChildren)
+        `(block ,box-id ,styles ,child-boxes)]
        [(none) `(none ,box-id)]
        [(grid)
         ;; build grid box with grid-def from styles
@@ -1124,8 +1142,15 @@
         (define resolved-h (resolve-size-value explicit-h #f))
         ;; subtract padding for auto-fill calculation (content area)
         (define-values (_pt pad-r _pb pad-l) (get-edges styles 'padding))
+        ;; resolve percentage padding against parent width for content-area calc
+        (define (resolve-pad-pct v)
+          (match v
+            [`(% ,pct)
+             (if (and parent-w (number? parent-w))
+                 (* (/ pct 100) parent-w) 0)]
+            [(? number?) v] [_ 0]))
         (define content-w-for-repeat
-          (if resolved-w (- resolved-w pad-l pad-r) #f))
+          (if resolved-w (- resolved-w (resolve-pad-pct pad-l) (resolve-pad-pct pad-r)) #f))
         (define col-defs (expand-auto-repeat raw-col-defs
                            (if content-w-for-repeat `(px ,content-w-for-repeat) explicit-w)
                            styles))

@@ -37,7 +37,7 @@
   (match box
     [`(inline ,id ,styles (,children ...))
      (define avail-w (or (avail-width->number (cadr avail)) +inf.0))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
      (define content-w (- avail-w (horizontal-pb bm)))
 
      (define-values (child-views total-height)

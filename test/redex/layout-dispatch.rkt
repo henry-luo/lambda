@@ -167,9 +167,9 @@
 (define (layout-replaced box avail)
   (match box
     [`(replaced ,id ,styles ,intrinsic-w ,intrinsic-h)
-     (define bm (extract-box-model styles))
      (define avail-w (avail-width->number (cadr avail)))
      (define avail-h (avail-height->number (caddr avail)))
+     (define bm (extract-box-model styles avail-w))
 
      ;; resolve explicit width/height
      (define css-w (get-style-prop styles 'width 'auto))
@@ -223,7 +223,7 @@
   (match box
     [`(table ,id ,styles (,row-groups ...))
      (define avail-w (avail-width->number (cadr avail)))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
      (define content-w (if avail-w (resolve-block-width styles avail-w) 0))
      (define offset-x (+ (box-model-padding-left bm) (box-model-border-left bm)))
      (define offset-y (+ (box-model-padding-top bm) (box-model-border-top bm)))
