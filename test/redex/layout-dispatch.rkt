@@ -8,6 +8,7 @@
 
 (require racket/match
          racket/list
+         racket/string
          "css-layout-lang.rkt"
          "layout-common.rkt"
          "layout-block.rkt"
@@ -85,8 +86,11 @@
       [_ (error 'layout "unknown box type: ~a" box)])]))
 
   ;; apply relative positioning offset
+  ;; pass containing block dimensions for percentage resolution
   (if (eq? position 'relative)
-      (apply-relative-offset view styles)
+      (let ([cb-w (avail-width->number (cadr avail))]
+            [cb-h (avail-height->number (caddr avail))])
+        (apply-relative-offset view styles cb-w cb-h))
       view))
 
 ;; ============================================================
@@ -109,23 +113,50 @@
      (define bm (extract-box-model styles))
      (define avail-w (avail-width->number (cadr avail)))
 
-     ;; text height: simplified default line height
-     (define line-height 20)
+     ;; Ahem font metrics: font-size=10px, line-height=1 → each line = 10px tall
+     ;; every visible glyph = font-size px wide
+     (define font-size 10)
+     (define line-height font-size) ;; line-height: 1
 
-     ;; text width: min of measured width and available width
-     (define text-w
-       (if avail-w
-           (min measured-w avail-w)
-           measured-w))
-
-     ;; for multi-line text, compute height based on wrapping
-     (define text-h
-       (if (and avail-w (> measured-w avail-w))
-           ;; wrapped: multiple lines
-           (* line-height (ceiling (/ measured-w avail-w)))
-           line-height))
-
-     (make-text-view id 0 0 text-w text-h content)]
+     (cond
+       ;; no wrapping needed: text fits or no constraint
+       [(or (not avail-w) (<= measured-w avail-w))
+        (make-text-view id 0 0 measured-w line-height content)]
+       [else
+        ;; word-wrap at zero-width-space boundaries
+        ;; split into words and greedily fit onto lines
+        (define words (string-split content "\u200B"))
+        (define word-ws
+          (for/list ([w (in-list words)])
+            ;; each visible char = font-size px wide
+            (for/sum ([ch (in-string w)])
+              (if (or (char=? ch #\u200B) (char=? ch #\u200C)
+                      (char=? ch #\u200D) (char=? ch #\uFEFF))
+                  0 font-size))))
+        (define-values (num-lines max-line-w)
+          (let loop ([remaining-words word-ws]
+                     [line-w 0]
+                     [lines 1]
+                     [max-w 0])
+            (cond
+              [(null? remaining-words)
+               (values lines (max max-w line-w))]
+              [else
+               (define ww (car remaining-words))
+               (define new-line-w (+ line-w ww))
+               (cond
+                 ;; first word on line always fits
+                 [(= line-w 0)
+                  (loop (cdr remaining-words) new-line-w lines max-w)]
+                 ;; word fits on current line
+                 [(<= new-line-w avail-w)
+                  (loop (cdr remaining-words) new-line-w lines max-w)]
+                 ;; word doesn't fit → start new line
+                 [else
+                  (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
+        (define text-w (min measured-w (max max-line-w avail-w)))
+        (define text-h (* num-lines line-height))
+        (make-text-view id 0 0 text-w text-h content)])]
 
     [_ (error 'layout-text "expected text box, got: ~a" box)]))
 
@@ -136,9 +167,9 @@
 (define (layout-replaced box avail)
   (match box
     [`(replaced ,id ,styles ,intrinsic-w ,intrinsic-h)
-     (define bm (extract-box-model styles))
      (define avail-w (avail-width->number (cadr avail)))
      (define avail-h (avail-height->number (caddr avail)))
+     (define bm (extract-box-model styles avail-w))
 
      ;; resolve explicit width/height
      (define css-w (get-style-prop styles 'width 'auto))
@@ -192,7 +223,7 @@
   (match box
     [`(table ,id ,styles (,row-groups ...))
      (define avail-w (avail-width->number (cadr avail)))
-     (define bm (extract-box-model styles))
+     (define bm (extract-box-model styles avail-w))
      (define content-w (if avail-w (resolve-block-width styles avail-w) 0))
      (define offset-x (+ (box-model-padding-left bm) (box-model-border-left bm)))
      (define offset-y (+ (box-model-padding-top bm) (box-model-border-top bm)))
