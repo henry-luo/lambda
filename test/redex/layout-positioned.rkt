@@ -131,7 +131,19 @@
           (set! content-w (* content-h ar))]
          ;; neither axis definite, but min-width may have increased content-w
          [(> content-w 0)
-          (set! content-h (/ content-w ar))]))
+          (set! content-h (/ content-w ar))]
+         ;; neither axis definite, content-w = 0 → check if min-height can seed AR
+         [else
+          (define min-h-val-ar (get-style-prop styles 'min-height 'auto))
+          (define min-h-ar (or (resolve-size-value min-h-val-ar containing-h) 0))
+          (define min-h-content-ar
+            (if (and (> min-h-ar 0) (eq? (box-model-box-sizing bm) 'border-box))
+                (max 0 (- min-h-ar (vertical-pb bm)))
+                min-h-ar))
+          (when (> min-h-content-ar 0)
+            ;; min-height seeds: height = min-height, width = height * AR
+            (set! content-h min-h-content-ar)
+            (set! content-w (* min-h-content-ar ar)))]))
 
      ;; lay out children to determine auto height
      ;; override position to static to avoid infinite recursion
@@ -218,6 +230,8 @@
 ;; offset a view's position by (dx, dy)
 (define (offset-view view dx dy)
   (match view
+    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
+     `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children ,baseline)]
     [`(view ,id ,x ,y ,w ,h ,children)
      `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,children)]
     [`(view-text ,id ,x ,y ,w ,h ,text)
@@ -254,6 +268,8 @@
 
 (define (set-view-pos view x y)
   (match view
+    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
     [`(view ,id ,_ ,_ ,w ,h ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,_ ,_ ,w ,h ,text)
@@ -262,6 +278,8 @@
 
 (define (set-view-size view w h)
   (match view
+    [`(view ,id ,x ,y ,_ ,_ ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
     [`(view ,id ,x ,y ,_ ,_ ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,x ,y ,_ ,_ ,text)

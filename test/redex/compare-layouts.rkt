@@ -231,6 +231,9 @@
 ;; parse a Redex view node
 (define (parse-view-node view)
   (match view
+    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
+     ;; view with stored baseline — ignore baseline for comparison
+     (values (->num x) (->num y) (->num w) (->num h) children)]
     [`(view ,id ,x ,y ,w ,h ,children)
      ;; include all children (elements + text) for structural comparison
      (values (->num x) (->num y) (->num w) (->num h) children)]
