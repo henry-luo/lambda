@@ -7,10 +7,11 @@
 
 #include "render_svg_inline.hpp"
 #include "render.hpp"
-#include "font_lookup_platform.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
+#include "../lib/font/font.h"
+#include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
 #include <string.h>
@@ -1073,12 +1074,12 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
     }
 
     // try platform font lookup
-    char* path = find_font_path_fallback(font_family);
+    char* path = font_platform_find_fallback(font_family);
 
     // check if path is a TTC file - ThorVG TTF loader doesn't support TTC (TrueType Collection)
     if (path && strstr(path, ".ttc")) {
         log_debug("[SVG] skipping TTC file (not supported by ThorVG TTF loader): %s", path);
-        free(path);
+        mem_free(path);
         path = nullptr;
     }
 
@@ -1102,12 +1103,12 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
 
     for (int i = 0; fallbacks[i]; i++) {
         if (strcmp(fallbacks[i], font_family) != 0) {
-            path = find_font_path_fallback(fallbacks[i]);
+            path = font_platform_find_fallback(fallbacks[i]);
 
             // skip TTC files
             if (path && strstr(path, ".ttc")) {
                 log_debug("[SVG] skipping TTC file (not supported): %s", path);
-                free(path);
+                mem_free(path);
                 path = nullptr;
                 continue;
             }

@@ -4,7 +4,6 @@
 #include <limits.h>
 #include "view.hpp"
 #include "font_face.h"
-#include "font_lookup_platform.h"
 
 // FreeType for direct font loading and glyph operations
 #include <ft2build.h>
@@ -77,23 +76,6 @@ static const char** resolve_generic_family(const char* family) {
     }
 
     return NULL;  // not a generic family or known alias
-}
-
-// Glyph fallback cache: caches which FT_Face (from fallback fonts) can render a given codepoint
-typedef struct GlyphFallbackEntry {
-    uint32_t codepoint;
-    FT_Face fallback_face;  // NULL if no fallback found (negative cache)
-} GlyphFallbackEntry;
-
-static int glyph_fallback_compare(const void *a, const void *b, void *udata) {
-    const GlyphFallbackEntry *ga = (const GlyphFallbackEntry*)a;
-    const GlyphFallbackEntry *gb = (const GlyphFallbackEntry*)b;
-    return ga->codepoint == gb->codepoint ? 0 : (ga->codepoint < gb->codepoint ? -1 : 1);
-}
-
-static uint64_t glyph_fallback_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const GlyphFallbackEntry *entry = (const GlyphFallbackEntry*)item;
-    return hashmap_xxhash3(&entry->codepoint, sizeof(entry->codepoint), seed0, seed1);
 }
 
 typedef struct FontfaceEntry {
@@ -270,7 +252,7 @@ void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_s
         }
     } else {
         // Font not found in database, fall back to platform-specific lookup
-        char* font_path = find_font_path_fallback(font_name);
+        char* font_path = font_platform_find_fallback(font_name);
         if (font_path) {
             if (FT_New_Face((FT_Library)uicon->ft_library, font_path, 0, &face) == 0) {
                 // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
@@ -308,88 +290,6 @@ void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_s
     }
     strbuf_free(style_cache_key);
     return face;
-}
-
-void* load_glyph(UiContext* uicon, FontHandle* handle, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
-    FT_Face face = handle ? (FT_Face)font_handle_get_ft_face(handle) : NULL;
-    if (!face) return NULL;
-    FT_GlyphSlot slot = NULL;  FT_Error error;
-    FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
-
-    // Debug: Log the face's current pixel size and glyph metrics
-    static int debug_count = 0;
-    if (for_rendering && debug_count < 100) {
-        // y_ppem is in pixels, height is in 26.6 fixed-point
-        log_debug("[GLYPH LOAD] face=%s, char_index=%u, y_ppem=%d, height=%.1f, css_size=%.2f, codepoint=U+%04X",
-                  face->family_name,
-                  char_index,
-                  face->size ? face->size->metrics.y_ppem : 0,
-                  face->size ? (face->size->metrics.height / 64.0) : 0,
-                  font_style ? font_style->font_size : 0.0f, codepoint);
-        debug_count++;
-    }
-
-    // FT_LOAD_NO_HINTING matches browser closely, whereas FT_LOAD_FORCE_AUTOHINT makes the text narrower
-    // FT_LOAD_COLOR is required for color emoji fonts (Apple Color Emoji, Noto Color Emoji, etc.)
-    FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
-    if (char_index > 0) {
-        error = FT_Load_Glyph(face, char_index, load_flags);
-        if (!error) { slot = face->glyph;  return slot; }
-    }
-
-    // failed to load glyph under current font, check fallback cache first
-    if (uicon->glyph_fallback_cache == NULL) {
-        uicon->glyph_fallback_cache = hashmap_new(sizeof(GlyphFallbackEntry), 256, 0, 0,
-            glyph_fallback_hash, glyph_fallback_compare, NULL, NULL);
-    }
-
-    // check cache for this codepoint
-    GlyphFallbackEntry search_key = {.codepoint = codepoint, .fallback_face = NULL};
-    GlyphFallbackEntry* cached = (GlyphFallbackEntry*)hashmap_get(uicon->glyph_fallback_cache, &search_key);
-    if (cached) {
-        if (cached->fallback_face == NULL) {
-            // negative cache hit - we already know no fallback has this glyph
-            return NULL;
-        }
-        // cache hit - use the cached fallback face
-        char_index = FT_Get_Char_Index(cached->fallback_face, codepoint);
-        if (char_index > 0) {
-            error = FT_Load_Glyph(cached->fallback_face, char_index, load_flags);
-            if (!error) {
-                slot = cached->fallback_face->glyph;
-                return slot;
-            }
-        }
-    }
-
-    // cache miss - search through fallback fonts
-    log_debug("Failed to load glyph: U+%04X", codepoint);
-    char** font_ptr = uicon->fallback_fonts;
-    while (*font_ptr) {
-        log_debug("Trying fallback font '%s' for char: U+%04X", *font_ptr, codepoint);
-        FT_Face fallback_face = (FT_Face)load_styled_font(uicon, *font_ptr, font_style);
-        if (fallback_face) {
-            char_index = FT_Get_Char_Index(fallback_face, codepoint);
-            if (char_index > 0) {
-                error = FT_Load_Glyph(fallback_face, char_index, load_flags);
-                if (!error) {
-                    log_font_fallback_triggered(face ? face->family_name : "unknown", *font_ptr);
-                    // cache this codepoint -> fallback_face mapping
-                    GlyphFallbackEntry new_entry = {.codepoint = codepoint, .fallback_face = fallback_face};
-                    hashmap_set(uicon->glyph_fallback_cache, &new_entry);
-                    slot = fallback_face->glyph;
-                    return slot;
-                }
-            }
-            log_debug("Failed to load glyph from fallback font: %s, U+%04X", *font_ptr, codepoint);
-        }
-        font_ptr++;
-    }
-
-    // negative cache - no fallback font has this glyph
-    GlyphFallbackEntry negative_entry = {.codepoint = codepoint, .fallback_face = NULL};
-    hashmap_set(uicon->glyph_fallback_cache, &negative_entry);
-    return NULL;
 }
 
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
@@ -568,11 +468,6 @@ void fontface_cleanup(UiContext* uicon) {
         hashmap_scan(uicon->fontface_map, fontface_entry_free, NULL);
         hashmap_free(uicon->fontface_map);
         uicon->fontface_map = NULL;
-    }
-    // free glyph fallback cache (no resources to free per entry, just the hashmap)
-    if (uicon->glyph_fallback_cache) {
-        hashmap_free(uicon->glyph_fallback_cache);
-        uicon->glyph_fallback_cache = NULL;
     }
 }
 
