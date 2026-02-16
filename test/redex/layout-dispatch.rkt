@@ -118,10 +118,17 @@
      (define is-proportional? (eq? font-type 'proportional))
 
      ;; font metrics depend on font type
-     (define font-size (if is-proportional? 16 10))
+     (define font-size
+       (cond
+         [is-proportional? 16]
+         ;; check for explicit font-size in styles (e.g., CSS2.1 tests with non-default Ahem size)
+         [else (get-style-prop styles 'font-size 10)]))
      (define line-height (if is-proportional? 18 font-size))
-     ;; average character width for proportional fonts
-     (define avg-char-w (if is-proportional? 6.5 font-size))
+     ;; character width categories for proportional fonts
+     (define upper-w (if is-proportional? 8.5 font-size))
+     (define lower-w (if is-proportional? 5.8 font-size))
+     (define space-w-char (if is-proportional? 4.0 font-size))
+     (define default-w (if is-proportional? 5.9 font-size))
 
      (cond
        ;; no wrapping needed: text fits or no constraint
@@ -132,10 +139,18 @@
           ;; proportional font: split on spaces for word wrapping
           [is-proportional?
            (define words (string-split content " "))
+           ;; compute word widths using per-character categories
+           (define (word-width w)
+             (for/fold ([total 0]) ([ch (in-string w)])
+               (cond
+                 [(char-upper-case? ch) (+ total upper-w)]
+                 [(char-lower-case? ch) (+ total lower-w)]
+                 [(char-numeric? ch) (+ total default-w)]
+                 [else (+ total default-w)])))
            (define word-ws
              (for/list ([w (in-list words)])
-               (* (string-length w) avg-char-w)))
-           (define space-w avg-char-w)
+               (word-width w)))
+           (define space-w space-w-char)
            (define-values (num-lines max-line-w)
              (let loop ([remaining-words word-ws]
                         [line-w 0]

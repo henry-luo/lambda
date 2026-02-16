@@ -175,20 +175,35 @@
 ;; Proportional Font Metrics (for non-Taffy/CSS2.1 tests)
 ;; ============================================================
 
-;; approximate average character width for a typical browser default serif font
-;; at 16px. calibrated to match Chrome's text wrapping for common English text.
-(define proportional-avg-char-width 6.5)
+;; character-width categories for typical browser default serif font at 16px.
+;; calibrated to match Chrome's text rendering on macOS.
+(define proportional-uppercase-width 8.5)    ;; average uppercase letter
+(define proportional-lowercase-width 5.8)    ;; average lowercase letter
+(define proportional-space-width 4.0)        ;; space character
+(define proportional-digit-width 5.9)        ;; digits
+(define proportional-default-width 5.9)      ;; other characters
 (define proportional-line-height 18)
 
 ;; measure text width using proportional font approximation.
-;; counts visible characters × average character width.
+;; uses per-character-category widths for better accuracy.
 (define (measure-text-proportional text)
   (define total 0)
   (for ([ch (in-string text)])
-    (unless (or (char=? ch #\newline) (char=? ch #\return)
-                (char=? ch #\u200B) (char=? ch #\u200C)
-                (char=? ch #\u200D) (char=? ch #\uFEFF))
-      (set! total (+ total proportional-avg-char-width))))
+    (cond
+      [(or (char=? ch #\newline) (char=? ch #\return)
+           (char=? ch #\u200B) (char=? ch #\u200C)
+           (char=? ch #\u200D) (char=? ch #\uFEFF))
+       (void)]  ;; zero-width / control chars
+      [(char=? ch #\space)
+       (set! total (+ total proportional-space-width))]
+      [(char-upper-case? ch)
+       (set! total (+ total proportional-uppercase-width))]
+      [(char-lower-case? ch)
+       (set! total (+ total proportional-lowercase-width))]
+      [(char-numeric? ch)
+       (set! total (+ total proportional-digit-width))]
+      [else
+       (set! total (+ total proportional-default-width))]))
   total)
 
 ;; ============================================================
@@ -203,15 +218,62 @@
       (let ([decls (string-split style-str ";")])
         ;; reverse so that last declaration wins (CSS cascade: later overrides earlier)
         ;; since get-style-prop uses assoc which finds the first match
-        (reverse
-         (filter-map
-          (lambda (decl)
-            (let ([parts (string-split (string-trim decl) ":")])
-              (if (>= (length parts) 2)
-                  (cons (string->symbol (string-trim (car parts)))
-                        (string-trim (string-join (cdr parts) ":")))
-                  #f)))
-          decls)))))
+        (define raw
+          (reverse
+           (filter-map
+            (lambda (decl)
+              (let ([parts (string-split (string-trim decl) ":")])
+                (if (>= (length parts) 2)
+                    (let* ([key (string->symbol (string-trim (car parts)))]
+                           [val (string-trim (string-join (cdr parts) ":"))])
+                      ;; CSS validation: reject invalid values during parsing
+                      ;; negative padding is invalid (CSS spec)
+                      (cond
+                        [(and (memq key '(padding padding-top padding-right
+                                          padding-bottom padding-left))
+                              (regexp-match? #rx"^-" val))
+                         #f]  ;; drop invalid negative padding declaration
+                        [else (cons key val)]))
+                    #f)))
+            decls)))
+        ;; dedup within this rule: keep first occurrence of each key
+        ;; (= last declared, since list is reversed). This ensures cross-rule
+        ;; dedup in apply-style-rules works correctly.
+        (define deduped
+          (let loop ([props raw] [seen '()] [result '()])
+            (cond
+              [(null? props) (reverse result)]
+              [(member (caar props) seen)
+               (loop (cdr props) seen result)]
+              [else
+               (loop (cdr props) (cons (caar props) seen)
+                     (cons (car props) result))])))
+        ;; expand font shorthand: "font: [style] size family"
+        ;; extract font-size and font-family from font shorthand
+        (define font-val (cdr-or-false 'font deduped))
+        (if font-val
+            (let ()
+              (define parts (string-split (string-trim font-val)))
+              ;; find the font-size (number+unit) and family (last word)
+              (define family (if (>= (length parts) 2)
+                                (last parts)
+                                #f))
+              ;; find font-size: look for a part with a unit or slash
+              (define size-part
+                (for/first ([p (in-list parts)]
+                            #:when (regexp-match?
+                                    #rx"^[0-9.]+(px|pt|em|ex|in|cm|mm|pc|rem|ch|%)"
+                                    p))
+                  ;; strip /line-height if present: "12pt/1.2" → "12pt"
+                  (car (string-split p "/"))))
+              (append deduped
+                      (if family
+                          (list (cons 'font-family family))
+                          '())
+                      (if size-part
+                          (list (cons 'font-size size-part))
+                          '())))
+            deduped))))
 
 ;; extract the element tree from an HTML file body.
 ;; returns a nested structure: (element tag attrs children)
@@ -219,7 +281,204 @@
 ;; only handles div elements (sufficient for Taffy tests).
 (define (html-file->inline-styles html-path)
   (define html-content (file->string html-path))
-  (parse-html-body html-content))
+  (define style-rules (extract-style-rules html-content))
+  (define elements (parse-html-body html-content))
+  ;; apply style block rules to elements if any
+  (if (null? style-rules)
+      elements
+      (map (lambda (e) (apply-style-rules e style-rules '())) elements)))
+
+;; ============================================================
+;; CSS <style> Block Parser
+;; ============================================================
+
+;; extract CSS rules from <style> blocks in HTML.
+;; returns a list of (selector-parts . properties-alist)
+;; selector-parts is a list of simple selectors for matching
+(define (extract-style-rules html-str)
+  (define results '())
+  ;; find all <style>...</style> blocks
+  (define style-matches
+    (regexp-match* #rx"<style[^>]*>(.*?)</style>" html-str #:match-select cadr))
+  (for ([raw-css-text (in-list (or style-matches '()))])
+    ;; strip CSS comments /* ... */ before parsing
+    (define css-text (regexp-replace* #rx"/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/" raw-css-text ""))
+    ;; also strip @font-face blocks (we don't use them)
+    (define css-clean (regexp-replace* #rx"@font-face[^}]*\\}" css-text ""))
+    ;; parse each rule: selector { properties }
+    ;; handle grouped selectors (comma-separated)
+    (define rule-matches
+      (regexp-match* #px"([^{}]+)\\{([^}]*)\\}" css-clean #:match-select cdr))
+    (for ([rule (in-list rule-matches)])
+      (define selector-text (string-trim (car rule)))
+      (define props-text (string-trim (cadr rule)))
+      (define props (parse-inline-style props-text))
+      (when (not (null? props))
+        ;; handle comma-separated selectors: "sel1, sel2 { ... }"
+        (define selectors (string-split selector-text ","))
+        (for ([sel (in-list selectors)])
+          (define trimmed-sel (string-trim sel))
+          (when (> (string-length trimmed-sel) 0)
+            (define parsed-sel (parse-css-selector trimmed-sel))
+            (when parsed-sel
+              (set! results (cons (cons parsed-sel props) results))))))))
+  (reverse results))
+
+;; parse a simple CSS selector into a structured form.
+;; supports: element (div), id (#foo), class (.bar), descendant (div div),
+;;           child combinator (div > div)
+;; returns a list of selector parts, each being:
+;;   (element "div"), (id "foo"), (class "bar")
+;; nested for descendant: ((element "div") (element "div"))
+(define (parse-css-selector sel-str)
+  ;; split on whitespace for descendant combinators
+  ;; handle > for child combinator (treat same as descendant for simplicity)
+  (define cleaned (regexp-replace* #rx"\\s*>\\s*" sel-str " > "))
+  (define parts (string-split cleaned))
+  ;; filter out ">" tokens (treat child same as descendant)
+  (define filtered (filter (lambda (p) (not (string=? p ">"))) parts))
+  (define parsed
+    (filter-map
+     (lambda (part)
+       (cond
+         [(regexp-match #rx"^#(.+)$" part) =>
+          (lambda (m) `(id ,(cadr m)))]
+         [(regexp-match #rx"^\\.(.+)$" part) =>
+          (lambda (m) `(class ,(cadr m)))]
+         [(regexp-match #rx"^([a-zA-Z][a-zA-Z0-9]*)$" part) =>
+          (lambda (m) `(element ,(cadr m)))]
+         ;; element#id or element.class
+         [(regexp-match #rx"^([a-zA-Z]+)#(.+)$" part) =>
+          (lambda (m) `(element+id ,(cadr m) ,(caddr m)))]
+         [(regexp-match #rx"^([a-zA-Z]+)\\.(.+)$" part) =>
+          (lambda (m) `(element+class ,(cadr m) ,(caddr m)))]
+         [else #f]))
+     filtered))
+  (if (null? parsed) #f parsed))
+
+;; check if a single selector part matches an element.
+;; elem: (element tag id class inline-alist children)
+(define (selector-part-matches? part elem-tag elem-id elem-class)
+  (match part
+    [`(element ,tag) (equal? tag elem-tag)]
+    [`(id ,id-str) (and elem-id (equal? id-str elem-id))]
+    [`(class ,cls) (and elem-class (string-contains? elem-class cls))]
+    [`(element+id ,tag ,id-str) (and (equal? tag elem-tag) elem-id (equal? id-str elem-id))]
+    [`(element+class ,tag ,cls) (and (equal? tag elem-tag) elem-class (string-contains? elem-class cls))]
+    [_ #f]))
+
+;; check if a full selector (list of parts) matches an element in context.
+;; ancestor-chain: list of (tag id class) from outermost to innermost parent.
+;; the last part must match the current element, preceding parts must match ancestors.
+(define (selector-matches? selector elem-tag elem-id elem-class ancestor-chain)
+  (cond
+    [(null? selector) #f]
+    ;; single-part selector: must match element
+    [(= (length selector) 1)
+     (selector-part-matches? (car selector) elem-tag elem-id elem-class)]
+    ;; multi-part (descendant): last part matches element, rest match ancestors
+    [else
+     (and (selector-part-matches? (last selector) elem-tag elem-id elem-class)
+          (ancestors-match? (drop-right selector 1) ancestor-chain))]))
+
+;; check if selector ancestor parts match some subsequence of the ancestor chain
+(define (ancestors-match? sel-parts ancestor-chain)
+  (cond
+    [(null? sel-parts) #t] ; all parts matched
+    [(null? ancestor-chain) #f] ; no more ancestors to try
+    [else
+     (define part (last sel-parts))
+     (define remaining-parts (drop-right sel-parts 1))
+     ;; try to match this part against any ancestor
+     (let loop ([ancestors ancestor-chain])
+       (cond
+         [(null? ancestors) #f]
+         [(let ([a (car ancestors)])
+            (selector-part-matches? part (car a) (cadr a) (caddr a)))
+          ;; matched: remaining parts must match earlier ancestors
+          (ancestors-match? remaining-parts (cdr ancestors))]
+         [else (loop (cdr ancestors))]))]))
+
+;; apply style rules to an element tree.
+;; returns a new element tree with style rules merged into inline styles.
+;; ancestor-chain: list of (tag id class) tuples from root to parent.
+;; parent-props: alist of parent element's computed CSS properties (for inherit)
+(define (apply-style-rules elem rules ancestor-chain [parent-props '()])
+  (match elem
+    [`(element ,tag ,id ,class ,inline-alist ,children)
+     ;; find all matching rules in source order
+     (define matching-props-raw
+       (apply append
+         (filter-map
+          (lambda (rule)
+            (define selector (car rule))
+            (define props (cdr rule))
+            (if (selector-matches? selector tag id class ancestor-chain)
+                props
+                #f))
+          rules)))
+     ;; deduplicate matching-props: later rules override earlier ones (CSS cascade)
+     ;; sort by specificity: id selectors > class selectors > element selectors
+     ;; for now, just deduplicate keeping last occurrence of each property
+     (define matching-props
+       (let loop ([props (reverse matching-props-raw)] [seen '()] [result '()])
+         (cond
+           [(null? props) result]
+           [(member (caar props) seen)
+            (loop (cdr props) seen result)]
+           [else
+            (loop (cdr props) (cons (caar props) seen)
+                  (cons (car props) result))])))
+     ;; merge: inline styles take priority over <style> block rules
+     ;; build merged alist: start with style-block props, then override with inline
+     (define merged-raw
+       (let ([result matching-props])
+         (for/fold ([r result]) ([prop (in-list inline-alist)])
+           ;; remove any existing entry with same key, then add inline
+           (cons prop (filter (lambda (p) (not (equal? (car p) (car prop)))) r)))))
+     ;; resolve 'inherit' values: replace with parent's computed value
+     (define merged-resolved
+       (map (lambda (prop)
+              (if (and (string? (cdr prop)) (string=? (cdr prop) "inherit"))
+                  ;; look up property in parent's computed styles
+                  (let ([parent-val (cdr-or-false (car prop) parent-props)])
+                    (if parent-val
+                        (cons (car prop) parent-val)
+                        prop))  ;; keep inherit if parent doesn't have it
+                  prop))
+            merged-raw))
+     ;; CSS inherited properties: automatically inherit from parent if not set
+     ;; (font-family, font-size, font, line-height, color, direction, text-align,
+     ;;  visibility, white-space, word-spacing, letter-spacing, text-indent,
+     ;;  text-transform, list-style, cursor)
+     (define css-inherited-props
+       '(font-family font-size font line-height color direction text-align
+         visibility white-space word-spacing letter-spacing text-indent
+         text-transform))
+     (define merged
+       (let loop ([inh-props css-inherited-props] [result merged-resolved])
+         (cond
+           [(null? inh-props) result]
+           [else
+            (define key (car inh-props))
+            (if (cdr-or-false key result)
+                ;; child already has this property — keep as is
+                (loop (cdr inh-props) result)
+                ;; child doesn't have it — inherit from parent
+                (let ([parent-val (cdr-or-false key parent-props)])
+                  (if parent-val
+                      (loop (cdr inh-props) (cons (cons key parent-val) result))
+                      (loop (cdr inh-props) result))))])))
+     ;; recurse into children with updated ancestor chain
+     (define new-chain (cons (list tag id class) ancestor-chain))
+     (define new-children
+       (map (lambda (c)
+              (match c
+                [`(text-node ,_) c]
+                [_ (apply-style-rules c rules new-chain merged)]))
+            children))
+     `(element ,tag ,id ,class ,merged ,new-children)]
+    [_ elem]))
 
 ;; parse body content to extract element tree
 (define (parse-html-body html-str)
@@ -240,10 +499,10 @@
 
   (let loop ()
     (when (< pos len)
-      ;; find next opening tag
+      ;; find next opening tag — include p for CSS2.1 test descriptions
       (define tag-match
         (regexp-match-positions
-         #rx"<(div|span|img)([^>]*)>"
+         #rx"<(div|span|img|p)([^>]*)>"
          html-str pos))
       (when tag-match
         (define tag-start (caar tag-match))
@@ -322,7 +581,7 @@
       ;; look for either an opening tag or a closing tag
       (define open-match
         (regexp-match-positions
-         #rx"<(div|span|img)([^>]*)>"
+         #rx"<(div|span|img|p)([^>]*)>"
          html-str pos))
       (define close-match
         (regexp-match-positions close-rx html-str pos))
@@ -396,9 +655,9 @@
 (define (classify-html-test html-path)
   (define content (file->string html-path))
   (cond
+    [(regexp-match? #rx"<img" content) 'complex]
     [(regexp-match? #rx"<style" content) 'style-block]
     [(regexp-match? #rx"<span" content) 'complex]
-    [(regexp-match? #rx"<img" content) 'complex]
     ;; check for non-whitespace text content between > and < on the same line
     ;; this matches actual text nodes like ">some text<" but not ">\n  <"
     [(let ([body-match (regexp-match #rx"(?i:<body[^>]*>(.*)</body>)" content)])
@@ -434,6 +693,27 @@
 
   (add! 'box-sizing (string->symbol box-sizing))
 
+  ;; detect font properties to set em/ex context for CSS unit conversion
+  ;; font-size from font shorthand or font-size property
+  (define font-size-str (cdr-or-false 'font-size inline-alist))
+  (define elem-font-size
+    (if font-size-str
+        ;; parse font-size without em/ex recursion — use absolute units only
+        (let ([m (regexp-match #rx"^([0-9.]+)(px|pt|in|cm|mm|pc)$"
+                               (string-trim font-size-str))])
+          (if m (css-unit->px (string->number (cadr m)) (caddr m))
+              (current-em-size)))
+        (current-em-size)))
+  ;; detect font-family for ex ratio (Ahem: 0.8, default: 0.5)
+  (define font-family-str (cdr-or-false 'font-family inline-alist))
+  (define elem-ex-ratio
+    (if (and font-family-str (regexp-match? #rx"(?i:ahem)" font-family-str))
+        0.8 0.5))
+
+  ;; set up em/ex context for all CSS unit conversions in this element
+  (current-em-size elem-font-size)
+  (current-ex-ratio elem-ex-ratio)
+
   ;; position: root gets absolute for Taffy tests (test_base_style.css has
   ;; body > * { position: absolute; }), static for CSS2.1 tests (browser default)
   (define position
@@ -454,8 +734,17 @@
   (when margin-vals
     (add! 'margin margin-vals))
 
-  ;; padding
-  (define padding-vals (parse-edge-shorthand inline-alist 'padding))
+  ;; padding (CSS spec: negative padding is invalid, clamp to 0)
+  (define padding-vals-raw (parse-edge-shorthand inline-alist 'padding))
+  (define padding-vals
+    (and padding-vals-raw
+         (match padding-vals-raw
+           [`(edges ,t ,r ,b ,l)
+            (define (clamp-pad v)
+              (cond [(and (number? v) (< v 0)) 0]
+                    [else v]))
+            `(edges ,(clamp-pad t) ,(clamp-pad r) ,(clamp-pad b) ,(clamp-pad l))]
+           [_ padding-vals-raw])))
   (when padding-vals
     (add! 'padding padding-vals))
 
@@ -600,6 +889,29 @@
 ;; ============================================================
 
 ;; parse a CSS length value to a Redex SizeValue
+;; convert CSS absolute length units to px
+;; 1in=96px, 1cm=37.795px, 1mm=3.7795px, 1pt=4/3px, 1pc=16px
+;; em/ex/rem/ch are relative to current-em-size parameter
+(define current-em-size (make-parameter 16))  ;; default browser font-size
+;; ex ratio: for Ahem font 0.8, for default serif ~0.5
+(define current-ex-ratio (make-parameter 0.5))
+
+(define (css-unit->px val unit)
+  (define factor
+    (cond
+      [(string=? unit "px") 1]
+      [(string=? unit "in") 96]
+      [(string=? unit "cm") (/ 96.0 2.54)]
+      [(string=? unit "mm") (/ 96.0 25.4)]
+      [(string=? unit "pt") (/ 4.0 3.0)]
+      [(string=? unit "pc") 16]
+      [(string=? unit "em") (current-em-size)]
+      [(string=? unit "ex") (* (current-em-size) (current-ex-ratio))]
+      [(string=? unit "rem") 16]
+      [(string=? unit "ch") (* (current-em-size) 0.5)]
+      [else 1]))
+  (* val factor))
+
 (define (parse-css-length str)
   (define trimmed (string-trim str))
   (cond
@@ -608,13 +920,15 @@
     [(string=? trimmed "0") '(px 0)]
     [(string=? trimmed "min-content") 'min-content]
     [(string=? trimmed "max-content") 'max-content]
-    [(regexp-match #rx"^(-?[0-9.]+)px$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)px$" trimmed) =>
      (lambda (m) `(px ,(string->number (cadr m))))]
-    [(regexp-match #rx"^(-?[0-9.]+)%$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)%$" trimmed) =>
      (lambda (m) `(% ,(string->number (cadr m))))]
-    [(regexp-match #rx"^(-?[0-9.]+)em$" trimmed) =>
-     (lambda (m) `(em ,(string->number (cadr m))))]
-    [(regexp-match #rx"^(-?[0-9.]+)$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)(em|ex|rem|ch)$" trimmed) =>
+     (lambda (m) `(px ,(css-unit->px (string->number (cadr m)) (caddr m))))]
+    [(regexp-match #rx"^([+-]?[0-9.]+)(in|cm|mm|pt|pc)$" trimmed) =>
+     (lambda (m) `(px ,(css-unit->px (string->number (cadr m)) (caddr m))))]
+    [(regexp-match #rx"^([+-]?[0-9.]+)$" trimmed) =>
      (lambda (m) `(px ,(string->number (cadr m))))]
     [else 'auto]))
 
@@ -623,9 +937,11 @@
   (define trimmed (string-trim str))
   (cond
     [(string=? trimmed "0") 0]
-    [(regexp-match #rx"^(-?[0-9.]+)px$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)px$" trimmed) =>
      (lambda (m) (string->number (cadr m)))]
-    [(regexp-match #rx"^(-?[0-9.]+)$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)(in|cm|mm|pt|pc|em|ex|rem|ch)$" trimmed) =>
+     (lambda (m) (css-unit->px (string->number (cadr m)) (caddr m)))]
+    [(regexp-match #rx"^([+-]?[0-9.]+)$" trimmed) =>
      (lambda (m) (string->number (cadr m)))]
     [else #f]))
 
@@ -634,11 +950,13 @@
   (define trimmed (string-trim str))
   (cond
     [(string=? trimmed "0") 0]
-    [(regexp-match #rx"^(-?[0-9.]+)px$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)px$" trimmed) =>
      (lambda (m) (string->number (cadr m)))]
-    [(regexp-match #rx"^(-?[0-9.]+)%$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)%$" trimmed) =>
      (lambda (m) `(% ,(string->number (cadr m))))]
-    [(regexp-match #rx"^(-?[0-9.]+)$" trimmed) =>
+    [(regexp-match #rx"^([+-]?[0-9.]+)(in|cm|mm|pt|pc|em|ex|rem|ch)$" trimmed) =>
+     (lambda (m) (css-unit->px (string->number (cadr m)) (caddr m)))]
+    [(regexp-match #rx"^([+-]?[0-9.]+)$" trimmed) =>
      (lambda (m) (string->number (cadr m)))]
     [else #f]))
 
@@ -702,6 +1020,24 @@
     [(list t r b l) `(edges ,t ,r ,b ,l)]
     [_ #f]))
 
+;; extract a width value from a border shorthand string
+;; e.g., "1px solid black" → 1, "1in blue" → 96, "solid 5px blue" → 5
+;; if border-style is present but no explicit width, defaults to medium (3px)
+(define (extract-border-width-from-shorthand str)
+  (define m (regexp-match #rx"([0-9.]+)(px|in|cm|mm|pt|pc|em|ex|rem|ch)" str))
+  (if m
+      (css-unit->px (string->number (cadr m)) (caddr m))
+      ;; check for keyword widths
+      (cond
+        [(regexp-match? #rx"thin" str) 1]
+        [(regexp-match? #rx"medium" str) 3]
+        [(regexp-match? #rx"thick" str) 5]
+        ;; if a border-style keyword is present but no explicit width,
+        ;; CSS defaults to medium (3px). 'none' and 'hidden' mean no visible border.
+        [(regexp-match? #rx"(?i:none|hidden)" str) 0]
+        [(regexp-match? #rx"(?i:dotted|dashed|solid|double|groove|ridge|inset|outset)" str) 3]
+        [else #f])))
+
 ;; parse border shorthand to extract border-width edges
 (define (parse-border-shorthand alist)
   (define bt (cdr-or-false 'border-top-width alist))
@@ -710,27 +1046,49 @@
   (define bl (cdr-or-false 'border-left-width alist))
   (define border (cdr-or-false 'border alist))
   (define border-width (cdr-or-false 'border-width alist))
+  ;; individual side shorthands: border-top, border-right, border-bottom, border-left
+  (define b-top (cdr-or-false 'border-top alist))
+  (define b-right (cdr-or-false 'border-right alist))
+  (define b-bottom (cdr-or-false 'border-bottom alist))
+  (define b-left (cdr-or-false 'border-left alist))
+
+  ;; start with border shorthand as baseline (applies to all sides)
+  (define base-w (if border (or (extract-border-width-from-shorthand border) 0) 0))
+
+  ;; border-width shorthand overrides base-w if present
+  (define bw-parsed (if border-width (parse-margin-shorthand border-width) #f))
 
   (cond
-    ;; individual sides
+    ;; individual border-*-width properties take highest priority
     [(or bt br bb bl)
-     (define tv (if bt (or (parse-css-px bt) 0) 0))
-     (define rv (if br (or (parse-css-px br) 0) 0))
-     (define bv (if bb (or (parse-css-px bb) 0) 0))
-     (define lv (if bl (or (parse-css-px bl) 0) 0))
+     (define bw-t (if bw-parsed (list-ref (cdr bw-parsed) 0) base-w))
+     (define bw-r (if bw-parsed (list-ref (cdr bw-parsed) 1) base-w))
+     (define bw-b (if bw-parsed (list-ref (cdr bw-parsed) 2) base-w))
+     (define bw-l (if bw-parsed (list-ref (cdr bw-parsed) 3) base-w))
+     (define tv (if bt (or (parse-css-px bt) 0) bw-t))
+     (define rv (if br (or (parse-css-px br) 0) bw-r))
+     (define bv (if bb (or (parse-css-px bb) 0) bw-b))
+     (define lv (if bl (or (parse-css-px bl) 0) bw-l))
      `(edges ,tv ,rv ,bv ,lv)]
 
-    ;; border shorthand (e.g. "1px solid black")
-    [border
-     (define m (regexp-match #rx"([0-9.]+)px" border))
-     (if m
-         (let ([w (string->number (cadr m))])
-           `(edges ,w ,w ,w ,w))
-         #f)]
+    ;; individual side shorthands (e.g., border-left: solid 5px blue)
+    [(or b-top b-right b-bottom b-left)
+     (define bw-t (if bw-parsed (list-ref (cdr bw-parsed) 0) base-w))
+     (define bw-r (if bw-parsed (list-ref (cdr bw-parsed) 1) base-w))
+     (define bw-b (if bw-parsed (list-ref (cdr bw-parsed) 2) base-w))
+     (define bw-l (if bw-parsed (list-ref (cdr bw-parsed) 3) base-w))
+     (define tv (if b-top (or (extract-border-width-from-shorthand b-top) 0) bw-t))
+     (define rv (if b-right (or (extract-border-width-from-shorthand b-right) 0) bw-r))
+     (define bv (if b-bottom (or (extract-border-width-from-shorthand b-bottom) 0) bw-b))
+     (define lv (if b-left (or (extract-border-width-from-shorthand b-left) 0) bw-l))
+     `(edges ,tv ,rv ,bv ,lv)]
 
-    ;; border-width shorthand
-    [border-width
-     (parse-margin-shorthand border-width)]
+    ;; border-width shorthand (e.g. "5px")
+    [bw-parsed bw-parsed]
+
+    ;; border shorthand with explicit width (e.g. "1px solid black", "1in blue")
+    [(and border (> base-w 0))
+     `(edges ,base-w ,base-w ,base-w ,base-w)]
 
     [else #f]))
 
@@ -1196,20 +1554,39 @@
      (define child-boxes
        (filter-map
         (lambda (c)
+          ;; scope em/ex context per child so siblings don't leak to each other
+          (parameterize ([current-em-size (current-em-size)]
+                         [current-ex-ratio (current-ex-ratio)])
           (match c
             [`(text-node ,text)
              ;; create a text box with pre-measured width
              (define text-id (string->symbol (format "txt~a" (unbox counter))))
              (set-box! counter (add1 (unbox counter)))
-             ;; text boxes: Taffy uses Ahem, non-Taffy uses proportional metrics
+             ;; detect font-family from parent element's styles
+             (define font-family-val
+               (cdr-or-false 'font-family inline-alist))
+             (define uses-ahem?
+               (or (uses-taffy-base?)
+                   (and font-family-val
+                        (regexp-match? #rx"(?i:ahem)" font-family-val))))
+             ;; detect font-size from parent element's styles
+             (define font-size-val
+               (cdr-or-false 'font-size inline-alist))
+             (define effective-font-size
+               (cond
+                 [font-size-val (or (parse-css-px font-size-val) 16)]
+                 [(uses-taffy-base?) ahem-font-size]
+                 [else 16]))
              (define text-box-sizing (if (uses-taffy-base?) 'border-box 'content-box))
              (cond
-               [(uses-taffy-base?)
-                (define text-styles `(style (box-sizing ,text-box-sizing)))
-                (define measured-w (measure-text-ahem text ahem-font-size))
+               [uses-ahem?
+                ;; Ahem font: each visible char = font-size wide
+                (define text-styles
+                  `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)))
+                (define measured-w (measure-text-ahem text effective-font-size))
                 `(text ,text-id ,text-styles ,text ,measured-w)]
                [else
-                ;; non-Taffy: normalize whitespace, use proportional font metrics
+                ;; non-Ahem: normalize whitespace, use proportional font metrics
                 (define normalized (normalize-text-content text))
                 (cond
                   [(string=? normalized "")
@@ -1220,7 +1597,15 @@
                      `(style (box-sizing ,text-box-sizing) (font-type proportional)))
                    (define measured-w (measure-text-proportional normalized))
                    `(text ,text-id ,text-styles ,normalized ,measured-w)])])]
-            [_ (element->box-tree c counter #f this-w)]))
+            [`(element ,tag ,id ,class ,inline-alist ,children)
+             ;; skip elements with position:absolute or position:fixed
+             ;; (they are out of normal flow and we don't model them)
+             (define pos-val (cdr-or-false 'position inline-alist))
+             (if (and pos-val (or (string=? pos-val "absolute")
+                                  (string=? pos-val "fixed")))
+                 #f
+                 (element->box-tree c counter #f this-w))]
+            [_ (element->box-tree c counter #f this-w)])))
         children))
 
      (define display-sym (string->symbol display-str))
@@ -1276,15 +1661,24 @@
 ;; ============================================================
 
 ;; extract the expected layout positions from a reference JSON layout tree.
-;; skips html, head, body wrappers — starts from the test root (body > div).
+;; skips html, head, body wrappers — starts from the test root (body > first div).
+;; For non-Taffy tests, zeroes root y since preceding elements (like <p>
+;; description text) are not modeled in our box tree.
 ;; returns: (expected id x y width height children)
 (define (reference->expected-layout ref-json)
   (define layout-tree (hash-ref ref-json 'layout_tree (hash)))
   ;; navigate: html → body → first div (test root)
   (define-values (test-root body-abs-x body-abs-y) (find-test-root layout-tree))
   (if test-root
-      ;; use body position as parent reference so test-root coords are body-relative
-      (layout-node->expected test-root body-abs-x body-abs-y)
+      (let ([exp (layout-node->expected test-root body-abs-x body-abs-y)])
+        (if (and exp (not (uses-taffy-base?)))
+            ;; for CSS2.1 tests, zero out root y since we don't model preceding
+            ;; elements like <p> description text in the box tree
+            (match exp
+              [`(expected ,id ,x ,y ,w ,h ,children)
+               `(expected ,id ,x 0 ,w ,h ,children)]
+              [_ exp])
+            exp))
       #f))
 
 ;; find the test root element (body > div#test-root or first body > div)
@@ -1393,11 +1787,13 @@
      (lambda (c)
        (define node-type (hash-ref c 'nodeType #f))
        (cond
-         ;; element nodes: skip script/style/display:none
+         ;; element nodes: skip script/style/display:none/position:absolute/fixed
          [(equal? node-type "element")
           (and (not (member (hash-ref c 'tag #f) '("script" "style" "link" "meta" "title")))
                (let ([computed (hash-ref c 'computed (hash))])
-                 (not (equal? (hash-ref computed 'display #f) "none")))
+                 (and (not (equal? (hash-ref computed 'display #f) "none"))
+                      ;; skip position:absolute/fixed elements (out of normal flow)
+                      (not (member (hash-ref computed 'position #f) '("absolute" "fixed")))))
                (layout-node->expected c abs-x abs-y))]
          ;; text nodes with visible layout
          [(equal? node-type "text")
@@ -1429,14 +1825,32 @@
 ;; returns: a Redex Box term
 (define (reference->box-tree html-path)
   ;; detect whether this test uses the Taffy base stylesheet
-  (parameterize ([uses-taffy-base? (html-uses-taffy-base-stylesheet? html-path)])
+  ;; reset em/ex context per test case to prevent cross-test leakage
+  (parameterize ([uses-taffy-base? (html-uses-taffy-base-stylesheet? html-path)]
+                 [current-em-size 16]
+                 [current-ex-ratio 0.5])
     (define elements (html-file->inline-styles html-path))
     (define counter (box 0))
-    (if (null? elements)
-        ;; empty test — shouldn't happen
-        `(block root (style) ())
-        ;; take the first body-level element as root
-        (element->box-tree (car elements) counter #t))))
+    (cond
+      [(null? elements)
+       ;; empty test — shouldn't happen
+       `(block root (style) ())]
+      [(uses-taffy-base?)
+       ;; Taffy: take the first body-level element as root
+       (element->box-tree (car elements) counter #t)]
+      [else
+       ;; CSS2.1: find first div element (skip p/description elements)
+       ;; to match expected tree which starts from first div
+       (define first-div
+         (for/first ([e (in-list elements)]
+                     #:when (match e
+                              [`(element "div" . ,_) #t]
+                              [_ #f]))
+           e))
+       (if first-div
+           (element->box-tree first-div counter #t)
+           ;; fallback: use first element
+           (element->box-tree (car elements) counter #t))])))
 
 ;; ============================================================
 ;; Full Test Case Builder
@@ -1448,7 +1862,10 @@
 ;; returns: reference-test-case struct
 (define (reference-file->test-case html-path ref-path)
   ;; detect whether this test uses the Taffy base stylesheet
-  (parameterize ([uses-taffy-base? (html-uses-taffy-base-stylesheet? html-path)])
+  ;; reset em/ex context per test case to prevent cross-test leakage
+  (parameterize ([uses-taffy-base? (html-uses-taffy-base-stylesheet? html-path)]
+                 [current-em-size 16]
+                 [current-ex-ratio 0.5])
     (define ref-json
       (call-with-input-file ref-path
         (lambda (in) (read-json in))))
