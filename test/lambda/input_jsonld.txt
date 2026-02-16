@@ -1,0 +1,3 @@
+['script', "application/ld+json"]
+map
+["https://schema.org", "WebSite", "Test Site", "https://example.com"]

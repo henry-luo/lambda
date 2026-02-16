@@ -7,6 +7,9 @@
 #include "../../mark_editor.hpp"
 #include <string.h>
 
+// JSON parser for embedded JSON-LD in <script type="application/ld+json">
+Item parse_json_to_item(Input* input, const char* json_string);
+
 // ============================================================================
 // QUIRKS MODE DETECTION
 // Per WHATWG HTML5 spec section 13.2.6.4.1
@@ -875,6 +878,37 @@ static void html5_process_in_text_mode(Html5Parser* parser, Html5Token* token) {
         // End tag closes the raw text element (title, textarea, style, script, etc.)
         // Pop the element and switch back to original insertion mode
         html5_flush_pending_text(parser);  // flush any buffered text
+
+        // Check for JSON-LD script: <script type="application/ld+json">
+        // Parse the embedded JSON content and replace the text child with parsed data
+        Element* current = html5_current_node(parser);
+        if (current) {
+            const char* tag = ((TypeElmt*)current->type)->name.str;
+            if (strcmp(tag, "script") == 0) {
+                ElementReader reader(current);
+                const char* type_attr = reader.get_attr_string("type");
+                if (type_attr && strcmp(type_attr, "application/ld+json") == 0) {
+                    // find the text child (string) and parse it as JSON
+                    if (current->length > 0) {
+                        Item last_child = current->items[current->length - 1];
+                        if (get_type_id(last_child) == LMD_TYPE_STRING) {
+                            String* json_str = last_child.get_string();
+                            const char* json_text = json_str->chars;
+                            log_debug("html5: parsing JSON-LD content (%zu bytes)", (size_t)json_str->len);
+                            Item parsed = parse_json_to_item(parser->input, json_text);
+                            TypeId parsed_type = get_type_id(parsed);
+                            if (parsed_type == LMD_TYPE_MAP || parsed_type == LMD_TYPE_ELEMENT
+                                || parsed_type == LMD_TYPE_ARRAY || parsed_type == LMD_TYPE_LIST) {
+                                // replace the string child with the parsed JSON
+                                current->items[current->length - 1] = parsed;
+                                log_debug("html5: replaced JSON-LD text with parsed structure");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         html5_pop_element(parser);
         html5_switch_tokenizer_state(parser, HTML5_TOK_DATA);
         parser->mode = parser->original_insertion_mode;

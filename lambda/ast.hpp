@@ -243,6 +243,8 @@ typedef enum AstNodeType {
     AST_NODE_RAISE_EXPR,    // raise expression (functional)
     AST_NODE_VAR_STAM,      // var statement (procedural only)
     AST_NODE_ASSIGN_STAM,   // assignment statement (procedural only)
+    AST_NODE_INDEX_ASSIGN_STAM,  // array indexed assignment: arr[i] = val (procedural only)
+    AST_NODE_MEMBER_ASSIGN_STAM, // map field assignment: obj.field = val (procedural only)
     AST_NODE_PIPE_FILE_STAM, // pipe to file statement (procedural only): |> and |>>
     AST_NODE_LET_STAM,
     AST_NODE_PUB_STAM,
@@ -474,6 +476,13 @@ typedef struct AstAssignStamNode : AstNode {
     AstNode *target_node; // AST node of the target variable (for type info)
     AstNode *value;       // value expression
 } AstAssignStamNode;
+
+// compound assignment statement: arr[i] = val or obj.field = val (procedural only)
+typedef struct AstCompoundAssignNode : AstNode {
+    AstNode *object;     // the array or map being mutated
+    AstNode *key;        // index expression (for arr[i]) or field name node (for obj.field)
+    AstNode *value;      // value expression to assign
+} AstCompoundAssignNode;
 
 typedef struct AstArrayNode : AstNode {
     AstNode *item;  // first item in the array
