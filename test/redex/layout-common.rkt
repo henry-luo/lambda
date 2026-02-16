@@ -107,6 +107,7 @@
 (define (avail-width->number aw)
   (match aw
     [`(definite ,n) n]
+    [`(content-sized ,n) n]
     ['indefinite #f]
     ['av-min-content #f]
     ['av-max-content #f]))

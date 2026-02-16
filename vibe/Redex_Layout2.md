@@ -29,6 +29,8 @@
 |--------|-------|
 | Differential tests (Phase 1) | **508/508 (100%)** |
 | Differential tests (Phase 2A) | **621/709 (87.6%)** |
+| Dedicated flex suite | **153/156 (98.1%)** |
+| Dedicated grid suite | **117/123 (95.1%)** |
 | Unit tests | 40/40 (100%) |
 | Test source | 10 suites: baseline, flex, grid, position, table, basic, box, page, flex-nest, text_flow |
 | Layout modes | Block, Flex, Grid, Positioned |
@@ -45,7 +47,7 @@ This means **2,533 additional tests** with reference JSONs exist across all suit
 
 ### Motivation
 
-1. **Verification breadth** — The C++ Radiant engine has separate flex (156) and grid (123) test suites that are 0% passing. The Redex model can serve as a second reference.
+1. **Verification breadth** — The C++ Radiant engine has separate flex (156) and grid (123) test suites. The Redex model now passes **153/156 flex** and **117/123 grid** tests, serving as a verified second reference.
 2. **Real-world coverage** — Production HTML uses `<style>` blocks, inline/inline-block elements, tables, floats, and text. The current model only covers synthetic flex/grid tests.
 3. **Specification completeness** — A layout specification that can't handle `<p>` or `<span>` is incomplete as a CSS reference.
 
@@ -928,3 +930,69 @@ Approach pivoted from the proposed JSON-computed-style importer (`reference-impo
 - Grid item margin in track sizing — `measure-grid-item-min` adds item margins to border-box size
 - Flex baseline cross-axis margin — cross-offset now includes `cross-margin-before`
 - Flex `min-width: auto` for items with explicit size — new `measure-flex-item-content-min` returns true content-based minimum per CSS Flexbox §4.5
+
+---
+
+### Dedicated Flex & Grid Suites — Deep Pass (ongoing)
+
+After Phase 2A brought in multi-suite discovery, dedicated passes on the full `flex/` (156 tests) and `grid/` (123 tests) suites pushed both to near-complete coverage.
+
+#### Current Results
+
+| Suite | Total | Pass | Fail | Pass Rate |
+|-------|-------|------|------|-----------|
+| **flex/** | 156 | **153** | 3 | **98.1%** |
+| **grid/** | 123 | **117** | 6 | **95.1%** |
+| **Combined** | 279 | **270** | 9 | **96.8%** |
+
+#### Key Fixes Implemented
+
+**Flex fixes:**
+
+| Fix | Description | Tests Gained |
+|-----|-------------|--------------|
+| Phase 5b main-axis re-resolve | When indefinite main is clamped by min/max-height, re-resolve items with constrained size as definite | ~5 |
+| `wrap-reverse` cross-axis | Reverse cross-axis origin and direction for `flex-wrap: wrap-reverse` | ~4 |
+| Cross-size derivation heuristic | For items with explicit cross-dim or max-cross constraint, derive cross-size from container rather than using indefinite | ~6 |
+| AR + max-main measurement | In Phase 3 basis sizing, measure with AR-derived cross when item has aspect-ratio + max-main constraint | ~3 |
+| Post-cross cross-size update | After `determine-cross-sizes`, update cross-size using actual child-main via AR (with max-cross cap) | ~3 |
+| AR cross constraint dispatch | In `determine-cross-sizes`, derive definite cross-avail from `child-main × AR` when item has aspect-ratio + auto cross + indefinite cross-avail; dispatch with derived constraint instead of indefinite | +1 |
+| Flex margin/shrink fixes | Percentage margin resolution, shrink with min-size clamping, baseline cross-margin | ~8 |
+
+**Grid fixes:**
+
+| Fix | Description | Tests Gained |
+|-----|-------------|--------------|
+| Fr freeze algorithm (§12.7.1) | Tracks whose base-size exceeds proportional share are frozen iteratively | ~5 |
+| Fr sub-1 sum floor | When sum of flex factors < 1, use `max(sum, 1)` as divisor per spec | ~3 |
+| `(content-sized n)` avail-width | New avail-width variant signals content-derived width to grid layout, allowing `auto-container-size?` to skip the `max(sum,1)` floor for content-sized containers | +1 |
+| Span + fr growth-limit guard | Skip growth-limit distribution (Step 2) when spanning item crosses fr tracks — prevents non-fr tracks from absorbing all space before Phase 3 flexible sizing | +1 |
+| Percentage gap resolution | Resolve `(% N)` gap values against container size | ~3 |
+| Max-width + min-content mode | Clamp available width by max-width when in min-content sizing mode | ~2 |
+| Margin percent resolution | Resolve percentage margins against containing block during track sizing | ~2 |
+| Grid item margin in alignment | Include margins in alignment offset and subtract from stretch sizing | ~3 |
+
+#### Remaining 3 Flex Failures
+
+All 3 failures use `writing-mode: vertical-lr`, which swaps the inline/block axes. Writing-mode support is not implemented.
+
+| Test | Root Cause | Details |
+|------|-----------|---------|
+| `intrinsic_sizing_main_size_column.html` | `writing-mode: vertical-lr` | Expected w=10, h=40; actual w=40, h=10 (axes swapped) |
+| `intrinsic_sizing_main_size_column_nested.html` | `writing-mode: vertical-lr` | Same axis-swap pattern, nested containers |
+| `intrinsic_sizing_main_size_column_wrap.html` | `writing-mode: vertical-lr` | Same axis-swap pattern, wrapping variant |
+
+#### Remaining 6 Grid Failures
+
+| Test | Category | Root Cause |
+|------|----------|-----------|
+| `grid_015_content_sizing.html` | **Font-dependent** | Uses Arial font (not Ahem); 29 mismatches from text measurement differences. Non-Ahem font metrics cannot be replicated without a real font engine. |
+| `grid_119_negative_lines.html` | **Font + complex** | Uses negative line numbers for implicit grid placement + Arial font; 12 mismatches from combined font metrics and implicit grid edge cases. |
+| `grid_relayout_vertical_text.html` | **Writing-mode** | Uses `writing-mode: vertical-lr`; 9 mismatches from unsupported axis swap. |
+| `grid_span_13_most_non_flex_with_minmax_indefinite.html` | **Extreme complexity** | 13 different track types including `minmax()`, `fit-content()`, `auto`, `fr`, fixed, and `%` — with spanning items across all + circular 20% dependency. 15 mismatches. |
+| `grid_span_13_most_non_flex_with_minmax_indefinite_hidden.html` | **Extreme complexity** | Same as above with `overflow: hidden`; 15 mismatches. |
+| `xgrid_fr_span_2_proportion_sub_1_sum_with_non_spanned_track.html` | **Browser quirk** | Browser gives 78/9 split for fr tracks; CSS Grid spec §12.7.1 algorithm gives 120/60. The browser deviates from spec when non-spanned tracks exist alongside spanned fr tracks with sub-1 sum. 3 mismatches. |
+
+#### Summary
+
+The 9 remaining failures fall into categories that are either **impossible** without new engine features (writing-mode), **inherently imprecise** (non-Ahem fonts), **prohibitively complex** (13-track-type spanning), or **browser deviations from spec**. All tractable flex and grid tests now pass.

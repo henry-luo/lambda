@@ -113,6 +113,10 @@
      (define bm (extract-box-model styles))
      (define avail-w (avail-width->number (cadr avail)))
 
+     ;; detect intrinsic sizing mode: min-content forces maximum wrapping (avail-w → 0)
+     (define is-min-content? (eq? (cadr avail) 'av-min-content))
+     (define effective-avail-w (if is-min-content? 0 avail-w))
+
      ;; detect font type: Ahem (Taffy tests) vs proportional (CSS2.1 tests)
      (define font-type (get-style-prop styles 'font-type 'ahem))
      (define is-proportional? (eq? font-type 'proportional))
@@ -120,33 +124,68 @@
      ;; font metrics depend on font type
      (define font-size
        (cond
-         [is-proportional? 16]
+         [is-proportional?
+          ;; use actual font-size from styles (CSS default is 16px)
+          (get-style-prop styles 'font-size 16)]
          ;; check for explicit font-size in styles (e.g., CSS2.1 tests with non-default Ahem size)
          [else (get-style-prop styles 'font-size 10)]))
-     (define line-height (if is-proportional? 18 font-size))
-     ;; character width categories for proportional fonts
-     (define upper-w (if is-proportional? 8.5 font-size))
-     (define lower-w (if is-proportional? 5.8 font-size))
-     (define space-w-char (if is-proportional? 4.0 font-size))
-     (define default-w (if is-proportional? 5.9 font-size))
+     (define line-height
+       (cond
+         [is-proportional?
+          ;; browser default 'normal' line-height for Arial from hhea metrics:
+          ;; (ascender + descender + lineGap) / unitsPerEm = (1854+434+67)/2048 ≈ 1.15
+          (let ([lh-prop (get-style-prop styles 'line-height #f)])
+            (if lh-prop
+                (if (number? lh-prop) lh-prop (* 1.15 font-size))
+                (* 1.15 font-size)))]
+         [else font-size]))
+     ;; character width categories scaled by font-size
+     ;; per-character Arial TrueType glyph advance width ratios
+     (define (char-width ch fs)
+       (define ratio
+         (cond
+           [(char=? ch #\space) 0.278]
+           [(char-upper-case? ch)
+            (case ch
+              [(#\I) 0.278] [(#\J) 0.500] [(#\L) 0.556] [(#\M) 0.833]
+              [(#\W) 0.944] [(#\F #\T #\Z) 0.611]
+              [(#\C #\O #\Q #\G) 0.778]
+              [(#\D #\H #\N #\R #\U) 0.722]
+              [(#\A #\B #\E #\K #\P #\S #\V #\X #\Y) 0.667]
+              [else 0.667])]
+           [(char-lower-case? ch)
+            (case ch
+              [(#\f #\t) 0.278] [(#\i #\j #\l) 0.222] [(#\r) 0.333]
+              [(#\c #\k #\s #\v #\x #\y #\z) 0.500] [(#\m) 0.833] [(#\w) 0.722]
+              [(#\a #\b #\d #\e #\g #\h #\n #\o #\p #\q #\u) 0.556]
+              [else 0.556])]
+           [(char-numeric? ch) 0.556]
+           [else
+            (case ch
+              [(#\. #\, #\: #\; #\! #\/) 0.278]
+              [(#\- #\( #\)) 0.333]
+              [(#\? #\&) 0.556]
+              [else 0.556])]))
+       (* ratio fs))
+     ;; fallback category-based widths (used for Ahem font path)
+     (define upper-w (if is-proportional? (* 0.667 font-size) font-size))
+     (define lower-w (if is-proportional? (* 0.556 font-size) font-size))
+     (define space-w-char (if is-proportional? (* 0.278 font-size) font-size))
+     (define default-w (if is-proportional? (* 0.556 font-size) font-size))
 
      (cond
        ;; no wrapping needed: text fits or no constraint
-       [(or (not avail-w) (<= measured-w avail-w))
+       [(or (not effective-avail-w) (<= measured-w effective-avail-w))
         (make-text-view id 0 0 measured-w line-height content)]
        [else
         (cond
           ;; proportional font: split on spaces for word wrapping
           [is-proportional?
            (define words (string-split content " "))
-           ;; compute word widths using per-character categories
+           ;; compute word widths using per-character Arial metrics
            (define (word-width w)
              (for/fold ([total 0]) ([ch (in-string w)])
-               (cond
-                 [(char-upper-case? ch) (+ total upper-w)]
-                 [(char-lower-case? ch) (+ total lower-w)]
-                 [(char-numeric? ch) (+ total default-w)]
-                 [else (+ total default-w)])))
+               (+ total (char-width ch font-size))))
            (define word-ws
              (for/list ([w (in-list words)])
                (word-width w)))
@@ -168,7 +207,7 @@
                     [(= line-w 0)
                      (loop (cdr remaining-words) ww lines max-w)]
                     ;; word fits on current line
-                    [(<= new-line-w avail-w)
+                    [(<= new-line-w effective-avail-w)
                      (loop (cdr remaining-words) new-line-w lines max-w)]
                     ;; word doesn't fit → start new line
                     [else
@@ -204,12 +243,13 @@
                     [(= line-w 0)
                      (loop (cdr remaining-words) new-line-w lines max-w)]
                     ;; word fits on current line
-                    [(<= new-line-w avail-w)
+                    [(<= new-line-w effective-avail-w)
                      (loop (cdr remaining-words) new-line-w lines max-w)]
                     ;; word doesn't fit → start new line
                     [else
                      (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
-           (define text-w (min measured-w (max max-line-w avail-w)))
+           ;; report actual content width (max line width), not container width
+           (define text-w max-line-w)
            (define text-h (* num-lines line-height))
            (make-text-view id 0 0 text-w text-h content)])])]
 
