@@ -20,6 +20,7 @@ extern "C" {
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 void parse_json(Input* input, const char* json_string);
+Item parse_json_to_item(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
 void parse_ini(Input* input, const char* ini_string);
 void parse_properties(Input* input, const char* prop_string);
