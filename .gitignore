@@ -129,6 +129,7 @@ test.history
 test_output/
 test/venv/
 test/layout/data/css2.1
+test/layout/data/css_block
 test/wpt
 test/pdf/output
 test/fuzzy/crashes/
