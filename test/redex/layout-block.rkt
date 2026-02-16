@@ -37,7 +37,7 @@
      (define content-w (resolve-block-width styles (or avail-w 0)))
 
      ;; resolve explicit height (or #f for auto)
-     (define explicit-h (resolve-block-height styles avail-h))
+     (define explicit-h (resolve-block-height styles avail-h avail-w))
 
      ;; lay out children within the content area
      (define child-avail
@@ -95,7 +95,17 @@
              [views '()])
     (cond
       [(null? remaining)
-       (values (reverse views) current-y)]
+       ;; CSS 2.1 §8.3.1: the last child's bottom margin stays inside the parent
+       ;; when the parent has non-zero bottom border-width or bottom padding.
+       ;; Otherwise it collapses through to become the parent's bottom margin.
+       (define parent-has-bottom-barrier?
+         (or (> (box-model-padding-bottom parent-bm) 0)
+             (> (box-model-border-bottom parent-bm) 0)))
+       (define final-y
+         (if parent-has-bottom-barrier?
+             (+ current-y prev-margin-bottom)
+             current-y))
+       (values (reverse views) final-y)]
       [else
        (define child (car remaining))
 
@@ -163,6 +173,8 @@
 
 (define (set-view-position view x y)
   (match view
+    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
     [`(view ,id ,_ ,_ ,w ,h ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,_ ,_ ,w ,h ,text)
