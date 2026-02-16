@@ -1,6 +1,3 @@
-[submodule "lexbor"]
-	path = lexbor
-	url = https://github.com/henry-luo/lexbor.git
 [submodule "test/yaml"]
 	path = test/yaml
 	url = https://github.com/yaml/yaml-test-suite.git
