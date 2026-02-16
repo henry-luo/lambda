@@ -860,4 +860,16 @@ typedef struct Context {
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
 
+    // bitwise functions (integer operations)
+    int64_t fn_band(int64_t a, int64_t b);
+    int64_t fn_bor(int64_t a, int64_t b);
+    int64_t fn_bxor(int64_t a, int64_t b);
+    int64_t fn_bnot(int64_t a);
+    int64_t fn_shl(int64_t a, int64_t b);
+    int64_t fn_shr(int64_t a, int64_t b);
+
+    // compound assignment support (procedural only)
+    void fn_array_set(Array* arr, int index, Item value);
+    void fn_map_set(Item map, Item key, Item value);
+
 #endif

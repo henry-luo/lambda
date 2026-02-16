@@ -2857,6 +2857,63 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     strbuf_append_char(tp->code_buf, ';');
 }
 
+// compound assignment: arr[i] = val → fn_array_set(arr, i, val)
+void transpile_index_assign_stam(Transpiler* tp, AstCompoundAssignNode *node) {
+    log_debug("transpile index assign stam");
+    if (!node || !node->object || !node->key || !node->value) {
+        log_error("Error: invalid index assign node");
+        return;
+    }
+
+    // check if object type is a typed array with known element type
+    TypeId obj_type = node->object->type ? node->object->type->type_id : LMD_TYPE_ANY;
+
+    strbuf_append_str(tp->code_buf, "\n fn_array_set((Array*)(");
+    transpile_expr(tp, node->object);
+    strbuf_append_str(tp->code_buf, "),(int)(");
+    transpile_expr(tp, node->key);
+    strbuf_append_str(tp->code_buf, "),");
+    transpile_box_item(tp, node->value);
+    strbuf_append_str(tp->code_buf, ");");
+}
+
+// compound assignment: obj.field = val → fn_map_set(obj, key, val)
+void transpile_member_assign_stam(Transpiler* tp, AstCompoundAssignNode *node) {
+    log_debug("transpile member assign stam");
+    if (!node || !node->object || !node->key || !node->value) {
+        log_error("Error: invalid member assign node");
+        return;
+    }
+
+    strbuf_append_str(tp->code_buf, "\n fn_map_set(");
+    transpile_box_item(tp, node->object);
+    strbuf_append_str(tp->code_buf, ",");
+    // key is an AstIdentNode — emit as string constant
+    if (node->key->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node->key;
+        String* key_name = ident->name;
+        // find or add to const_list
+        int const_index = -1;
+        for (int i = 0; i < tp->const_list->length; i++) {
+            String* s = (String*)tp->const_list->data[i];
+            if (s == key_name) {
+                const_index = i;
+                break;
+            }
+        }
+        if (const_index < 0) {
+            arraylist_append(tp->const_list, key_name);
+            const_index = tp->const_list->length - 1;
+        }
+        strbuf_append_format(tp->code_buf, "const_s2it(%d)", const_index);
+    } else {
+        transpile_box_item(tp, node->key);
+    }
+    strbuf_append_str(tp->code_buf, ",");
+    transpile_box_item(tp, node->value);
+    strbuf_append_str(tp->code_buf, ");");
+}
+
 void transpile_items(Transpiler* tp, AstNode *item) {
     bool is_first = true;
     while (item) {
@@ -3018,6 +3075,12 @@ void transpile_proc_statements(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_ASSIGN_STAM) {
             transpile_assign_stam(tp, (AstAssignStamNode*)item);
         }
+        else if (item->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+            transpile_index_assign_stam(tp, (AstCompoundAssignNode*)item);
+        }
+        else if (item->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            transpile_member_assign_stam(tp, (AstCompoundAssignNode*)item);
+        }
         else if (item->node_type == AST_NODE_FOR_STAM) {
             transpile_for(tp, (AstForNode*)item);
         }
@@ -3093,6 +3156,12 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         }
         else if (item->node_type == AST_NODE_ASSIGN_STAM) {
             transpile_assign_stam(tp, (AstAssignStamNode*)item);
+        }
+        else if (item->node_type == AST_NODE_INDEX_ASSIGN_STAM) {
+            transpile_index_assign_stam(tp, (AstCompoundAssignNode*)item);
+        }
+        else if (item->node_type == AST_NODE_MEMBER_ASSIGN_STAM) {
+            transpile_member_assign_stam(tp, (AstCompoundAssignNode*)item);
         }
         else if (item->node_type == AST_NODE_FOR_STAM) {
             transpile_for(tp, (AstForNode*)item);
@@ -3556,6 +3625,58 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 // For integers, floor/ceil/round is identity - just return the value boxed
                 strbuf_append_str(tp->code_buf, "i2it((int64_t)(");
                 transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+
+            // bnot(a) — unary bitwise NOT
+            if (strcmp(fn_name, "bnot") == 0) {
+                strbuf_append_str(tp->code_buf, "fn_bnot((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+        }
+
+        // ==== Bitwise binary functions: band, bor, bxor, shl, shr ====
+        if (first_arg && second_arg && !second_arg->next) {
+            if (strcmp(fn_name, "band") == 0) {
+                strbuf_append_str(tp->code_buf, "fn_band((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "),(int64_t)(");
+                transpile_expr(tp, second_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+            if (strcmp(fn_name, "bor") == 0) {
+                strbuf_append_str(tp->code_buf, "fn_bor((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "),(int64_t)(");
+                transpile_expr(tp, second_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+            if (strcmp(fn_name, "bxor") == 0) {
+                strbuf_append_str(tp->code_buf, "fn_bxor((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "),(int64_t)(");
+                transpile_expr(tp, second_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+            if (strcmp(fn_name, "shl") == 0) {
+                strbuf_append_str(tp->code_buf, "fn_shl((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "),(int64_t)(");
+                transpile_expr(tp, second_arg);
+                strbuf_append_str(tp->code_buf, "))");
+                return;
+            }
+            if (strcmp(fn_name, "shr") == 0) {
+                strbuf_append_str(tp->code_buf, "fn_shr((int64_t)(");
+                transpile_expr(tp, first_arg);
+                strbuf_append_str(tp->code_buf, "),(int64_t)(");
+                transpile_expr(tp, second_arg);
                 strbuf_append_str(tp->code_buf, "))");
                 return;
             }

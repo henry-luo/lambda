@@ -357,6 +357,13 @@ typedef enum SysFunc {
     // variadic parameter access
     SYSFUNC_VARG0,          // varg() - get all variadic args as list
     SYSFUNC_VARG1,          // varg(n) - get nth variadic arg
+    // bitwise functions
+    SYSFUNC_BAND,
+    SYSFUNC_BOR,
+    SYSFUNC_BXOR,
+    SYSFUNC_BNOT,
+    SYSFUNC_SHL,
+    SYSFUNC_SHR,
     // procedural functions
     SYSPROC_NOW,
     SYSPROC_TODAY,

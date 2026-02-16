@@ -6651,8 +6651,21 @@
           "type": "FIELD",
           "name": "target",
           "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "identifier"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "index_expr"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "member_expr"
+              }
+            ]
           }
         },
         {
