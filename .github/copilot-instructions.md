@@ -44,22 +44,14 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **Output**: `lambda/format/` - multiple formatters (JSON, Markdown, HTML, YAML, etc.)
 - **Validation**: `lambda/validator/` - schema-based type validation with error reporting
 - **CSS Engine**: `lambda/input/css/` - complete CSS parser, cascade resolver
-- **Radiant Engine**: `radiant/` - HTML/CSS/SVG layout and rendering with FreeType, GLFW, FontConfig
 
 ### Radiant Layout Engine (`radiant/`)
 
 Radiant is the CSS layout and rendering engine for HTML/CSS document presentation.
 
-**Architecture:**
 - **Unified DOM/View Tree**: `DomNode` → `DomText`/`DomElement` serve as both DOM and layout views
 - **Relative Coordinates**: All positions relative to parent's border box
 - **Layout Context**: `LayoutContext` struct coordinates all layout state
-
-**Layout Sub-flows** (dispatched in `layout_block.cpp`):
-- **Block/Inline**: `layout_block_content()`, `layout_inline()` - standard CSS flow
-- **Flexbox**: `layout_flex_content()` in `layout_flex_multipass.cpp` - 9-phase algorithm
-- **Grid**: `layout_grid_content()` in `layout_grid_multipass.cpp` - track sizing + item placement
-- **Table**: `layout_table_content()` in `layout_table.cpp` - auto/fixed layout
 
 **Key Files:**
 | File | Purpose |
@@ -202,6 +194,7 @@ NEVER use printf/fprintf/std::cout for debugging
 ### Libraries (`lib/`)
 - `mempool.c/h` - Variable-size memory pool
 - `arena.c/h` - Arena allocator (linear allocation)
+- `str.c/h` - String library
 - `strbuf.c/h` - Dynamic string buffer
 - `arraylist.c/h` - Dynamic array
 - `hashmap.c/h` - Hash table
@@ -213,13 +206,7 @@ NEVER use printf/fprintf/std::cout for debugging
 - `test/*.cpp` - GTest unit tests
 - `test/lambda/*.ls` - Lambda script integration tests
 - `test/input/` - Test data files
-- `test/layout/` - CSS layout tests and browser references
-
-### External Libraries
-- **FreeType**: Font rasterization (Radiant engine)
-- **GLFW**: Window management (Radiant engine)
-- **ThorVG**: Vector graphics rendering (Radiant engine)
-- **GTest**: Unit testing framework (dev dependency)
+- `test/layout/` - HTML/CSS layout tests
 
 ### MIR (JIT Compiler)
 - Location: `lambda/mir.c` (embedded in repo)
@@ -251,4 +238,3 @@ NEVER use printf/fprintf/std::cout for debugging
   - `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
 - After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
 - For any temporal files, create them under `./temp` directory, instead of `/tmp` dir.
-- **Token limit**: 10,000,000 tokens per session. So don't worry about running short of tokens.

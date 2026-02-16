@@ -36,6 +36,7 @@
     ],
     "includes": [
         ".",
+        "include",
         "build_temp/re2-noabsl",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
@@ -86,8 +87,8 @@
         },
         {
             "name": "mir",
-            "include": "/usr/local/include",
-            "lib": "/usr/local/lib/libmir.a",
+            "include": "mac-deps/mir",
+            "lib": "mac-deps/mir/libmir.a",
             "link": "static"
         },
         {
@@ -98,8 +99,8 @@
         },
         {
             "name": "utf8proc",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libutf8proc.a",
+            "include": "build_temp/utf8proc",
+            "lib": "build_temp/utf8proc/build/libutf8proc.a",
             "link": "static"
         },
         {
@@ -258,7 +259,7 @@
                 "rpmalloc"
             ],
             "special_flags": "-DUTF8PROC_STATIC",
-            "cpp_flags": "-I/opt/homebrew/include -DUTF8PROC_STATIC",
+            "cpp_flags": "-Ibuild_temp/utf8proc -DUTF8PROC_STATIC",
             "link": "static",
             "defines": [
                 "UTF8PROC_STATIC"
