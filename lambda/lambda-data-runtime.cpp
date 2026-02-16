@@ -481,8 +481,15 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             log_debug("map_get found field: %.*s, type: %d, ptr: %p",
                 (int)field->name->length, field->name->str, type_id, field_ptr);
             switch (type_id) {
-            case LMD_TYPE_NULL:
+            case LMD_TYPE_NULL: {
+                // Check if a non-null pointer was stored via type transition (NULL→container)
+                void* ptr = *(void**)field_ptr;
+                if (ptr) {
+                    Container* container = (Container*)ptr;
+                    return {.container = container};
+                }
                 return ItemNull;
+            }
             case LMD_TYPE_BOOL:
                 return {.item = b2it(*(bool*)field_ptr)};
             case LMD_TYPE_INT:
@@ -510,6 +517,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container* container = *(Container**)field_ptr;
+                if (!container) return ItemNull;  // Was set to null via type transition
                 log_debug("map_get container: %p, type_id: %d", container, container->type_id);
                 // assert(container->type_id == type_id);
                 return {.container = container};
