@@ -38,12 +38,20 @@
     [`(inline ,id ,styles (,children ...))
      (define avail-w (or (avail-width->number (cadr avail)) +inf.0))
      (define bm (extract-box-model styles avail-w))
-     (define content-w (- avail-w (horizontal-pb bm)))
+     (define max-content-w (- avail-w (horizontal-pb bm)))
 
      (define-values (child-views total-height)
-       (layout-inline-children children content-w bm dispatch-fn))
+       (layout-inline-children children max-content-w bm dispatch-fn))
 
-     (define border-box-w (compute-border-box-width bm (min content-w avail-w)))
+     ;; inline boxes shrink-wrap to their content (CSS 2.2 §9.2.2)
+     ;; actual content width = rightmost extent of children
+     (define offset-x (+ (box-model-padding-left bm) (box-model-border-left bm)))
+     (define actual-content-w
+       (if (null? child-views) 0
+           (apply max
+             (for/list ([v (in-list child-views)])
+               (- (+ (view-x v) (view-width v)) offset-x)))))
+     (define border-box-w (compute-border-box-width bm actual-content-w))
      (define border-box-h (compute-border-box-height bm total-height))
 
      (make-view id 0 0 border-box-w border-box-h child-views)]
