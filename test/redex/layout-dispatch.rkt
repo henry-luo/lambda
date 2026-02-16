@@ -113,50 +113,105 @@
      (define bm (extract-box-model styles))
      (define avail-w (avail-width->number (cadr avail)))
 
-     ;; Ahem font metrics: font-size=10px, line-height=1 → each line = 10px tall
-     ;; every visible glyph = font-size px wide
-     (define font-size 10)
-     (define line-height font-size) ;; line-height: 1
+     ;; detect font type: Ahem (Taffy tests) vs proportional (CSS2.1 tests)
+     (define font-type (get-style-prop styles 'font-type 'ahem))
+     (define is-proportional? (eq? font-type 'proportional))
+
+     ;; font metrics depend on font type
+     (define font-size
+       (cond
+         [is-proportional? 16]
+         ;; check for explicit font-size in styles (e.g., CSS2.1 tests with non-default Ahem size)
+         [else (get-style-prop styles 'font-size 10)]))
+     (define line-height (if is-proportional? 18 font-size))
+     ;; character width categories for proportional fonts
+     (define upper-w (if is-proportional? 8.5 font-size))
+     (define lower-w (if is-proportional? 5.8 font-size))
+     (define space-w-char (if is-proportional? 4.0 font-size))
+     (define default-w (if is-proportional? 5.9 font-size))
 
      (cond
        ;; no wrapping needed: text fits or no constraint
        [(or (not avail-w) (<= measured-w avail-w))
         (make-text-view id 0 0 measured-w line-height content)]
        [else
-        ;; word-wrap at zero-width-space boundaries
-        ;; split into words and greedily fit onto lines
-        (define words (string-split content "\u200B"))
-        (define word-ws
-          (for/list ([w (in-list words)])
-            ;; each visible char = font-size px wide
-            (for/sum ([ch (in-string w)])
-              (if (or (char=? ch #\u200B) (char=? ch #\u200C)
-                      (char=? ch #\u200D) (char=? ch #\uFEFF))
-                  0 font-size))))
-        (define-values (num-lines max-line-w)
-          (let loop ([remaining-words word-ws]
-                     [line-w 0]
-                     [lines 1]
-                     [max-w 0])
-            (cond
-              [(null? remaining-words)
-               (values lines (max max-w line-w))]
-              [else
-               (define ww (car remaining-words))
-               (define new-line-w (+ line-w ww))
+        (cond
+          ;; proportional font: split on spaces for word wrapping
+          [is-proportional?
+           (define words (string-split content " "))
+           ;; compute word widths using per-character categories
+           (define (word-width w)
+             (for/fold ([total 0]) ([ch (in-string w)])
                (cond
-                 ;; first word on line always fits
-                 [(= line-w 0)
-                  (loop (cdr remaining-words) new-line-w lines max-w)]
-                 ;; word fits on current line
-                 [(<= new-line-w avail-w)
-                  (loop (cdr remaining-words) new-line-w lines max-w)]
-                 ;; word doesn't fit → start new line
+                 [(char-upper-case? ch) (+ total upper-w)]
+                 [(char-lower-case? ch) (+ total lower-w)]
+                 [(char-numeric? ch) (+ total default-w)]
+                 [else (+ total default-w)])))
+           (define word-ws
+             (for/list ([w (in-list words)])
+               (word-width w)))
+           (define space-w space-w-char)
+           (define-values (num-lines max-line-w)
+             (let loop ([remaining-words word-ws]
+                        [line-w 0]
+                        [lines 1]
+                        [max-w 0])
+               (cond
+                 [(null? remaining-words)
+                  (values lines (max max-w line-w))]
                  [else
-                  (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
-        (define text-w (min measured-w (max max-line-w avail-w)))
-        (define text-h (* num-lines line-height))
-        (make-text-view id 0 0 text-w text-h content)])]
+                  (define ww (car remaining-words))
+                  (define new-line-w
+                    (if (= line-w 0) ww (+ line-w space-w ww)))
+                  (cond
+                    ;; first word on line always fits
+                    [(= line-w 0)
+                     (loop (cdr remaining-words) ww lines max-w)]
+                    ;; word fits on current line
+                    [(<= new-line-w avail-w)
+                     (loop (cdr remaining-words) new-line-w lines max-w)]
+                    ;; word doesn't fit → start new line
+                    [else
+                     (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
+           ;; for proportional text, report max line width (not container width)
+           (define text-w max-line-w)
+           (define text-h (* num-lines line-height))
+           (make-text-view id 0 0 text-w text-h content)]
+
+          ;; Ahem font: split on zero-width spaces
+          [else
+           (define words (string-split content "\u200B"))
+           (define word-ws
+             (for/list ([w (in-list words)])
+               ;; each visible char = font-size px wide
+               (for/sum ([ch (in-string w)])
+                 (if (or (char=? ch #\u200B) (char=? ch #\u200C)
+                         (char=? ch #\u200D) (char=? ch #\uFEFF))
+                     0 font-size))))
+           (define-values (num-lines max-line-w)
+             (let loop ([remaining-words word-ws]
+                        [line-w 0]
+                        [lines 1]
+                        [max-w 0])
+               (cond
+                 [(null? remaining-words)
+                  (values lines (max max-w line-w))]
+                 [else
+                  (define ww (car remaining-words))
+                  (define new-line-w (+ line-w ww))
+                  (cond
+                    ;; first word on line always fits
+                    [(= line-w 0)
+                     (loop (cdr remaining-words) new-line-w lines max-w)]
+                    ;; word fits on current line
+                    [(<= new-line-w avail-w)
+                     (loop (cdr remaining-words) new-line-w lines max-w)]
+                    ;; word doesn't fit → start new line
+                    [else
+                     (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
+           (define text-w (min measured-w (max max-line-w avail-w)))
+           (define text-h (* num-lines line-height))
+           (make-text-view id 0 0 text-w text-h content)])])]
 
     [_ (error 'layout-text "expected text box, got: ~a" box)]))
 
@@ -306,6 +361,8 @@
 
 (define (set-view-pos view x y)
   (match view
+    [`(view ,id ,_ ,_ ,w ,h ,children ,baseline)
+     `(view ,id ,x ,y ,w ,h ,children ,baseline)]
     [`(view ,id ,_ ,_ ,w ,h ,children)
      `(view ,id ,x ,y ,w ,h ,children)]
     [`(view-text ,id ,_ ,_ ,w ,h ,text)

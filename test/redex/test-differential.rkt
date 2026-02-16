@@ -48,14 +48,16 @@
         "table"    "table"
         "basic"    "basic"
         "box"      "box"
+        "advanced" "advanced"
         "page"     "page"
         "flex-nest" "flex-nest"
-        "text_flow" "text_flow"))
+        "text_flow" "text_flow"
+        "css_block" "css_block"))
 
 ;; all suite names in default order
 (define all-suite-names
-  '("baseline" "flex" "grid" "position" "table" "basic" "box"
-    "page" "flex-nest" "text_flow"))
+  '("baseline" "flex" "grid" "position" "table" "basic" "box" "advanced"
+    "page" "flex-nest" "text_flow" "css_block"))
 
 ;; ============================================================
 ;; Test Discovery
@@ -65,7 +67,8 @@
 ;; returns list of (html-path . ref-path) pairs.
 (define (discover-tests-in-dir html-dir ref-dir
                                 #:filter-pattern [pattern #f]
-                                #:classify? [classify? #t])
+                                #:classify? [classify? #t]
+                                #:accept-style-block? [accept-style? #f])
   (define html-files
     (sort (filter (lambda (f)
                     (regexp-match? #rx"\\.(html|htm)$" (path->string f)))
@@ -82,7 +85,7 @@
 
   ;; pair with reference JSONs, keeping only those that:
   ;; 1. have a matching reference JSON
-  ;; 2. are classified as 'simple (when classify? is #t)
+  ;; 2. are classified as 'simple (or 'style-block when accepted)
   (filter-map
    (lambda (html-file)
      (define stem (path-replace-extension html-file #""))
@@ -91,9 +94,14 @@
      (define html-path (build-path html-dir html-file))
      (and (file-exists? ref-file)
           (or (not classify?)
-              (eq? (classify-html-test (path->string html-path)) 'simple))
+              (let ([cls (classify-html-test (path->string html-path))])
+                (or (eq? cls 'simple)
+                    (and accept-style? (eq? cls 'style-block)))))
           (cons (path->string html-path) (path->string ref-file))))
    filtered))
+
+;; suites that accept style-block tests (CSS2.1 tests with <style> blocks)
+(define style-block-suites '("css_block" "box" "advanced"))
 
 ;; find all test pairs: (html-path . ref-path) for simple tests across suites
 (define (discover-tests #:filter-pattern [pattern #f]
@@ -106,10 +114,12 @@
       (for/list ([suite-name (in-list suites)])
         (define sub-dir (hash-ref suite-dirs suite-name #f))
         (if sub-dir
-            (let ([html-dir (build-path test-dir "layout" "data" sub-dir)])
+            (let ([html-dir (build-path test-dir "layout" "data" sub-dir)]
+                  [accept-style? (member suite-name style-block-suites)])
               (if (directory-exists? html-dir)
                   (discover-tests-in-dir html-dir ref-dir
-                                          #:filter-pattern pattern)
+                                          #:filter-pattern pattern
+                                          #:accept-style-block? (and accept-style? #t))
                   '()))
             '()))))
 
