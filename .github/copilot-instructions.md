@@ -1,5 +1,27 @@
 # GitHub Copilot Instructions for Lambda Script
 
+## CRITICAL Rules for AI Agents
+
+These rules MUST be followed. Violations are considered errors.
+
+1. **NEVER write files to `/tmp`**. Use `./temp/` for ALL temporary files.
+2. **NEVER use `std::string`, `std::vector`, `std::map`**, or any other `std::` types. Use `./lib` equivalents (`Str`, `ArrayList`, `HashMap`, etc.).
+3. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`.
+4. **NEVER manually edit `parser.c`**. Grammar regeneration is automatic from `grammar.js` via `make generate-grammar`.
+5. **NEVER modify `log.conf`**.
+6. **NEVER manually edit `.lua` build files**. Edit `build_lambda_config.json`, then run `make`.
+7. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
+8. C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
+
+| DON'T | DO |
+|-------|-----|
+| Write to `/tmp` | Write to `./temp/` |
+| `std::string s = "hello"` | Use `Str` from `lib/str.h` |
+| `printf("debug: %d", x)` | `log_debug("debug: %d", x)` |
+| `std::vector<int> v` | Use `ArrayList` from `lib/arraylist.h` |
+| Edit `parser.c` manually | Edit `grammar.js` then `make generate-grammar` |
+| Edit `premake5.mac.lua` manually | Edit `build_lambda_config.json` then `make` |
+
 ## Project Overview
 
 Lambda Script is a **general-purpose, cross-platform, pure functional scripting language** designed for data processing and document presentation, built from scratch in C/C++ with JIT compilation.
@@ -188,8 +210,7 @@ NEVER use printf/fprintf/std::cout for debugging
 - `lambda/input/css/css_parser.cpp` - CSS syntax parser
 - `lambda/input/css/css_engine.cpp` - Cascade resolver
 - `radiant/layout.cpp` - Layout engine coordinator
-- `radiant/layout_flex.cpp` - Flexbox implementation
-- `radiant/layout_block.cpp` - Block layout
+- `radiant/layout_*.cpp` - Block, Flexbox, etc. layout implementation
 
 ### Libraries (`lib/`)
 - `mempool.c/h` - Variable-size memory pool
@@ -219,22 +240,14 @@ NEVER use printf/fprintf/std::cout for debugging
 2. Check `./log.txt` for detailed execution trace
 3. Run with debugger: `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- extra CLI arguments`
 
-## Notes & Constraints
-- C++17 standard.
-- Don't use std::string or std::* containers, like std::vector or std::map. Use ./lib equivalents.
-- Grammar regeneration is automatic - don't manually edit `parser.c`
-- Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
-- Lambda language documentation:
-- **Lambda Reference Docs**:
-  - `doc/Lambda_Reference.md` — Language overview and quick reference
-  - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
-  - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
-  - `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
-  - `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
-  - `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, `?` propagation, `let a^err` destructuring)
-  - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
-  - `doc/Lambda_Validator_Guide.md` — Schema-based data validation
-  - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
-  - `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
-- After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
-- For any temporal files, create them under `./temp` directory, instead of `/tmp` dir.
+## Lambda Language Documentation
+- `doc/Lambda_Reference.md` — Language overview and quick reference
+- `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
+- `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
+- `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
+- `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
+- `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, `?` propagation, `let a^err` destructuring)
+- `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
+- `doc/Lambda_Validator_Guide.md` — Schema-based data validation
+- `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
+- `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
