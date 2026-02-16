@@ -59,7 +59,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
                     tracker.advance(4);
 
                     int codepoint = (int)strtol(hex, NULL, 16);
-                    
+
                     // check for surrogate pairs (used for characters > U+FFFF like emojis)
                     // high surrogate: 0xD800-0xDBFF, low surrogate: 0xDC00-0xDFFF
                     if (codepoint >= 0xD800 && codepoint <= 0xDBFF) {
@@ -67,24 +67,24 @@ static String* parse_string(InputContext& ctx, const char **json) {
                         if ((*json)[0] == '\\' && (*json)[1] == 'u') {
                             (*json) += 2; // skip \u
                             tracker.advance(2);
-                            
+
                             if (strlen(*json) < 4) {
                                 ctx.addError(tracker.location(), "Invalid unicode escape: need 4 hex digits for low surrogate");
                                 return nullptr;
                             }
-                            
+
                             char hex_low[5] = {0};
                             strncpy(hex_low, *json, 4);
                             (*json) += 4;
                             tracker.advance(4);
-                            
+
                             int low_surrogate = (int)strtol(hex_low, NULL, 16);
                             uint32_t combined = decode_surrogate_pair((uint16_t)codepoint, (uint16_t)low_surrogate);
                             if (combined != 0) {
                                 // valid surrogate pair - combine into full codepoint
                                 codepoint = (int)combined;
                             } else {
-                                ctx.addWarning(tracker.location(), 
+                                ctx.addWarning(tracker.location(),
                                     "Invalid surrogate pair: high surrogate not followed by low surrogate");
                                 // output the high surrogate as replacement char and re-process low
                                 stringbuf_append_char(sb, (char)0xEF);
@@ -108,7 +108,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
                         stringbuf_append_char(sb, (char)0xBD);
                         continue;  // skip final (*json)++
                     }
-                    
+
                     // encode codepoint as UTF-8
                     append_codepoint_utf8(sb, (uint32_t)codepoint);
                     continue;  // skip the (*json)++ at end of loop - we already advanced
@@ -155,7 +155,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
     // Check if it's an integer
     if (value == (int64_t)value) {
         int64_t int_value = (int64_t)value;
-        log_debug("parse_number: creating INT from double=%g, int64=%lld (0x%llx)", 
+        log_debug("parse_number: creating INT from double=%g, int64=%lld (0x%llx)",
                   value, (long long)int_value, (unsigned long long)int_value);
         Item result = ctx.builder.createInt(int_value);
         log_debug("parse_number: result.item=0x%llx", (unsigned long long)result.item);
@@ -421,4 +421,22 @@ void parse_json(Input* input, const char* json_string) {
     if (ctx.hasErrors()) {
         ctx.logErrors();
     }
+}
+
+// Parse a JSON string and return the result as an Item
+// Reuses the same JSON parser but doesn't set input->root
+Item parse_json_to_item(Input* input, const char* json_string) {
+    if (!json_string || !*json_string) {
+        return {.item = ITEM_NULL};
+    }
+
+    InputContext ctx(input, json_string, strlen(json_string));
+
+    Item result = parse_value(ctx, &json_string, 0);
+
+    if (ctx.hasErrors()) {
+        ctx.logErrors();
+    }
+
+    return result;
 }
