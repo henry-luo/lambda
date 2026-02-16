@@ -123,7 +123,7 @@ TypeInfo type_info[LMD_CONTAINER_HEAP_START + 1];
 
 void init_type_info() {
     type_info[LMD_TYPE_RAW_POINTER] = {sizeof(void*), "pointer", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
-    type_info[LMD_TYPE_NULL] = {sizeof(bool), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
+    type_info[LMD_TYPE_NULL] = {sizeof(void*), "null", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};  // pointer-sized for NULL↔container transitions
     type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
     type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // 64-bit to store 56-bit value

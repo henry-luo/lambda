@@ -3082,13 +3082,61 @@ void fn_map_set(Item map_item, Item key, Item value) {
             TypeId field_type = entry->type->type_id;
             void* field_ptr = (char*)mp->data + entry->byte_offset;
 
-            if (field_type != value_type) {
+            // Allow compatible type transitions:
+            // - NULL can be set to any container/string type (and vice versa)
+            // - INT <-> INT64 promotion
+            // - Same type always ok
+            bool type_compatible = (field_type == value_type);
+            if (!type_compatible) {
+                bool is_null_transition = false;
+                // NULL field can accept any container/string type
+                if (field_type == LMD_TYPE_NULL) {
+                    switch (value_type) {
+                    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+                    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
+                    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
+                    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+                        is_null_transition = true;
+                        break;
+                    default: break;
+                    }
+                }
+                // Container/string field can be set to NULL
+                if (value_type == LMD_TYPE_NULL) {
+                    switch (field_type) {
+                    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+                    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
+                    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE: case LMD_TYPE_LIST:
+                    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+                        is_null_transition = true;
+                        break;
+                    default: break;
+                    }
+                }
+                if (is_null_transition) {
+                    type_compatible = true;
+                    // Don't update shared shape - just handle the store directly
+                }
+                // INT <-> INT64 promotion
+                if ((field_type == LMD_TYPE_INT && value_type == LMD_TYPE_INT64) ||
+                    (field_type == LMD_TYPE_INT64 && value_type == LMD_TYPE_INT)) {
+                    type_compatible = true;
+                }
+                // INT <-> FLOAT coercion (store by converting the value)
+                if ((field_type == LMD_TYPE_INT && value_type == LMD_TYPE_FLOAT) ||
+                    (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT)) {
+                    type_compatible = true;
+                }
+            }
+            if (!type_compatible) {
                 log_error("fn_map_set: type mismatch for field '%s' (existing=%d, new=%d)",
                           key_cstr, field_type, value_type);
                 return;
             }
 
             // decrement ref count for old value
+            // For NULL↔container transitions, the stored value may differ from field_type
+            // Always try to decrement if a non-null pointer-sized value is stored
             switch (field_type) {
             case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
                 String* old_str = *(String**)field_ptr;
@@ -3102,11 +3150,26 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 if (old_c && old_c->ref_cnt > 0) old_c->ref_cnt--;
                 break;
             }
+            case LMD_TYPE_NULL: {
+                // A container might have been stored via NULL→container transition
+                void* old_ptr = *(void**)field_ptr;
+                if (old_ptr) {
+                    Container* old_c = (Container*)old_ptr;
+                    if (old_c->ref_cnt > 0) old_c->ref_cnt--;
+                }
+                break;
+            }
             default: break;
             }
 
-            // store new value
-            switch (value_type) {
+            // store new value — use field_type for storage format, coerce value if needed
+            if (field_type == LMD_TYPE_INT && value_type == LMD_TYPE_FLOAT) {
+                // FLOAT → INT coercion: truncate to integer
+                *(int64_t*)field_ptr = (int64_t)value.get_double();
+            } else if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
+                // INT → FLOAT coercion: widen to double
+                *(double*)field_ptr = (double)value.get_int56();
+            } else switch (value_type) {
             case LMD_TYPE_NULL: *(void**)field_ptr = NULL; break;
             case LMD_TYPE_BOOL: *(bool*)field_ptr = value.bool_val; break;
             case LMD_TYPE_INT:  *(int64_t*)field_ptr = value.get_int56(); break;
