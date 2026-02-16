@@ -2584,3 +2584,33 @@ extern "C" int64_t fn_ceil_i(int64_t x) {
 extern "C" int64_t fn_round_i(int64_t x) {
     return x;
 }
+
+// ============================================================================
+// BITWISE OPERATIONS
+// ============================================================================
+
+extern "C" int64_t fn_band(int64_t a, int64_t b) {
+    return a & b;
+}
+
+extern "C" int64_t fn_bor(int64_t a, int64_t b) {
+    return a | b;
+}
+
+extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
+    return a ^ b;
+}
+
+extern "C" int64_t fn_bnot(int64_t a) {
+    return ~a;
+}
+
+extern "C" int64_t fn_shl(int64_t a, int64_t b) {
+    if (b < 0 || b >= 64) return 0;
+    return a << b;
+}
+
+extern "C" int64_t fn_shr(int64_t a, int64_t b) {
+    if (b < 0 || b >= 64) return 0;
+    return a >> b;  // arithmetic right shift (sign-extending)
+}

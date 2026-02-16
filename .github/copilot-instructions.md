@@ -1,5 +1,27 @@
 # GitHub Copilot Instructions for Lambda Script
 
+## CRITICAL Rules for AI Agents
+
+These rules MUST be followed. Violations are considered errors.
+
+1. **NEVER write files to `/tmp`**. Use `./temp/` for ALL temporary files.
+2. **NEVER use `std::string`, `std::vector`, `std::map`**, or any other `std::` types. Use `./lib` equivalents (`Str`, `ArrayList`, `HashMap`, etc.).
+3. **NEVER use `printf`/`fprintf`/`std::cout`** for debugging. Use `log_debug()`, `log_info()`, `log_error()` from `lib/log.h`.
+4. **NEVER manually edit `parser.c`**. Grammar regeneration is automatic from `grammar.js` via `make generate-grammar`.
+5. **NEVER modify `log.conf`**.
+6. **NEVER manually edit `.lua` build files**. Edit `build_lambda_config.json`, then run `make`.
+7. After adding a new Lambda unit test script `*.ls`, ALWAYS add the corresponding expected result `*.txt` file.
+8. C++17 standard. Start each log line with a distinct prefix/phrase for easy searching.
+
+| DON'T | DO |
+|-------|-----|
+| Write to `/tmp` | Write to `./temp/` |
+| `std::string s = "hello"` | Use `Str` from `lib/str.h` |
+| `printf("debug: %d", x)` | `log_debug("debug: %d", x)` |
+| `std::vector<int> v` | Use `ArrayList` from `lib/arraylist.h` |
+| Edit `parser.c` manually | Edit `grammar.js` then `make generate-grammar` |
+| Edit `premake5.mac.lua` manually | Edit `build_lambda_config.json` then `make` |
+
 ## Project Overview
 
 Lambda Script is a **general-purpose, cross-platform, pure functional scripting language** designed for data processing and document presentation, built from scratch in C/C++ with JIT compilation.
@@ -38,69 +60,32 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **Type System**: `lambda/lambda-data.hpp` - 20+ built-in types with inference
 
 ### Document Processing Pipeline
-- **Input**: `lambda/input/` - 15+ parsers (JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, etc.)
-  - Each parser uses `MarkBuilder` (`lambda/mark_builder.hpp`) to construct Lambda data structures
-  - Common pattern: parse → build Items → set Input root
-- **Output**: `lambda/format/` - multiple formatters (JSON, Markdown, HTML, YAML, etc.)
-- **Validation**: `lambda/validator/` - schema-based type validation with error reporting
-- **CSS Engine**: `lambda/input/css/` - complete CSS parser, cascade resolver
+- **Input**: `lambda/input/` - parsers for JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, etc. Each uses `MarkBuilder` (`lambda/mark_builder.hpp`) to construct Lambda data structures.
+- **Output**: `lambda/format/` - formatters (JSON, Markdown, HTML, YAML, etc.)
+- **Validation**: `lambda/validator/` - schema-based type validation
+- **CSS Engine**: `lambda/input/css/` - CSS parser and cascade resolver
 
 ### Radiant Layout Engine (`radiant/`)
-
-Radiant is the CSS layout and rendering engine for HTML/CSS document presentation.
-
-- **Unified DOM/View Tree**: `DomNode` → `DomText`/`DomElement` serve as both DOM and layout views
-- **Relative Coordinates**: All positions relative to parent's border box
-- **Layout Context**: `LayoutContext` struct coordinates all layout state
-
-**Key Files:**
-| File | Purpose |
-|------|---------|
-| `view.hpp` | View hierarchy: `ViewBlock`, `ViewSpan`, property structs |
-| `layout.hpp` | Core structs: `LayoutContext`, `BlockContext`, `Linebox` |
-| `layout_block.cpp` | Block layout, mode dispatch |
-| `layout_inline.cpp` | Inline/text layout, line breaking |
-| `layout_flex.cpp` | Flexbox algorithm |
-| `layout_grid.cpp` | Grid track sizing |
-| `layout_table.cpp` | Table layout |
-| `resolve_css_style.cpp` | CSS cascade and property resolution |
-
-**Property Structures** (allocated via `alloc_*_prop()` from pool):
-- `BlockProp`, `BoundaryProp` (box model), `InlineProp`, `FontProp`
-- `FlexProp`/`FlexItemProp`, `GridProp`/`GridItemProp`, `TableProp`
+CSS layout and rendering engine for HTML/CSS document presentation.
+- **DOM/View Tree**: `DomNode` → `DomText`/`DomElement` (both DOM and layout views)
+- **Layout**: `layout_block.cpp`, `layout_inline.cpp`, `layout_flex.cpp`, `layout_grid.cpp`, `layout_table.cpp`
+- **CSS Resolution**: `resolve_css_style.cpp`
+- **Core structs**: `view.hpp` (view hierarchy), `layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`)
 
 ## Lambda CLI Commands
 
-### Basic Usage
 ```bash
 ./lambda.exe                          # Start interactive REPL (default)
 ./lambda.exe script.ls                # Run a functional Lambda script (JIT with C2MIR)
 ./lambda.exe --help                   # Show help message for Lambda CLI
 ./lambda.exe run script.ls            # Run a procedural Lambda script with main() procedure
-```
-
-### Document Validation
-```bash
 ./lambda.exe validate data.json -s schema.ls     # Validate against custom schema
-./lambda.exe validate data.json                  # Validate with doc_schema.ls (default)
-```
-
-### Format Conversion
-```bash
-./lambda.exe convert input.json -t yaml -o output.yaml      # Auto-detect input format
-./lambda.exe convert input.md -f markdown -t html -o out.html  # Explicit formats
-```
-
-### Layout Analysis & Rendering
-```bash
+./lambda.exe convert input.json -t yaml -o output.yaml      # Format conversion
+./lambda.exe layout page.html                    # Run CSS layout, output view tree
+./lambda.exe render page.html -o output.svg      # Render to SVG/PDF/PNG
+./lambda.exe view page.html                      # Open HTML in browser window
 make layout suite=baseline                       # Run layout regression tests
 make layout test=file_name                       # Compare specific html file layout against browser
-./lambda.exe layout page.html                    # Runs CSS layout, and output view tree
-./lambda.exe render page.html -o output.svg      # Render to SVG
-./lambda.exe render page.html -o output.pdf      # Render to PDF
-./lambda.exe render page.html -o output.png      # Render to PNG/JPEG
-./lambda.exe view                                # Open default (test/html/index.html)
-./lambda.exe view page.html                      # Open HTML in browser window
 ```
 
 ## Build System & Development Workflow
@@ -111,130 +96,59 @@ make build              # Incremental build (Premake5-based, fastest)
 make clean-all          # Clean all build artifacts
 ```
 
-**Build architecture**:
-- JSON config (`build_lambda_config.json`) → Python generator (`utils/generate_premake.py`) → Premake5 Lua → Makefiles
-- Auto-regenerates parser when `grammar.js` changes (dependency tracking via Make)
+**Build architecture**: `build_lambda_config.json` → `utils/generate_premake.py` → Premake5 Lua → Makefiles
 
-### Testing Strategy
+### Testing
 ```bash
 make build-test               # Build all test executables
 make test                     # Run ALL tests (baseline + extended)
 make test-lambda-baseline     # Lambda core functionalities (must pass 100%, when changes maked to Lambda engine)
-make test-radiant-baseline     # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
+make test-radiant-baseline    # Radiant core functionalities (must pass 100%, when changes maked to Radiant engine)
 ```
+**Running single test**: `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
 
-**Running single test**: e.g. `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
-
-### Grammar & Parser Development
+### Grammar & Parser
 ```bash
 make generate-grammar   # Regenerate parser from grammar.js
-make clean-grammar      # Remove generated files (parser.c, ts-enum.h)
 ```
+Grammar source: `lambda/tree-sitter-lambda/grammar.js`. Enum mapping: `lambda/ts-enum.h` (auto-generated).
 
-**Tree-sitter integration**:
-- Grammar: `lambda/tree-sitter-lambda/grammar.js`
-- Enum mapping: `lambda/ts-enum.h` (auto-generated via `utils/update_ts_enum.sh`)
+## Coding Conventions
 
-## Coding Conventions & Best Practices
-
-### Memory Safety Rules
-1. **Always use pool allocation** for Lambda objects: `pool_calloc()`, `arena_alloc()`
-2. **Use MarkBuilder and MarkReader** for constructing complex Lambda/Mark structures and reading them (handles memory correctly)
-
-### Debugging & Logging
-```cpp
-// Use structured logging (lib/log.h) - outputs to ./log.txt
-log_debug("Processing item: type=%d, value=%p", type_id, ptr);
-log_info("Loaded document: %zu bytes", size);
-log_error("Parse failed at line %d: %s", line, msg);
-```
-NEVER use printf/fprintf/std::cout for debugging
-
-### Code Style
+- **Memory**: Use `pool_calloc()`, `arena_alloc()` for Lambda objects. Use `MarkBuilder`/`MarkReader` for constructing/reading Lambda data structures.
+- **Logging**: Use `log_debug()`/`log_info()`/`log_error()` from `lib/log.h` → outputs to `./log.txt`
+- **Naming**: `snake_case` for C/C++ functions, `PascalCase` for classes
 - **Comments**: Start inline comments in lowercase: `// process the next token`
-- **Naming**: `snake_case` for C and C++ methods, `PascalCase` for classes
 - **Error handling**: Return `ItemNull` or `ItemError`, log errors with `log_error()`
 
-## File Organization & Key Files
+## Key Entry Points
 
-### Core Runtime
-- `lambda/lambda.h` - Core data structures (C API for MIR)
-- `lambda/lambda-data.hpp` - Full C++ API and type definitions
-- `lambda/lambda-data.cpp` - Runtime data manipulation
-- `lambda/lambda-mem.cpp` - Memory allocation (pools, arenas, name pooling)
-- `lambda/lambda-eval.cpp` - Interpreter execution engine
-
-### Parsing & Compilation
-- `lambda/parse.c` - Tree-sitter integration wrapper
-- `lambda/build_ast.cpp` - AST construction from CST
-- `lambda/transpile.cpp` - AST → C code transpilation
-- `lambda/transpile-mir.cpp` - AST → MIR JIT compilation
-- `lambda/mir.c` - MIR runtime integration
-
-### Data Construction
-- `lambda/mark_builder.hpp/cpp` - High-level builder for Lambda data (use this!)
-- `lambda/mark_reader.hpp/cpp` - Data traversal and querying
-- `lambda/mark_editor.hpp/cpp` - In-place data modification
-- `lambda/name_pool.hpp/cpp` - String interning and pooling
-- `lambda/shape_pool.hpp/cpp` - Map shape caching
-
-### Input Parsers (all in `lambda/input/`)
-- `input.cpp` - Main input dispatcher
-- `input-json.cpp`, `input-xml.cpp`, `input-html.cpp` - Common formats
-- `input-css.cpp` - CSS parser (uses `lambda/input/css/` engine)
-- `input-math.cpp` - Mathematical expression parser
-
-### CSS & Layout (Radiant engine in `radiant/`)
-- `lambda/input/css/css_parser.cpp` - CSS syntax parser
-- `lambda/input/css/css_engine.cpp` - Cascade resolver
-- `radiant/layout.cpp` - Layout engine coordinator
-- `radiant/layout_flex.cpp` - Flexbox implementation
-- `radiant/layout_block.cpp` - Block layout
-
-### Libraries (`lib/`)
-- `mempool.c/h` - Variable-size memory pool
-- `arena.c/h` - Arena allocator (linear allocation)
-- `str.c/h` - String library
-- `strbuf.c/h` - Dynamic string buffer
-- `arraylist.c/h` - Dynamic array
-- `hashmap.c/h` - Hash table
-- `log.c/h` - Structured logging
-
-### Testing (`test/`)
-- `test_run.sh` - Main test runner (parallel execution)
-- `test/*.exe` - GTest C++ unit tests (e.g., `test_lambda_gtest.exe`)
-- `test/*.cpp` - GTest unit tests
-- `test/lambda/*.ls` - Lambda script integration tests
-- `test/input/` - Test data files
-- `test/layout/` - HTML/CSS layout tests
-
-### MIR (JIT Compiler)
-- Location: `lambda/mir.c` (embedded in repo)
-- API: See `include/mir.h`
-- Lambda → MIR transpilation in `lambda/transpile-mir.cpp`
-- Functions exposed to JIT code via function table
+| Area | Start here |
+|------|-----------|
+| Core data types | `lambda/lambda-data.hpp`, `lambda/lambda.h` (C API for MIR) |
+| Runtime evaluation | `lambda/lambda-eval.cpp` |
+| Memory management | `lambda/lambda-mem.cpp` |
+| AST & parsing | `lambda/build_ast.cpp`, `lambda/parse.c` |
+| JIT compilation | `lambda/transpile-mir.cpp`, `lambda/mir.c` |
+| Data construction | `lambda/mark_builder.hpp`, `lambda/mark_reader.hpp`, `lambda/mark_editor.hpp` |
+| Input parsers | `lambda/input/input.cpp` (dispatcher), `lambda/input/input-*.cpp` |
+| Output formatters | `lambda/format/` |
+| CSS & layout | `radiant/layout.cpp`, `radiant/layout_*.cpp` |
+| Custom lib types | `lib/str.h`, `lib/strbuf.h`, `lib/arraylist.h`, `lib/hashmap.h`, `lib/mempool.h` |
+| Tests | `test/*.cpp` (GTest), `test/lambda/*.ls` (integration), `test/layout/` (HTML/CSS) |
 
 ### Debugging a Crash
-1. Use `log_debug()` liberally to trace execution flow
-2. Check `./log.txt` for detailed execution trace
-3. Run with debugger: `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- extra CLI arguments`
+1. Check `./log.txt` for execution trace
+2. Run with debugger: `lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- extra CLI arguments`
 
-## Notes & Constraints
-- C++17 standard.
-- Don't use std::string or std::* containers, like std::vector or std::map. Use ./lib equivalents.
-- Grammar regeneration is automatic - don't manually edit `parser.c`
-- Log file location: `./log.txt` (configure levels in `log.conf`). Don't change log config. Start each log line with a distinct prefix/phrase for easy searching.
-- Lambda language documentation:
-- **Lambda Reference Docs**:
-  - `doc/Lambda_Reference.md` — Language overview and quick reference
-  - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
-  - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
-  - `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
-  - `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
-  - `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, `?` propagation, `let a^err` destructuring)
-  - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
-  - `doc/Lambda_Validator_Guide.md` — Schema-based data validation
-  - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
-  - `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
-- After adding a new Lambda unit test script *.ls, don't forget to add the correspoding expected result file *.txt.
-- For any temporal files, create them under `./temp` directory, instead of `/tmp` dir.
+## Lambda Language Documentation
+- `doc/Lambda_Reference.md` — Language overview and quick reference
+- `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
+- `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
+- `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
+- `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
+- `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, `?` propagation, `let a^err` destructuring)
+- `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
+- `doc/Lambda_Validator_Guide.md` — Schema-based data validation
+- `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
+- `doc/Radiant_Layout_Design.md` — Radiant CSS layout engine design
