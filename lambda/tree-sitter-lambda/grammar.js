@@ -791,8 +791,9 @@ module.exports = grammar({
 
     // assignment statement for mutable variables (procedural only)
     // use prec.right to prefer consuming expression when present
+    // supports: x = val, arr[i] = val, obj.field = val
     assign_stam: $ => seq(
-      field('target', $.identifier), '=', field('value', $._expr),
+      field('target', choice($.identifier, $.index_expr, $.member_expr)), '=', field('value', $._expr),
       optional(';')
     ),
 

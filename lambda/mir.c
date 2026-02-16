@@ -346,6 +346,16 @@ func_obj_t func_list[] = {
     {"path_concat", (fn_ptr) path_concat},
     {"path_wildcard", (fn_ptr) path_wildcard},
     {"path_wildcard_recursive", (fn_ptr) path_wildcard_recursive},
+    // array/map mutation (procedural)
+    {"fn_array_set", (fn_ptr) fn_array_set},
+    {"fn_map_set", (fn_ptr) fn_map_set},
+    // bitwise operations
+    {"fn_band", (fn_ptr) fn_band},
+    {"fn_bor", (fn_ptr) fn_bor},
+    {"fn_bxor", (fn_ptr) fn_bxor},
+    {"fn_bnot", (fn_ptr) fn_bnot},
+    {"fn_shl", (fn_ptr) fn_shl},
+    {"fn_shr", (fn_ptr) fn_shr},
 };
 
 void *import_resolver(const char *name) {
