@@ -140,18 +140,23 @@
      (define col-gap (resolve-gap col-gap-raw (if avail-w content-w #f)))
 
      ;; main/cross axis available sizes
-     ;; for row: when the container has auto width and avail-w is indefinite (max-content mode),
-     ;; main-avail must be +inf.0 so items don't erroneously shrink to 0.
-     ;; content-w = 0 in that case (from resolve-block-width with auto/0), which is wrong for flex.
+     ;; for row: when the container has auto width and avail-w is indefinite,
+     ;; the behavior depends on intrinsic sizing mode:
+     ;; - av-max-content: use +inf.0 so items get natural (flex-basis) sizes
+     ;; - av-min-content: use 0 so items shrink maximally to their auto-minimum
+     ;; - pure indefinite: use +inf.0 (same as max-content)
+     ;; content-w = 0 when avail-w is indefinite (from resolve-block-width with auto/0).
      ;; percentage width with indefinite containing block also behaves as auto.
+     (define is-min-content-mode? (eq? (cadr avail) 'av-min-content))
      (define effective-width-auto?
        (or (eq? (get-style-prop styles 'width 'auto) 'auto)
            pct-width-indefinite?))
      (define main-avail
        (if is-row?
-           (if (and effective-width-auto? (not avail-w))
-               +inf.0
-               content-w)
+           (cond
+             [(and effective-width-auto? (not avail-w) is-min-content-mode?) 0]
+             [(and effective-width-auto? (not avail-w)) +inf.0]
+             [else content-w])
            (or explicit-h
                ;; for column wrap: use max-height as wrapping boundary when height is auto
                ;; per CSS Flexbox §9.3, items wrap at the container's inner main size,
@@ -168,7 +173,15 @@
            (or explicit-h
                (let ([min-h (resolve-min-height styles avail-h)])
                  (if (> min-h 0) min-h +inf.0)))
-           content-w))
+           ;; column flex: cross axis = width
+           ;; when the container has definite available width, content-w correctly resolves.
+           ;; when avail-w is indefinite (intrinsic sizing), content-w resolves to 0.
+           ;; for av-max-content / indefinite, use +inf.0 so items expand to natural widths;
+           ;; for av-min-content, keep content-w (0) to force items to minimum widths.
+           (if (and effective-width-auto? (not avail-w)
+                    (not (eq? (cadr avail) 'av-min-content)))
+               +inf.0
+               content-w)))
      ;; track whether cross-avail comes from a definite source:
      ;; for row: explicit height is set
      ;; for column: container has explicit width (avail-w is definite)
@@ -207,11 +220,14 @@
      ;; for row: explicit width OR definite available width from parent
      ;; for column: explicit height
      ;; percentage width with indefinite containing block is NOT definite
+     ;; ALSO true for min-content mode: main-avail=0 acts as a definite constraint
+     ;; to force items to shrink maximally to their content-based minimums
      (define main-definite?
        (if is-row?
            (or (and (not effective-width-auto?)
                     (not (eq? (get-style-prop styles 'width 'auto) 'auto)))
-               (and avail-w #t))
+               (and avail-w #t)
+               is-min-content-mode?)
            (and explicit-h #t)))
      (define resolved-lines
        (for/list ([line (in-list lines)])
@@ -312,6 +328,8 @@
      (define aspect-ratio-val (get-style-prop styles 'aspect-ratio #f))
      ;; for intrinsic row sizing (CSS Flexbox §9.9.1):
      ;; compute each item's max-content contribution to the container's intrinsic width.
+     ;; For min-content mode: items have already been shrunk to their minimums by
+     ;; resolve-flex-lengths (main-avail=0, main-definite?=#t), so use total-main instead.
      ;; Only items with EXPLICIT flex-basis (not auto) need special handling, because
      ;; their flex-base may differ from their natural (max-content) size.
      ;; For flex-basis: auto items, the hypothetical outer already equals their content size.
@@ -326,7 +344,82 @@
      (define intrinsic-flex-main
        (if (and is-row? (not has-explicit-width?) is-intrinsic-width-sizing?)
            (let ([is-max-content? (eq? (cadr avail) 'av-max-content)])
-             (for/sum ([line (in-list cross-sized-lines)])
+             (if (not is-max-content?)
+                 ;; min-content mode: compute per CSS Flexbox §9.9.1
+                 ;; Single-line: sum of items' min-content contributions
+                 ;; Multi-line: largest individual min-content contribution
+                 ;; min-content contribution = max(outer-min-content, outer-preferred)
+                 ;; clamped by flex-base as max (when not growable) and min/max properties
+                 (let ()
+                   ;; compute per-item min-content contribution
+                   (define (item-min-content-contribution item)
+                     (define item-bm (flex-item-bm item))
+                     (define item-styles (flex-item-styles item))
+                     (define main-margin (if is-row? (horizontal-margin item-bm)
+                                             (vertical-margin item-bm)))
+                     (define main-pb (if is-row? (horizontal-pb item-bm)
+                                         (vertical-pb item-bm)))
+                     ;; outer min-content size: measure at av-min-content + margin
+                     (define child-box (flex-item-box item))
+                     (define mc-avail `(avail av-min-content indefinite))
+                     (define mc-view (dispatch-fn child-box mc-avail))
+                     (define outer-min-content (+ (if is-row? (view-width mc-view) (view-height mc-view))
+                                                  main-margin))
+                     ;; outer preferred size (if item has explicit main size)
+                     (define main-size-prop (if is-row? 'width 'height))
+                     (define main-size-val (get-style-prop item-styles main-size-prop 'auto))
+                     (define has-item-explicit-main? (not (eq? main-size-val 'auto)))
+                     (define outer-preferred
+                       (if has-item-explicit-main?
+                           (let* ([resolved (or (resolve-size-value main-size-val +inf.0) 0)]
+                                  [content (if (eq? (box-model-box-sizing item-bm) 'border-box)
+                                               (max 0 (- resolved main-pb))
+                                               resolved)]
+                                  [bb (+ content main-pb)])
+                             (+ bb main-margin))
+                           #f))
+                     ;; contribution = max(outer-min-content, outer-preferred) if preferred exists
+                     (define base-contribution
+                       (if outer-preferred
+                           (max outer-min-content outer-preferred)
+                           outer-min-content))
+                     ;; clamp by flex-base as max when not growable (grow=0)
+                     (define grow (flex-item-flex-grow item))
+                     (define basis-outer (flex-item-hypothetical-main item))
+                     (define clamped-contribution
+                       (if (= grow 0)
+                           (min base-contribution basis-outer)
+                           base-contribution))
+                     ;; apply min/max main size constraints
+                     (define min-prop (if is-row? 'min-width 'min-height))
+                     (define max-prop (if is-row? 'max-width 'max-height))
+                     (define min-raw (or (resolve-size-value
+                                          (get-style-prop item-styles min-prop 'auto) +inf.0) 0))
+                     (define max-raw (or (resolve-size-value
+                                          (get-style-prop item-styles max-prop 'none) +inf.0) +inf.0))
+                     (define min-c-content
+                       (if (and (> min-raw 0) (eq? (box-model-box-sizing item-bm) 'border-box))
+                           (max 0 (- min-raw main-pb)) min-raw))
+                     (define max-c-content
+                       (if (and (not (infinite? max-raw)) (eq? (box-model-box-sizing item-bm) 'border-box))
+                           (max 0 (- max-raw main-pb)) max-raw))
+                     (define min-outer (+ min-c-content main-pb main-margin))
+                     (define max-outer (+ max-c-content main-pb main-margin))
+                     (max min-outer (min max-outer clamped-contribution)))
+                   ;; gather all items across all lines
+                   (define all-items
+                     (apply append (map flex-line-items cross-sized-lines)))
+                   (define is-multi-line-container?
+                     (not (eq? wrap-mode 'nowrap)))
+                   (if is-multi-line-container?
+                       ;; multi-line: largest individual min-content contribution
+                       (apply max 0 (map item-min-content-contribution all-items))
+                       ;; single-line: sum of min-content contributions + gaps
+                       (+ (for/sum ([item (in-list all-items)])
+                            (item-min-content-contribution item))
+                          (* main-gap (max 0 (sub1 (length all-items)))))))
+                 ;; max-content mode
+                 (for/sum ([line (in-list cross-sized-lines)])
                (define items-in-line (flex-line-items line))
                (+ (for/sum ([item (in-list items-in-line)])
                     (define grow (flex-item-flex-grow item))
@@ -381,9 +474,9 @@
                             [(> grow 0) (max hyp-outer max-content-outer)]
                             [(> shrink 0) (min hyp-outer max-content-outer)]
                             [else hyp-outer]))
-                        ;; flex-basis:auto or min-content mode: use hypothetical outer
+                        ;; flex-basis:auto: use hypothetical outer
                         hyp-outer))
-                  (* main-gap (max 0 (sub1 (length items-in-line)))))))
+                  (* main-gap (max 0 (sub1 (length items-in-line))))))))
            #f))
      (define final-content-w
        (let ([raw-w (cond
@@ -407,6 +500,22 @@
                     [bb-w (* bb-h aspect-ratio-val)])
                (max 0 (- bb-w horiz-pb)))
              raw-w)))
+     ;; apply min-width/max-width when width is auto (not already handled by resolve-block-width)
+     (when (not has-explicit-width?)
+       (define min-w-val (get-style-prop styles 'min-width 'auto))
+       (define max-w-val (get-style-prop styles 'max-width 'none))
+       (define min-w-raw (or (resolve-size-value min-w-val (or avail-w 0)) 0))
+       (define max-w-raw (or (resolve-size-value max-w-val (or avail-w 0)) +inf.0))
+       ;; convert to content-box when border-box
+       (define min-w
+         (if (and (> min-w-raw 0) (eq? (box-model-box-sizing bm) 'border-box))
+             (max 0 (- min-w-raw (horizontal-pb bm)))
+             min-w-raw))
+       (define max-w
+         (if (and (not (infinite? max-w-raw)) (eq? (box-model-box-sizing bm) 'border-box))
+             (max 0 (- max-w-raw (horizontal-pb bm)))
+             max-w-raw))
+       (set! final-content-w (max min-w (min max-w final-content-w))))
      (define final-content-h
        (let ([raw-h (or explicit-h
                         (if is-row? total-cross total-main))])
@@ -657,9 +766,50 @@
                                                      (* (+ min-cross cross-pb) aspect-ratio)
                                                      (/ (+ min-cross cross-pb) aspect-ratio))])
                         (max 0 (- derived-main-border main-pb)))
-                      ;; no min-cross → fall back to content measurement
-                      (let ([measured (measure-flex-item-content child is-row? main-avail cross-avail dispatch-fn)])
-                        (max 0 (- measured main-pb))))))]
+                      ;; no min-cross → check max-cross for AR constraint
+                      ;; per CSS: when aspect-ratio + max-cross, derive basis from max-cross
+                      (let* ([max-cross-prop (if is-row? 'max-height 'max-width)]
+                             [max-cross-val (resolve-size-value (get-style-prop styles max-cross-prop 'none) cross-ref)]
+                             [max-cross (if max-cross-val
+                                            (if (eq? (box-model-box-sizing bm) 'border-box)
+                                                max-cross-val  ;; border-box includes pb
+                                                (+ max-cross-val cross-pb))
+                                            #f)])
+                        (if (and max-cross (< max-cross +inf.0))
+                            ;; derive basis from max-cross via aspect-ratio
+                            ;; then clamp by content measurement (basis shouldn't exceed content)
+                            (let* ([derived-main-border (if is-row?
+                                                            (* max-cross aspect-ratio)
+                                                            (/ max-cross aspect-ratio))]
+                                   [derived-main (max 0 (- derived-main-border main-pb))]
+                                   ;; also measure content to get the max-content basis
+                                   [measured (measure-flex-item-content child is-row? main-avail cross-avail dispatch-fn)]
+                                   [content-main (max 0 (- measured main-pb))])
+                              ;; use the smaller: the AR-transferred size or the content size
+                              (min derived-main content-main))
+                            ;; no max-cross → check if max-main can constrain via AR
+                            ;; When max-main is set, the AR-derived cross at max-main may be
+                            ;; smaller than the container cross, affecting text wrapping.
+                            ;; Measure content at the AR-derived cross width for accuracy.
+                            (let* ([max-main-prop (if is-row? 'max-width 'max-height)]
+                                   [max-main-val (resolve-size-value (get-style-prop styles max-main-prop 'none) main-avail)]
+                                   [max-main-content (if (and max-main-val (not (infinite? max-main-val)))
+                                                        (if (eq? (box-model-box-sizing bm) 'border-box)
+                                                            (max 0 (- max-main-val main-pb))
+                                                            max-main-val)
+                                                        #f)]
+                                   ;; derive the cross width from max-main via AR
+                                   [ar-cross-at-max (if max-main-content
+                                                        (if is-row?
+                                                            (/ (+ max-main-content main-pb) aspect-ratio)
+                                                            (* (+ max-main-content main-pb) aspect-ratio))
+                                                        #f)]
+                                   ;; use the AR-derived cross as the measurement width
+                                   [eff-cross (if ar-cross-at-max
+                                                  (min (or cross-avail +inf.0) ar-cross-at-max)
+                                                  cross-avail)]
+                                   [measured (measure-flex-item-content child is-row? main-avail eff-cross dispatch-fn)])
+                              (max 0 (- measured main-pb))))))))]
            [else
             ;; need to measure content — result is border-box, convert to content-box
             (define measured (measure-flex-item-content child is-row? main-avail cross-avail dispatch-fn))
@@ -711,8 +861,9 @@
             (min basis content-min)]
            [else
             ;; content-based minimum: measure item's min-content contribution
+            ;; per CSS Flexbox §4.5: automatic minimum = min-content size
             ;; result is border-box, convert to content-box
-            (define measured (measure-flex-item-content child is-row? main-avail cross-avail dispatch-fn))
+            (define measured (measure-flex-item-content-min child is-row? main-avail cross-avail dispatch-fn))
             (max 0 (- measured main-pb))])]))
     (define max-main
       (let ([raw (or max-main-raw +inf.0)])
@@ -1145,10 +1296,28 @@
           [(and (number? cross-avail) (not (infinite? cross-avail)))
            `(definite ,cross-avail)]
           [else 'indefinite]))
+      ;; aspect-ratio cross constraint: when item has AR + auto cross + indefinite cross-avail,
+      ;; derive a definite cross from the resolved main via AR so the child layout is constrained.
+      ;; This is needed for cases like column flex + align-items:start + max-height + aspect-ratio,
+      ;; where the AR-derived width must constrain the child's content layout.
+      (define ar-cross-avail-spec
+        (let ([ar (get-style-prop item-styles 'aspect-ratio #f)])
+          (if (and ar (number? ar) (> ar 0)
+                   (not has-item-explicit-cross?)
+                   (eq? cross-avail-spec 'indefinite))
+              ;; derive cross (border-box) from child-main (border-box) via AR
+              ;; aspect-ratio = width/height
+              ;; for row: cross=height, child-main=width → cross = width/ratio
+              ;; for column: cross=width, child-main=height → cross = height*ratio
+              (let ([derived-cross (if is-row?
+                                      (/ child-main ar)
+                                      (* child-main ar))])
+                `(definite ,derived-cross))
+              cross-avail-spec)))
       (define child-avail
         (if is-row?
-            `(avail (definite ,child-main) ,cross-avail-spec)
-            `(avail ,cross-avail-spec (definite ,child-main))))
+            `(avail (definite ,child-main) ,ar-cross-avail-spec)
+            `(avail ,ar-cross-avail-spec (definite ,child-main))))
       ;; override percentage main-axis sizes to prevent re-resolution
       (define dispatch-box0 (override-pct-main-size item child-main is-row?))
       ;; always inject flex-resolved main-size as definite so nested flex containers
@@ -1170,12 +1339,22 @@
       (define child-view (dispatch-fn dispatch-box child-avail))
       (set-flex-item-view! item child-view)
       (define raw-cross (if is-row? (view-height child-view) (view-width child-view)))
-      ;; aspect-ratio: if cross is auto (0 or very small) and item has aspect-ratio,
-      ;; derive cross from the resolved main size
+      ;; aspect-ratio: if the item has auto cross dimension and aspect-ratio,
+      ;; derive cross from the resolved main size rather than using the dispatched size.
+      ;; However, skip this if there's a max-cross constraint (max-width for column,
+      ;; max-height for row) — in that case, let the post-cross AR derivation handle
+      ;; it by applying max-cross and re-deriving main from the constrained cross.
       (define aspect-ratio (get-style-prop item-styles 'aspect-ratio #f))
+      (define cross-dim-prop (if is-row? 'height 'width))
+      (define has-explicit-cross-dim?
+        (not (eq? (get-style-prop item-styles cross-dim-prop 'auto) 'auto)))
+      (define max-cross-dim-prop (if is-row? 'max-height 'max-width))
+      (define has-max-cross-constraint?
+        (not (eq? (get-style-prop item-styles max-cross-dim-prop 'none) 'none)))
       (define cross
         (if (and aspect-ratio (number? aspect-ratio) (> aspect-ratio 0)
-                 (< raw-cross 0.01))  ;; cross wasn't set explicitly
+                 (not has-explicit-cross-dim?)
+                 (not has-max-cross-constraint?))  ;; no max-cross → derive from main
             (let ([main-border (+ main-size (if is-row? (horizontal-pb (flex-item-bm item)) (vertical-pb (flex-item-bm item))))])
               ;; aspect-ratio = width/height
               ;; for row: cross = height = width / ratio = main-border / ratio
@@ -1188,6 +1367,34 @@
               (max 0 (- derived cross-pb)))
             raw-cross))
       (set-flex-item-cross-size! item cross)
+
+      ;; aspect-ratio: for non-stretch items with aspect-ratio and no explicit main size,
+      ;; derive main from the resolved cross size (cross may be constrained by max-width/min-width)
+      ;; per CSS Flexbox §9.4: use cross size to derive main when aspect-ratio applies
+      (when (and aspect-ratio (number? aspect-ratio) (> aspect-ratio 0)
+                 (not (eq? item-effective-align 'align-stretch)))
+        (define main-size-prop (if is-row? 'width 'height))
+        (define has-item-explicit-main?
+          (not (eq? (get-style-prop item-styles main-size-prop 'auto) 'auto)))
+        (when (not has-item-explicit-main?)
+          (define item-bm (flex-item-bm item))
+          (define cross-pb (if is-row? (vertical-pb item-bm) (horizontal-pb item-bm)))
+          (define main-pb-ar (if is-row? (horizontal-pb item-bm) (vertical-pb item-bm)))
+          (define cross-border (+ cross cross-pb))
+          ;; apply max-cross constraint to cross-border
+          (define max-cross-prop (if is-row? 'max-height 'max-width))
+          (define max-cross-val (resolve-size-value (get-style-prop item-styles max-cross-prop 'none) cross-avail))
+          (define eff-cross-border
+            (if max-cross-val (min cross-border max-cross-val) cross-border))
+          (define derived-main-border (if is-row?
+                                          (* eff-cross-border aspect-ratio)
+                                          (/ eff-cross-border aspect-ratio)))
+          (define derived-main (max 0 (- derived-main-border main-pb-ar)))
+          (set-flex-item-main-size! item derived-main)
+          ;; also update cross to reflect the capped value (max-cross may have reduced it)
+          (when (and max-cross-val (< eff-cross-border cross-border))
+            (set-flex-item-cross-size! item (max 0 (- eff-cross-border cross-pb))))))
+
       ;; compute baseline for baseline alignment (only meaningful for row direction)
       (when is-row?
         (set-flex-item-baseline! item (compute-view-baseline child-view))))
@@ -1327,7 +1534,11 @@
                      [main-cap (if (and (> (flex-item-min-main item) 0)
                                         (number? main-avail) (not (infinite? main-avail)))
                                    main-avail +inf.0)]
-                     [clamped (max (flex-item-min-main item)
+                     ;; per CSS Flexbox §4.5: for items with aspect-ratio, the auto minimum
+                     ;; in the ratio-dependent axis is min(content-size, transferred-size).
+                     ;; the transferred size is derived from the now-resolved cross size.
+                     [effective-min (min (flex-item-min-main item) derived-main)]
+                     [clamped (max effective-min
                                    (min (flex-item-max-main item) (min main-cap derived-main)))])
                 (set-flex-item-main-size! item clamped)
                 clamped)
@@ -1734,10 +1945,16 @@
 
       ;; get the child view (already laid out in Phase 6)
       (define child-view (flex-item-view item))
-      ;; override the view with correct dimensions if needed
+      ;; override the view with correct dimensions if needed.
+      ;; text views (anonymous flex items wrapping text content) preserve their
+      ;; intrinsic content dimensions — CSS text nodes report their bounding box
+      ;; at natural text size, even when the anonymous flex item stretches.
       (define positioned-view
         (if child-view
-            (set-view-size (set-view-pos child-view x y) view-w view-h)
+            (let ([pos-view (set-view-pos child-view x y)])
+              (match pos-view
+                [`(view-text . ,_) pos-view]
+                [_ (set-view-size pos-view view-w view-h)]))
             (make-view (get-box-id (flex-item-box item)) x y view-w view-h '())))
 
       ;; apply relative positioning offset after flex positioning
