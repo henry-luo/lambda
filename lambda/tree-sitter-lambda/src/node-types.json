@@ -243,6 +243,14 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "index_expr",
+            "named": true
+          },
+          {
+            "type": "member_expr",
+            "named": true
           }
         ]
       },

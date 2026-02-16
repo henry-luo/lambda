@@ -152,6 +152,13 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_IO_FETCH, "io_fetch", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},     // io_fetch(target) -> any^
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true},     // io_fetch(target, options) -> any^
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false},     // exists(path) -> bool (never fails)
+    // bitwise functions - operate on integers, not method-eligible
+    {SYSFUNC_BAND, "band", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},        // band(a, b) -> int
+    {SYSFUNC_BOR, "bor", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // bor(a, b) -> int
+    {SYSFUNC_BXOR, "bxor", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},        // bxor(a, b) -> int
+    {SYSFUNC_BNOT, "bnot", 1, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},        // bnot(a) -> int
+    {SYSFUNC_SHL, "shl", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // shl(a, n) -> int
+    {SYSFUNC_SHR, "shr", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // shr(a, n) -> int
 };
 
 // Check if a name matches any system function (regardless of arg count)
@@ -3194,17 +3201,17 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
 
 AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     log_debug("build list type");
-    
+
     // Count children first to check for single-element case
     uint32_t child_count = ts_node_named_child_count(list_node);
-    
+
     // If single element, unwrap it - this makes (expr) just return expr
     // This is important for pattern context where ("a" to "z") should be a range_type
     if (child_count == 1) {
         TSNode child = ts_node_named_child(list_node, 0);
         return build_expr(tp, child);
     }
-    
+
     // Multi-element list type
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
@@ -4532,6 +4539,7 @@ AstNode* build_var_stam(Transpiler* tp, TSNode var_node) {
 }
 
 // assignment statement for mutable variables (procedural only)
+// supports: x = val, arr[i] = val, obj.field = val
 AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
     log_debug("build assign stam");
 
@@ -4541,25 +4549,69 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
         return NULL;
     }
 
-    AstAssignStamNode* ast_node = (AstAssignStamNode*)alloc_ast_node(tp, AST_NODE_ASSIGN_STAM, assign_node, sizeof(AstAssignStamNode));
-
-    // get target identifier
+    // get target node — could be identifier, index_expr, or member_expr
     TSNode target_node = ts_node_child_by_field_id(assign_node, FIELD_TARGET);
-    StrView target_str = ts_node_source(tp, target_node);
-    ast_node->target = name_pool_create_strview(tp->name_pool, target_str);
+    TSSymbol target_symbol = ts_node_symbol(target_node);
 
-    // lookup target variable to get its type info
-    NameEntry* entry = lookup_name(tp, target_str);
-    ast_node->target_node = entry ? entry->node : NULL;
-
-    // build value expression
+    // build value expression (same for all cases)
     TSNode value_node = ts_node_child_by_field_id(assign_node, FIELD_VALUE);
-    ast_node->value = build_expr(tp, value_node);
-    ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
 
-    // TODO: Verify target is a mutable variable (var, not let)
+    if (target_symbol == SYM_INDEX_EXPR) {
+        // arr[i] = val — compound index assignment
+        AstCompoundAssignNode* ast_node = (AstCompoundAssignNode*)alloc_ast_node(
+            tp, AST_NODE_INDEX_ASSIGN_STAM, assign_node, sizeof(AstCompoundAssignNode));
 
-    return (AstNode*)ast_node;
+        // build object (the array/container)
+        TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
+        ast_node->object = build_expr(tp, obj_node);
+
+        // build index expression
+        TSNode idx_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
+        ast_node->key = build_expr(tp, idx_node);
+
+        // build value expression
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+
+        return (AstNode*)ast_node;
+    }
+    else if (target_symbol == SYM_MEMBER_EXPR) {
+        // obj.field = val — compound member assignment
+        AstCompoundAssignNode* ast_node = (AstCompoundAssignNode*)alloc_ast_node(
+            tp, AST_NODE_MEMBER_ASSIGN_STAM, assign_node, sizeof(AstCompoundAssignNode));
+
+        // build object (the map/element)
+        TSNode obj_node = ts_node_child_by_field_id(target_node, FIELD_OBJECT);
+        ast_node->object = build_expr(tp, obj_node);
+
+        // build field name as identifier node
+        TSNode field_node = ts_node_child_by_field_id(target_node, FIELD_FIELD);
+        ast_node->key = build_expr(tp, field_node);
+
+        // build value expression
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+
+        return (AstNode*)ast_node;
+    }
+    else {
+        // simple variable assignment: x = val
+        AstAssignStamNode* ast_node = (AstAssignStamNode*)alloc_ast_node(tp, AST_NODE_ASSIGN_STAM, assign_node, sizeof(AstAssignStamNode));
+
+        // get target identifier
+        StrView target_str = ts_node_source(tp, target_node);
+        ast_node->target = name_pool_create_strview(tp->name_pool, target_str);
+
+        // lookup target variable to get its type info
+        NameEntry* entry = lookup_name(tp, target_str);
+        ast_node->target_node = entry ? entry->node : NULL;
+
+        // build value expression
+        ast_node->value = build_expr(tp, value_node);
+        ast_node->type = ast_node->value ? ast_node->value->type : &TYPE_ANY;
+
+        return (AstNode*)ast_node;
+    }
 }
 
 // returns NULL for variadic marker (...)
