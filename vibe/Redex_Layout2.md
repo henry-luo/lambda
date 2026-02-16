@@ -31,10 +31,11 @@
 | Differential tests (Phase 2A) | **621/709 (87.6%)** |
 | Dedicated flex suite | **153/156 (98.1%)** |
 | Dedicated grid suite | **117/123 (95.1%)** |
+| Dedicated box suite | **68/77 (88.3%)** |
 | Unit tests | 40/40 (100%) |
 | Test source | 10 suites: baseline, flex, grid, position, table, basic, box, page, flex-nest, text_flow |
-| Layout modes | Block, Flex, Grid, Positioned |
-| Total Redex code | ~6,800 lines across 14 `.rkt` files |
+| Layout modes | Block, Flex, Grid, Positioned, Inline (partial) |
+| Total Redex code | ~7,200 lines across 14 `.rkt` files |
 
 ### The Gap
 
@@ -996,3 +997,88 @@ All 3 failures use `writing-mode: vertical-lr`, which swaps the inline/block axe
 #### Summary
 
 The 9 remaining failures fall into categories that are either **impossible** without new engine features (writing-mode), **inherently imprecise** (non-Ahem fonts), **prohibitively complex** (13-track-type spanning), or **browser deviations from spec**. All tractable flex and grid tests now pass.
+
+---
+
+### Phase 2B++ — Box Suite Block & Inline Enhancement (Feb 17, 2026)
+
+**Box suite: 56 → 68/77 (+12), no regressions on flex (153/156) or grid (117/123).**
+
+Dedicated pass on the `box/` suite (77 discovered tests) focusing on block-level and inline layout features needed by CSS 2.1 conformance tests. Three major fixes implemented across multiple sessions.
+
+#### Current Results
+
+| Suite | Total | Pass | Fail | Pass Rate |
+|-------|-------|------|------|----------|
+| **box/** | 77 | **68** | 9 | **88.3%** |
+| **flex/** | 156 | **153** | 3 | **98.1%** |
+| **grid/** | 123 | **117** | 6 | **95.1%** |
+
+#### Key Fixes Implemented
+
+**1. Times Serif Font Metrics (+6: 56→62)**
+
+The box suite CSS 2.1 tests use Times (serif) as the default browser font, not Arial. Previously all text measurement used Arial metrics, causing systematic width mismatches.
+
+| Fix | Description |
+|-----|-------------|
+| Dual font metric system | Added `font-metrics` symbol ('times or 'arial) propagated through styles. Selection based on both `font-family` and `font-weight`. |
+| `times-char-widths` hash table | Per-character Times New Roman width ratios in `reference-import.rkt` (~30 characters). |
+| `times-char-ratio` function | Per-character Times width ratios in `layout-dispatch.rkt` with uppercase kerning correction (-0.025em). |
+| Font-family + weight detection | `use-arial-metrics?` = true when font-family contains sans-serif/arial/helvetica OR font-weight is bold. Otherwise defaults to Times. |
+| Proportional line-height | Times ratio 1.107 (vs Arial 1.15). Space width 0.250em (vs Arial 0.278em). |
+
+**2. Block-in-Inline Strut Heights (+5: 62→67)**
+
+Implemented CSS 2.2 §9.2.1.1: when an inline element contains block-level children, it is split into anonymous blocks. The empty anonymous block portions before and after contribute a "strut" height equal to the line-height.
+
+| Fix | Description |
+|-----|-------------|
+| `has-block-child?` detection | In `element->box-tree`, checks if any child box is `(block ...)`. |
+| Inline → block conversion | When `display: inline` has block children, converts to `(block ...)` with strut height annotations. |
+| `__before-strut-height` / `__after-strut-height` | Style properties storing the strut height (line-height-ratio × font-size). |
+| `layout-block.rkt` integration | Applies `before-strut-h` as initial y-offset and `after-strut-h` as additional final height. |
+| 10 block-in-inline tests pass | All `block-in-inline-*.htm` tests in the box suite now pass. |
+
+**3. Inline `::before` Content Width (+1: 67→68)**
+
+| Fix | Description |
+|-----|-------------|
+| `inject-before-content` extended | Handles non-block `::before` display by measuring content width with `measure-text-proportional`. |
+| `__before-inline-width` | Stored in parent's inline-alist, passed through to layout as x-offset for first text child. |
+| `layout-block.rkt` x-offset | Applies `before-inline-w` to first text child's x position. |
+
+#### Attempted & Reverted
+
+| Attempt | Reason for Revert |
+|---------|-------------------|
+| `white-space: pre` text node preservation | Modified `maybe-add-text-node!` to skip normalization when parent has `white-space: pre`. Caused 8 regressions (68→60) because the HTML parser's text node creation runs before CSS properties are known — whitespace between HTML elements (not meaningful content) was being preserved. Fundamental architectural issue: CSS-aware text node handling would require a two-pass approach. |
+
+#### Files Modified (3)
+
+| File | Changes |
+|------|--------|
+| `reference-import.rkt` | Times char-width hash table, font-weight/font-family detection, `font-metrics` symbol, `measure-text-proportional` dual-font support, `has-block-child?` + strut height computation, inline→block conversion, inline `::before` width measurement, `__before-inline-width` pass-through |
+| `layout-dispatch.rkt` | `font-metrics` detection from styles, `times-char-ratio` function, `arial-char-ratio` function (refactored from old `char-width`), dual `space-w-char` (0.250 Times / 0.278 Arial), proportional line-height ratio per font |
+| `layout-block.rkt` | `before-strut-h` / `after-strut-h` from `__before-strut-height` / `__after-strut-height`, initial-y / final-y strut integration, `before-inline-w` from `__before-inline-width` applied as x-offset to first text child |
+
+#### Remaining 9 Box Failures
+
+| Test | Category | Root Cause |
+|------|----------|------------|
+| `box_004_borders.html` | **Whitespace text nodes** | Child-count mismatch (13 vs 8). Whitespace text nodes between `inline-block` elements need preservation — `maybe-add-text-node!` strips whitespace-only nodes before CSS context is known. |
+| `box_006_text_align.html` | **Inline formatting context** | Full IFC needed — `<strong>` inline elements should share lines with adjacent text. Currently stacked vertically instead of composed horizontally. |
+| `box_013_nested_boxes.html` | **Box-sizing + flex** | 15/42 mismatches with systematic ~20px width offset. Tests `box-sizing: border-box` with universal selector + nested percentages + margin collapse + embedded flex layout. |
+| `run-in-basic-008.htm` | **Relative positioning** | y offset expected=0, actual=-32. `position: relative; top: 2em` interaction with containing block offsets. |
+| `run-in-basic-014.htm` | **white-space: pre** | Child-count 3 vs 2. Browser preserves whitespace text node between elements under `white-space: pre`. Requires CSS-aware HTML parsing (two-pass). |
+| `run-in-pre-ref.htm` | **white-space: pre** | Same root cause as run-in-basic-014 — whitespace text node count mismatch. |
+| `run-in-breaking-001.htm` | **white-space: pre + layout** | Child-count 3 vs 2 (same pre issue) plus height mismatch (46 vs 152.96). |
+| `text-indent-011.htm` | **line-height: 0** | text.y expected=-18, text.height expected=35. `line-height: 0` causes text to overflow upward (negative y). |
+| `text-indent-012.htm` | **Absolute + float** | div.y expected=0, actual=75. Complex interaction of absolute positioning + float + text-indent. |
+
+#### Priority for Next Session
+
+1. **white-space: pre** (3 tests) — Two-pass approach: preserve all whitespace text nodes with a flag during HTML parse, then drop based on CSS `white-space` property in a second pass.
+2. **box_013 nested sizing** (1 test) — Investigate the 20px offset from `box-sizing: border-box` interacting with embedded flex container.
+3. **IFC / box_006** (1 test) — Inline elements sharing lines with text content requires proper inline formatting context implementation.
+4. **Remaining edge cases** (4 tests) — Relative positioning, line-height: 0, absolute+float interactions.
