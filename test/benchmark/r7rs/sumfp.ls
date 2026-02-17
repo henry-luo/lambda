@@ -4,8 +4,7 @@
 
 pn run(n) {
     var i = n
-    // Use Item-typed zero to avoid transpiler float reassignment bug
-    var s = n - n
+    var s = 0.0
     while (i >= 0.0) {
         s = s + i
         i = i - 1.0
