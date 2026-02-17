@@ -2,6 +2,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "../lib/log.h"
+#include "../lib/url.h"
 #include "utf_string.h"
 #include "re2_wrapper.hpp"
 #include <mpdecimal.h>  // needed for inline decimal operations
@@ -2385,6 +2386,60 @@ Item fn_upper(Item str_item) {
         result->chars[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
     }
     result->chars[len] = '\0';
+    return {.item = s2it(result)};
+}
+
+// url_resolve(base, relative) - resolve a relative URL against a base URL
+Item fn_url_resolve(Item base_item, Item relative_item) {
+    GUARD_ERROR2(base_item, relative_item);
+    TypeId base_type = get_type_id(base_item);
+    TypeId rel_type = get_type_id(relative_item);
+
+    if ((base_type != LMD_TYPE_STRING && base_type != LMD_TYPE_SYMBOL) ||
+        (rel_type != LMD_TYPE_STRING && rel_type != LMD_TYPE_SYMBOL)) {
+        log_debug("fn_url_resolve: arguments must be strings");
+        return ItemError;
+    }
+
+    const char* base_chars = base_item.get_chars();
+    const char* rel_chars = relative_item.get_chars();
+    if (!base_chars || !rel_chars) {
+        return ItemNull;
+    }
+
+    // parse the base URL
+    Url* base_url = url_parse(base_chars);
+    if (!base_url || !base_url->is_valid) {
+        log_debug("fn_url_resolve: invalid base URL '%s'", base_chars);
+        if (base_url) url_destroy(base_url);
+        return ItemNull;
+    }
+
+    // resolve the relative URL against the base
+    Url* resolved = url_resolve_relative(rel_chars, base_url);
+    if (!resolved || !resolved->is_valid) {
+        log_debug("fn_url_resolve: failed to resolve '%s' against '%s'", rel_chars, base_chars);
+        if (resolved) url_destroy(resolved);
+        url_destroy(base_url);
+        return ItemNull;
+    }
+
+    // get the href string from the resolved URL
+    const char* href = url_get_href(resolved);
+    if (!href) {
+        url_destroy(resolved);
+        url_destroy(base_url);
+        return ItemNull;
+    }
+
+    uint32_t len = (uint32_t)strlen(href);
+    String* result = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    result->len = len;
+    memcpy(result->chars, href, len);
+    result->chars[len] = '\0';
+
+    url_destroy(resolved);
+    url_destroy(base_url);
     return {.item = s2it(result)};
 }
 
