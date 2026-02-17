@@ -254,6 +254,9 @@ static const NativeBinaryFunc* can_use_native_binary_func(AstSysFuncNode* sys_fn
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     if (!fn_node || !has_typed_params(fn_node)) return false;
 
+    // Don't use unboxed for procs - no _u version is generated for them
+    if (fn_node->node_type == AST_NODE_PROC) return false;
+
     // Don't use unboxed for TCO functions - they need the goto-based implementation
     if (should_use_tco(fn_node) && is_tco_function_safe(fn_node)) {
         return false;
@@ -4629,6 +4632,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     } else if (fn_node->body->node_type == AST_NODE_RAISE_STAM) {
         // raise statement already generates return, don't add another
         transpile_raise(tp, (AstRaiseNode*)fn_node->body);
+        strbuf_append_str(tp->code_buf, "\n}\n");
+    } else if (is_proc && fn_node->body->node_type == AST_NODE_RETURN_STAM) {
+        // return statement already generates return, don't add another
+        transpile_return(tp, (AstReturnNode*)fn_node->body);
         strbuf_append_str(tp->code_buf, "\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");
