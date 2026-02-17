@@ -69,38 +69,86 @@
 (define (layout-inline-children children max-line-width parent-bm dispatch-fn)
   (define offset-x (+ (box-model-padding-left parent-bm) (box-model-border-left parent-bm)))
   (define offset-y (+ (box-model-padding-top parent-bm) (box-model-border-top parent-bm)))
-  (define default-line-height 20)  ; simplified default line height
+
+  ;; compute text height from styles: use explicit line-height or font metrics
+  (define (text-height-from-styles styles)
+    (define fs (get-style-prop styles 'font-size 16))
+    (define lh (get-style-prop styles 'line-height #f))
+    (cond
+      [(and lh (number? lh)) lh]
+      ;; Ahem font: line-height defaults to font-size
+      [(let ([ft (get-style-prop styles 'font-type #f)])
+         (or (not ft) (eq? ft 'ahem)))
+       fs]
+      ;; proportional: use font metrics ratio
+      [else (* 1.15 fs)]))
 
   (let loop ([remaining children]
              [current-x 0]
              [current-y 0]
-             [line-height default-line-height]
+             [line-height 0]
              [views '()])
     (cond
       [(null? remaining)
        (values (reverse views) (+ current-y line-height))]
       [else
        (define child (car remaining))
+
+       ;; CSS 2.2 §9.3.2: check for forced line break (<br> element)
+       ;; <br> elements carry __forced-break in their styles
+       (define is-forced-break?
+         (match child
+           [`(inline ,_ ,styles ,_)
+            (get-style-prop styles '__forced-break #f)]
+           [_ #f]))
+
+       (cond
+         [is-forced-break?
+          ;; CSS 2.2 §9.3.2: <br> forced line break
+          ;; Position the <br> at the current cursor on the current line,
+          ;; give it one line-height, then advance to the next line.
+          (define br-id
+            (match child [`(inline ,id ,_ ,_) id] [_ 'br]))
+          ;; <br> has height equal to one line of text in the current context
+          (define br-height
+            (if (> line-height 0)
+                line-height
+                ;; default proportional line height: ~17.71 (16px × 1.107)
+                17.71))
+          (define br-view
+            `(view ,br-id ,(+ offset-x current-x) ,(+ offset-y current-y) 0 ,br-height ()))
+          (define new-line-height (max line-height br-height))
+          (loop (cdr remaining)
+                0
+                (+ current-y new-line-height)
+                0
+                (cons br-view views))]
+
+         [else
        (define child-view
          (match child
-           ;; text node: measure and possibly wrap
+           ;; text node: dispatch through layout system for proper metrics
            [`(text ,id ,styles ,content ,measured-w)
-            (define text-height default-line-height)
+            ;; lay out text via dispatch to get correct font-measured dimensions
+            (define text-avail `(avail (definite ,max-line-width) indefinite))
+            (define laid-out (dispatch-fn child text-avail))
+            (define cw (view-width laid-out))
+            (define ch (view-height laid-out))
             ;; check if text fits on current line
             (cond
-              [(and (> current-x 0) (> (+ current-x measured-w) max-line-width))
+              [(and (> current-x 0) (> (+ current-x cw) max-line-width))
                ;; wrap to next line
                (set! current-x 0)
                (set! current-y (+ current-y line-height))
-               (set! line-height default-line-height)]
+               (set! line-height 0)]
               [else (void)])
-            (define vw (make-text-view id
-                                       (+ offset-x current-x)
-                                       (+ offset-y current-y)
-                                       measured-w text-height content))
-            (set! current-x (+ current-x measured-w))
-            (set! line-height (max line-height text-height))
-            vw]
+            (define positioned
+              (set-view-position laid-out
+                                (+ offset-x current-x)
+                                (+ offset-y current-y)))
+            (set! current-x (+ current-x cw))
+            (set! line-height (max line-height ch))
+            positioned]
 
            ;; inline-block: lay out as block, then place inline
            [`(inline-block ,id ,styles ,children-inner)
@@ -112,7 +160,7 @@
             (when (and (> current-x 0) (> (+ current-x cw) max-line-width))
               (set! current-x 0)
               (set! current-y (+ current-y line-height))
-              (set! line-height default-line-height))
+              (set! line-height 0))
             (define positioned
               (set-view-position laid-out
                                 (+ offset-x current-x)
@@ -131,7 +179,7 @@
             (when (and (> current-x 0) (> (+ current-x cw) max-line-width))
               (set! current-x 0)
               (set! current-y (+ current-y line-height))
-              (set! line-height default-line-height))
+              (set! line-height 0))
             (define positioned
               (set-view-position laid-out
                                 (+ offset-x current-x)
@@ -149,7 +197,7 @@
               (when (and (> current-x 0) (> (+ current-x cw) max-line-width))
                 (set! current-x 0)
                 (set! current-y (+ current-y line-height))
-                (set! line-height default-line-height))
+                (set! line-height 0))
               (define positioned
                 (set-view-position laid-out
                                   (+ offset-x current-x)
@@ -160,8 +208,7 @@
 
        (loop (cdr remaining)
              current-x current-y line-height
-             (cons child-view views))])))
-
+             (cons child-view views))])])))  ;; close else, cond, loop-case
 ;; ============================================================
 ;; Helper: Set view position
 ;; ============================================================
