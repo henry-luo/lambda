@@ -1,5 +1,6 @@
 #include "format.h"
 #include "../../lib/stringbuf.h"
+#include "../../lib/log.h"
 
 // Create a Lambda Item from raw field data with proper type tagging
 Item create_item_from_field_data(void* field_data, TypeId type_id) {
@@ -93,7 +94,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         format_type_with_flavor[sizeof(format_type_with_flavor) - 1] = '\0';
     }
 
-    printf("Formatting with type: %s\n", format_type_with_flavor);
+    log_debug("Formatting with type: %s", format_type_with_flavor);
 
     String* result = NULL;
 
