@@ -277,18 +277,17 @@ The chart rendering pipeline consists of these stages, each implemented as a pur
 ### Module Structure
 
 ```
-lib/chart/
+lambda/package/chart/
 ├── chart.ls              # Main entry point: chart.render(spec) → SVG
 ├── parse.ls              # Parse and validate <chart> element tree
-├── data.ls               # Data resolution and loading
-├── transform.ls          # Data transforms (aggregate, bin, filter, calculate)
-├── scale.ls              # Scale construction (linear, ordinal, log, time, band, point)
+├── transform.ls          # Data transforms (aggregate, bin, filter, calculate, sort, fold, flatten)
+├── scale.ls              # Scale construction (linear, ordinal, log, sqrt, band, point)
 ├── mark.ls               # Mark renderers (bar, line, area, point, arc, text, rule, tick)
 ├── axis.ls               # Axis generation (ticks, labels, gridlines)
-├── legend.ls             # Legend generation
-├── layout.ls             # Layout and positioning
-├── color.ls              # Color palettes and schemes
-├── svg.ls                # SVG element helpers
+├── legend.ls             # Legend generation (categorical and gradient)
+├── layout.ls             # Layout and positioning (cartesian and arc)
+├── color.ls              # Color palettes and schemes (category10, sequential, diverging)
+├── svg.ls                # SVG element construction helpers and path generators
 └── util.ls               # Math utilities (nice numbers, tick intervals, etc.)
 ```
 
@@ -297,7 +296,7 @@ lib/chart/
 #### Simple Bar Chart
 
 ```lambda
-import chart: .lib.chart;
+import chart: .lambda.package.chart.chart;
 
 let sales = [
     {category: "A", amount: 28},
@@ -1196,3 +1195,104 @@ Single-view charts with basic marks and auto-scales.
 ---
 
 *This proposal is based on Vega-Lite v5 as the design reference, adapted for Lambda Script's element-based syntax, functional programming model, and SVG output pipeline.*
+
+---
+
+## Implementation Progress (as of 2025-02-17)
+
+### Status Summary
+
+The chart library is **functional end-to-end** for Phase 1 (Core MVP) chart types. All 12 modules are implemented, compile via MIR JIT, and produce correct SVG output. A Vega-Lite JSON converter module (`vega.ls`) has been added to enable ingestion of Vega-Lite specifications. Three automated tests (bar, line, scatter) are registered in the baseline test suite and passing.
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| **Phase 1 — Core (MVP)** | ✅ Complete | Bar, line, point marks; auto-axes; linear/band/point scales; SVG assembly |
+| **Phase 2 — Extended Marks** | 🔶 Partial | Area, arc, text, rule, tick marks implemented. Legends implemented (color + gradient). Size/opacity encoding not yet wired. |
+| **Phase 3 — Transforms & Scales** | 🔶 Partial | Filter and sort transforms working. Log/sqrt scales implemented. Aggregate, calculate, bin, fold, flatten transforms **stubbed** (return data unchanged). Stacking not implemented. |
+| **Phase 4 — Composition** | 🔶 Partial | Layer composition working. Facet, concat, repeat not implemented. Config/theming not implemented. Grid lines working. |
+| **Phase 5 — Advanced** | ❌ Not started | — |
+
+### Module Inventory
+
+12 modules, ~2,180 lines of Lambda Script, 57 public functions, 18 public values.
+
+| Module | Lines | Public API | Status |
+|--------|-------|------------|--------|
+| `chart.ls` | 379 | `render(chart_el)`, `render_spec(spec)` | ✅ Working — main entry points |
+| `parse.ls` | 159 | `parse_chart`, `get_channel`, `has_channel` | ✅ Working — element tree → spec map |
+| `mark.ls` | 328 | `bar`, `bar_horizontal`, `line_mark`, `area_mark`, `point_mark`, `arc_mark`, `text_mark`, `rule_mark`, `tick_mark` | ✅ 9 mark types implemented |
+| `scale.ls` | 190 | `linear_scale`, `linear_scale_nice`, `log_scale`, `sqrt_scale`, `band_scale`, `point_scale`, `ordinal_scale`, `scale_apply`, `scale_ticks`, `scale_invert`, `infer_scale`, `infer_color_scale` | ✅ 7 scale types |
+| `axis.ls` | 189 | `x_axis`, `y_axis`, `x_axis_grid`, `y_axis_grid`, `estimate_y_axis_width`, `estimate_x_axis_height` | ✅ Working |
+| `legend.ls` | 141 | `color_legend`, `gradient_legend`, `legend_width`, `legend_height` | ✅ Working |
+| `layout.ls` | 114 | `compute_layout`, `compute_arc_layout` | ✅ Working |
+| `color.ls` | 103 | `get_scheme`, `pick_color`, `sequential_color` + 13 palette constants | ✅ 13 palettes |
+| `svg.ls` | 159 | 19 SVG helper functions (elements, path commands, transforms) | ✅ Working |
+| `transform.ls` | 82 | `apply_transforms`, `compute_agg` | 🔶 Only filter + sort; aggregate/calculate/bin/fold/flatten stubbed |
+| `util.ls` | 163 | 15 math/collection utilities | ✅ Working (with `unique_vals` workaround) |
+| `vega.ls` | 174 | `convert(vl)` | ✅ Vega-Lite JSON → Lambda chart spec |
+
+### Vega-Lite Converter (`vega.ls`)
+
+A new module not in the original proposal. Converts Vega-Lite JSON maps into the Lambda chart spec format consumed by `chart.render_spec()`. Key mappings:
+
+| Vega-Lite | Lambda Chart |
+|-----------|-------------|
+| `mark.type` | `mark.kind` |
+| `encoding.*.type` | `encoding.*.dtype` |
+| `"quantitative"` / `"Q"` | `"quantitative"` |
+| `"nominal"` / `"N"` | `"nominal"` |
+| `"ordinal"` / `"O"` | `"ordinal"` |
+| `"temporal"` / `"T"` | `"temporal"` |
+| camelCase keys (e.g., `strokeWidth`) | snake_case keys (e.g., `stroke_width`) |
+| `mark: "bar"` (string shorthand) | `mark: {kind: "bar"}` |
+| `layer: [...]` | Layer composition via `render_layered` |
+
+Usage: `let spec = vega.convert(vega_lite_json)` then `chart.render_spec(spec)`.
+
+### Test Suite
+
+3 end-to-end tests registered in the baseline test runner (`test_lambda_gtest.exe`):
+
+| Test | Input | Chart Type | Data Points | Verified Output |
+|------|-------|------------|-------------|-----------------|
+| `test_bar_chart` | Inline Vega-Lite JSON | Bar (nominal × quantitative) | 3 categories (A/B/C) | ✅ 3,050 bytes SVG |
+| `test_line_chart` | Inline Vega-Lite JSON | Line with point markers | 5 points (x: 0–4) | ✅ 4,861 bytes SVG |
+| `test_scatter_chart` | Inline Vega-Lite JSON | Scatter (point mark) | 5 points (x: 10–50) | ✅ 4,826 bytes SVG |
+
+All tests follow the pipeline: **Vega-Lite map → `vega.convert()` → `chart.render_spec()` → `format(svg, 'xml')`**.
+
+Tests are registered in `test/test_lambda_gtest.cpp` via the `"test/lambda/chart"` directory entry in `FUNCTIONAL_TEST_DIRECTORIES`. Each `.ls` script has a corresponding `.txt` expected-output file.
+
+### Issues Encountered
+
+#### Resolved
+
+| # | Issue | Root Cause | Resolution |
+|---|-------|-----------|------------|
+| 1 | **Cross-module `: float` type annotations break JIT** | MIR compilation fails when `pub fn` parameters or return types use `: float` | Removed all `: float` annotations from pub function signatures; use un-annotated params |
+| 2 | **Tuple-pipe mapping broken cross-module** | `tuple \| module.fn(~)` fails at MIR compilation | Replaced with explicit `for (x in tuple) module.fn(x)` comprehensions |
+| 3 | **`unique()` broken for string arrays** | Built-in `unique()` only returns the first element when given string arrays; works correctly for integer arrays | Implemented recursive `unique_vals()` in `util.ls` using linear-scan `has_val()` helper; replaced all 12 call sites across 5 modules |
+| 4 | **X-axis tick labels show `"<error>"`** | `util.fmt_num(tv)` called on string values from band scales (nominal categories) | Changed to `string(tv)` in `axis.ls` — works universally for both numeric and string tick values |
+| 5 | **`if`/`else` blocks parsed as map literals** | `{ }` inside if-expressions treated as map constructor, not code blocks | Rewrote all conditional logic as parenthesized if-expressions: `(if (cond) expr1 else expr2)` |
+| 6 | **Reserved words as map keys** | `.type` field access fails because `type` is a reserved Lambda keyword | Used bracket notation: `obj["type"]` instead of `obj.type` |
+| 7 | **`for` comprehension concatenates string results** | When the body of a `for` expression returns strings, results are concatenated instead of collected into a tuple | Used recursive array-building pattern with `[*result, item]` instead of `for` comprehension for string-producing operations |
+| 8 | **`let` with `if_expr` inside `for` comprehension causes MIR failure** | `let label = (if (cond) A else B)` as a `for`-local binding crashes MIR compilation | Avoided the pattern; used `string(tv)` universally instead of conditional formatting |
+| 9 | **`input()` with `^err` destructuring breaks module resolution** | `let vl^err = input(...)` in test scripts causes "Failed to find import item for module" error at MIR compilation, even though all imported modules compile individually | Switched test scripts to inline data (map literals) instead of file I/O; `input()` with `^err` appears to interfere with the JIT module linker |
+| 10 | **Computed map keys not supported** | `{[key_var]: val}` syntax does not exist in Lambda | Cannot dynamically construct maps with variable keys; must use spread `{*base, field: val}` with known field names |
+| 11 | **Map spread segfault** | `{...m}` causes a segfault | Use `{*m}` instead |
+| 12 | **Functions limited to 8 parameters** | MIR JIT fails for functions with >8 parameters | Restructured functions to use context maps (`ctx`) instead of many individual parameters |
+
+#### Remaining / Known Limitations
+
+| # | Issue | Impact | Workaround |
+|---|-------|--------|------------|
+| 1 | **5 transform types not implemented** (aggregate, calculate, bin, fold, flatten) | Cannot do in-chart data aggregation, computed fields, or histograms | Pre-process data in user scripts before passing to chart; transforms return data unchanged |
+| 2 | **No computed key support in Lambda** | Cannot dynamically construct maps with variable field names | Limits transform implementation; `calculate` and `aggregate` transforms require building maps with dynamic `as` field names |
+| 3 | **`unique()` still broken for strings** | Upstream Lambda runtime bug | Workaround in place (`util.unique_vals`); should be fixed in the runtime |
+| 4 | **`input()` + `^err` breaks JIT module linking** | Cannot load test data from external JSON files in test scripts | Use inline data in test scripts; `input()` works in standalone scripts but fails when combined with multi-module imports |
+| 5 | **No stacking support** | Cannot render stacked bar or stacked area charts | Not yet implemented in the mark/scale pipeline |
+| 6 | **No facet / concat / repeat composition** | Only single-view and layer compositions work | Multi-view dashboards not yet possible |
+| 7 | **No temporal (time) scale** | Date/time axes not supported | Temporal data must be converted to numeric values manually |
+| 8 | **Gradient legend uses discrete rectangles** | No SVG `<linearGradient>` element generation | Visual approximation with 20 small `<rect>` elements; acceptable for most use cases |
+| 9 | **Band/point scale index lookup is O(n)** | Uses linear scan `for` comprehension instead of hash map | Acceptable for typical category counts (<100); would need optimization for large categorical datasets |
+| 10 | **`: float` annotations unusable on public functions** | Cross-module JIT compilation fails | All numeric parameters left un-annotated; type inference handles it correctly at runtime |

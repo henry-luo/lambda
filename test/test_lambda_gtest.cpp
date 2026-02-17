@@ -13,6 +13,7 @@
 // Functional scripts (executed with ./lambda.exe <script>)
 static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda",
+    "test/lambda/chart",
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
