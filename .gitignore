@@ -106,6 +106,9 @@ linux-deps/
 windows-deps/
 win-native-deps/
 
+# Reference projects
+ref/
+
 # Documentation related
 .obsidian/
 site/
