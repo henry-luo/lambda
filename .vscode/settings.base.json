@@ -95,5 +95,6 @@
     "C_Cpp.intelliSenseEngine": "default",
     "C_Cpp.intelliSenseEngineFallback": "enabled",
     "C_Cpp.autocompleteAddParentheses": true,
-    "C_Cpp.workspaceParsingPriority": "highest"
+    "C_Cpp.workspaceParsingPriority": "highest",
+    "github.copilot.chat.agent.allowedFilePathPatterns": ["/tmp/**"]
 }

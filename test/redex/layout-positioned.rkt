@@ -40,6 +40,11 @@
      (define css-width-val (get-style-prop styles 'width 'auto))
      (define resolved-w (resolve-size-value css-width-val containing-w))
 
+     ;; width-from-content?: true when width is determined by shrink-to-fit
+     ;; (content-sized). Used to signal grid layout that fr distribution should
+     ;; not apply the max(sum,1) floor for sub-1 flex factor sums, since the
+     ;; container width was derived from the content itself.
+     (define width-from-content? #f)
      (define content-w
        (cond
          ;; explicit width
@@ -50,6 +55,7 @@
                     (horizontal-pb bm) (horizontal-margin bm)))]
          ;; shrink-to-fit: measure content with max-content, clamp to containing block
          [else
+          (set! width-from-content? #t)
           (define shrink-avail (max 0 (- containing-w (horizontal-pb bm) (horizontal-margin bm))))
           ;; measure max-content (preferred) width
           (define static-s (override-position styles 'static))
@@ -158,7 +164,9 @@
        (if content-h
            (+ content-h (vertical-pb bm) (vertical-margin bm))
            #f))
-     (define avail `(avail (definite ,avail-w-for-dispatch)
+     (define avail `(avail ,(if width-from-content?
+                                `(content-sized ,avail-w-for-dispatch)
+                                `(definite ,avail-w-for-dispatch))
                            ,(if avail-h-for-dispatch
                                 `(definite ,avail-h-for-dispatch)
                                 'indefinite)))
