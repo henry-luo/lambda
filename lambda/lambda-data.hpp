@@ -317,6 +317,7 @@ typedef enum SysFunc {
     SYSFUNC_TRIM_END,
     SYSFUNC_LOWER,
     SYSFUNC_UPPER,
+    SYSFUNC_URL_RESOLVE,
     SYSFUNC_SPLIT,
     SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
     SYSFUNC_REPLACE,

@@ -1,0 +1,12 @@
+# R7RS Benchmark Results 2026-02-17 12:33:31, runs=5
+benchmark,category,lambda_ms,lambda_typed_ms,racket_ms,guile_ms
+fib,recursive,2347.261,1145.809,0.715,3.145
+fibfp,recursive,5278.656,2323.811,3.449,15.279
+tak,recursive,122.521,9.325,0.064,0.288
+cpstak,closure,229.608,10.016,0.149,1.463
+sum,iterative,5739.692,9.204,1.053,1.072
+sumfp,iterative,1110.145,9.140,1.148,2.590
+nqueens,backtrack,1547.478,1129.680,0.098,0.338
+fft,numeric,1254.458,1461.966,0.475,1.694
+mbrot,numeric,7674.514,152.815,3.734,13.676
+ack,recursive,13751.052,24.297,3.147,12.945
