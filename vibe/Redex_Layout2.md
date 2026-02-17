@@ -29,10 +29,13 @@
 |--------|-------|
 | Differential tests (Phase 1) | **508/508 (100%)** |
 | Differential tests (Phase 2A) | **621/709 (87.6%)** |
+| Dedicated flex suite | **153/156 (98.1%)** |
+| Dedicated grid suite | **117/123 (95.1%)** |
+| Dedicated box suite | **68/77 (88.3%)** |
 | Unit tests | 40/40 (100%) |
 | Test source | 10 suites: baseline, flex, grid, position, table, basic, box, page, flex-nest, text_flow |
-| Layout modes | Block, Flex, Grid, Positioned |
-| Total Redex code | ~6,800 lines across 14 `.rkt` files |
+| Layout modes | Block, Flex, Grid, Positioned, Inline (partial) |
+| Total Redex code | ~7,200 lines across 14 `.rkt` files |
 
 ### The Gap
 
@@ -45,7 +48,7 @@ This means **2,533 additional tests** with reference JSONs exist across all suit
 
 ### Motivation
 
-1. **Verification breadth** — The C++ Radiant engine has separate flex (156) and grid (123) test suites that are 0% passing. The Redex model can serve as a second reference.
+1. **Verification breadth** — The C++ Radiant engine has separate flex (156) and grid (123) test suites. The Redex model now passes **153/156 flex** and **117/123 grid** tests, serving as a verified second reference.
 2. **Real-world coverage** — Production HTML uses `<style>` blocks, inline/inline-block elements, tables, floats, and text. The current model only covers synthetic flex/grid tests.
 3. **Specification completeness** — A layout specification that can't handle `<p>` or `<span>` is incomplete as a CSS reference.
 
@@ -928,3 +931,154 @@ Approach pivoted from the proposed JSON-computed-style importer (`reference-impo
 - Grid item margin in track sizing — `measure-grid-item-min` adds item margins to border-box size
 - Flex baseline cross-axis margin — cross-offset now includes `cross-margin-before`
 - Flex `min-width: auto` for items with explicit size — new `measure-flex-item-content-min` returns true content-based minimum per CSS Flexbox §4.5
+
+---
+
+### Dedicated Flex & Grid Suites — Deep Pass (ongoing)
+
+After Phase 2A brought in multi-suite discovery, dedicated passes on the full `flex/` (156 tests) and `grid/` (123 tests) suites pushed both to near-complete coverage.
+
+#### Current Results
+
+| Suite | Total | Pass | Fail | Pass Rate |
+|-------|-------|------|------|-----------|
+| **flex/** | 156 | **153** | 3 | **98.1%** |
+| **grid/** | 123 | **117** | 6 | **95.1%** |
+| **Combined** | 279 | **270** | 9 | **96.8%** |
+
+#### Key Fixes Implemented
+
+**Flex fixes:**
+
+| Fix | Description | Tests Gained |
+|-----|-------------|--------------|
+| Phase 5b main-axis re-resolve | When indefinite main is clamped by min/max-height, re-resolve items with constrained size as definite | ~5 |
+| `wrap-reverse` cross-axis | Reverse cross-axis origin and direction for `flex-wrap: wrap-reverse` | ~4 |
+| Cross-size derivation heuristic | For items with explicit cross-dim or max-cross constraint, derive cross-size from container rather than using indefinite | ~6 |
+| AR + max-main measurement | In Phase 3 basis sizing, measure with AR-derived cross when item has aspect-ratio + max-main constraint | ~3 |
+| Post-cross cross-size update | After `determine-cross-sizes`, update cross-size using actual child-main via AR (with max-cross cap) | ~3 |
+| AR cross constraint dispatch | In `determine-cross-sizes`, derive definite cross-avail from `child-main × AR` when item has aspect-ratio + auto cross + indefinite cross-avail; dispatch with derived constraint instead of indefinite | +1 |
+| Flex margin/shrink fixes | Percentage margin resolution, shrink with min-size clamping, baseline cross-margin | ~8 |
+
+**Grid fixes:**
+
+| Fix | Description | Tests Gained |
+|-----|-------------|--------------|
+| Fr freeze algorithm (§12.7.1) | Tracks whose base-size exceeds proportional share are frozen iteratively | ~5 |
+| Fr sub-1 sum floor | When sum of flex factors < 1, use `max(sum, 1)` as divisor per spec | ~3 |
+| `(content-sized n)` avail-width | New avail-width variant signals content-derived width to grid layout, allowing `auto-container-size?` to skip the `max(sum,1)` floor for content-sized containers | +1 |
+| Span + fr growth-limit guard | Skip growth-limit distribution (Step 2) when spanning item crosses fr tracks — prevents non-fr tracks from absorbing all space before Phase 3 flexible sizing | +1 |
+| Percentage gap resolution | Resolve `(% N)` gap values against container size | ~3 |
+| Max-width + min-content mode | Clamp available width by max-width when in min-content sizing mode | ~2 |
+| Margin percent resolution | Resolve percentage margins against containing block during track sizing | ~2 |
+| Grid item margin in alignment | Include margins in alignment offset and subtract from stretch sizing | ~3 |
+
+#### Remaining 3 Flex Failures
+
+All 3 failures use `writing-mode: vertical-lr`, which swaps the inline/block axes. Writing-mode support is not implemented.
+
+| Test | Root Cause | Details |
+|------|-----------|---------|
+| `intrinsic_sizing_main_size_column.html` | `writing-mode: vertical-lr` | Expected w=10, h=40; actual w=40, h=10 (axes swapped) |
+| `intrinsic_sizing_main_size_column_nested.html` | `writing-mode: vertical-lr` | Same axis-swap pattern, nested containers |
+| `intrinsic_sizing_main_size_column_wrap.html` | `writing-mode: vertical-lr` | Same axis-swap pattern, wrapping variant |
+
+#### Remaining 6 Grid Failures
+
+| Test | Category | Root Cause |
+|------|----------|-----------|
+| `grid_015_content_sizing.html` | **Font-dependent** | Uses Arial font (not Ahem); 29 mismatches from text measurement differences. Non-Ahem font metrics cannot be replicated without a real font engine. |
+| `grid_119_negative_lines.html` | **Font + complex** | Uses negative line numbers for implicit grid placement + Arial font; 12 mismatches from combined font metrics and implicit grid edge cases. |
+| `grid_relayout_vertical_text.html` | **Writing-mode** | Uses `writing-mode: vertical-lr`; 9 mismatches from unsupported axis swap. |
+| `grid_span_13_most_non_flex_with_minmax_indefinite.html` | **Extreme complexity** | 13 different track types including `minmax()`, `fit-content()`, `auto`, `fr`, fixed, and `%` — with spanning items across all + circular 20% dependency. 15 mismatches. |
+| `grid_span_13_most_non_flex_with_minmax_indefinite_hidden.html` | **Extreme complexity** | Same as above with `overflow: hidden`; 15 mismatches. |
+| `xgrid_fr_span_2_proportion_sub_1_sum_with_non_spanned_track.html` | **Browser quirk** | Browser gives 78/9 split for fr tracks; CSS Grid spec §12.7.1 algorithm gives 120/60. The browser deviates from spec when non-spanned tracks exist alongside spanned fr tracks with sub-1 sum. 3 mismatches. |
+
+#### Summary
+
+The 9 remaining failures fall into categories that are either **impossible** without new engine features (writing-mode), **inherently imprecise** (non-Ahem fonts), **prohibitively complex** (13-track-type spanning), or **browser deviations from spec**. All tractable flex and grid tests now pass.
+
+---
+
+### Phase 2B++ — Box Suite Block & Inline Enhancement (Feb 17, 2026)
+
+**Box suite: 56 → 68/77 (+12), no regressions on flex (153/156) or grid (117/123).**
+
+Dedicated pass on the `box/` suite (77 discovered tests) focusing on block-level and inline layout features needed by CSS 2.1 conformance tests. Three major fixes implemented across multiple sessions.
+
+#### Current Results
+
+| Suite | Total | Pass | Fail | Pass Rate |
+|-------|-------|------|------|----------|
+| **box/** | 77 | **68** | 9 | **88.3%** |
+| **flex/** | 156 | **153** | 3 | **98.1%** |
+| **grid/** | 123 | **117** | 6 | **95.1%** |
+
+#### Key Fixes Implemented
+
+**1. Times Serif Font Metrics (+6: 56→62)**
+
+The box suite CSS 2.1 tests use Times (serif) as the default browser font, not Arial. Previously all text measurement used Arial metrics, causing systematic width mismatches.
+
+| Fix | Description |
+|-----|-------------|
+| Dual font metric system | Added `font-metrics` symbol ('times or 'arial) propagated through styles. Selection based on both `font-family` and `font-weight`. |
+| `times-char-widths` hash table | Per-character Times New Roman width ratios in `reference-import.rkt` (~30 characters). |
+| `times-char-ratio` function | Per-character Times width ratios in `layout-dispatch.rkt` with uppercase kerning correction (-0.025em). |
+| Font-family + weight detection | `use-arial-metrics?` = true when font-family contains sans-serif/arial/helvetica OR font-weight is bold. Otherwise defaults to Times. |
+| Proportional line-height | Times ratio 1.107 (vs Arial 1.15). Space width 0.250em (vs Arial 0.278em). |
+
+**2. Block-in-Inline Strut Heights (+5: 62→67)**
+
+Implemented CSS 2.2 §9.2.1.1: when an inline element contains block-level children, it is split into anonymous blocks. The empty anonymous block portions before and after contribute a "strut" height equal to the line-height.
+
+| Fix | Description |
+|-----|-------------|
+| `has-block-child?` detection | In `element->box-tree`, checks if any child box is `(block ...)`. |
+| Inline → block conversion | When `display: inline` has block children, converts to `(block ...)` with strut height annotations. |
+| `__before-strut-height` / `__after-strut-height` | Style properties storing the strut height (line-height-ratio × font-size). |
+| `layout-block.rkt` integration | Applies `before-strut-h` as initial y-offset and `after-strut-h` as additional final height. |
+| 10 block-in-inline tests pass | All `block-in-inline-*.htm` tests in the box suite now pass. |
+
+**3. Inline `::before` Content Width (+1: 67→68)**
+
+| Fix | Description |
+|-----|-------------|
+| `inject-before-content` extended | Handles non-block `::before` display by measuring content width with `measure-text-proportional`. |
+| `__before-inline-width` | Stored in parent's inline-alist, passed through to layout as x-offset for first text child. |
+| `layout-block.rkt` x-offset | Applies `before-inline-w` to first text child's x position. |
+
+#### Attempted & Reverted
+
+| Attempt | Reason for Revert |
+|---------|-------------------|
+| `white-space: pre` text node preservation | Modified `maybe-add-text-node!` to skip normalization when parent has `white-space: pre`. Caused 8 regressions (68→60) because the HTML parser's text node creation runs before CSS properties are known — whitespace between HTML elements (not meaningful content) was being preserved. Fundamental architectural issue: CSS-aware text node handling would require a two-pass approach. |
+
+#### Files Modified (3)
+
+| File | Changes |
+|------|--------|
+| `reference-import.rkt` | Times char-width hash table, font-weight/font-family detection, `font-metrics` symbol, `measure-text-proportional` dual-font support, `has-block-child?` + strut height computation, inline→block conversion, inline `::before` width measurement, `__before-inline-width` pass-through |
+| `layout-dispatch.rkt` | `font-metrics` detection from styles, `times-char-ratio` function, `arial-char-ratio` function (refactored from old `char-width`), dual `space-w-char` (0.250 Times / 0.278 Arial), proportional line-height ratio per font |
+| `layout-block.rkt` | `before-strut-h` / `after-strut-h` from `__before-strut-height` / `__after-strut-height`, initial-y / final-y strut integration, `before-inline-w` from `__before-inline-width` applied as x-offset to first text child |
+
+#### Remaining 9 Box Failures
+
+| Test | Category | Root Cause |
+|------|----------|------------|
+| `box_004_borders.html` | **Whitespace text nodes** | Child-count mismatch (13 vs 8). Whitespace text nodes between `inline-block` elements need preservation — `maybe-add-text-node!` strips whitespace-only nodes before CSS context is known. |
+| `box_006_text_align.html` | **Inline formatting context** | Full IFC needed — `<strong>` inline elements should share lines with adjacent text. Currently stacked vertically instead of composed horizontally. |
+| `box_013_nested_boxes.html` | **Box-sizing + flex** | 15/42 mismatches with systematic ~20px width offset. Tests `box-sizing: border-box` with universal selector + nested percentages + margin collapse + embedded flex layout. |
+| `run-in-basic-008.htm` | **Relative positioning** | y offset expected=0, actual=-32. `position: relative; top: 2em` interaction with containing block offsets. |
+| `run-in-basic-014.htm` | **white-space: pre** | Child-count 3 vs 2. Browser preserves whitespace text node between elements under `white-space: pre`. Requires CSS-aware HTML parsing (two-pass). |
+| `run-in-pre-ref.htm` | **white-space: pre** | Same root cause as run-in-basic-014 — whitespace text node count mismatch. |
+| `run-in-breaking-001.htm` | **white-space: pre + layout** | Child-count 3 vs 2 (same pre issue) plus height mismatch (46 vs 152.96). |
+| `text-indent-011.htm` | **line-height: 0** | text.y expected=-18, text.height expected=35. `line-height: 0` causes text to overflow upward (negative y). |
+| `text-indent-012.htm` | **Absolute + float** | div.y expected=0, actual=75. Complex interaction of absolute positioning + float + text-indent. |
+
+#### Priority for Next Session
+
+1. **white-space: pre** (3 tests) — Two-pass approach: preserve all whitespace text nodes with a flag during HTML parse, then drop based on CSS `white-space` property in a second pass.
+2. **box_013 nested sizing** (1 test) — Investigate the 20px offset from `box-sizing: border-box` interacting with embedded flex container.
+3. **IFC / box_006** (1 test) — Inline elements sharing lines with text content requires proper inline formatting context implementation.
+4. **Remaining edge cases** (4 tests) — Relative positioning, line-height: 0, absolute+float interactions.

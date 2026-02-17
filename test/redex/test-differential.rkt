@@ -100,8 +100,11 @@
           (cons (path->string html-path) (path->string ref-file))))
    filtered))
 
-;; suites that accept style-block tests (CSS2.1 tests with <style> blocks)
-(define style-block-suites '("css_block" "box" "advanced"))
+;; suites that accept style-block tests (tests with <style> CSS rules)
+;; the importer fully handles CSS style blocks with selector matching
+(define style-block-suites '("css_block" "box" "advanced" "flex" "grid"
+                              "baseline" "position" "table" "basic"
+                              "page" "flex-nest" "text_flow"))
 
 ;; find all test pairs: (html-path . ref-path) for simple tests across suites
 (define (discover-tests #:filter-pattern [pattern #f]
