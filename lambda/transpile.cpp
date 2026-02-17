@@ -254,6 +254,9 @@ static const NativeBinaryFunc* can_use_native_binary_func(AstSysFuncNode* sys_fn
 bool can_use_unboxed_call(AstCallNode* call_node, AstFuncNode* fn_node) {
     if (!fn_node || !has_typed_params(fn_node)) return false;
 
+    // Don't use unboxed for procs - no _u version is generated for them
+    if (fn_node->node_type == AST_NODE_PROC) return false;
+
     // Don't use unboxed for TCO functions - they need the goto-based implementation
     if (should_use_tco(fn_node) && is_tco_function_safe(fn_node)) {
         return false;
@@ -1736,7 +1739,19 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
     write_var_name(tp->code_buf, asn_node, NULL);
     strbuf_append_char(tp->code_buf, '=');
 
+    // coerce Item → native scalar when variable type is scalar but RHS returns Item
+    TypeId var_tid = var_type->type_id;
+    TypeId rhs_tid = asn_node->as->type ? asn_node->as->type->type_id : LMD_TYPE_ANY;
+    const char* unbox_fn = NULL;
+    if (var_tid != rhs_tid && (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL)) {
+        if (var_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
+        else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
+        else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
+        else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
+    }
+    if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
     transpile_expr(tp, asn_node->as);
+    if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
 
     // restore previous context
     tp->current_assign_name = prev_assign_name;
@@ -2852,7 +2867,21 @@ void transpile_assign_stam(Transpiler* tp, AstAssignStamNode *assign_node) {
     if (needs_boxing) {
         transpile_box_item(tp, assign_node->value);
     } else {
+        // coerce Item → native scalar when target type is scalar but value returns Item
+        const char* unbox_fn = NULL;
+        if (assign_node->target_node && assign_node->target_node->type && assign_node->value->type) {
+            TypeId target_tid = assign_node->target_node->type->type_id;
+            TypeId val_tid = assign_node->value->type->type_id;
+            if (target_tid != val_tid && (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL)) {
+                if (target_tid == LMD_TYPE_FLOAT) unbox_fn = "it2d(";
+                else if (target_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
+                else if (target_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
+                else if (target_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
+            }
+        }
+        if (unbox_fn) strbuf_append_str(tp->code_buf, unbox_fn);
         transpile_expr(tp, assign_node->value);
+        if (unbox_fn) strbuf_append_char(tp->code_buf, ')');
     }
     strbuf_append_char(tp->code_buf, ';');
 }
@@ -4629,6 +4658,10 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     } else if (fn_node->body->node_type == AST_NODE_RAISE_STAM) {
         // raise statement already generates return, don't add another
         transpile_raise(tp, (AstRaiseNode*)fn_node->body);
+        strbuf_append_str(tp->code_buf, "\n}\n");
+    } else if (is_proc && fn_node->body->node_type == AST_NODE_RETURN_STAM) {
+        // return statement already generates return, don't add another
+        transpile_return(tp, (AstReturnNode*)fn_node->body);
         strbuf_append_str(tp->code_buf, "\n}\n");
     } else {
         strbuf_append_str(tp->code_buf, " return ");

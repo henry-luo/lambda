@@ -91,6 +91,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_TRIM_END, "trim_end", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
     {SYSFUNC_LOWER, "lower", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
     {SYSFUNC_UPPER, "upper", 1, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
+    {SYSFUNC_URL_RESOLVE, "url_resolve", 2, &TYPE_STRING, false, false, false, LMD_TYPE_STRING, false},
     {SYSFUNC_SPLIT, "split", 2, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
     {SYSFUNC_STR_JOIN, "str_join", 2, &TYPE_STRING, false, false, true, LMD_TYPE_ANY, false},  // arr.str_join(sep)
     {SYSFUNC_REPLACE, "replace", 3, &TYPE_ANY, false, false, true, LMD_TYPE_STRING, false},
@@ -1009,6 +1010,41 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
                     sym_node->type = (Type*)sym_type;
                     return (AstNode*)sym_node;
                 }
+
+                // Check if object is an aliased import prefix (e.g., helper.val)
+                // by looking up the qualified name "object.field" in scope
+                size_t obj_len = ns_ident->name->len;
+                size_t fld_len = id_node->name->len;
+                size_t q_len = obj_len + 1 + fld_len;
+                char q_buf[256];
+                if (q_len < sizeof(q_buf)) {
+                    memcpy(q_buf, ns_ident->name->chars, obj_len);
+                    q_buf[obj_len] = '.';
+                    memcpy(q_buf + obj_len + 1, id_node->name->chars, fld_len);
+                    q_buf[q_len] = '\0';
+                    StrView q_view = {q_buf, q_len};
+                    NameEntry* q_entry = lookup_name(tp, q_view);
+                    if (q_entry && q_entry->import) {
+                        log_debug("aliased import var resolved: %s", q_buf);
+                        // build as a direct identifier reference
+                        AstIdentNode* resolved = (AstIdentNode*)alloc_ast_node(
+                            tp, AST_NODE_IDENT, array_node, sizeof(AstIdentNode));
+                        resolved->name = q_entry->name;
+                        resolved->entry = q_entry;
+                        if (q_entry->import && q_entry->node->type->type_id != LMD_TYPE_FUNC) {
+                            resolved->type = alloc_type(tp->pool, q_entry->node->type->type_id, sizeof(Type));
+                            resolved->type->is_const = 0;
+                        } else {
+                            resolved->type = q_entry->node->type ? q_entry->node->type : &TYPE_ANY;
+                        }
+                        // wrap in primary node to match expected AST structure
+                        AstPrimaryNode* pri_node = (AstPrimaryNode*)alloc_ast_node(
+                            tp, AST_NODE_PRIMARY, array_node, sizeof(AstPrimaryNode));
+                        pri_node->expr = (AstNode*)resolved;
+                        pri_node->type = resolved->type;
+                        return (AstNode*)pri_node;
+                    }
+                }
             }
         }
     }
@@ -1158,10 +1194,51 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
+    bool is_aliased_import_call = false;
     if (is_method_call && !is_builtin_module_call && !ts_node_is_null(object_node)) {
-        method_object = build_expr(tp, object_node);
-        if (method_object && method_object->type) {
-            obj_type_id = method_object->type->type_id;
+        // Check if object.method is an aliased import call (e.g., helper.add())
+        // by looking up the qualified name "object.method" in scope
+        if (module_name.length > 0 && method_name.length > 0) {
+            char qualified_buf[256];
+            snprintf(qualified_buf, sizeof(qualified_buf), "%.*s.%.*s",
+                (int)module_name.length, module_name.str,
+                (int)method_name.length, method_name.str);
+            StrView qualified_view = {qualified_buf, strlen(qualified_buf)};
+            NameEntry* qualified_entry = lookup_name(tp, qualified_view);
+            if (qualified_entry && qualified_entry->import) {
+                // resolved as an aliased import function call
+                log_debug("aliased import call resolved: %s", qualified_buf);
+                is_aliased_import_call = true;
+                AstIdentNode* ident_node = (AstIdentNode*)alloc_ast_node(
+                    tp, AST_NODE_IDENT, function_node, sizeof(AstIdentNode));
+                ident_node->name = qualified_entry->name;
+                ident_node->entry = qualified_entry;
+                ident_node->type = qualified_entry->node->type;
+                ast_node->function = (AstNode*)ident_node;
+                if (ident_node->type && ident_node->type->type_id == LMD_TYPE_FUNC) {
+                    TypeFunc* func_type = (TypeFunc*)ident_node->type;
+                    if (func_type->is_proc && !tp->current_scope->is_proc) {
+                        record_semantic_error(tp, call_node, ERR_PROC_IN_FN,
+                            "procedure '%s' cannot be called in a function", qualified_buf);
+                        ast_node->type = &TYPE_ERROR;
+                        return (AstNode*)ast_node;
+                    }
+                    if (func_type->can_raise) {
+                        ast_node->can_raise = true;
+                        ast_node->type = &TYPE_ANY;
+                    } else {
+                        ast_node->type = func_type->returned ? func_type->returned : &TYPE_ANY;
+                    }
+                } else {
+                    ast_node->type = &TYPE_ANY;
+                }
+            }
+        }
+        if (!is_aliased_import_call) {
+            method_object = build_expr(tp, object_node);
+            if (method_object && method_object->type) {
+                obj_type_id = method_object->type->type_id;
+            }
         }
     }
 
@@ -1170,7 +1247,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     SysFuncInfo* sys_func_info = NULL;
 
     // For built-in module calls, construct the full function name (e.g., fs_copy)
-    if (is_builtin_module_call) {
+    if (is_aliased_import_call) {
+        // Already resolved above - skip sys func and regular call resolution
+    }
+    else if (is_builtin_module_call) {
         char full_name[128];
         snprintf(full_name, sizeof(full_name), "%.*s_%.*s",
             (int)module_name.length, module_name.str,
@@ -5345,6 +5425,31 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
 }
 
+// push a name with a qualified alias prefix (alias.name) for aliased imports
+static void push_qualified_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import, String* alias) {
+    // create qualified name: alias.original_name
+    size_t alias_len = alias->len;
+    size_t name_len = node->name->len;
+    size_t total_len = alias_len + 1 + name_len;  // alias.name
+    char* buf = (char*)pool_alloc(tp->pool, total_len + 1);
+    memcpy(buf, alias->chars, alias_len);
+    buf[alias_len] = '.';
+    memcpy(buf + alias_len + 1, node->name->chars, name_len);
+    buf[total_len] = '\0';
+    StrView qualified = {buf, total_len};
+    String* qualified_name = name_pool_create_strview(tp->name_pool, qualified);
+
+    log_debug("pushing qualified name %.*s", (int)qualified_name->len, qualified_name->chars);
+
+    NameEntry* entry = (NameEntry*)pool_calloc(tp->pool, sizeof(NameEntry));
+    entry->name = qualified_name;
+    entry->node = (AstNode*)node;  entry->import = import;
+    entry->scope = tp->current_scope;
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
+}
+
 void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
     log_debug("declare_module_import");
     // import module
@@ -5358,6 +5463,7 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
         log_error("Error: declare_module_import expected AST_SCRIPT but got node_type %d", node->node_type);
         return;  // Defensive recovery - exit gracefully
     }
+    bool has_alias = (import_node->alias != nullptr);
     node = ((AstScript*)node)->child;
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) {
@@ -5369,7 +5475,11 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
             log_debug("got imported fn/pn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
-                push_name(tp, (AstNamedNode*)func_node, import_node);
+                if (has_alias) {
+                    push_qualified_name(tp, (AstNamedNode*)func_node, import_node, import_node->alias);
+                } else {
+                    push_name(tp, (AstNamedNode*)func_node, import_node);
+                }
             }
         }
         else if (node->node_type == AST_NODE_PUB_STAM) {
@@ -5377,7 +5487,11 @@ void declare_module_import(Transpiler* tp, AstImportNode* import_node) {
             AstNode* declare = pub_node->declare;
             while (declare) {
                 AstNamedNode* dec_node = (AstNamedNode*)declare;
-                push_name(tp, (AstNamedNode*)dec_node, import_node);
+                if (has_alias) {
+                    push_qualified_name(tp, (AstNamedNode*)dec_node, import_node, import_node->alias);
+                } else {
+                    push_name(tp, (AstNamedNode*)dec_node, import_node);
+                }
                 log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
                 declare = declare->next;
             }

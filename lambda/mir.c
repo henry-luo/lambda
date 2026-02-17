@@ -201,6 +201,7 @@ func_obj_t func_list[] = {
     {"fn_trim_end", (fn_ptr) fn_trim_end},
     {"fn_lower", (fn_ptr) fn_lower},
     {"fn_upper", (fn_ptr) fn_upper},
+    {"fn_url_resolve", (fn_ptr) fn_url_resolve},
     {"fn_split", (fn_ptr) fn_split},
     {"fn_str_join", (fn_ptr) fn_str_join},
     {"fn_replace", (fn_ptr) fn_replace},
