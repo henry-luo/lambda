@@ -78,18 +78,9 @@ Adding type annotations (`: int`, `: float`) to function parameters and local va
 | **Large** | tak, cpstak | 0.04–0.08× | 12–25× | Recursive call parameters unboxed to native `int64_t` |
 | **Moderate** | fibfp, fib | 0.44–0.49× | 2.0–2.3× | Recursive but with function call overhead still dominant |
 | **Small** | nqueens | 0.73× | 1.4× | Array operations remain boxed; only scalar args unboxed |
-| **Regression** | fft | 1.17× | 0.85× | Float annotations removed due to bug #21; only `: int` applied |
+| **Regression** | fft | 1.17× | 0.85× | Array element access remains `Item`-typed; float unboxing limited |
 
 **Key insight**: When the JIT can eliminate `Item` boxing/unboxing in tight loops (sum, ack, sumfp), Lambda approaches competitive speed. The remaining 155× gap vs Racket is primarily from function call overhead and missing tail-call optimization.
-
-### Type Annotation Limitations (Bug #21)
-
-The `: float` type annotation triggers a transpiler bug when used on variables that interact with array elements (which are `Item`-typed). This forced removal of float annotations in `fft2.ls` and `fibfp2.ls`:
-
-- **fft2**: All float variables in the Danielson-Lanczos section left untyped (wr, wi, theta, wpr, wpi, tempr, tempi)
-- **fibfp2**: Result variable left untyped (`var result = fibfp(27.0)` instead of `var result: float`)
-
-This bug limits the typed speedup for float-heavy benchmarks. Fixing it would likely bring `fft` and `fibfp` improvements in line with the other benchmarks.
 
 ### Performance Gap Breakdown
 
@@ -129,8 +120,6 @@ Original R7RS benchmark parameters (e.g., `fib(40)`, `tak(40,20,11)`, `sum(10000
 Several benchmarks required workarounds for Lambda JIT limitations:
 
 - **cpstak**: True CPS with closures (`fn(a) => expr`) is not supported in Lambda's JIT transpiler. Replaced with double invocation of direct `tak`.
-- **sumfp**: Float variable reassignment in loops triggers transpiler bug #21 (`Item` assigned to `double`). Workaround: `var s = n - n` instead of `var s = 0.0`.
-- **tak**: Deeply nested `return tak(tak(...), tak(...), tak(...))` causes transpiler error. Workaround: intermediate variables for inner calls.
 
 ### Comparison with AWFY Results
 
@@ -146,12 +135,11 @@ The R7RS benchmarks stress exactly where Lambda is weakest: tight recursive loop
 
 Based on typed vs untyped results, the highest-impact optimization targets are:
 
-1. **Fix transpiler bug #21** (`: float` annotation on reassigned vars): Would unlock full typed speedup for `fft` and `fibfp`, potentially bringing them to the 10–50× improvement tier
-2. **Function call optimization**: Reduce per-call overhead for known-target recursive calls (biggest remaining gap for `fib`, `tak`, `ack`)
-3. **Tail-call optimization**: Convert tail-recursive calls to jumps (critical for all recursive benchmarks)
-4. **Type inference for untyped code**: Automatically infer types where possible, bringing untyped performance closer to typed
-5. **Array element type specialization**: Allow typed arrays (`Array<int>`, `Array<float>`) to eliminate boxing on element access (would help `nqueens`, `fft`)
-6. **Add `clock()` system function**: Enable internal timing for accurate Lambda benchmarking
+1. **Function call optimization**: Reduce per-call overhead for known-target recursive calls (biggest remaining gap for `fib`, `tak`, `ack`)
+2. **Tail-call optimization**: Convert tail-recursive calls to jumps (critical for all recursive benchmarks)
+3. **Type inference for untyped code**: Automatically infer types where possible, bringing untyped performance closer to typed
+4. **Array element type specialization**: Allow typed arrays (`Array<int>`, `Array<float>`) to eliminate boxing on element access (would help `nqueens`, `fft`)
+5. **Add `clock()` system function**: Enable internal timing for accurate Lambda benchmarking
 
 ## Files
 

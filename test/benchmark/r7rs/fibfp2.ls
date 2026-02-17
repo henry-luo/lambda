@@ -10,7 +10,7 @@ pn fibfp(n: float) {
 }
 
 pn benchmark() {
-    var result = fibfp(27.0)
+    var result: float = fibfp(27.0)
     return result
 }
 
