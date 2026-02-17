@@ -604,11 +604,12 @@
       (hash-ref col-widths col 0)))
   ;; CSS 2.2 §17.6.1: total width includes (num-cols + 1) horizontal spacing gaps
   (define total-w (+ total-cell-w (* (+ num-cols 1) bs-h)))
-  ;; CSS 2.2 §17.5.2.2: for width:auto tables, cap at available width
-  ;; (the table shouldn't overflow its container if it can avoid it).
-  ;; But for tables with explicit width, the caller will use max(explicit, auto)
-  ;; which may exceed avail-w (content can overflow).
-  (max total-w 0))
+  ;; build per-column width list (ordered by column index)
+  (define col-widths-list
+    (for/list ([col (in-range num-cols)])
+      (hash-ref col-widths col 0)))
+  ;; return total width and per-column widths
+  (values (max total-w 0) col-widths-list))
 
 ;; compute the preferred width of a single table cell.
 ;; if the cell has an explicit width, use it.
@@ -671,6 +672,10 @@
      (define table-layout (get-style-prop styles 'table-layout 'auto))
      (define is-fixed-layout? (eq? table-layout 'fixed))
 
+     ;; compute per-column preferred widths from content
+     (define-values (auto-w auto-col-widths)
+       (compute-table-auto-width all-rows styles avail-w avail))
+
      (define content-w
        (cond
          ;; Fixed layout with explicit width: use specified width as-is
@@ -678,12 +683,10 @@
           (if avail-w (resolve-block-width styles avail-w) 0)]
          ;; Auto layout with explicit width: max(specified, content)
          [has-explicit-width?
-          (let ([specified-w (if avail-w (resolve-block-width styles avail-w) 0)]
-                [auto-w (compute-table-auto-width all-rows styles avail-w avail)])
+          (let ([specified-w (if avail-w (resolve-block-width styles avail-w) 0)])
             (max specified-w auto-w))]
          ;; No explicit width: compute from content
-         [else
-          (compute-table-auto-width all-rows styles avail-w avail)]))
+         [else auto-w]))
 
      ;; Determine the number of data columns from the rows.
      ;; This is needed for column width sizing.
@@ -707,7 +710,34 @@
      ;; Available width for cells = content-w - total horizontal spacing
      (define total-h-spacing (* (+ num-columns 1) bs-h))
      (define cell-available-w (max 0 (- content-w total-h-spacing)))
-     (define col-w (if (> num-columns 0) (/ cell-available-w num-columns) content-w))
+
+     ;; CSS 2.2 §17.5.2.2: distribute available width among columns.
+     ;; auto-col-widths has per-column preferred border-box widths from content.
+     ;; If columns have preferred widths, distribute extra space proportionally.
+     ;; For fixed layout or when auto-col-widths is empty, use uniform distribution.
+     (define col-widths-list
+       (cond
+         ;; fixed layout: all columns share equally
+         [(or is-fixed-layout? (null? auto-col-widths) (= num-columns 0))
+          (define col-w (if (> num-columns 0) (/ cell-available-w num-columns) 0))
+          (make-list num-columns col-w)]
+         [else
+          ;; auto layout: distribute proportionally to content widths
+          ;; Pad or trim auto-col-widths to match num-columns
+          (define padded-col-widths
+            (cond
+              [(= (length auto-col-widths) num-columns) auto-col-widths]
+              [(< (length auto-col-widths) num-columns)
+               (append auto-col-widths
+                       (make-list (- num-columns (length auto-col-widths)) 0))]
+              [else (take auto-col-widths num-columns)]))
+          (define total-pref (apply + padded-col-widths))
+          (if (> total-pref 0)
+              ;; distribute available width proportionally to preferred widths
+              (for/list ([pw (in-list padded-col-widths)])
+                (* cell-available-w (/ pw total-pref)))
+              ;; all zero preferred: uniform distribution
+              (make-list num-columns (/ cell-available-w num-columns)))]))
 
      ;; CSS 2.2 §17.2: row groups must be rendered in order:
      ;; 1. table-caption (above table grid, or below if caption-side: bottom)
@@ -812,6 +842,7 @@
                  (match group [`(block ,_ ,_ ,children) children] [_ '()]))
                (define span-count
                  (if (null? child-columns) 1 (length child-columns)))
+               ;; compute per-child column widths and positions using col-widths-list
                (define child-col-views
                  (if (null? child-columns)
                      '()  ;; empty group = 1 implicit column, no child views
@@ -819,14 +850,30 @@
                                 [ci (in-naturals)])
                        (define cc-id
                          (match cc [`(block ,cid ,_ ,_) cid] [_ 'anon]))
-                       ;; x is group-relative: bs-h + ci * (col-w + bs-h)
-                       ;; but relative to group start, first child at 0
-                       (define cc-x (* ci (+ col-w bs-h)))
-                       (make-view cc-id cc-x 0 col-w 0 '()))))
-               ;; group x accounts for border-spacing
-               (define group-col-x (+ bs-h (* col-counter (+ col-w bs-h))))
-               (define group-col-w (+ (* span-count col-w)
-                                      (* (max 0 (- span-count 1)) bs-h)))
+                       (define actual-col-idx (+ col-counter ci))
+                       (define ccw (if (< actual-col-idx (length col-widths-list))
+                                       (list-ref col-widths-list actual-col-idx)
+                                       0))
+                       ;; x relative to group start: sum widths + spacing of preceding children
+                       (define cc-x
+                         (for/sum ([j (in-range ci)])
+                           (define jcol (+ col-counter j))
+                           (+ (if (< jcol (length col-widths-list))
+                                  (list-ref col-widths-list jcol) 0)
+                              bs-h)))
+                       (make-view cc-id cc-x 0 ccw 0 '()))))
+               ;; group x = offset from table edge: bs-h + sum of preceding column widths + spacing
+               (define group-col-x
+                 (+ bs-h (for/sum ([j (in-range col-counter)])
+                           (+ (if (< j (length col-widths-list))
+                                  (list-ref col-widths-list j) 0)
+                              bs-h))))
+               (define group-col-w
+                 (+ (for/sum ([j (in-range span-count)])
+                      (define jcol (+ col-counter j))
+                      (if (< jcol (length col-widths-list))
+                          (list-ref col-widths-list jcol) 0))
+                    (* (max 0 (- span-count 1)) bs-h)))
                (define col-group-view
                  (make-view group-id group-col-x offset-y group-col-w 0
                             child-col-views))
@@ -839,9 +886,17 @@
                      new-col-ids (+ col-counter span-count) rg-ids dr-ids va-acc)]
               [is-column?
                ;; CSS 2.2 §17.5.1: single table-column — positioned at column offset.
-               ;; x = bs-h + col * (col-w + bs-h) to match cell positions
-               (define col-x (+ offset-x bs-h (* col-counter (+ col-w bs-h))))
-               (define col-view (make-view group-id col-x offset-y col-w 0 '()))
+               ;; x = bs-h + sum of preceding column widths + spacing
+               (define this-col-w (if (< col-counter (length col-widths-list))
+                                      (list-ref col-widths-list col-counter)
+                                      0))
+               (define col-x
+                 (+ offset-x bs-h
+                    (for/sum ([j (in-range col-counter)])
+                      (+ (if (< j (length col-widths-list))
+                             (list-ref col-widths-list j) 0)
+                         bs-h))))
+               (define col-view (make-view group-id col-x offset-y this-col-w 0 '()))
                (loop (cdr groups) y
                      (cons (cons src-idx col-view) acc) mfb
                      (cons group-id col-ids) (+ col-counter 1) rg-ids dr-ids va-acc)]
@@ -870,7 +925,8 @@
                       (loop (cdr groups) y acc mfb col-ids col-counter rg-ids dr-ids va-acc)
                       (let-values ([(row-views row-h group-cell-va)
                                     (layout-table-rows inner-rows group-w 0
-                                                       0 0 avail bs-h bs-v)])
+                                                       0 0 avail bs-h bs-v
+                                                       col-widths-list)])
                         ;; create group wrapper view containing the row views
                         ;; Group is inset by border-spacing from the table edge:
                         ;; x = offset-x + bs-h, y = offset-y + y + bs-v
@@ -894,7 +950,8 @@
                                            ,(match group [`(block ,_ ,_ ,c) c] [_ '()]))))
                   (define-values (row-views row-h direct-cell-va)
                     (layout-table-rows rows direct-row-w direct-start-y
-                                       (+ offset-x bs-h) offset-y avail bs-h bs-v))
+                                       (+ offset-x bs-h) offset-y avail bs-h bs-v
+                                       col-widths-list))
                   (define new-dr-ids
                     (append (map (lambda (rv) (view-id rv)) row-views) dr-ids))
                   ;; advance y past leading bs-v + row height
@@ -1081,13 +1138,13 @@
     [_ '()]))
 
 (define (layout-table-rows rows content-w y offset-x offset-y avail
-                            [bs-h 0] [bs-v 0])
+                            [bs-h 0] [bs-v 0] [col-widths-list '()])
   ;; CSS 2.2 §17.6.1: border-spacing in the separated borders model.
   ;; This function handles BETWEEN-cell and BETWEEN-row spacing only.
   ;; Edge spacing (inset from table/group edges) is handled by the caller.
   ;; Row position: x = offset-x, width = content-w (caller provides inset values)
-  ;; Cell width = (content-w - (n-1)*bs-h) / n
-  ;; Cell x within row = col * (cell-w + bs-h)
+  ;; Cell widths come from col-widths-list when available (per-column proportional).
+  ;; Cell x within row = sum of preceding column widths + spacing gaps.
   ;; Vertical layout: row1 [bs-v] row2 [bs-v] row3 ...
   ;; bs-v is added BETWEEN rows only (not before first or after last).
   ;; Leading/trailing bs-v is handled by the caller (group or table level).
@@ -1119,22 +1176,43 @@
                  [_ #f]))
              cells))
           (define num-cells (length regular-cells))
-          ;; CSS 2.2 §17.6.1: cell width = (row-w - (n-1)*bs-h) / n
-          ;; Between-cell spacing = (n-1) gaps of bs-h
+          ;; CSS 2.2 §17.5.2.2: use per-column widths when available.
+          ;; col-widths-list contains border-box widths for each column.
+          ;; If not available (empty list), fall back to uniform distribution.
+          (define use-per-col? (and (not (null? col-widths-list))
+                                    (>= (length col-widths-list) num-cells)))
+          ;; Uniform fallback width (for when no per-column data)
           (define between-cell-spacing (* (max 0 (- num-cells 1)) bs-h))
-          (define cell-w (if (> num-cells 0)
+          (define uniform-cell-w (if (> num-cells 0)
                             (/ (max 0 (- row-w between-cell-spacing)) num-cells)
                             row-w))
+          ;; Helper: get width for column index
+          (define (get-col-w col)
+            (if use-per-col?
+                (list-ref col-widths-list col)
+                uniform-cell-w))
+          ;; Helper: get x position for column index (sum of preceding widths + spacing)
+          (define (get-col-x col)
+            (if use-per-col?
+                (for/sum ([j (in-range col)])
+                  (+ (list-ref col-widths-list j) bs-h))
+                (* col (+ uniform-cell-w bs-h))))
           (define row-h 0)
           ;; lay out regular table cells
-          ;; Cell x within row = col * (cell-w + bs-h)
           (define cell-views
             (for/list ([cell (in-list regular-cells)]
                        [col (in-naturals)])
-              (define cell-x (* col (+ cell-w bs-h)))
+              (define cell-x (get-col-x col))
               (match cell
                 [`(cell ,cell-id ,cell-styles ,colspan (,children ...))
-                 (define cw (* cell-w (max 1 colspan)))
+                 ;; colspan: sum widths of spanned columns + (colspan-1) spacing gaps
+                 (define cw
+                   (if use-per-col?
+                       (let ([span (max 1 colspan)])
+                         (+ (for/sum ([j (in-range col (min (+ col span) (length col-widths-list)))])
+                              (list-ref col-widths-list j))
+                            (* (max 0 (- span 1)) bs-h)))
+                       (* uniform-cell-w (max 1 colspan))))
                  (define cell-box `(block ,cell-id ,cell-styles (,@children)))
                  (define cell-avail `(avail (definite ,cw) indefinite))
                  (define cell-view (layout cell-box cell-avail))
@@ -1143,7 +1221,7 @@
                  (set-view-pos cell-view cell-x 0)]
                 ;; block child acting as cell (e.g. display:table-cell without float)
                 [`(block ,cell-id ,cell-styles ,children)
-                 (define cw cell-w)
+                 (define cw (get-col-w col))
                  (define cell-avail `(avail (definite ,cw) indefinite))
                  (define cell-view (layout cell cell-avail))
                  (define ch (view-height cell-view))
@@ -1214,7 +1292,7 @@
                   [`(cell ,_ ,s ,_ ,_) s]
                   [`(block ,_ ,s ,_) s]
                   [_ '(style)]))
-              (define cell-bm (extract-box-model cell-styles-for-va cell-w))
+              (define cell-bm (extract-box-model cell-styles-for-va (view-width cv)))
               (define pt (box-model-padding-top cell-bm))
               (define pb (box-model-padding-bottom cell-bm))
               (define bt (box-model-border-top cell-bm))

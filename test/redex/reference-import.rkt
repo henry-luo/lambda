@@ -704,6 +704,11 @@
      parts))
   (if (null? parsed) #f parsed))
 
+;; CSS class matching: exact word match in space-separated class string.
+;; e.g. class="col" should NOT match selector ".colgroup"
+(define (has-css-class? elem-class cls)
+  (and elem-class (member cls (string-split elem-class)) #t))
+
 ;; check if a single selector part matches an element.
 ;; child-index: 1-based position among siblings (for :nth-child)
 (define (selector-part-matches? part elem-tag elem-id elem-class [child-index 0])
@@ -711,13 +716,13 @@
     [`(universal) #t]  ;; * matches everything
     [`(element ,tag) (equal? tag elem-tag)]
     [`(id ,id-str) (and elem-id (equal? id-str elem-id))]
-    [`(class ,cls) (and elem-class (string-contains? elem-class cls))]
+    [`(class ,cls) (has-css-class? elem-class cls)]
     [`(element+id ,tag ,id-str) (and (equal? tag elem-tag) elem-id (equal? id-str elem-id))]
-    [`(element+class ,tag ,cls) (and (equal? tag elem-tag) elem-class (string-contains? elem-class cls))]
+    [`(element+class ,tag ,cls) (and (equal? tag elem-tag) (has-css-class? elem-class cls))]
     [`(nth ,n) (= child-index n)]
-    [`(class+nth ,cls ,n) (and elem-class (string-contains? elem-class cls) (= child-index n))]
+    [`(class+nth ,cls ,n) (and (has-css-class? elem-class cls) (= child-index n))]
     [`(element+nth ,tag ,n) (and (equal? tag elem-tag) (= child-index n))]
-    [`(element+class+nth ,tag ,cls ,n) (and (equal? tag elem-tag) elem-class (string-contains? elem-class cls) (= child-index n))]
+    [`(element+class+nth ,tag ,cls ,n) (and (equal? tag elem-tag) (has-css-class? elem-class cls) (= child-index n))]
     [_ #f]))
 
 ;; check if a full selector (list of parts, possibly with '> markers) matches
@@ -1525,6 +1530,13 @@
       (define val (string-trim v))
       (add! 'table-layout (string->symbol val))))
 
+  ;; CSS 2.2 §17.4.1: caption-side: top (default) | bottom
+  ;; Controls whether the table caption is above or below the table grid.
+  (let ([v (cdr-or-false 'caption-side inline-alist)])
+    (when v
+      (define val (string-trim v))
+      (add! 'caption-side (string->symbol val))))
+
   ;; CSS 2.2 §17.6.1: border-spacing applies only when border-collapse is separate.
   ;; Can be one value (both H and V) or two values (horizontal vertical).
   ;; Default is 2px (browser default).
@@ -2296,13 +2308,29 @@
      (define base-styles (inline-styles->redex-styles inline-alist is-root? class tag))
 
      ;; CSS UA default: <td> and <th> have vertical-align: middle
-     ;; This is from the HTML UA stylesheet, not a CSS initial value.
+     ;; and padding: 1px. These are from the HTML UA stylesheet.
      ;; Only apply if not already set by author/inline styles.
+     ;; CSS UA default: <table> has border-spacing: 2px.
      (define styles
-       (if (and (member tag '("td" "th"))
-                (not (get-style-prop base-styles 'vertical-align #f)))
-           (append base-styles `((vertical-align va-middle)))
-           base-styles))
+       (let* ([s1 (if (and (member tag '("td" "th"))
+                           (not (get-style-prop base-styles 'vertical-align #f)))
+                      (append base-styles `((vertical-align va-middle)))
+                      base-styles)]
+              [s2 (if (and (member tag '("td" "th"))
+                           (not (get-style-prop s1 'padding-top #f))
+                           (not (get-style-prop s1 'padding-right #f))
+                           (not (get-style-prop s1 'padding-bottom #f))
+                           (not (get-style-prop s1 'padding-left #f)))
+                      (append s1 `((padding-top 1) (padding-right 1) (padding-bottom 1) (padding-left 1)))
+                      s1)]
+              ;; HTML UA stylesheet: <table> { border-spacing: 2px; }
+              ;; Only for actual <table> HTML elements, not CSS display:table divs.
+              [s3 (if (and (equal? tag "table")
+                           (not (get-style-prop s2 'border-spacing-h #f))
+                           (not (get-style-prop s2 'border-spacing-v #f)))
+                      (append s2 `((border-spacing-h 2) (border-spacing-v 2)))
+                      s2)])
+         s3))
 
      ;; determine display type from inline styles, tag default, or base default
      (define display-str
