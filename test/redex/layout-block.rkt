@@ -11,7 +11,8 @@
          racket/math
          "css-layout-lang.rkt"
          "layout-common.rkt"
-         "layout-positioned.rkt")
+         "layout-positioned.rkt"
+         "layout-inline.rkt")
 
 (provide layout-block
          layout-block-children
@@ -373,6 +374,162 @@
   ;; Non-BFC: inherit parent's accumulator (floats propagate upward)
   (define descendant-float-box
     (if establishes-bfc? (box 0) (bfc-max-float-bottom)))
+
+  ;; ============================================================
+  ;; CSS 2.2 §9.4.2: Inline Formatting Context Detection
+  ;; ============================================================
+  ;; If ALL visible children are inline-level (text, inline, inline-block),
+  ;; use inline formatting context to lay them out horizontally with line wrapping,
+  ;; instead of the default vertical block stacking.
+  (define visible-children
+    (filter (lambda (c)
+              (and (not (match c [`(none ,_) #t] [_ #f]))
+                   ;; skip absolute/fixed positioned children
+                   (let ([s (get-box-styles c)])
+                     (let ([pos (get-style-prop s 'position 'static)])
+                       (not (or (eq? pos 'absolute) (eq? pos 'fixed)))))))
+            children))
+
+  (define all-inline-children?
+    (and (not (null? visible-children))
+         ;; Only use IFC path when there's at least one inline-block child.
+         ;; Pure text/inline blocks are handled correctly by existing block layout.
+         (for/or ([c (in-list visible-children)])
+           (match c [`(inline-block . ,_) #t] [_ #f]))
+         ;; don't use IFC path if there are floats among children (floats need block layout)
+         (for/and ([c (in-list visible-children)])
+           (match c
+             [`(text . ,_) #t]
+             [`(inline-block . ,_) #t]
+             [`(inline . ,_) #t]
+             [_ #f]))))
+
+  (if all-inline-children?
+      ;; === Inline formatting context path ===
+      ;; Lay out inline-level children horizontally with line wrapping
+      (let ()
+        (define inline-avail-w (or avail-w +inf.0))
+        ;; Create a zero box model for layout-inline-children since we handle
+        ;; padding/border offsets ourselves
+        (define zero-bm (extract-box-model '(style) 0))
+        (define-values (raw-views total-height cursor-line-widths)
+          (layout-inline-children visible-children inline-avail-w zero-bm dispatch-fn avail-h))
+
+        ;; CSS 2.2 §10.6.1: each line box starts with a strut — an imaginary
+        ;; zero-width inline box with the containing block's font & line-height.
+        ;; For baseline-aligned inline-blocks whose baseline is at the bottom
+        ;; margin edge (no in-flow line boxes), the strut's descent extends below
+        ;; the baseline, adding to the line box height. Only add when:
+        ;; 1. No text children present (text includes line-height covering strut)
+        ;; 2. All inline-blocks use baseline alignment (not top/bottom)
+        ;; 3. At least one inline-block has no in-flow line boxes (baseline at bottom)
+        (define has-inline-block?
+          (for/or ([c (in-list visible-children)])
+            (match c [`(inline-block . ,_) #t] [_ #f])))
+        (define has-text-children?
+          (for/or ([c (in-list visible-children)])
+            (match c [`(text . ,_) #t] [_ #f])))
+        ;; check if any inline-block has non-baseline vertical-align
+        (define all-baseline-aligned?
+          (for/and ([c (in-list visible-children)])
+            (match c
+              [`(inline-block ,_ ,styles . ,_)
+               (let ([va (get-style-prop styles 'vertical-align #f)])
+                 (or (not va) (eq? va 'baseline)))]
+              [_ #t])))
+        ;; CSS §10.8.1: an inline-block's baseline is the baseline of its last
+        ;; in-flow line box, unless it has no in-flow line boxes or overflow≠visible.
+        ;; When baseline is at the bottom margin edge, strut descent extends below.
+        (define has-bottom-baseline-ib?
+          (for/or ([c (in-list visible-children)])
+            (match c
+              [`(inline-block ,_ ,_ ,ib-children)
+               ;; no in-flow line boxes = no text/inline children
+               (not (for/or ([ibc (in-list ib-children)])
+                      (match ibc
+                        [`(text . ,_) #t]
+                        [`(inline . ,_) #t]
+                        [_ #f])))]
+              [_ #f])))
+        (define strut-descent
+          (if (and has-inline-block? (not has-text-children?)
+                   all-baseline-aligned? has-bottom-baseline-ib? parent-styles)
+              (let* ([fs (get-style-prop parent-styles 'font-size 16)]
+                     [font-type (get-style-prop parent-styles 'font-type #f)]
+                     [lh-prop (get-style-prop parent-styles 'line-height #f)]
+                     ;; Times hhea: ascender=891, descender=216, unitsPerEm=1000
+                     ;; → descent ratio = 216/1000 = 0.216
+                     ;; Arial hhea: descender=434, unitsPerEm=2048
+                     ;; → descent ratio = 434/2048 ≈ 0.212
+                     [descent-ratio (if (eq? font-type 'arial) 0.212 0.216)]
+                     [lh-ratio (if (eq? font-type 'arial) 1.15 1.107)]
+                     [strut-lh (if (and lh-prop (number? lh-prop))
+                                   lh-prop
+                                   (* lh-ratio fs))]
+                     [half-leading (/ (- strut-lh fs) 2)]
+                     [descent (* descent-ratio fs)])
+                (max 0 (+ descent half-leading)))
+              0))
+        (define effective-height (+ total-height strut-descent))
+
+        ;; Group views by line: detect line boundaries by looking for x-coordinate
+        ;; resets (x decreases from one view to the next = new line started)
+        (define (group-by-line views)
+          (if (null? views) '()
+              (let loop ([remaining (cdr views)]
+                         [current-line (list (car views))]
+                         [prev-right-edge (+ (view-x (car views)) (view-width (car views)))]
+                         [lines '()])
+                (cond
+                  [(null? remaining)
+                   (reverse (cons (reverse current-line) lines))]
+                  [else
+                   (define v (car remaining))
+                   (define vx (view-x v))
+                   ;; if this view's x is less than the previous view's right edge,
+                   ;; it must be on a new line (line-wrapped)
+                   (if (< vx (- prev-right-edge 1))
+                       (loop (cdr remaining)
+                             (list v)
+                             (+ vx (view-width v))
+                             (cons (reverse current-line) lines))
+                       (loop (cdr remaining)
+                             (cons v current-line)
+                             (+ vx (view-width v))
+                             lines))]))))
+
+        (define (shift-view v dx dy)
+          (match v
+            [`(view ,id ,x ,y ,w ,h ,ch ,baseline)
+             `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,ch ,baseline)]
+            [`(view ,id ,x ,y ,w ,h ,ch)
+             `(view ,id ,(+ x dx) ,(+ y dy) ,w ,h ,ch)]
+            [`(view-text ,id ,x ,y ,w ,h ,text)
+             `(view-text ,id ,(+ x dx) ,(+ y dy) ,w ,h ,text)]
+            [_ v]))
+
+        (define lines (group-by-line raw-views))
+
+        ;; Apply text-align per line and text-indent on first line
+        ;; using cursor-based line widths from layout-inline-children.
+        (define aligned-views
+          (apply append
+            (for/list ([line (in-list lines)]
+                       [lw (in-list cursor-line-widths)]
+                       [line-idx (in-naturals)])
+              ;; CSS §16.1: text-indent applies to the first line
+              (define indent (if (= line-idx 0) text-indent 0))
+              (define align-offset
+                (cond
+                  [(eq? text-align 'center) (max 0 (/ (- inline-avail-w lw) 2))]
+                  [(eq? text-align 'right) (max 0 (- inline-avail-w lw))]
+                  [else 0]))
+              (for/list ([v (in-list line)])
+                (shift-view v (+ offset-x align-offset indent) offset-y)))))
+
+        (values aligned-views effective-height))
+
+      ;; === Block formatting context path (existing vertical stacking) ===
 
   (let loop ([remaining children]
              [current-y initial-y]
@@ -873,11 +1030,53 @@
                    [else (+ (view-height child-view) (* 2 (view-y child-view)))]))]
               ;; CSS 2.2 §10.8.1: inline-block non-replaced elements — the margin
               ;; box determines the line box height contribution.
-              ;; Top margin is already included in collapsed-margin above,
-              ;; so only add border-box height + bottom margin here.
+              ;; CSS 2.2 §10.6.1: the line box height includes the strut (parent's
+              ;; line-height). When vertical-align is baseline (default), the
+              ;; inline-block bottom aligns with the text baseline, so the descent
+              ;; below the baseline extends below the inline-block.
+              ;; line-box-height = max(inline-block-margin-box-h, strut-line-height)
+              ;; But with baseline alignment: height = ib-margin-box-h + descent
+              ;; where descent = (line-height - ascender-height) for the parent font.
               [`(inline-block ,_ ,ib-styles ,_)
-               (+ (view-height child-view)
-                  (box-model-margin-bottom child-bm))]
+               (let* ([ib-h (+ (view-height child-view) (box-model-margin-bottom child-bm))]
+                      ;; compute parent's strut descent:
+                      ;; the amount below the baseline from the parent font's line-height
+                      [parent-fs (if parent-styles (get-style-prop parent-styles 'font-size 16) 16)]
+                      [parent-font-metrics (if parent-styles (get-style-prop parent-styles 'font-metrics #f) #f)]
+                      ;; Times: ascender ratio = 891/1000, Arial: 1854/2048 ≈ 0.905
+                      [is-proportional? (if parent-styles
+                                            (let ([ft (get-style-prop parent-styles 'font-type #f)])
+                                              (eq? ft 'proportional))
+                                            #f)]
+                      ;; for non-proportional (Ahem) font: no descent issue, strut = font-size
+                      ;; for proportional fonts: compute descent below baseline
+                      [strut-descent
+                       (if is-proportional?
+                           (let* ([is-arial? (eq? parent-font-metrics 'arial)]
+                                  ;; line-height ratio
+                                  [lh-ratio (if is-arial? 1.15 1.107)]
+                                  ;; line-height = font-size * ratio
+                                  [strut-lh (* parent-fs lh-ratio)]
+                                  ;; ascender ratio: Times 891/1000, Arial ~905/1000
+                                  [ascender-ratio (if is-arial? 0.905 0.891)]
+                                  ;; descent from baseline = line-height - (ascender * font-size + half-leading)
+                                  ;; half-leading = (line-height - font-size) / 2
+                                  ;; descent below baseline = descender + half-leading
+                                  ;; descender ratio: Times 216/1000, Arial ~212/1000
+                                  [descender-ratio (if is-arial? 0.212 0.216)]
+                                  [half-leading (/ (- strut-lh parent-fs) 2)]
+                                  [descent (+ (* descender-ratio parent-fs) half-leading)])
+                             descent)
+                           0)]
+                      ;; vertical-align: baseline (default) → inline-block bottom at baseline
+                      ;; the descent extends below the inline-block
+                      [va (get-style-prop ib-styles 'vertical-align 'baseline)])
+                 (if (and is-proportional? (> strut-descent 0)
+                          (or (eq? va 'baseline) (not va)))
+                     ;; with baseline alignment: total height = ib-h + strut descent
+                     (+ ib-h strut-descent)
+                     ;; other vertical-align values: just margin-box height
+                     ib-h))]
               [_ (view-height child-view)]))
           (define new-y (+ effective-block-y child-h))
           ;; track table-column/column-group children for height post-processing
@@ -902,6 +1101,7 @@
                 (if (and is-table-column? child-box-id)
                     (cons child-box-id column-ids)
                     column-ids))])])))
+  ) ;; close (if all-inline-children? ...)
 
 ;; ============================================================
 ;; Helper: Extract styles from any box type
