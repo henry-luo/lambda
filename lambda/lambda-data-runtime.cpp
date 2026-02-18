@@ -14,6 +14,10 @@ Item fn_input1(Item url);
 extern "C" Item path_resolve_for_iteration(Path* path);
 extern "C" void path_load_metadata(Path* path);
 
+// VMap access helpers (implemented in vmap.cpp)
+Item vmap_get_by_str(VMap* vm, const char* key);
+Item vmap_get_by_item(VMap* vm, Item key);
+
 // Internal helper: resolve path content and cache it
 // Uses the new path_resolve_for_iteration which handles directories and files properly
 static Item resolve_path_content(Path* path) {
@@ -695,6 +699,11 @@ Item item_at(Item data, int index) {
         Item resolved = resolve_path_content(data.path);
         return item_at(resolved, index);
     }
+    case LMD_TYPE_VMAP: {
+        VMap* vm = data.vmap;
+        if (vm && vm->vtable) return vm->vtable->value_at(vm->data, (int64_t)index);
+        return ItemNull;
+    }
     // case LMD_TYPE_BINARY: todo - proper binary data access
     default:
         log_error("item_at: unsupported item_at type: %d", type_id);
@@ -715,6 +724,10 @@ Item item_attr(Item data, const char* key) {
         Map* map = data.map;
         bool is_found;
         return _map_get((TypeMap*)map->type, map->data, (char*)key, &is_found);
+    }
+    case LMD_TYPE_VMAP: {
+        VMap* vm = data.vmap;
+        return vmap_get_by_str(vm, key);
     }
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;
@@ -834,6 +847,13 @@ ArrayList* item_keys(Item data) {
             field = field->next;
         }
         return keys;
+    }
+    case LMD_TYPE_VMAP: {
+        VMap* vm = data.vmap;
+        if (vm && vm->vtable && vm->data) {
+            return vm->vtable->keys(vm->data);
+        }
+        return NULL;
     }
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;
