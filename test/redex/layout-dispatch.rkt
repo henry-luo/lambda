@@ -17,7 +17,8 @@
          "layout-flex.rkt"
          "layout-grid.rkt"
          "layout-positioned.rkt"
-         "layout-intrinsic.rkt")
+         "layout-intrinsic.rkt"
+         "font-metrics.rkt")
 
 (provide layout
          layout-document)
@@ -316,14 +317,15 @@
      ;; set by reference-import based on font-family + font-weight
      (define font-metrics-val (get-style-prop styles 'font-metrics 'times))
      (define use-arial? (eq? font-metrics-val 'arial))
-     ;; select line-height ratio based on font: Times 1.107, Arial 1.15
-     (define proportional-lh-ratio (if use-arial? 1.15 1.107))
+     ;; select line-height ratio from JSON-loaded font metrics
+     ;; JSON metrics provide Chrome-compatible normal line-height calculation:
+     ;;   max(hhea_ascender + |hhea_descender| + hhea_lineGap, win_ascent + win_descent) / unitsPerEm
+     ;; This replaces the old hardcoded values (Times 1.107, Arial 1.15) which were
+     ;; incorrect for Times (missed hhea.lineGap of 87/2048).
+     (define proportional-lh-ratio (font-line-height-ratio font-metrics-val))
      (define line-height
        (cond
          [is-proportional?
-          ;; browser default 'normal' line-height from hhea metrics:
-          ;; Times: (ascender+|descender|)/unitsPerEm = (891+216)/1000 ≈ 1.107
-          ;; Arial: (1854+434+67)/2048 ≈ 1.15
           (let ([lh-prop (get-style-prop styles 'line-height #f)])
             (if lh-prop
                 (if (number? lh-prop) lh-prop (* proportional-lh-ratio font-size))
@@ -338,73 +340,15 @@
      ;; half-leading = (line-height - font-size) / 2 positions text within line box.
      ;; Stacking uses height + 2*half-leading = line-height (recovered by layout-block).
      (define half-leading (/ (- line-height font-size) 2))
-     ;; per-character Arial TrueType glyph advance width ratios (used for bold text)
-     (define (arial-char-ratio ch)
-       (cond
-         [(or (char=? ch #\space) (char=? ch #\u00A0)) 0.278]
-         [(char-upper-case? ch)
-          (case ch
-            [(#\I) 0.278] [(#\J) 0.500] [(#\L) 0.556] [(#\M) 0.833]
-            [(#\W) 0.944] [(#\F #\T #\Z) 0.611]
-            [(#\C #\O #\Q #\G) 0.778]
-            [(#\D #\H #\N #\R #\U) 0.722]
-            [(#\A #\B #\E #\K #\P #\S #\V #\X #\Y) 0.667]
-            [else 0.667])]
-         [(char-lower-case? ch)
-          (case ch
-            [(#\f #\t) 0.278] [(#\i #\j #\l) 0.222] [(#\r) 0.333]
-            [(#\c #\k #\s #\v #\x #\y #\z) 0.500] [(#\m) 0.833] [(#\w) 0.722]
-            [(#\a #\b #\d #\e #\g #\h #\n #\o #\p #\q #\u) 0.556]
-            [else 0.556])]
-         [(char-numeric? ch) 0.556]
-         [else
-          (case ch
-            [(#\. #\, #\: #\; #\! #\/) 0.278]
-            [(#\- #\( #\)) 0.333]
-            [(#\? #\&) 0.556]
-            [else 0.556])]))
-     ;; per-character Times (serif) TrueType glyph advance width ratios
-     ;; from macOS Times.dfont hhea table (unitsPerEm=1000)
-     ;; uppercase ratios include -0.025em average kerning correction
-     (define (times-char-ratio ch)
-       (cond
-         [(or (char=? ch #\space) (char=? ch #\u00A0)) 0.250]
-         [(char-upper-case? ch)
-          ;; apply kerning correction: Times has significant pair kerning for
-          ;; uppercase letters (e.g., F-A, T-o) which we don't model individually
-          (- (case ch
-               [(#\I) 0.333] [(#\J) 0.389] [(#\M) 0.889] [(#\W) 0.944]
-               [(#\A #\V) 0.722] [(#\B #\R) 0.667]
-               [(#\C #\G #\O #\Q) 0.722]
-               [(#\D #\H #\K #\N #\U #\X #\Y) 0.722]
-               [(#\E #\L #\Z) 0.611]
-               [(#\F) 0.556] [(#\P) 0.556] [(#\S) 0.556] [(#\T) 0.611]
-               [else 0.667])
-             0.025)]
-         [(char-lower-case? ch)
-          (case ch
-            [(#\f) 0.333] [(#\i #\j #\l) 0.278] [(#\t) 0.278]
-            [(#\r) 0.333] [(#\s) 0.389]
-            [(#\m) 0.722] [(#\w) 0.667]
-            [(#\a #\c #\e #\z) 0.444]
-            [(#\b #\d #\g #\h #\k #\n #\o #\p #\q #\u #\v #\x #\y) 0.500]
-            [else 0.500])]
-         [(char-numeric? ch) 0.500]
-         [else
-          (case ch
-            [(#\. #\, #\: #\; #\!) 0.278]
-            [(#\/ #\-) 0.333] [(#\( #\)) 0.333]
-            [(#\?) 0.444] [(#\&) 0.778]
-            [(#\") 0.444] [(#\') 0.333]
-            [else 0.500])]))
-     ;; select char-width function based on font-metrics (arial vs times)
+     ;; Per-character width function from JSON-loaded font metrics.
+     ;; Uses full glyph advance width tables (2000+ glyphs) instead of
+     ;; the old ~80-character hardcoded ratio tables, eliminating the
+     ;; need for the crude -0.025 uppercase kerning hack on Times.
+     (define json-char-width-fn (make-char-width-fn font-metrics-val))
      (define (char-width ch fs)
-       (* (if use-arial? (arial-char-ratio ch) (times-char-ratio ch)) fs))
+       (json-char-width-fn ch fs))
      ;; fallback category-based widths (used for Ahem font path)
-     (define upper-w (if is-proportional? (* 0.667 font-size) font-size))
-     (define lower-w (if is-proportional? (* 0.556 font-size) font-size))
-     (define space-w-char (if is-proportional? (* (if use-arial? 0.278 0.250) font-size) font-size))
-     (define default-w (if is-proportional? (* 0.556 font-size) font-size))
+     (define space-w-char (if is-proportional? (char-width #\space font-size) font-size))
 
      ;; CSS 2.2 §16.6: white-space:pre preserves newlines in source text.
      ;; check for pre-formatted text with explicit line breaks (newlines).
