@@ -161,6 +161,10 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_BNOT, "bnot", 1, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},        // bnot(a) -> int
     {SYSFUNC_SHL, "shl", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // shl(a, n) -> int
     {SYSFUNC_SHR, "shr", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // shr(a, n) -> int
+    // vmap functions
+    {SYSFUNC_VMAP_NEW, "map", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},     // map() -> empty vmap
+    {SYSFUNC_VMAP_NEW, "map", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},     // map([k1,v1,...]) -> vmap from array
+    {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false},     // m.set(k, v) -> in-place insert
 };
 
 // Check if a name matches any system function (regardless of arg count)
@@ -179,6 +183,13 @@ SysFuncInfo* get_sys_func_info(StrView* name, int arg_count) {
     for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
         if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == arg_count) {
             log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
+            return &sys_funcs[i];
+        }
+    }
+    // fallback: match variadic functions (arg_count == -1)
+    for (size_t i = 0; i < sizeof(sys_funcs) / sizeof(sys_funcs[0]); i++) {
+        if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == -1) {
+            log_debug("is sys func (variadic): %.*s, %d", (int)name->length, name->str, arg_count);
             return &sys_funcs[i];
         }
     }
@@ -4119,11 +4130,13 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     // determine the type of the variable
     Type* expr_type = ast_node->as->type;
     if (ast_node->is_named) {
-        // 'at' iteration: for elements, iterates attributes; for maps, iterates key-value pairs
-        if (expr_type->type_id == LMD_TYPE_ELEMENT || expr_type->type_id == LMD_TYPE_MAP) {
-            ast_node->type = &TYPE_ANY;  // attribute values can be any type
-        } else {
+        // 'at' iteration: for elements/maps, iterates attributes/key-value pairs
+        if (ast_node->index_name) {
+            // Two-variable form: for k, v at expr -> v (name) is value
             ast_node->type = &TYPE_ANY;
+        } else {
+            // Single-variable form: for k at expr -> k (name) is key name (string)
+            ast_node->type = &TYPE_STRING;
         }
     } else if (expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST) {
         // Safely determine nested type

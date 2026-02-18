@@ -385,6 +385,9 @@ typedef enum SysFunc {
     SYSPROC_IO_CHMOD,
     SYSPROC_IO_RENAME,
     SYSPROC_IO_FETCH,        // io.fetch(target, options) - fetch data from URL or file
+    // vmap functions
+    SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
+    SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
 } SysFunc;
 
 typedef struct TypeBinary : Type {

@@ -362,6 +362,10 @@ func_obj_t func_list[] = {
     {"fn_bnot", (fn_ptr) fn_bnot},
     {"fn_shl", (fn_ptr) fn_shl},
     {"fn_shr", (fn_ptr) fn_shr},
+    // vmap functions
+    {"vmap_new", (fn_ptr) vmap_new},
+    {"vmap_from_array", (fn_ptr) vmap_from_array},
+    {"vmap_set", (fn_ptr) vmap_set},
 };
 
 void *import_resolver(const char *name) {
