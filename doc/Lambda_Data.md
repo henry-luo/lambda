@@ -718,6 +718,9 @@ Key-value mappings with structural typing:
 
 // Empty map
 {}
+
+// Dynamic map construction
+map([k1, v1, k2, v2, ...])
 ```
 
 #### Map Access
@@ -736,12 +739,10 @@ person.address   // null (key doesn't exist)
 
 ```lambda
 len(person)               // 2
-keys(person)              // ['name, 'age]
-values(person)            // ["Charlie", 25]
 
-// Spread operator for merging
-let updated = {...person, age: 26}
-// {name: "Charlie", age: 26}
+// Wrapping/spreading map in new map
+let wrapped = {person, gender: 'male'}
+// {name: "Charlie", age: 25, gender: 'male'}
 ```
 
 ### Elements
