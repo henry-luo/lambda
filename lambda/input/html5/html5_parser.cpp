@@ -714,14 +714,14 @@ Element* html5_insert_html_element(Html5Parser* parser, Html5Token* token) {
     html5_push_element(parser, elem);
 
     log_debug("html5: inserted element <%s>", token->tag_name->chars);
-    
+
     // For SVG/MathML self-closing elements, pop immediately
     // Per WHATWG spec: In foreign content, self-closing tags should be immediately closed
     if (token->self_closing && html5_is_in_svg_namespace(parser)) {
         log_debug("html5: self-closing SVG element <%s>, popping immediately", token->tag_name->chars);
         html5_pop_element(parser);
     }
-    
+
     return elem;
 }
 
@@ -1048,17 +1048,19 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
         const char* key;
         ItemReader value;
         while (it.next(&key, &value)) {
-            if (key && value.isString()) {
+            if (key) {
                 // Apply SVG attribute name correction if in SVG namespace
                 const char* attr_name = key;
                 if (in_svg) {
                     attr_name = html5_lookup_svg_attr(key);
                 }
 
-                // Get the actual String* pointer to preserve empty strings as null
-                String* str_value = value.asString();
-                if (str_value) {
+                if (value.isString()) {
+                    String* str_value = value.asString();
                     eb.attr(attr_name, Item{.item = s2it(str_value)});
+                } else {
+                    // ITEM_NULL for empty attribute values (e.g., content="")
+                    eb.attr(attr_name, Item{.item = ITEM_NULL});
                 }
             }
         }

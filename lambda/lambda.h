@@ -802,6 +802,7 @@ typedef struct Context {
     Item fn_upper(Item str);
     Item fn_url_resolve(Item base, Item relative);
     Item fn_split(Item str, Item sep);
+    Item fn_chars(Item str);            // chars(str) - decompose into array of characters
     Item fn_str_join(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
 
