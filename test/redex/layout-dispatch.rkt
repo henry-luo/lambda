@@ -194,8 +194,34 @@
   (define root-bm (extract-box-model root-styles viewport-w))
   ;; extract body padding if injected by reference-import
   (define body-pad-left (get-style-prop root-styles '__body-padding-left 0))
-  (define avail `(avail (definite ,viewport-w) (definite ,viewport-h)))
-  (define view (layout root-box avail))
+  ;; CSS 2.2 §17.5.2: tables with auto width use shrink-to-fit sizing.
+  ;; When the root element is a table (e.g., body { display: table }),
+  ;; use shrink-to-fit width instead of full viewport width.
+  (define is-table-root? (match root-box [`(table . ,_) #t] [_ #f]))
+  (define avail
+    (if is-table-root?
+        ;; table root: lay out at max-content first to determine shrink-to-fit width,
+        ;; but cap at viewport width
+        `(avail (definite ,viewport-w) (definite ,viewport-h))
+        `(avail (definite ,viewport-w) (definite ,viewport-h))))
+  (define view
+    (if is-table-root?
+        ;; table root with auto width: shrink-to-fit
+        (let ()
+          (define css-width (get-style-prop root-styles 'width 'auto))
+          (if (eq? css-width 'auto)
+              ;; shrink-to-fit: measure at max-content, then cap
+              (let* ([max-avail `(avail av-max-content indefinite)]
+                     [max-view (layout root-box max-avail)]
+                     [preferred-w (view-width max-view)]
+                     [min-avail `(avail av-min-content indefinite)]
+                     [min-view (layout root-box min-avail)]
+                     [min-w (view-width min-view)]
+                     [shrink-w (min preferred-w (max min-w viewport-w))]
+                     [final-avail `(avail (definite ,shrink-w) (definite ,viewport-h))])
+                (layout root-box final-avail))
+              (layout root-box avail)))
+        (layout root-box avail)))
   ;; CSS 2.2 §9.7: if the root box itself is floated, position it as if
   ;; <body> were its parent block formatting context.
   ;; §9.7 also: position:absolute/fixed → float computes to none.
@@ -250,7 +276,14 @@
 
      ;; detect intrinsic sizing mode: min-content forces maximum wrapping (avail-w → 0)
      (define is-min-content? (eq? (cadr avail) 'av-min-content))
-     (define effective-avail-w (if is-min-content? 0 avail-w))
+     ;; CSS 2.2 §16.6: white-space:nowrap prevents text from wrapping
+     (define ws-val (get-style-prop styles 'white-space #f))
+     (define is-nowrap? (eq? ws-val 'nowrap))
+     (define effective-avail-w
+       (cond
+         [is-min-content? 0]
+         [is-nowrap? #f]  ;; no width constraint → text won't wrap
+         [else avail-w]))
 
      ;; detect font type: Ahem (Taffy tests) vs proportional (CSS2.1 tests)
      (define font-type (get-style-prop styles 'font-type 'ahem))
@@ -710,10 +743,6 @@
      (define total-h-spacing (* (+ num-columns 1) bs-h))
      (define cell-available-w (max 0 (- content-w total-h-spacing)))
 
-     ;; DEBUG: print table layout values
-     (eprintf "TABLE-LAYOUT: avail-w=~a content-w=~a num-cols=~a cell-avail=~a fixed?=~a explicit-w=~a\n"
-              avail-w content-w num-columns cell-available-w is-fixed-layout? explicit-width)
-
      ;; CSS 2.2 §17.5.2.1: Fixed table layout algorithm.
      ;; 1. Columns with explicit widths (from first-row cells) get those widths.
      ;; 2. Remaining space distributed equally among auto-width columns.
@@ -735,7 +764,6 @@
               (match cell
                 [`(block ,_ ,s ,_)
                  (define w-prop (get-style-prop s 'width #f))
-                 (eprintf "  CELL ~a: w-prop=~a\n" i w-prop)
                  (cond
                    [(and (number? w-prop) (> w-prop 0)) w-prop]
                    ;; percentage width stored as (% num): resolve against cell-available-w
