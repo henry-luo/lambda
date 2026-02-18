@@ -60,14 +60,16 @@ Port of Mozilla's Readability.js to Lambda Script (`utils/readability2.ls`), tes
 
 **Root cause**: Readability.js replaces sequences of `<br>` tags with `<p>` tags during `_replaceBrs()` preprocessing. Our implementation does not perform this DOM transformation, so the paragraph boundaries differ and the resulting excerpt text doesn't match exactly. The content itself is correct — just paragraph segmentation differs.
 
-### 3. `mozilla-1` — excerpt is null
+### 3. `mozilla-1` — excerpt mismatch
 
 | | Value |
 |---|---|
 | **Expected** | `It's easier than ever to personalize Firefox...` |
-| **Actual** | `null` |
+| **Actual** | Wrong text (country list instead of article content) |
 
-**Root cause**: The article content is selected correctly, but excerpt extraction fails because `collect_all_elements` (a Lambda built-in) returns elements with 0 children. When we look for `<p>` elements inside the article, we find them, but `get_inner_text()` returns empty strings because the elements have lost their child text nodes. This is a **Lambda runtime bug** (see below). The page is also very large (~39s to process), contributing to the issue.
+**Root cause (multi-layered)**:
+1. **Empty string comparison bug (Bug #5, now FIXED)**: Lambda's HTML5 tokenizer created real `String*` objects with `len=0` for empty HTML attributes like `content=""`, while the string literal `""` in Lambda compiles to `ITEM_NULL`. This type mismatch (`LMD_TYPE_STRING` vs `LMD_TYPE_NULL`) caused `str == ""` to always return false for empty attribute strings. Fix: HTML5 tokenizer now uses `nullptr` for empty attributes, consistently matching Lambda's null semantics.
+2. **Article region selection**: Even with the empty-string fix, `find_best_candidate` selects a div containing a country dropdown list instead of the main article content. This is an article extraction quality issue, not related to `collect_all_elements`.
 
 ---
 
@@ -102,51 +104,81 @@ let sorted_maps = for (m in maps order by m.s desc) m
 let sorted_arrs = for (a in arrs order by a[0] desc) a
 ```
 
-### Bug #2: `collect_all_elements` loses element children
+### Bug #2: `collect_all_elements` loses element children — **NOT A BUG**
 
-**Symptom**: Elements returned by `collect_all_elements(root)` have 0 children, even though the original elements have children in the DOM. `get_inner_text()` on these elements returns `""`.
+**Original symptom**: Elements returned by `collect_all_elements(root)` have 0 children, even though the original elements have children in the DOM. `get_inner_text()` on these elements returns `""`.
 
-**Workaround**: Use `find_all(root, tag_name)` for specific tag types, which preserves element children correctly.
+**Investigation**: Extensive testing proved `collect_all_elements` works correctly:
+- On small HTML files: returns elements with correct children counts
+- On mozilla-1 (95KB): returns 882 elements, all with correct children
+- Both `collect_all_elements` and `find_all` return identical results
+
+**Root cause**: The actual issue was **Bug #5 (empty string comparison)**, not `collect_all_elements`. The metadata excerpt was an empty string from `<meta content="">` that didn't compare equal to `""` (due to type mismatch), causing the excerpt logic to take the metadata path instead of falling through to paragraph search.
+
+### Bug #5: Empty string from HTML attributes doesn't equal `""` — **FIXED**
+
+**Symptom**: `get_attr(elem, "content", "")` for `<meta content="">` returns a value where:
+- `is string` → true, `len()` → 0
+- `== ""` → **false**, `!= ""` → **true**
+- `== null` → **false**
+
+This caused `get_meta()` to pass through empty-content meta tags, and `metadata.excerpt` to be set to a "ghost" empty string that prevented the paragraph-search fallback from running.
+
+**Root cause**: Lambda's `""` string literal compiles to `ITEM_NULL` (type `LMD_TYPE_NULL`) via `build_ast.cpp`, while the HTML5 tokenizer (`html5_tokenizer.cpp`) allocated a real `String*` with `len=0` (type `LMD_TYPE_STRING`). The equality function `fn_eq` does a type-ID check first — since `LMD_TYPE_STRING != LMD_TYPE_NULL`, comparison returned false.
+
+**Fix**: Changed `html5_tokenizer.cpp` to use `nullptr` instead of allocating zero-length strings for empty attribute values. Since `s2it(nullptr)` returns `ITEM_NULL`, this matches Lambda's `""` → null semantics.
+
+**Files changed**: `lambda/input/html5/html5_tokenizer.cpp`, `lambda/input/html5/html5_token.cpp`
+
+### Bug #3: Index access on concatenated arrays in `for` comprehensions — **NOT A BUG**
+
+**Original symptom**: Building an array with `++` (concatenation) and then accessing elements by index (`arr[i]`) inside a `for` comprehension returns garbage values.
+
+**Root cause**: The reported code used `range(0, n)` which is **incorrect syntax**. The `range()` system function requires 3 arguments: `range(start, end, step)`. Calling it with 2 arguments silently fails. Two correct approaches:
+
+1. **`to` range syntax** (preferred): `for (i in 0 to n - 1) arr[i]` — note that `to` is **inclusive** on both ends
+2. **3-arg `range()` function**: `for (i in range(0, n, 1)) arr[i]` — exclusive upper bound
+
+Both approaches work correctly with concatenated arrays and compound types.
+
+**Recommendation**: Use direct iteration `for (c in containers) c` when you don't need the index. Use `0 to n - 1` or `range(0, n, 1)` when index is needed.
 
 ```
-// BROKEN: returned elements lose children
-let all = collect_all_elements(article)
-
-// WORKING: preserves element structure
-let paras = find_all(article, 'p')
-```
-
-### Bug #3: Index access on concatenated arrays in `for` comprehensions
-
-**Symptom**: Building an array with `++` (concatenation) and then accessing elements by index (`arr[i]`) inside a `for` comprehension returns garbage values — null attributes, pointer addresses as indices, corrupted data.
-
-**Workaround**: Iterate directly with `for (c in containers)` instead of index-based `for (i in range(...)) containers[i]`.
-
-```
-// BROKEN: containers[idx] returns garbage
-let containers = find_all(body, 'div') ++ find_all(body, 'section')
-for (i in range(0, len(containers))) containers[i]
-
-// WORKING: direct iteration
+// Direct iteration (preferred when index not needed)
 for (c in containers) c
+
+// Index-based with 'to' (inclusive both ends)
+for (i in 0 to len(arr) - 1) arr[i]
+
+// Index-based with range() (exclusive upper bound, requires 3 args)
+for (i in range(0, len(arr), 1)) arr[i]
+
+// WRONG: range() requires 3 args — this silently fails
+for (i in range(0, len(arr))) arr[i]  // ← produces empty result
 ```
 
-### Bug #4: Compound boolean expressions in `where` clauses
+### Bug #4: Compound boolean expressions in `where` clauses — **NOT A BUG**
 
-**Symptom**: Complex `and`/`or`/`not` combinations in `where` clauses produce incorrect results. Elements that should be filtered out are included, or vice versa.
+**Original symptom**: Complex `and`/`or`/`not` combinations in `where` clauses produce incorrect results. Elements that should be filtered out are included, or vice versa.
 
-**Workaround**: Decompose compound booleans into separate `let` bindings, then combine.
+**Root cause**: Not a `where` clause issue. All compound boolean patterns (`and`, `or`, `not`, nested combinations, function calls in predicates) work correctly. The original failures were caused by **symbol vs string type mismatches** — comparing a symbol `'p'` against a string `"p"` returns false. In Lambda, `'p'` (single-quoted) is a symbol and `"p"` (double-quoted) is a string; they are different types.
 
 ```
-// BROKEN: may produce wrong results
-[for (p in paras where is_para(p) and not is_byline(p)) p]
+// WRONG: symbol != string
+e.tag == "p"    // ← fails if e.tag is symbol 'p'
 
-// WORKING: decompose
-[for (p in paras) (
-    let ok1 = is_para(p),
-    let ok2 = is_byline(p),
-    if (ok1 and not ok2) p else null
-)] |> filter(x => x != null)
+// CORRECT: compare with matching type
+e.tag == 'p'    // ← works when e.tag is symbol 'p'
+```
+
+All compound boolean patterns work correctly in `where` clauses:
+```
+where x > 3 and x < 8                         // ✓
+where x < 3 or x > 8                          // ✓
+where not (x > 5)                              // ✓
+where is_para(e) and not is_byline(e)          // ✓
+where (f1(x) and not f2(x)) or f3(x)          // ✓
+where f1(x) and not f2(x) and f3(x)           // ✓
 ```
 
 ---
@@ -194,7 +226,7 @@ pub fn title(doc), text(doc), lang(doc), dir(doc), metadata(doc)
 ### To fix the 3 remaining failures:
 1. **HTML entity decoding** (`005-unescape-html-entities`) — Requires Lambda HTML parser to decode numeric/named entities to Unicode characters in text content. Not fixable in readability2.ls.
 2. **BR-to-P replacement** (`replace-brs`) — Readability.js preprocesses `<br><br>` sequences into `<p>` split. Would need DOM mutation support in Lambda (MarkEditor) or a text-level workaround.
-3. **mozilla-1 null excerpt** — Large page (~39s) where `collect_all_elements` bug prevents excerpt extraction. The article content itself is selected correctly.
+3. **mozilla-1 wrong excerpt** — `find_best_candidate` selects a div with country dropdown content instead of the main article. Would need improved scoring or candidate selection logic.
 
 ### Missing Readability.js features (not tested yet):
 - `_replaceBrs()` — BR tag replacement preprocessing
