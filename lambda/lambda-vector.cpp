@@ -1188,15 +1188,17 @@ Item fn_sign(Item item) {
 //==============================================================================
 
 // reverse(vec) - reverse order of elements
+// string/symbol passthrough: strings are singular, not iterable
 Item fn_reverse(Item item) {
     GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+
     int64_t len = vector_length(item);
     if (len == 0) {
         List* result = list();
         return { .list = result };
     }
-
-    TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
@@ -1224,15 +1226,17 @@ Item fn_reverse(Item item) {
 }
 
 // sort(vec) - sort in ascending order
+// string/symbol passthrough: strings are singular, not iterable
 Item fn_sort1(Item item) {
     GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+
     int64_t len = vector_length(item);
     if (len == 0) {
         List* result = list();
         return { .list = result };
     }
-
-    TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
@@ -1336,8 +1340,12 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
 }
 
 // sort(vec, direction) - sort with direction ('asc' or 'desc')
+// string/symbol passthrough: strings are singular, not iterable
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+
     int64_t len = vector_length(item);
     if (len == 0) {
         List* result = list();
@@ -1358,8 +1366,6 @@ Item fn_sort2(Item item, Item dir_item) {
             descending = true;
         }
     }
-
-    TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
@@ -1416,44 +1422,58 @@ Item fn_sort2(Item item, Item dir_item) {
 }
 
 // unique(vec) - remove duplicates
+// list input → spreadable array; array input → preserve is_spreadable flag
+// string/symbol passthrough: strings are singular, not iterable
 Item fn_unique(Item item) {
     GUARD_ERROR1(item);
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) return item;
+
     int64_t len = vector_length(item);
-    if (len == 0) {
-        List* result = list();
-        return { .list = result };
+
+    // determine spreadable flag: lists → true, arrays → follow input
+    bool spreadable = true; // default for list input
+    if (type == LMD_TYPE_ARRAY) {
+        spreadable = item.array->is_spreadable;
+    } else if (type == LMD_TYPE_ARRAY_INT64 || type == LMD_TYPE_ARRAY_FLOAT) {
+        spreadable = false; // typed arrays don't have the flag
     }
 
-    TypeId type = get_type_id(item);
+    if (len == 0) {
+        Array* result = array();
+        result->is_spreadable = spreadable;
+        return { .array = result };
+    }
 
     // fast path for homogeneous int64 arrays (direct numeric comparison)
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* arr = item.array_int64;
-        List* result = list();
+        Array* result = array();
         for (int64_t i = 0; i < len; i++) {
             int64_t val = arr->items[i];
             bool found = false;
-            for (int64_t j = 0; j < result->length; j++) {
+            for (int64_t j = 0; j < (int64_t)result->length; j++) {
                 if (result->items[j].get_int64() == val) {
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                list_push(result, push_l(val));
+                array_push(result, push_l(val));
             }
         }
-        return { .list = result };
+        result->is_spreadable = spreadable;
+        return { .array = result };
     }
 
     // fast path for homogeneous float arrays (direct numeric comparison)
     if (type == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* arr = item.array_float;
-        List* result = list();
+        Array* result = array();
         for (int64_t i = 0; i < len; i++) {
             double val = arr->items[i];
             bool found = false;
-            for (int64_t j = 0; j < result->length; j++) {
+            for (int64_t j = 0; j < (int64_t)result->length; j++) {
                 double res_val = result->items[j].get_double();
                 if (val == res_val || (std::isnan(val) && std::isnan(res_val))) {
                     found = true;
@@ -1461,41 +1481,51 @@ Item fn_unique(Item item) {
                 }
             }
             if (!found) {
-                list_push(result, push_d(val));
+                array_push(result, push_d(val));
             }
         }
-        return { .list = result };
+        result->is_spreadable = spreadable;
+        return { .array = result };
     }
 
     // generic path: use fn_eq for type-aware comparison (handles strings, symbols, etc.)
-    List* result = list();
+    Array* result = array();
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(item, i);
 
         bool found = false;
-        for (int64_t j = 0; j < result->length; j++) {
+        for (int64_t j = 0; j < (int64_t)result->length; j++) {
             if (fn_eq(elem, result->items[j]) == BOOL_TRUE) {
                 found = true;
                 break;
             }
         }
         if (!found) {
-            list_push(result, elem);
+            array_push(result, elem);
         }
     }
-    return { .list = result };
+    result->is_spreadable = spreadable;
+    return { .array = result };
 }
 
 // concat(v1, v2) - concatenate two vectors
+// string/symbol: delegates to fn_join(a, b) for string concatenation
 Item fn_concat(Item a, Item b) {
     GUARD_ERROR2(a, b);
+
+    TypeId type_a = get_type_id(a);
+    TypeId type_b = get_type_id(b);
+
+    // string/symbol concatenation via fn_join
+    if ((type_a == LMD_TYPE_STRING || type_a == LMD_TYPE_SYMBOL) &&
+        (type_b == LMD_TYPE_STRING || type_b == LMD_TYPE_SYMBOL)) {
+        return fn_join(a, b);
+    }
+
     int64_t len_a = vector_length(a);
     int64_t len_b = vector_length(b);
 
     if (len_a < 0 || len_b < 0) return ItemError;
-
-    TypeId type_a = get_type_id(a);
-    TypeId type_b = get_type_id(b);
 
     // If both are same homogeneous type, preserve it
     if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
@@ -1520,8 +1550,17 @@ Item fn_concat(Item a, Item b) {
 }
 
 // take(vec, n) - first n elements
+// string/symbol: delegates to fn_substring(str, 0, n)
 Item fn_take(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+
+    TypeId type = get_type_id(vec);
+    // string/symbol: take = substring(str, 0, n)
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+        Item zero = {.item = i2it(0)};
+        return fn_substring(vec, zero, n_item);
+    }
+
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
@@ -1534,8 +1573,6 @@ Item fn_take(Item vec, Item n_item) {
     int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
     if (n < 0) n = 0;
     if (n > len) n = len;
-
-    TypeId type = get_type_id(vec);
 
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(n);
@@ -1555,8 +1592,18 @@ Item fn_take(Item vec, Item n_item) {
 }
 
 // drop(vec, n) - drop first n elements
+// string/symbol: delegates to fn_substring(str, n, len)
 Item fn_drop(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
+
+    TypeId type = get_type_id(vec);
+    // string/symbol: drop = substring(str, n, char_count)
+    if (type == LMD_TYPE_STRING || type == LMD_TYPE_SYMBOL) {
+        int64_t char_count = fn_len(vec);
+        Item end = {.item = i2it(char_count)};
+        return fn_substring(vec, n_item, end);
+    }
+
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
@@ -1571,7 +1618,6 @@ Item fn_drop(Item vec, Item n_item) {
     if (n > len) n = len;
 
     int64_t new_len = len - n;
-    TypeId type = get_type_id(vec);
 
     if (type == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64* result = array_int64_new(new_len);

@@ -167,23 +167,22 @@ void serialize_attributes_wpt(const ElementReader& elem, std::string& output, in
                 // Get attribute name
                 std::string attr_name(shape->name->str, shape->name->length);
 
-                // Get attribute value
+                // Get attribute value - include ITEM_NULL attrs as empty string
                 ItemReader val = elem.get_attr(attr_name.c_str());
-                if (!val.isNull()) {
-                    std::string attr_value;
-                    TypeId val_type = val.getType();
-                    if (val_type == LMD_TYPE_STRING) {
-                        String* str = val.asString();
-                        if (str) {
-                            attr_value = std::string(str->chars, str->len);
-                        }
-                    } else if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
-                        attr_value = std::to_string(val.asInt());
-                    } else if (val_type == LMD_TYPE_BOOL) {
-                        attr_value = val.asBool() ? "true" : "false";
+                std::string attr_value;
+                TypeId val_type = val.getType();
+                if (val_type == LMD_TYPE_STRING) {
+                    String* str = val.asString();
+                    if (str) {
+                        attr_value = std::string(str->chars, str->len);
                     }
-                    attrs.push_back({attr_name, attr_value});
+                } else if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
+                    attr_value = std::to_string(val.asInt());
+                } else if (val_type == LMD_TYPE_BOOL) {
+                    attr_value = val.asBool() ? "true" : "false";
                 }
+                // LMD_TYPE_NULL: attr_value stays empty (""), outputting name=""
+                attrs.push_back({attr_name, attr_value});
             }
             shape = shape->next;
         }
