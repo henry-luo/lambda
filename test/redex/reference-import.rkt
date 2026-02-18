@@ -874,6 +874,8 @@
             (define c (car cs))
             (match c
               [`(text-node ,_) (loop (cdr cs) idx (cons c result))]
+              [`(text-node-whitespace ,_) (loop (cdr cs) idx (cons c result))]
+              [`(text-node-raw ,_ ,_) (loop (cdr cs) idx (cons c result))]
               [_ (loop (cdr cs) (add1 idx)
                        (cons (apply-style-rules c rules new-chain merged idx) result))])])))
      `(element ,tag ,id ,class ,merged ,new-children)]
@@ -983,6 +985,49 @@
 
   (reverse results))
 
+;; HTML spec: auto-insert <tbody> around consecutive <tr> children of <table>.
+;; Browsers always create <tbody> elements for table rows that aren't already
+;; inside <thead>/<tbody>/<tfoot>. This runs at parse time, before CSS resolution.
+(define (auto-insert-tbody children)
+  (define (is-tr-element? c)
+    (match c
+      [`(element "tr" ,_ ,_ ,_ ,_) #t]
+      [_ #f]))
+  (define (is-thead/tbody/tfoot? c)
+    (match c
+      [`(element ,(and tag (or "thead" "tbody" "tfoot")) ,_ ,_ ,_ ,_) #t]
+      [_ #f]))
+  (define (is-whitespace? c)
+    (match c
+      [`(text-node-whitespace ,_) #t]
+      [_ #f]))
+  ;; if all rows are already wrapped in thead/tbody/tfoot, nothing to do
+  (define has-bare-tr? (for/or ([c (in-list children)]) (is-tr-element? c)))
+  (if (not has-bare-tr?)
+      children
+      ;; wrap consecutive <tr> runs (including intervening whitespace) in synthetic <tbody>.
+      ;; whitespace-only text nodes between <tr> elements are part of the run.
+      (let loop ([remaining children] [acc '()] [tr-acc '()])
+        (cond
+          [(null? remaining)
+           (if (null? tr-acc)
+               (reverse acc)
+               (reverse (cons (list 'element "tbody" #f #f '() (reverse tr-acc))
+                              acc)))]
+          [(is-tr-element? (car remaining))
+           (loop (cdr remaining) acc (cons (car remaining) tr-acc))]
+          ;; whitespace between <tr> elements: include in current run if active
+          [(and (is-whitespace? (car remaining)) (not (null? tr-acc)))
+           (loop (cdr remaining) acc (cons (car remaining) tr-acc))]
+          [else
+           (if (null? tr-acc)
+               (loop (cdr remaining) (cons (car remaining) acc) '())
+               (loop (cdr remaining)
+                     (cons (car remaining)
+                           (cons (list 'element "tbody" #f #f '() (reverse tr-acc))
+                                 acc))
+                     '()))]))))
+
 ;; parse children until we hit the closing tag for the given tag-name.
 ;; returns (values children-list position-after-close)
 ;; also captures text content between tags as (text-node "content") entries.
@@ -998,11 +1043,16 @@
       (define raw (substring html-str pos end-pos))
       (define decoded (decode-html-entities raw))
       (define text (normalize-text-content decoded))
-      (when (and (> (string-length text) 0)
-                 ;; skip pure whitespace between elements (unless white-space: pre)
-                 (not (regexp-match? #rx"^[ \t\r\n]+$" text)))
-        ;; store both normalized and raw text; box builder chooses based on white-space
-        (set! children (cons (list 'text-node-raw decoded text) children)))))
+      (cond
+        [(and (> (string-length text) 0)
+              (not (regexp-match? #rx"^[ \t\r\n]+$" text)))
+         ;; store both normalized and raw text; box builder chooses based on white-space
+         (set! children (cons (list 'text-node-raw decoded text) children))]
+        ;; CSS 2.2 §9.2.2.1: whitespace-only text nodes between elements.
+        ;; Preserve as text-node-whitespace; the box builder will decide whether
+        ;; to include them based on context (inline formatting vs block formatting).
+        [(regexp-match? #rx"[ \t\r\n]" decoded)
+         (set! children (cons (list 'text-node-whitespace decoded) children))])))
 
   (let loop ()
     (when (< pos len)
@@ -1089,8 +1139,14 @@
              (let ()
                (define-values (grandchildren after)
                  (parse-children-until html-str tag-end child-tag))
+               ;; HTML spec: browsers auto-insert <tbody> around <tr> children of <table>.
+               ;; Wrap consecutive <tr> children of <table> in synthetic <tbody> elements.
+               (define final-grandchildren
+                 (if (equal? child-tag "table")
+                     (auto-insert-tbody grandchildren)
+                     grandchildren))
                (set! children
-                     (cons (list 'element child-tag elem-id elem-class inline-style grandchildren)
+                     (cons (list 'element child-tag elem-id elem-class inline-style final-grandchildren)
                            children))
                (set! pos after)
                (loop)))]
@@ -2419,6 +2475,67 @@
         `(replaced ,box-id ,styles ,intrinsic-w ,intrinsic-h)]
        [else
 
+     ;; CSS 2.2 §9.2.2.1: determine if this element has inline-level children.
+     ;; If so, whitespace text nodes between them should be preserved as single spaces.
+     ;; For whitespace stripping decisions, exclude out-of-flow elements
+     ;; (abs-pos/fixed and floats) since they don't affect inline formatting.
+     (define (is-out-of-flow? c)
+       (match c
+         [`(element ,etag ,eid ,eclass ,ealist ,echildren)
+          (let ([pos-val (cdr-or-false 'position ealist)]
+                [float-val (cdr-or-false 'float ealist)])
+            (or (and pos-val (or (string=? pos-val "absolute")
+                                 (string=? pos-val "fixed")))
+                (and float-val
+                     (not (string=? (string-trim float-val) "none")))))]
+         [_ #f]))
+
+     ;; flow-children: exclude out-of-flow elements for whitespace decisions only
+     (define flow-children
+       (filter (lambda (c) (not (is-out-of-flow? c))) children))
+
+     (define has-inline-level-children?
+       (for/or ([c (in-list flow-children)])
+         (match c
+           [`(element ,etag ,eid ,eclass ,ealist ,echildren)
+            (let ([d (or (cdr-or-false 'display ealist)
+                        (html-tag-default-display etag)
+                        (hash-ref (base-defaults) 'display))])
+              (and d (or (equal? d "inline-block")
+                        (equal? d "inline")
+                        (equal? d "inline-flex")
+                        (equal? d "inline-grid")
+                        (equal? d "inline-table"))))]
+           [_ #f])))
+
+     ;; CSS Text §4: strip leading/trailing whitespace text nodes from inline contexts.
+     ;; Strip based on flow-children analysis, then reconstruct with original order
+     ;; keeping out-of-flow elements in their original positions.
+     (define whitespace-to-strip
+       (if has-inline-level-children?
+           ;; determine which whitespace nodes to strip (leading and trailing in flow)
+           (let* ([stripped-leading
+                   (let loop ([remaining flow-children] [stripped '()])
+                     (cond
+                       [(null? remaining) stripped]
+                       [(match (car remaining) [`(text-node-whitespace ,_) #t] [_ #f])
+                        (loop (cdr remaining) (cons (car remaining) stripped))]
+                       [else stripped]))]
+                  [stripped-trailing
+                   (let loop ([remaining (reverse flow-children)] [stripped '()])
+                     (cond
+                       [(null? remaining) stripped]
+                       [(match (car remaining) [`(text-node-whitespace ,_) #t] [_ #f])
+                        (loop (cdr remaining) (cons (car remaining) stripped))]
+                       [else stripped]))])
+             (append stripped-leading stripped-trailing))
+           '()))
+
+     ;; Reconstruct effective-children from original children order,
+     ;; removing only the whitespace nodes identified for stripping.
+     (define effective-children
+       (filter (lambda (c) (not (memq c whitespace-to-strip))) children))
+
      (define child-boxes
        (filter-map
         (lambda (c)
@@ -2426,6 +2543,60 @@
           (parameterize ([current-em-size (current-em-size)]
                          [current-ex-ratio (current-ex-ratio)])
           (match c
+            ;; CSS 2.2 §9.2.2.1: whitespace text nodes in inline formatting contexts
+            ;; become a single space character. In block formatting contexts, skip them.
+            [`(text-node-whitespace ,raw-ws)
+             (if has-inline-level-children?
+                 ;; generate a single space text box
+                 (let ()
+                   (define text-id (string->symbol (format "txt~a" (unbox counter))))
+                   (set-box! counter (add1 (unbox counter)))
+                   (define font-family-val (cdr-or-false 'font-family inline-alist))
+                   (define uses-ahem?
+                     (or (uses-taffy-base?)
+                         (and font-family-val
+                              (regexp-match? #rx"(?i:ahem)" font-family-val))))
+                   (define effective-font-size
+                     (cond [(uses-taffy-base?) ahem-font-size]
+                           [else (current-em-size)]))
+                   (define text-box-sizing (if (uses-taffy-base?) 'border-box 'content-box))
+                   (define parent-line-height (get-style-prop styles 'line-height #f))
+                   (define font-weight-val
+                     (let ([fw (cdr-or-false 'font-weight inline-alist)])
+                       (cond
+                         [(not fw) 'normal]
+                         [(or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900")) 'bold]
+                         [else 'normal])))
+                   (define use-arial-metrics?
+                     (or (eq? font-weight-val 'bold)
+                         (and font-family-val
+                              (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
+                                  (regexp-match? #rx"(?i:arial)" font-family-val)
+                                  (regexp-match? #rx"(?i:helvetica)" font-family-val)))))
+                   (define font-metrics-sym (if use-arial-metrics? 'arial 'times))
+                   (cond
+                     [uses-ahem?
+                      (define text-styles
+                        (if parent-line-height
+                            `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)
+                                    (line-height ,parent-line-height))
+                            `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size))))
+                      (define measured-w (measure-text-ahem " " effective-font-size))
+                      `(text ,text-id ,text-styles " " ,measured-w)]
+                     [else
+                      (define base-style-props
+                        `((box-sizing ,text-box-sizing)
+                          (font-type proportional)
+                          (font-size ,effective-font-size)
+                          (font-metrics ,font-metrics-sym)))
+                      (define text-styles
+                        (if parent-line-height
+                            `(style ,@base-style-props (line-height ,parent-line-height))
+                            `(style ,@base-style-props)))
+                      (define measured-w (measure-text-proportional " " effective-font-size font-family-val font-metrics-sym))
+                      `(text ,text-id ,text-styles " " ,measured-w)]))
+                 ;; block formatting context: skip whitespace text nodes
+                 #f)]
             [(or `(text-node ,norm-text)
                  `(text-node-raw ,_ ,norm-text))
              ;; get raw text if available (for white-space: pre)
@@ -2502,10 +2673,14 @@
                 (define ahem-text (apply-text-transform (if is-pre? raw-text norm-text)))
                 (when (string=? ahem-text "") #f)
                 (define text-styles
+                  (let ([ws-props (if (and white-space-val (equal? white-space-val "nowrap"))
+                                     '((white-space nowrap))
+                                     '())])
                   (if parent-line-height
                       `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)
-                              (line-height ,parent-line-height))
-                      `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size))))
+                              (line-height ,parent-line-height) ,@ws-props)
+                      `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)
+                              ,@ws-props))))
                 (define measured-w (measure-text-ahem ahem-text effective-font-size))
                 (if (string=? ahem-text "")
                     #f
@@ -2524,7 +2699,11 @@
                      `((box-sizing ,text-box-sizing)
                        (font-type proportional)
                        (font-size ,effective-font-size)
-                       (font-metrics ,font-metrics-sym)))
+                       (font-metrics ,font-metrics-sym)
+                       ,@(if (and white-space-val
+                                  (equal? white-space-val "nowrap"))
+                             '((white-space nowrap))
+                             '())))
                    (define text-styles
                      (if parent-line-height
                          `(style ,@base-style-props (line-height ,parent-line-height))
@@ -2540,7 +2719,7 @@
                  #f
                  (element->box-tree c counter #f this-w))]
             [_ (element->box-tree c counter #f this-w)])))
-        children))
+        effective-children))
 
      (define display-sym (string->symbol display-str))
 
@@ -2677,9 +2856,16 @@
                                    (cons (make-anon-tbody-box (reverse row-acc) counter)
                                          acc))
                              '()))])))
-       `(table ,table-id
-               (style (display table))
-               ,final-children))
+       ;; Inherit border-spacing from parent element (e.g., table { border-spacing: 0 })
+       (define bs-h (get-style-prop styles 'border-spacing-h #f))
+       (define bs-v (get-style-prop styles 'border-spacing-v #f))
+       (define anon-table-style
+         (cond
+           [(and bs-h bs-v)
+            `(style (display table) (border-spacing-h ,bs-h) (border-spacing-v ,bs-v))]
+           [else
+            `(style (display table))]))
+       `(table ,table-id ,anon-table-style ,final-children))
 
      (case display-sym
        [(flex)
@@ -2694,35 +2880,13 @@
         `(block ,box-id ,styles ,wrapped)]
        [(inline)
         (if (has-block-child? child-boxes)
-            ;; block-in-inline: convert to block and add strut heights
-            (let* ([strut-h (compute-strut-height)]
-                   ;; check if first child is a block (need before-strut)
-                   [first-is-block?
-                    (and (pair? child-boxes)
-                         (pair? (car child-boxes))
-                         (eq? (car (car child-boxes)) 'block))]
-                   ;; check if last child is a block (need after-strut)
-                   [last-is-block?
-                    (and (pair? child-boxes)
-                         (let ([last (last child-boxes)])
-                           (and (pair? last)
-                                (eq? (car last) 'block))))]
-                   ;; inject strut heights into the container's styles
-                   [strut-styles
-                    (match styles
-                      [`(style ,@props)
-                       (define new-props props)
-                       (when first-is-block?
-                         (set! new-props
-                           (append new-props
-                                   `((__before-strut-height ,strut-h)))))
-                       (when last-is-block?
-                         (set! new-props
-                           (append new-props
-                                   `((__after-strut-height ,strut-h)))))
-                       `(style ,@new-props)]
-                      [_ styles])])
-              `(block ,box-id ,strut-styles ,child-boxes))
+            ;; block-in-inline: convert to block.
+            ;; CSS 2.2 §9.2.1.1: inline broken around block children.
+            ;; Empty anonymous inline fragments (before first block / after last
+            ;; block) don't generate line boxes and have zero height.
+            ;; Non-empty fragments' height comes from their inline content.
+            ;; No explicit strut injection is needed.
+            `(block ,box-id ,styles ,child-boxes)
             ;; normal inline
             `(inline ,box-id ,styles ,child-boxes))]
        [(inline-block)
@@ -2764,24 +2928,96 @@
                         child-boxes)])
               `(block ,box-id ,styles ,w)))]
        [(table inline-table)
-        ;; All tables go through table layout, regardless of explicit width.
-        ;; CSS 2.2 §17.5.2: auto-width tables use shrink-to-fit sizing,
-        ;; handled by layout-table-simple.
-        ;; HTML spec: browsers automatically insert anonymous <tbody> wrappers
-        ;; around consecutive <tr> elements that are direct children of <table>.
-        ;; We replicate this behavior here so our box tree matches the browser DOM.
+        ;; CSS 2.2 §17.2.1: Anonymous table objects.
+        ;; Step 1: Wrap non-proper-table children in anonymous table-cell → table-row.
+        ;; "If a child C of a 'table' or 'inline-table' box is not a proper table
+        ;;  child, generate an anonymous 'table-row' box around C and all consecutive
+        ;;  siblings of C that are not proper table children."
+        ;; Within that anonymous row, all children become a single anonymous table-cell.
+        (define (is-proper-table-child-box? box)
+          (match box
+            [`(block ,_ ,s ,_)
+             (let ([d (get-style-prop s 'display #f)])
+               (and d (memq d '(table-row table-row-group table-header-group
+                                table-footer-group table-column table-column-group
+                                table-caption))))]
+            [_ #f]))
+        (define (is-table-cell-box? box)
+          (match box
+            [`(block ,_ ,s ,_)
+             (eq? (get-style-prop s 'display #f) 'table-cell)]
+            [_ #f]))
+        ;; CSS 2.2 §17.2.1 Step 1: wrap consecutive non-proper children in
+        ;; anonymous table-row. Step 2: within each anonymous row, wrap
+        ;; consecutive non-table-cell children in anonymous table-cell.
+        (define (wrap-non-cells-in-anon-cell contents)
+          ;; Within an anonymous row, wrap consecutive non-cell children in anon-cell
+          (let loop ([remaining contents] [acc '()] [non-cell-acc '()])
+            (cond
+              [(null? remaining)
+               (if (null? non-cell-acc)
+                   (reverse acc)
+                   (let ([cell-id (string->symbol
+                                   (format "anon-cell-~a" (unbox counter)))])
+                     (set-box! counter (add1 (unbox counter)))
+                     (reverse (cons `(block ,cell-id (style (display table-cell))
+                                            ,(reverse non-cell-acc))
+                                    acc))))]
+              [(is-table-cell-box? (car remaining))
+               (if (null? non-cell-acc)
+                   (loop (cdr remaining) (cons (car remaining) acc) '())
+                   (let ([cell-id (string->symbol
+                                   (format "anon-cell-~a" (unbox counter)))])
+                     (set-box! counter (add1 (unbox counter)))
+                     (loop (cdr remaining)
+                           (cons (car remaining)
+                                 (cons `(block ,cell-id (style (display table-cell))
+                                               ,(reverse non-cell-acc))
+                                       acc))
+                           '())))]
+              [else
+               (loop (cdr remaining) acc (cons (car remaining) non-cell-acc))])))
+        (define (make-anon-row contents)
+          (define row-id (string->symbol (format "anon-row-~a" (unbox counter))))
+          (set-box! counter (add1 (unbox counter)))
+          (define row-children (wrap-non-cells-in-anon-cell contents))
+          `(block ,row-id (style (display table-row)) ,row-children))
+        ;; wrap consecutive non-proper children in anonymous row
+        (define has-non-proper?
+          (for/or ([b (in-list child-boxes)])
+            (not (is-proper-table-child-box? b))))
+        (define wrapped-children
+          (if has-non-proper?
+              (let loop ([remaining child-boxes] [acc '()] [non-proper-acc '()])
+                (cond
+                  [(null? remaining)
+                   (if (null? non-proper-acc)
+                       (reverse acc)
+                       (reverse (cons (make-anon-row (reverse non-proper-acc))
+                                      acc)))]
+                  [(is-proper-table-child-box? (car remaining))
+                   (if (null? non-proper-acc)
+                       (loop (cdr remaining) (cons (car remaining) acc) '())
+                       (loop (cdr remaining)
+                             (cons (car remaining)
+                                   (cons (make-anon-row (reverse non-proper-acc))
+                                         acc))
+                             '()))]
+                  [else
+                   (loop (cdr remaining) acc (cons (car remaining) non-proper-acc))]))
+              child-boxes))
+        ;; Step 2: Wrap consecutive table-row children in anonymous tbody.
+        ;; HTML spec: browsers auto-insert <tbody> around <tr> direct children.
+        ;; For actual <table> elements, replicate this behavior.
         (define (is-table-row-box? box)
           (match box
             [`(block ,_ ,s ,_)
              (let ([d (get-style-prop s 'display #f)])
                (eq? d 'table-row))]
             [_ #f]))
-        ;; Only wrap in anonymous tbody for actual HTML <table> elements,
-        ;; not for divs with display:table (CSS-only tables).
-        ;; HTML spec: browsers auto-insert <tbody> around <tr> direct children.
         (define final-children
           (if (equal? tag "table")
-              (let loop ([boxes child-boxes] [acc '()] [row-acc '()])
+              (let loop ([boxes wrapped-children] [acc '()] [row-acc '()])
                 (cond
                   [(null? boxes)
                    (if (null? row-acc)
@@ -2798,7 +3034,7 @@
                                    (cons (make-anon-tbody-box (reverse row-acc) counter)
                                          acc))
                              '()))]))
-              child-boxes))
+              wrapped-children))
         `(table ,box-id ,styles ,final-children)]
        [(table-row table-row-group table-header-group table-footer-group
                    table-cell table-column table-column-group table-caption)
@@ -2863,6 +3099,7 @@
       #f))
 
 ;; find the test root element (body > div#test-root or first body > div)
+;; When body has display:table, use the body itself as the root.
 ;; returns: (values test-root-node body-abs-x body-abs-y)
 (define (find-test-root html-node)
   (define html-children (hash-ref html-node 'children '()))
@@ -2875,12 +3112,20 @@
       (let* ([body-layout (hash-ref body-node 'layout (hash))]
              [body-x (hash-ref body-layout 'x 0)]
              [body-y (hash-ref body-layout 'y 0)]
-             [test-root
-              (for/first ([c (in-list (hash-ref body-node 'children '()))]
-                          #:when (and (equal? (hash-ref c 'nodeType #f) "element")
-                                      (equal? (hash-ref c 'tag #f) "div")))
-                c)])
-        (values test-root body-x body-y))
+             [body-computed (hash-ref body-node 'computed (hash))]
+             [body-display (hash-ref body-computed 'display #f)])
+        ;; if body has display:table, use body itself as root
+        (if (equal? body-display "table")
+            (let* ([html-layout (hash-ref html-node 'layout (hash))]
+                   [html-x (hash-ref html-layout 'x 0)]
+                   [html-y (hash-ref html-layout 'y 0)])
+              (values body-node html-x html-y))
+            (let ([test-root
+                   (for/first ([c (in-list (hash-ref body-node 'children '()))]
+                               #:when (and (equal? (hash-ref c 'nodeType #f) "element")
+                                           (equal? (hash-ref c 'tag #f) "div")))
+                     c)])
+              (values test-root body-x body-y))))
       (values #f 0 0)))
 
 ;; convert a text node to an expected layout node.
@@ -3010,6 +3255,25 @@
                  [current-ex-ratio 0.5])
     (define elements (html-file->inline-styles html-path))
     (define counter (box 0))
+    ;; detect body display type (e.g., body { display: table })
+    (define body-display
+      (let ()
+        (define html-content (file->string html-path))
+        (define body-tag-match (regexp-match #rx"<body([^>]*)>" html-content))
+        (define body-attrs (if body-tag-match (cadr body-tag-match) ""))
+        (define body-class-match (regexp-match #rx"class=\"([^\"]+)\"" body-attrs))
+        (define body-class (and body-class-match (cadr body-class-match)))
+        ;; check if body has a display-changing class in the style rules
+        (define-values (style-rules _before _after)
+          (extract-style-rules html-content))
+        (define body-display-from-rules
+          (for/fold ([display #f]) ([rule (in-list style-rules)])
+            (define selector (car rule))
+            (define props (cdr rule))
+            (if (selector-matches? selector "body" #f body-class '(("html" #f #f)) 1)
+                (or (cdr-or-false 'display props) display)
+                display)))
+        body-display-from-rules))
     (cond
       [(null? elements)
        ;; empty test — shouldn't happen
@@ -3017,6 +3281,17 @@
       [(uses-taffy-base?)
        ;; Taffy: take the first body-level element as root
        (element->box-tree (car elements) counter #t)]
+      ;; CSS2.1: when body has display:table, create a synthetic body element
+      ;; containing all children as the root (the body IS the table).
+      ;; Include UA default body margin (8px) so layout-document positions
+      ;; the root correctly.
+      [(and body-display (equal? body-display "table"))
+       (define body-elem
+         `(element "body" #f #f ((display . "table")
+                                 (margin-top . "8px") (margin-right . "8px")
+                                 (margin-bottom . "8px") (margin-left . "8px"))
+                   ,elements))
+       (element->box-tree body-elem counter #t)]
       [else
        ;; CSS2.1: find first div element (skip p/description elements)
        ;; to match expected tree which starts from first div
