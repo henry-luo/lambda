@@ -328,18 +328,16 @@
          [is-proportional?
           (let ([lh-prop (get-style-prop styles 'line-height #f)])
             (if lh-prop
-                (if (number? lh-prop) lh-prop (* proportional-lh-ratio font-size))
-                (* proportional-lh-ratio font-size)))]
+                (if (number? lh-prop) lh-prop (chrome-mac-line-height font-metrics-val font-size))
+                (chrome-mac-line-height font-metrics-val font-size)))]
          [else
           ;; Ahem: check for explicit line-height, default to font-size
           (let ([lh-prop (get-style-prop styles 'line-height #f)])
             (if (and lh-prop (number? lh-prop))
                 lh-prop
                 font-size))]))
-     ;; Chrome getClientRects() reports em-box height (≈ font-size), y = half-leading.
-     ;; half-leading = (line-height - font-size) / 2 positions text within line box.
-     ;; Stacking uses height + 2*half-leading = line-height (recovered by layout-block).
-     (define half-leading (/ (- line-height font-size) 2))
+     ;; Chrome getClientRects() returns line-height as the text rect height.
+     ;; Text view height = line-height, y = 0 (leading included in height).
      ;; Per-character width function from JSON-loaded font metrics.
      ;; Uses full glyph advance width tables (2000+ glyphs) instead of
      ;; the old ~80-character hardcoded ratio tables, eliminating the
@@ -368,18 +366,17 @@
                 (+ total (char-width ch font-size))))
             (max mx lw)))
         (define text-w max-line-w)
-        ;; CSS 2.2 §10.6.1: text rect = em-box spanning first to last line
-        ;; height = (n-1)*lh + fs, y = half-leading
-        (define text-h (+ (* (sub1 num-lines) line-height) font-size))
-        (make-text-view id 0 half-leading text-w text-h content)]
+        ;; Chrome getClientRects() returns line-height as the rect height for each
+        ;; line of text.  For a multi-line bounding box the total height = n * lh.
+        (define text-h (* num-lines line-height))
+        (make-text-view id 0 0 text-w text-h content)]
 
        ;; no wrapping needed: text fits or no constraint
        [(or (not effective-avail-w) (<= measured-w effective-avail-w))
-        ;; CSS 2.2 §10.6.1: text rect height = font-size (em-box), y = half-leading.
-        ;; Browser Range.getClientRects() returns em-box dimensions, not the full
-        ;; line-box height. The half-leading offsets the text visually within the
-        ;; line box. Stacking uses line-height (restored via layout-block stacking code).
-        (make-text-view id 0 half-leading measured-w font-size content)]
+        ;; Chrome Range.getClientRects() returns line-height as the text rect
+        ;; height (not just font-size/em-box).  The half-leading is already
+        ;; included in line-height, so y = 0 and h = line-height.
+        (make-text-view id 0 0 measured-w line-height content)]
        [else
         (cond
           ;; proportional font: split on spaces for word wrapping
@@ -417,10 +414,10 @@
                      (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
            ;; for proportional text, report max line width (not container width)
            (define text-w max-line-w)
-           ;; CSS 2.2 §10.6.1: text rect = em-box spanning first to last line
-           ;; height = (n-1)*lh + fs, y = half-leading
-           (define text-h (+ (* (sub1 num-lines) line-height) font-size))
-           (make-text-view id 0 half-leading text-w text-h content)]
+           ;; Chrome getClientRects(): each line rect has height = line-height.
+           ;; Bounding box of n lines = n * line-height.
+           (define text-h (* num-lines line-height))
+           (make-text-view id 0 0 text-w text-h content)]
 
           ;; Ahem font with newlines: handle pre-formatted line breaks
           [(and has-newlines? (not is-proportional?))
@@ -433,8 +430,8 @@
                    (ahem-char-width ch font-size)))
                (max mx lw)))
            (define text-w max-line-w)
-           (define text-h (+ (* (sub1 num-lines) line-height) font-size))
-           (make-text-view id 0 half-leading text-w text-h content)]
+           (define text-h (* num-lines line-height))
+           (make-text-view id 0 0 text-w text-h content)]
 
           ;; Ahem font: split on zero-width spaces
           [else
@@ -467,10 +464,9 @@
                      (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
            ;; report actual content width (max line width), not container width
            (define text-w max-line-w)
-           ;; Ahem: display height spans from first-line half-leading to last-line bottom
-           ;; = (num-lines - 1) * line-height + font-size
-           (define text-h (+ (* (sub1 num-lines) line-height) font-size))
-           (make-text-view id 0 half-leading text-w text-h content)])]))
+           ;; text height = n * line-height (matches Chrome getClientRects bounding box)
+           (define text-h (* num-lines line-height))
+           (make-text-view id 0 0 text-w text-h content)])]))
 
 ;; ============================================================
 ;; Replaced Element Layout (img, svg, etc.)

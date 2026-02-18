@@ -459,12 +459,11 @@
                      [font-type (get-style-prop parent-styles 'font-type #f)]
                      [font-metrics-sym (get-style-prop parent-styles 'font-metrics 'times)]
                      [lh-prop (get-style-prop parent-styles 'line-height #f)]
-                     ;; use JSON-loaded font metrics for descent and line-height ratios
+                     ;; use Chrome-macOS-compatible line-height for consistency
                      [descent-ratio (font-descender-ratio font-metrics-sym)]
-                     [lh-ratio (font-line-height-ratio font-metrics-sym)]
                      [strut-lh (if (and lh-prop (number? lh-prop))
                                    lh-prop
-                                   (* lh-ratio fs))]
+                                   (chrome-mac-line-height font-metrics-sym fs))]
                      [half-leading (/ (- strut-lh fs) 2)]
                      [descent (* descent-ratio fs)])
                 (max 0 (+ descent half-leading)))
@@ -1050,8 +1049,7 @@
                       ;; for proportional fonts: compute descent below baseline using JSON metrics
                       [strut-descent
                        (if is-proportional?
-                           (let* ([lh-ratio (font-line-height-ratio parent-font-metrics-sym)]
-                                  [strut-lh (* parent-fs lh-ratio)]
+                           (let* ([strut-lh (chrome-mac-line-height parent-font-metrics-sym parent-fs)]
                                   [descender-ratio (font-descender-ratio parent-font-metrics-sym)]
                                   [half-leading (/ (- strut-lh parent-fs) 2)]
                                   [descent (+ (* descender-ratio parent-fs) half-leading)])
