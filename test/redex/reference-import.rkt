@@ -460,7 +460,14 @@
                    `(element ,tag ,id ,class ,new-alist ,new-children))
                  ;; inline/run-in ::before: measure content width and add as x-offset
                  ;; also add line-height contribution for empty parent elements
-                 (if (and content-text (> (string-length content-text) 0))
+                 ;; CSS 2.2 §9.2.4: inline-block creates a new BFC, so leading/trailing
+                 ;; whitespace in generated content is trimmed (white-space processing)
+                 (let* ([before-is-inline-block? (equal? before-display "inline-block")]
+                        [effective-content-text
+                         (if (and content-text before-is-inline-block?)
+                             (string-trim content-text)
+                             content-text)])
+                 (if (and effective-content-text (> (string-length effective-content-text) 0))
                      (let* ([;; use ::before's own font-size if specified, else inherit from parent
                             before-fs-raw (cdr-or-false 'font-size matching-before)]
                             [before-fs (if before-fs-raw (or (parse-css-px before-fs-raw) #f) #f)]
@@ -476,8 +483,23 @@
                             [is-sans? (and ff-val
                                            (or (regexp-match? #rx"(?i:sans-serif)" ff-val)
                                                (regexp-match? #rx"(?i:arial)" ff-val)))]
-                            [fm (if (or is-bold? is-sans?) 'arial 'times)]
-                            [content-w (measure-text-proportional content-text effective-fs ff-val fm)]
+                            ;; Distinguish Arial-native from generic sans-serif
+                            [is-arial-native?
+                             (and is-sans? ff-val
+                                  (let ([ap (regexp-match-positions #rx"(?i:arial)" ff-val)]
+                                        [hp (regexp-match-positions #rx"(?i:helvetica)" ff-val)]
+                                        [sp (regexp-match-positions #rx"(?i:sans-serif)" ff-val)])
+                                    (and ap
+                                         (or (not hp) (< (caar ap) (caar hp)))
+                                         (or (not sp) (< (caar ap) (caar sp))))))]
+                            [fm (cond
+                                  [(and is-bold? is-arial-native?) 'arial-native-bold]
+                                  [(and is-bold? is-sans?) 'arial-bold]
+                                  [is-bold? 'times-bold]
+                                  [is-arial-native? 'arial-native]
+                                  [is-sans? 'arial]
+                                  [else 'times])]
+                            [content-w (measure-text-proportional effective-content-text effective-fs ff-val fm)]
                             ;; compute line-height from ::before's font metrics
                             ;; normal line-height ≈ 1.2 × font-size
                             [before-lh-raw (cdr-or-false 'line-height matching-before)]
@@ -495,7 +517,7 @@
                                    alist1))])
                        `(element ,tag ,id ,class ,new-alist ,new-children))
                      ;; empty: no change
-                     `(element ,tag ,id ,class ,inline-alist ,new-children))))
+                     `(element ,tag ,id ,class ,inline-alist ,new-children)))))
            `(element ,tag ,id ,class ,inline-alist ,new-children))]
       [_ elem])))
 
@@ -1231,11 +1253,14 @@
         (hash-ref (base-defaults) 'display)))
 
   ;; determine box-sizing (check class for .content-box / .border-box)
+  ;; CSS 2.2 §17: browsers apply border-box sizing to <table> elements
+  ;; (UA stylesheet), even when the display is overridden to block.
   (define box-sizing
     (cond
       [(and has-class (string-contains? has-class "content-box")) "content-box"]
       [(and has-class (string-contains? has-class "border-box")) "border-box"]
       [(cdr-or-false 'box-sizing inline-alist)]
+      [(and tag (equal? tag "table")) "border-box"]
       [else (hash-ref (base-defaults) 'box-sizing)]))
 
   (add! 'box-sizing (string->symbol box-sizing))
@@ -1348,6 +1373,34 @@
   (define margin-vals (parse-edge-shorthand expanded-alist 'margin))
   (when margin-vals
     (add! 'margin margin-vals))
+
+  ;; CSS 2.2 UA stylesheet: default margins for block-level HTML elements.
+  ;; <p>, <blockquote>, <figure>, <figcaption>: margin 1em 0
+  ;; <h1>: margin 0.67em 0, <h2>: margin 0.83em 0, <h3>: margin 1em 0
+  ;; <h4>: margin 1.33em 0, <h5>: margin 1.67em 0, <h6>: margin 2.33em 0
+  ;; <ul>, <ol>, <dl>: margin 1em 0 (+ padding-left 40px)
+  ;; Only apply when no explicit margin is set AND not using Taffy base styles
+  ;; (Taffy tests set * { margin: 0 } which overrides UA defaults).
+  (when (and (not margin-vals)
+             (not (uses-taffy-base?))
+             tag)
+    (define ua-margin-em
+      (cond
+        [(equal? tag "p") 1.0]
+        [(equal? tag "blockquote") 1.0]
+        [(equal? tag "h1") 0.67]
+        [(equal? tag "h2") 0.83]
+        [(equal? tag "h3") 1.0]
+        [(equal? tag "h4") 1.33]
+        [(equal? tag "h5") 1.67]
+        [(equal? tag "h6") 2.33]
+        [(member tag '("ul" "ol" "dl")) 1.0]
+        [(equal? tag "figure") 1.0]
+        [(equal? tag "hr") 0.5]
+        [else #f]))
+    (when ua-margin-em
+      (define ua-margin-px (* ua-margin-em elem-font-size))
+      (add! 'margin `(edges ,ua-margin-px 0 ,ua-margin-px 0))))
 
   ;; padding (CSS spec: negative padding is invalid, clamp to 0)
   (define padding-vals-raw (parse-edge-shorthand expanded-alist 'padding))
@@ -2527,6 +2580,7 @@
            [_ #f])))
 
      ;; CSS Text §4: strip leading/trailing whitespace text nodes from inline contexts.
+     ;; CSS 2.2 §9.2.2.1: strip whitespace text adjacent to block-level siblings.
      ;; Strip based on flow-children analysis, then reconstruct with original order
      ;; keeping out-of-flow elements in their original positions.
      (define whitespace-to-strip
@@ -2545,8 +2599,38 @@
                        [(null? remaining) stripped]
                        [(match (car remaining) [`(text-node-whitespace ,_) #t] [_ #f])
                         (loop (cdr remaining) (cons (car remaining) stripped))]
-                       [else stripped]))])
-             (append stripped-leading stripped-trailing))
+                       [else stripped]))]
+                  ;; CSS 2.2 §9.2.2.1: whitespace-only text directly contained in a
+                  ;; block container is not rendered if adjacent to a block-level sibling.
+                  ;; This applies when mixed block+inline children coexist: whitespace
+                  ;; between block and inline-block elements collapses to nothing.
+                  [is-block-level?
+                   (lambda (c)
+                     (match c
+                       [`(element ,etag ,eid ,eclass ,ealist ,echildren)
+                        (let ([d (or (cdr-or-false 'display ealist)
+                                     (html-tag-default-display etag)
+                                     (hash-ref (base-defaults) 'display))])
+                          (or (not d)
+                              (equal? d "block")
+                              (equal? d "table")
+                              (equal? d "flex")
+                              (equal? d "grid")
+                              (equal? d "list-item")))]
+                       [_ #f]))]
+                  [is-ws? (lambda (c) (match c [`(text-node-whitespace ,_) #t] [_ #f]))]
+                  [fc-vec (list->vector flow-children)]
+                  [n (vector-length fc-vec)]
+                  [block-adjacent-ws
+                   (for/list ([i (in-range n)]
+                              #:when (is-ws? (vector-ref fc-vec i))
+                              #:when (or
+                                      (and (> i 0)
+                                           (is-block-level? (vector-ref fc-vec (sub1 i))))
+                                      (and (< i (sub1 n))
+                                           (is-block-level? (vector-ref fc-vec (add1 i))))))
+                     (vector-ref fc-vec i))])
+             (append stripped-leading stripped-trailing block-adjacent-ws))
            '()))
 
      ;; Reconstruct effective-children from original children order,
@@ -2591,14 +2675,34 @@
                               (regexp-match? #rx"(?i:courier)" font-family-val))))
                    (define use-arial-metrics?
                      (and (not use-mono-metrics?)
-                          (or (eq? font-weight-val 'bold)
-                              (and font-family-val
-                                   (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
-                                       (regexp-match? #rx"(?i:arial)" font-family-val)
-                                       (regexp-match? #rx"(?i:helvetica)" font-family-val))))))
-                   (define font-metrics-sym (cond [use-mono-metrics? 'mono]
-                                                  [use-arial-metrics? 'arial]
-                                                  [else 'times]))
+                          font-family-val
+                          (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
+                              (regexp-match? #rx"(?i:arial)" font-family-val)
+                              (regexp-match? #rx"(?i:helvetica)" font-family-val))))
+                   ;; Distinguish explicit Arial.ttf (hhea metrics) from generic
+                   ;; sans-serif/Helvetica.  On macOS, when "Arial" appears before
+                   ;; "Helvetica" and before "sans-serif" in the computed
+                   ;; font-family, Chrome uses Arial.ttf's own hhea line-height
+                   ;; metrics (separate rounding, no 15% boost).
+                   (define use-arial-native?
+                     (and use-arial-metrics?
+                          font-family-val
+                          (let ([arial-pos (regexp-match-positions #rx"(?i:arial)" font-family-val)]
+                                [helv-pos  (regexp-match-positions #rx"(?i:helvetica)" font-family-val)]
+                                [sans-pos  (regexp-match-positions #rx"(?i:sans-serif)" font-family-val)])
+                            (and arial-pos
+                                 (or (not helv-pos)
+                                     (< (caar arial-pos) (caar helv-pos)))
+                                 (or (not sans-pos)
+                                     (< (caar arial-pos) (caar sans-pos)))))))
+                   (define font-metrics-sym
+                     (let ([base (cond [use-mono-metrics? 'mono]
+                                       [use-arial-native? 'arial-native]
+                                       [use-arial-metrics? 'arial]
+                                       [else 'times])])
+                       (if (eq? font-weight-val 'bold)
+                           (string->symbol (format "~a-bold" base))
+                           base)))
                    (cond
                      [uses-ahem?
                       (define text-styles
@@ -2666,14 +2770,30 @@
                         (regexp-match? #rx"(?i:courier)" font-family-val))))
              (define use-arial-metrics?
                (and (not use-mono-metrics?)
-                    (or (eq? font-weight-val 'bold)
-                        (and font-family-val
-                             (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
-                                 (regexp-match? #rx"(?i:arial)" font-family-val)
-                                 (regexp-match? #rx"(?i:helvetica)" font-family-val))))))
-             (define font-metrics-sym (cond [use-mono-metrics? 'mono]
-                                            [use-arial-metrics? 'arial]
-                                            [else 'times]))
+                    font-family-val
+                    (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
+                        (regexp-match? #rx"(?i:arial)" font-family-val)
+                        (regexp-match? #rx"(?i:helvetica)" font-family-val))))
+             ;; Distinguish explicit Arial.ttf from generic sans-serif/Helvetica
+             (define use-arial-native?
+               (and use-arial-metrics?
+                    font-family-val
+                    (let ([arial-pos (regexp-match-positions #rx"(?i:arial)" font-family-val)]
+                          [helv-pos  (regexp-match-positions #rx"(?i:helvetica)" font-family-val)]
+                          [sans-pos  (regexp-match-positions #rx"(?i:sans-serif)" font-family-val)])
+                      (and arial-pos
+                           (or (not helv-pos)
+                               (< (caar arial-pos) (caar helv-pos)))
+                           (or (not sans-pos)
+                               (< (caar arial-pos) (caar sans-pos)))))))
+             (define font-metrics-sym
+               (let ([base (cond [use-mono-metrics? 'mono]
+                                 [use-arial-native? 'arial-native]
+                                 [use-arial-metrics? 'arial]
+                                 [else 'times])])
+                 (if (eq? font-weight-val 'bold)
+                     (string->symbol (format "~a-bold" base))
+                     base)))
              ;; detect white-space: pre from parent (preserves whitespace text nodes)
              ;; pre and pre-wrap preserve all whitespace; pre-line only preserves
              ;; line breaks (spaces still collapse), so we don't treat it as "pre"
@@ -2809,8 +2929,8 @@
      ;; parent, the browser generates an anonymous table wrapper around those
      ;; children so they receive table layout. We only wrap when there are
      ;; actual table-row or table-row-group children (the core case that
-     ;; needs horizontal cell layout). Isolated table-cell, table-caption,
-     ;; etc. are handled by the existing block fallback.
+     ;; needs horizontal cell layout). Standalone table-cell and table-caption
+     ;; also trigger wrapping (CSS 2.2 §17.2.1: anonymous table objects).
      (define (is-table-row-like-box? box)
        (match box
          [`(block ,_ ,s ,_)
@@ -2836,11 +2956,14 @@
          [_ #f]))
 
      (define (has-table-internal-child? boxes)
-       ;; Only trigger anonymous table wrapping if there are actual table-row-like
-       ;; children AND the element was NOT blockified from a table-internal display
-       ;; (since blockified table internals are still within their parent table context).
+       ;; CSS 2.2 §17.2.1: trigger anonymous table wrapping for ANY table-internal
+       ;; child (including standalone table-cell and table-caption), not just
+       ;; table-row-like children. Do NOT trigger when the element was blockified
+       ;; from a table-internal display (still within parent table context).
        (and (not was-table-internal-blockified?)
-            (has-table-row-like-child? boxes)))
+            (for/or ([b (in-list boxes)]
+                     #:when (is-table-internal-box? b))
+              #t)))
 
      (define (wrap-table-internal-children boxes)
        ;; Wrap consecutive runs of table-internal children in anonymous table boxes.
@@ -2865,6 +2988,35 @@
      (define (make-anon-table-box table-children counter)
        (define table-id (string->symbol (format "anon-table-~a" (unbox counter))))
        (set-box! counter (add1 (unbox counter)))
+       ;; CSS 2.2 §17.2.1: wrap standalone table-cell children in anonymous table-row.
+       ;; A table-cell that is not inside a table-row needs an anonymous row generated.
+       (define (is-cell-box? box)
+         (match box
+           [`(block ,_ ,s ,_)
+            (eq? (get-style-prop s 'display #f) 'table-cell)]
+           [_ #f]))
+       (define cell-wrapped-children
+         (let cell-loop ([boxes table-children] [acc '()] [cell-acc '()])
+           (cond
+             [(null? boxes)
+              (if (null? cell-acc)
+                  (reverse acc)
+                  (let ([row-id (string->symbol (format "anon-row-~a" (unbox counter)))])
+                    (set-box! counter (add1 (unbox counter)))
+                    (reverse (cons `(block ,row-id (style (display table-row)) ,(reverse cell-acc))
+                                   acc))))]
+             [(is-cell-box? (car boxes))
+              (cell-loop (cdr boxes) acc (cons (car boxes) cell-acc))]
+             [else
+              (if (null? cell-acc)
+                  (cell-loop (cdr boxes) (cons (car boxes) acc) '())
+                  (let ([row-id (string->symbol (format "anon-row-~a" (unbox counter)))])
+                    (set-box! counter (add1 (unbox counter)))
+                    (cell-loop (cdr boxes)
+                               (cons (car boxes)
+                                     (cons `(block ,row-id (style (display table-row)) ,(reverse cell-acc))
+                                           acc))
+                               '())))])))
        ;; Wrap consecutive table-row children in anonymous tbody
        (define (is-row-box? box)
          (match box
@@ -2872,7 +3024,7 @@
             (eq? (get-style-prop s 'display #f) 'table-row)]
            [_ #f]))
        (define final-children
-         (let wrap-loop ([boxes table-children] [acc '()] [row-acc '()])
+         (let wrap-loop ([boxes cell-wrapped-children] [acc '()] [row-acc '()])
            (cond
              [(null? boxes)
               (if (null? row-acc)
@@ -3156,7 +3308,10 @@
             (let ([test-root
                    (for/first ([c (in-list (hash-ref body-node 'children '()))]
                                #:when (and (equal? (hash-ref c 'nodeType #f) "element")
-                                           (equal? (hash-ref c 'tag #f) "div")))
+                                           (equal? (hash-ref c 'tag #f) "div")
+                                           ;; skip display:none elements — they have no layout
+                                           (let ([comp (hash-ref c 'computed (hash))])
+                                             (not (equal? (hash-ref comp 'display #f) "none")))))
                      c)])
               (values test-root body-x body-y))))
       (values #f 0 0)))
@@ -3288,24 +3443,55 @@
                  [current-ex-ratio 0.5])
     (define elements (html-file->inline-styles html-path))
     (define counter (box 0))
-    ;; detect body display type (e.g., body { display: table })
-    (define body-display
+    ;; detect body-level CSS properties (display, font-size) from style rules
+    (define-values (body-display body-font-size-px)
       (let ()
         (define html-content (file->string html-path))
         (define body-tag-match (regexp-match #rx"<body([^>]*)>" html-content))
         (define body-attrs (if body-tag-match (cadr body-tag-match) ""))
         (define body-class (html-attr body-attrs "class"))
-        ;; check if body has a display-changing class in the style rules
         (define-values (style-rules _before _after)
           (extract-style-rules html-content))
-        (define body-display-from-rules
-          (for/fold ([display #f]) ([rule (in-list style-rules)])
-            (define selector (car rule))
-            (define props (cdr rule))
-            (if (selector-matches? selector "body" #f body-class '(("html" #f #f)) 1)
-                (or (cdr-or-false 'display props) display)
-                display)))
-        body-display-from-rules))
+        ;; collect all body-matching CSS properties
+        (define body-css-props
+          (apply append
+            (filter-map
+             (lambda (rule)
+               (define selector (car rule))
+               (define props (cdr rule))
+               (if (selector-matches? selector "body" #f body-class '(("html" #f #f)) 1)
+                   props #f))
+             style-rules)))
+        ;; also check html-level font-size (body inherits from html)
+        (define html-css-props
+          (apply append
+            (filter-map
+             (lambda (rule)
+               (define selector (car rule))
+               (define props (cdr rule))
+               (if (selector-matches? selector "html" #f #f '() 1)
+                   props #f))
+             style-rules)))
+        ;; also check body tag inline style for font-size
+        (define body-inline-fs
+          (let ([m (regexp-match #rx"font-size:\\s*([^;\"]+)" body-attrs)])
+            (and m (string-trim (cadr m)))))
+        ;; resolve body font-size: inline > style-block > html > default 16
+        (define fs-str
+          (or body-inline-fs
+              (cdr-or-false 'font-size body-css-props)
+              (cdr-or-false 'font-size html-css-props)))
+        (define fs-px
+          (if fs-str
+              (let ([m (regexp-match #rx"^([0-9.]+)px$" (string-trim fs-str))])
+                (if m (string->number (cadr m)) #f))
+              #f))
+        (define display-val (cdr-or-false 'display body-css-props))
+        (values display-val fs-px)))
+    ;; CSS inheritance: body font-size propagates to all descendants
+    ;; Set current-em-size so children without explicit font-size inherit it
+    (when body-font-size-px
+      (current-em-size body-font-size-px))
     (cond
       [(null? elements)
        ;; empty test — shouldn't happen
