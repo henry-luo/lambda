@@ -183,16 +183,42 @@
     (define v-kids (or v-children '()))
     (define e-kids (or e-children '()))
 
+    ;; CSS 2.2 §17.2.1: Anonymous table objects.
+    ;; The layout engine wraps table-internal children (table-row, table-cell, etc.)
+    ;; in anonymous table and tbody boxes that don't appear in the browser reference.
+    ;; Flatten these anonymous wrappers for comparison purposes.
+    (define (is-anon-table-or-tbody? node)
+      (define id (extract-id node))
+      (and (symbol? id)
+           (let ([s (symbol->string id)])
+             (or (string-prefix? s "anon-table-")
+                 (string-prefix? s "anon-tbody-")))))
+
+    (define (flatten-anon-tables kids)
+      (apply append
+             (for/list ([k (in-list kids)])
+               (if (is-anon-table-or-tbody? k)
+                   (let-values ([(x y w h children) (parse-view-node k)])
+                     (flatten-anon-tables (or children '())))
+                   (list k)))))
+
+    ;; try flattening anonymous wrappers if child counts don't match
+    (define effective-v-kids
+      (if (and (not (= (length v-kids) (length e-kids)))
+               (ormap is-anon-table-or-tbody? v-kids))
+          (flatten-anon-tables v-kids)
+          v-kids))
+
     (cond
       ;; structural mismatch: fail immediately, don't recurse into misaligned children
-      [(not (= (length v-kids) (length e-kids)))
+      [(not (= (length effective-v-kids) (length e-kids)))
        (set! failures
              (cons (layout-failure path 'child-count
-                                   (length e-kids) (length v-kids) 0)
+                                   (length e-kids) (length effective-v-kids) 0)
                    failures))]
       [else
        (for ([i (in-range (length e-kids))])
-         (define v-child (list-ref v-kids i))
+         (define v-child (list-ref effective-v-kids i))
          (define e-child (list-ref e-kids i))
          (define child-id (extract-id e-child))
          (walk! v-child e-child
