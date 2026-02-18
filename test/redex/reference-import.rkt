@@ -271,6 +271,7 @@
 ;; font-family: #f or string — for serif/sans-serif distinction
 ;; font-metrics: 'times or 'arial — selects which font metrics to use
 (define (measure-text-proportional text [font-size 16] [font-family #f] [font-metrics 'times])
+  (load-font-metrics!)  ;; ensure JSON metrics are loaded
   (cond
     ;; Use JSON-loaded metrics (with per-glyph widths + kerning)
     [(font-metrics-loaded?)
@@ -573,10 +574,8 @@
   ;; so selectors like ".body div" or "#main div" work correctly
   (define body-tag-match (regexp-match #rx"<body([^>]*)>" html-content))
   (define body-attrs (if body-tag-match (cadr body-tag-match) ""))
-  (define body-id-match (regexp-match #rx"id=\"([^\"]+)\"" body-attrs))
-  (define body-class-match (regexp-match #rx"class=\"([^\"]+)\"" body-attrs))
-  (define body-id (and body-id-match (cadr body-id-match)))
-  (define body-class (and body-class-match (cadr body-class-match)))
+  (define body-id (html-attr body-attrs "id"))
+  (define body-class (html-attr body-attrs "class"))
   ;; apply style block rules to elements if any
   ;; include html → body in ancestor chain so selectors like "body > div" work
   (define body-ancestor-chain
@@ -892,6 +891,18 @@
      `(element ,tag ,id ,class ,merged ,new-children)]
     [_ elem]))
 
+;; extract an HTML attribute value — handles double-quoted, single-quoted,
+;; and unquoted attribute values.
+;; e.g., id="foo", id='foo', id=foo all return "foo"
+(define (html-attr attrs-str attr-name)
+  (define quoted-rx (regexp (string-append attr-name "=\"([^\"]+)\"")))
+  (define single-rx (regexp (string-append attr-name "='([^']+)'")))
+  (define unquoted-rx (regexp (string-append attr-name "=([^ \t\n\r>\"']+)")))
+  (define m (or (regexp-match quoted-rx attrs-str)
+                (regexp-match single-rx attrs-str)
+                (regexp-match unquoted-rx attrs-str)))
+  (and m (cadr m)))
+
 ;; parse body content to extract element tree
 (define (parse-html-body html-str)
   ;; extract body content — try with </body> first, fall back to end-of-string
@@ -940,32 +951,30 @@
                                      (car (caddr tag-match))
                                      (cdr (caddr tag-match))))
 
-        ;; parse id
-        (define id-match (regexp-match #rx"id=\"([^\"]+)\"" attrs-str))
-        (define elem-id (if id-match (cadr id-match) #f))
+        ;; parse id — handles quoted and unquoted values
+        (define elem-id (html-attr attrs-str "id"))
 
         ;; parse class
-        (define class-match (regexp-match #rx"class=\"([^\"]+)\"" attrs-str))
-        (define elem-class (if class-match (cadr class-match) #f))
+        (define elem-class (html-attr attrs-str "class"))
 
         ;; parse style
-        (define style-match (regexp-match #rx"style=\"([^\"]+)\"" attrs-str))
+        (define style-val (html-attr attrs-str "style"))
         (define inline-style-raw
-          (if style-match
-              (parse-inline-style (cadr style-match))
+          (if style-val
+              (parse-inline-style style-val)
               '()))
 
         ;; parse HTML presentational attributes (width, height) → CSS equivalents
         ;; for replaced elements like iframe, img, video
-        (define width-attr-match (regexp-match #rx"width=\"([^\"]+)\"" attrs-str))
-        (define height-attr-match (regexp-match #rx"height=\"([^\"]+)\"" attrs-str))
+        (define width-attr-val (html-attr attrs-str "width"))
+        (define height-attr-val (html-attr attrs-str "height"))
         (define html-attrs-as-css
           (append
-           (if (and width-attr-match (not (cdr-or-false 'width inline-style-raw)))
-               (list (cons 'width (cadr width-attr-match)))
+           (if (and width-attr-val (not (cdr-or-false 'width inline-style-raw)))
+               (list (cons 'width width-attr-val))
                '())
-           (if (and height-attr-match (not (cdr-or-false 'height inline-style-raw)))
-               (list (cons 'height (cadr height-attr-match)))
+           (if (and height-attr-val (not (cdr-or-false 'height inline-style-raw)))
+               (list (cons 'height height-attr-val))
                '())))
         (define inline-style (append inline-style-raw html-attrs-as-css))
 
@@ -1113,24 +1122,22 @@
                                        (car (caddr open-match))
                                        (cdr (caddr open-match))))
 
-         ;; parse attrs
-         (define id-match (regexp-match #rx"id=\"([^\"]+)\"" attrs-str))
-         (define elem-id (if id-match (cadr id-match) #f))
-         (define class-match (regexp-match #rx"class=\"([^\"]+)\"" attrs-str))
-         (define elem-class (if class-match (cadr class-match) #f))
-         (define style-match (regexp-match #rx"style=\"([^\"]+)\"" attrs-str))
+         ;; parse attrs — handles quoted and unquoted values
+         (define elem-id (html-attr attrs-str "id"))
+         (define elem-class (html-attr attrs-str "class"))
+         (define style-val (html-attr attrs-str "style"))
          (define inline-style-raw
-           (if style-match (parse-inline-style (cadr style-match)) '()))
+           (if style-val (parse-inline-style style-val) '()))
          ;; parse HTML presentational attributes (width, height) → CSS equivalents
-         (define width-attr-match (regexp-match #rx"width=\"([^\"]+)\"" attrs-str))
-         (define height-attr-match (regexp-match #rx"height=\"([^\"]+)\"" attrs-str))
+         (define width-attr-val (html-attr attrs-str "width"))
+         (define height-attr-val (html-attr attrs-str "height"))
          (define html-attrs-as-css
            (append
-            (if (and width-attr-match (not (cdr-or-false 'width inline-style-raw)))
-                (list (cons 'width (cadr width-attr-match)))
+            (if (and width-attr-val (not (cdr-or-false 'width inline-style-raw)))
+                (list (cons 'width width-attr-val))
                 '())
-            (if (and height-attr-match (not (cdr-or-false 'height inline-style-raw)))
-                (list (cons 'height (cadr height-attr-match)))
+            (if (and height-attr-val (not (cdr-or-false 'height inline-style-raw)))
+                (list (cons 'height height-attr-val))
                 '())))
          (define inline-style (append inline-style-raw html-attrs-as-css))
 
@@ -2578,13 +2585,20 @@
                          [(not fw) 'normal]
                          [(or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900")) 'bold]
                          [else 'normal])))
+                   (define use-mono-metrics?
+                     (and font-family-val
+                          (or (regexp-match? #rx"(?i:monospace)" font-family-val)
+                              (regexp-match? #rx"(?i:courier)" font-family-val))))
                    (define use-arial-metrics?
-                     (or (eq? font-weight-val 'bold)
-                         (and font-family-val
-                              (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
-                                  (regexp-match? #rx"(?i:arial)" font-family-val)
-                                  (regexp-match? #rx"(?i:helvetica)" font-family-val)))))
-                   (define font-metrics-sym (if use-arial-metrics? 'arial 'times))
+                     (and (not use-mono-metrics?)
+                          (or (eq? font-weight-val 'bold)
+                              (and font-family-val
+                                   (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
+                                       (regexp-match? #rx"(?i:arial)" font-family-val)
+                                       (regexp-match? #rx"(?i:helvetica)" font-family-val))))))
+                   (define font-metrics-sym (cond [use-mono-metrics? 'mono]
+                                                  [use-arial-metrics? 'arial]
+                                                  [else 'times]))
                    (cond
                      [uses-ahem?
                       (define text-styles
@@ -2643,15 +2657,23 @@
                    [(or (equal? fw "bold") (equal? fw "700") (equal? fw "800") (equal? fw "900")) 'bold]
                    [else 'normal])))
              ;; determine which font metrics to use:
-             ;; - "arial" if font-family is explicitly sans-serif/arial/helvetica, OR bold weight
-             ;; - "times" if font-family is default (serif) with normal weight
+             ;; - 'mono if font-family is explicitly monospace/courier
+             ;; - 'arial if font-family is explicitly sans-serif/arial/helvetica, OR bold weight
+             ;; - 'times if font-family is default (serif) with normal weight
+             (define use-mono-metrics?
+               (and font-family-val
+                    (or (regexp-match? #rx"(?i:monospace)" font-family-val)
+                        (regexp-match? #rx"(?i:courier)" font-family-val))))
              (define use-arial-metrics?
-               (or (eq? font-weight-val 'bold)
-                   (and font-family-val
-                        (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
-                            (regexp-match? #rx"(?i:arial)" font-family-val)
-                            (regexp-match? #rx"(?i:helvetica)" font-family-val)))))
-             (define font-metrics-sym (if use-arial-metrics? 'arial 'times))
+               (and (not use-mono-metrics?)
+                    (or (eq? font-weight-val 'bold)
+                        (and font-family-val
+                             (or (regexp-match? #rx"(?i:sans-serif)" font-family-val)
+                                 (regexp-match? #rx"(?i:arial)" font-family-val)
+                                 (regexp-match? #rx"(?i:helvetica)" font-family-val))))))
+             (define font-metrics-sym (cond [use-mono-metrics? 'mono]
+                                            [use-arial-metrics? 'arial]
+                                            [else 'times]))
              ;; detect white-space: pre from parent (preserves whitespace text nodes)
              ;; pre and pre-wrap preserve all whitespace; pre-line only preserves
              ;; line breaks (spaces still collapse), so we don't treat it as "pre"
@@ -3272,8 +3294,7 @@
         (define html-content (file->string html-path))
         (define body-tag-match (regexp-match #rx"<body([^>]*)>" html-content))
         (define body-attrs (if body-tag-match (cadr body-tag-match) ""))
-        (define body-class-match (regexp-match #rx"class=\"([^\"]+)\"" body-attrs))
-        (define body-class (and body-class-match (cadr body-class-match)))
+        (define body-class (html-attr body-attrs "class"))
         ;; check if body has a display-changing class in the style rules
         (define-values (style-rules _before _after)
           (extract-style-rules html-content))
