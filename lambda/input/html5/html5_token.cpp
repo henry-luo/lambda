@@ -83,7 +83,7 @@ Html5Token* html5_token_create_eof(Pool* pool, Arena* arena) {
     return token;
 }
 
-void html5_token_add_attribute(Html5Token* token, String* name, String* value, Input* input) {
+void html5_token_add_attribute(Html5Token* token, String* name, Item value, Input* input) {
     if (token->type != HTML5_TOKEN_START_TAG) {
         log_error("html5_token_add_attribute: token is not a start tag");
         return;
@@ -93,9 +93,10 @@ void html5_token_add_attribute(Html5Token* token, String* name, String* value, I
         token->attributes = map_pooled(token->pool);
     }
 
-    // Add attribute to map - use s2it to create tagged Item from String*
-    map_put(token->attributes, name, Item{.item = s2it(value)}, input);
-    log_debug("html5_token_add_attribute: %s=%s", name->chars, value->chars);
+    // Add attribute to map - value is already a tagged Item (ITEM_NULL for empty attrs)
+    map_put(token->attributes, name, value, input);
+    String* str = (value.item != ITEM_NULL) ? it2s(value) : nullptr;
+    log_debug("html5_token_add_attribute: %s=%s", name->chars, str ? str->chars : "");
 }
 
 void html5_token_append_to_tag_name(Html5Token* token, char c) {

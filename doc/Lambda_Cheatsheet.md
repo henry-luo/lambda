@@ -24,10 +24,10 @@ string  symbol  binary  datetime
 
 **Container Types:**
 ```lambda
-range, 1 to 10               // Range
-array, [123, true]           // Array of values
-list, (0.5, "string:)        // List
-map, {key: 'symbol'}         // Map
+range, 1 to 10          // Range (inclusive both ends)
+array, [123, true]      // Array of values
+list, (0.5, "string:)   // List
+map, {key: 'symbol'}    // Map
 element, <div class: bold; "text" <br>>  // Element
 ```
 
@@ -311,9 +311,17 @@ fn outer(n) { fn inner(x)=>x+n; inner } // closure
 
 `datetime()` `today()` `now()` `justnow()` `date(dt)` `time(dt)`
 
+**Range:**
+
+`s to e` creates a range from `s` to `e` (inclusive both ends). `range(s,e,step)` creates a range with custom step (exclusive end).
+```lambda
+1 to 5                 // [1, 2, 3, 4, 5]
+range(0, 10, 2)        // [0, 2, 4, 6, 8]
+```
+
 **Collection:**
 
-`slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `concat(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(a,b,s)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
+`slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `concat(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
 
 **Vector:**
 

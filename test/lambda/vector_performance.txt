@@ -1,5 +1,3 @@
-Formatting with type: json
-Formatting with type: json
 "===== VECTOR PERFORMANCE AND EDGE CASES TEST ======== Empty Vector Handling ==="
 []
 0
