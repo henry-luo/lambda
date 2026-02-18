@@ -673,10 +673,11 @@ TEST_F(NegativeScriptTest, RuntimeError_InvalidOperation) {
     ExpectErrorWithoutCrash("test/lambda/negative/runtime/invalid_operation.ls");
 }
 
-// Note: Stack overflow test is disabled by default as it may be slow or affect CI
-// TEST_F(NegativeScriptTest, RuntimeError_StackOverflow) {
-//     ExpectErrorWithoutCrash("test/lambda/negative/runtime/stack_overflow.ls");
-// }
+// Stack overflow test - uses Phase 2 signal-based handler (sigaltstack/SEH)
+// for graceful recovery instead of crashing with SIGSEGV
+TEST_F(NegativeScriptTest, RuntimeError_StackOverflow) {
+    ExpectErrorWithoutCrash("test/lambda/negative/runtime/stack_overflow.ls");
+}
 
 TEST_F(NegativeScriptTest, RuntimeError_CallNonFunction) {
     ExpectErrorWithoutCrash("test/lambda/negative/runtime/test_call_nonfunc.ls");

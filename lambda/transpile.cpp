@@ -4627,22 +4627,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // (otherwise, transforming just the tail calls would break the function)
     bool use_tco = should_use_tco(fn_node) && is_tco_function_safe(fn_node);
 
-    // Stack overflow check for potentially recursive functions
-    // TCO functions don't need stack checks since they won't grow the stack
-    bool needs_stack_check = !use_tco;
-
-    if (needs_stack_check) {
-        strbuf_append_str(tp->code_buf, " LAMBDA_STACK_CHECK(\"");
-        // Use function name if available, otherwise use assignment name
-        if (fn_node->name && fn_node->name->chars) {
-            strbuf_append_str_n(tp->code_buf, fn_node->name->chars, fn_node->name->len);
-        } else if (tp->current_assign_name && tp->current_assign_name->chars) {
-            strbuf_append_str_n(tp->code_buf, tp->current_assign_name->chars, tp->current_assign_name->len);
-        } else {
-            strbuf_append_str(tp->code_buf, "<anonymous>");
-        }
-        strbuf_append_str(tp->code_buf, "\");\n");
-    }
+    // Phase 2: No per-function stack check — signal handler catches overflow at OS level
 
     // TCO: Add loop label at start of function body for goto target
     if (use_tco) {
@@ -5500,28 +5485,13 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
 // include lambda-embed.h to get the lambda header file content as a string
 #include "lambda-embed.h"
 
-// Stack overflow check code to be included in transpiled output
-// Uses portable approach compatible with MIR C compiler
-// Access stack_limit directly from runtime context (rt->stack_limit) for speed
-static const char* stack_check_code = R"(
-// Stack overflow protection declarations
-extern void lambda_stack_overflow_error(const char* func_name);
-
-// Fast stack check using local variable address and context's cached stack_limit
-#define LAMBDA_STACK_CHECK(func_name) \
-    { \
-        volatile char _stack_marker; \
-        if ((uintptr_t)&_stack_marker < rt->stack_limit) { \
-            lambda_stack_overflow_error(func_name); \
-            return ITEM_ERROR; \
-        } \
-    }
-)";
+// Phase 2: Stack overflow protection is handled by signal handler (sigaltstack/SEH)
+// installed in lambda_stack_init(). No per-call check code is emitted into transpiled
+// output — the OS catches stack overflow at the hardware/MMU level with zero overhead.
 
 void transpile_ast_root(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
-    // Add stack overflow protection code
-    strbuf_append_str(tp->code_buf, stack_check_code);
+    // Phase 2: No stack check code emitted — signal handler handles overflow
     // all (nested) function definitions need to be hoisted to global level
     log_debug("define_ast_node ...");
     // Import shared runtime context pointer from native runtime
