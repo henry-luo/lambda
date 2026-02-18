@@ -440,10 +440,9 @@ The `<chart>` element is the root of every chart specification.
 
     // --- Metadata ---
     title?: string | <title>,     // chart title (string or element for formatting)
-    description?: string,         // accessible description
+    description?: string;         // accessible description
 
     // --- Children (order-independent) ---
-    ;
     <data ...>                    // data specification (required)
     <mark ...>                    // mark type (required for single-view)
     <encoding; ...>               // encoding channels
@@ -1284,15 +1283,15 @@ Tests are registered in `test/test_lambda_gtest.cpp` via the `"test/lambda/chart
 
 #### Remaining / Known Limitations
 
-| # | Issue | Impact | Workaround |
-|---|-------|--------|------------|
-| 1 | **5 transform types not implemented** (aggregate, calculate, bin, fold, flatten) | Cannot do in-chart data aggregation, computed fields, or histograms | Pre-process data in user scripts before passing to chart; transforms return data unchanged |
-| 2 | **No computed key support in Lambda** | Cannot dynamically construct maps with variable field names | Limits transform implementation; `calculate` and `aggregate` transforms require building maps with dynamic `as` field names |
-| 3 | **`unique()` still broken for strings** | Upstream Lambda runtime bug | Workaround in place (`util.unique_vals`); should be fixed in the runtime |
-| 4 | **`input()` + `^err` breaks JIT module linking** | Cannot load test data from external JSON files in test scripts | Use inline data in test scripts; `input()` works in standalone scripts but fails when combined with multi-module imports |
-| 5 | **No stacking support** | Cannot render stacked bar or stacked area charts | Not yet implemented in the mark/scale pipeline |
-| 6 | **No facet / concat / repeat composition** | Only single-view and layer compositions work | Multi-view dashboards not yet possible |
-| 7 | **No temporal (time) scale** | Date/time axes not supported | Temporal data must be converted to numeric values manually |
-| 8 | **Gradient legend uses discrete rectangles** | No SVG `<linearGradient>` element generation | Visual approximation with 20 small `<rect>` elements; acceptable for most use cases |
-| 9 | **Band/point scale index lookup is O(n)** | Uses linear scan `for` comprehension instead of hash map | Acceptable for typical category counts (<100); would need optimization for large categorical datasets |
-| 10 | **`: float` annotations unusable on public functions** | Cross-module JIT compilation fails | All numeric parameters left un-annotated; type inference handles it correctly at runtime |
+| #   | Issue                                                                            | Impact                                                              | Workaround                                                                                                                  |
+| --- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **5 transform types not implemented** (aggregate, calculate, bin, fold, flatten) | Cannot do in-chart data aggregation, computed fields, or histograms | Pre-process data in user scripts before passing to chart; transforms return data unchanged                                  |
+| 2   | **No computed key support in Lambda**                                            | Cannot dynamically construct maps with variable field names         | Limits transform implementation; `calculate` and `aggregate` transforms require building maps with dynamic `as` field names |
+| 3   | **`unique()` still broken for strings**                                          | Upstream Lambda runtime bug                                         | Workaround in place (`util.unique_vals`); should be fixed in the runtime                                                    |
+| 4   | **`input()` + `^err` breaks JIT module linking**                                 | Cannot load test data from external JSON files in test scripts      | Use inline data in test scripts; `input()` works in standalone scripts but fails when combined with multi-module imports    |
+| 5   | **No stacking support**                                                          | Cannot render stacked bar or stacked area charts                    | Not yet implemented in the mark/scale pipeline                                                                              |
+| 6   | **No facet / concat / repeat composition**                                       | Only single-view and layer compositions work                        | Multi-view dashboards not yet possible                                                                                      |
+| 7   | **No temporal (time) scale**                                                     | Date/time axes not supported                                        | Temporal data must be converted to numeric values manually                                                                  |
+| 8   | **Gradient legend uses discrete rectangles**                                     | No SVG `<linearGradient>` element generation                        | Visual approximation with 20 small `<rect>` elements; acceptable for most use cases                                         |
+| 9   | **Band/point scale index lookup is O(n)**                                        | Uses linear scan `for` comprehension instead of hash map            | Acceptable for typical category counts (<100); would need optimization for large categorical datasets                       |
+| 10  | **`: float` annotations unusable on public functions**                           | Cross-module JIT compilation fails                                  | All numeric parameters left un-annotated; type inference handles it correctly at runtime                                    |

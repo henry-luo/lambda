@@ -308,7 +308,22 @@
               (let ([parts (string-split (string-trim decl) ":")])
                 (if (>= (length parts) 2)
                     (let* ([key (string->symbol (string-trim (car parts)))]
-                           [val (string-trim (string-join (cdr parts) ":"))])
+                           [raw-val (string-trim (string-join (cdr parts) ":"))]
+                           ;; CSS spec: keyword values must not be quoted.
+                           ;; Strip surrounding single/double quotes from values
+                           ;; so that e.g. align-items: 'stretch' → stretch.
+                           ;; This matches browser behavior (browser ignores
+                           ;; the quotes and uses the keyword).
+                           ;; Exception: grid-template-areas and content use
+                           ;; quoted strings as meaningful syntax — do NOT strip.
+                           [val (if (and (not (memq key '(grid-template-areas content)))
+                                        (>= (string-length raw-val) 2)
+                                        (let ([fc (string-ref raw-val 0)]
+                                              [lc (string-ref raw-val (sub1 (string-length raw-val)))])
+                                          (or (and (char=? fc #\') (char=? lc #\'))
+                                              (and (char=? fc #\") (char=? lc #\")))))
+                                    (substring raw-val 1 (sub1 (string-length raw-val)))
+                                    raw-val)])
                       ;; CSS validation: reject invalid values during parsing
                       ;; negative padding is invalid (CSS spec)
                       (cond
@@ -883,13 +898,26 @@
 
   (let loop ()
     (when (< pos len)
+      ;; HTML comments: skip <!-- ... --> at top level
+      (define comment-match
+        (regexp-match-positions #rx"<!--" html-str pos))
       ;; find next opening tag — include common HTML elements
       ;; longer tag names must precede shorter prefixes (br before b, iframe before i, etc.)
       (define tag-match
         (regexp-match-positions
-         #rx"<(iframe|strong|embed|object|video|canvas|span|table|tbody|thead|tfoot|caption|colgroup|col|bdo|br|tr|td|th|dl|dt|dd|ol|ul|li|div|img|em|b|i|u|a|p)([^>]*)>"
+         #rx"<(iframe|strong|embed|object|video|canvas|span|table|tbody|thead|tfoot|caption|colgroup|col|bdo|br|tr|td|th|dl|dt|dd|ol|ul|li|div|img|em|h[1-6]|b|i|u|a|p)([^>]*)>"
          html-str pos))
-      (when tag-match
+
+      ;; skip comment if it comes before the next tag
+      (cond
+        [(and comment-match
+              (or (not tag-match) (< (caar comment-match) (caar tag-match))))
+         (define end-match (regexp-match-positions #rx"-->" html-str (cdar comment-match)))
+         (if end-match
+             (set! pos (cdar end-match))
+             (set! pos len))
+         (loop)]
+        [tag-match
         (define tag-start (caar tag-match))
         (define tag-end (cdar tag-match))
         (define tag-name (substring html-str
@@ -951,7 +979,7 @@
                     (cons (list 'element tag-name elem-id elem-class inline-style children)
                           results))
               (set! pos after-pos)
-              (loop))))))
+              (loop)))])))
 
   (reverse results))
 
@@ -981,12 +1009,27 @@
       ;; look for either an opening tag or a closing tag
       (define open-match
         (regexp-match-positions
-         #rx"<(iframe|strong|embed|object|video|canvas|span|table|tbody|thead|tfoot|caption|colgroup|col|bdo|br|tr|td|th|dl|dt|dd|ol|ul|li|div|img|em|b|i|u|a|p)([^>]*)>"
+         #rx"<(iframe|strong|embed|object|video|canvas|span|table|tbody|thead|tfoot|caption|colgroup|col|bdo|br|tr|td|th|dl|dt|dd|ol|ul|li|div|img|em|h[1-6]|b|i|u|a|p)([^>]*)>"
          html-str pos))
       (define close-match
         (regexp-match-positions close-rx html-str pos))
 
+      ;; HTML comments: check for <!-- ahead of any tag
+      (define comment-ahead
+        (regexp-match-positions #rx"<!--" html-str pos))
+
       (cond
+        ;; HTML comment comes before any tag — capture text before it, skip comment
+        [(and comment-ahead
+              (or (not close-match) (< (caar comment-ahead) (caar close-match)))
+              (or (not open-match) (< (caar comment-ahead) (caar open-match))))
+         (maybe-add-text-node! (caar comment-ahead))
+         (define end-match (regexp-match-positions #rx"-->" html-str (cdar comment-ahead)))
+         (if end-match
+             (set! pos (cdar end-match))
+             (set! pos len))
+         (loop)]
+
         ;; closing tag comes first (or no more opens)
         [(and close-match
               (or (not open-match)
@@ -2507,7 +2550,15 @@
      (define is-floated?
        (and float-val-str
             (not (string=? (string-trim float-val-str) "none"))))
+     ;; track if element was blockified from a table-internal display
+     ;; (these should not trigger anonymous table wrapping for their children,
+     ;; since they were originally part of a table context)
+     (define was-table-internal-blockified? #f)
      (when is-floated?
+       (when (memq display-sym '(table-row-group table-header-group
+                                  table-footer-group table-row table-cell
+                                  table-column table-column-group table-caption))
+         (set! was-table-internal-blockified? #t))
        (set! display-sym
              (case display-sym
                [(inline inline-block table-row-group table-header-group
@@ -2541,9 +2592,106 @@
        (define lh-ratio (if is-sans? 1.15 1.107))
        (* lh-ratio fs))
 
+     ;; CSS 2.2 §17.2.1: Anonymous table objects.
+     ;; When table-row or table-row-group elements appear inside a non-table
+     ;; parent, the browser generates an anonymous table wrapper around those
+     ;; children so they receive table layout. We only wrap when there are
+     ;; actual table-row or table-row-group children (the core case that
+     ;; needs horizontal cell layout). Isolated table-cell, table-caption,
+     ;; etc. are handled by the existing block fallback.
+     (define (is-table-row-like-box? box)
+       (match box
+         [`(block ,_ ,s ,_)
+          (let ([d (get-style-prop s 'display #f)])
+            (and d (memq d '(table-row table-row-group table-header-group
+                             table-footer-group table-column
+                             table-column-group))))]
+         [_ #f]))
+
+     (define (has-table-row-like-child? boxes)
+       (for/or ([b (in-list boxes)])
+         (is-table-row-like-box? b)))
+
+     ;; For the purpose of grouping into an anonymous table, any table-internal
+     ;; display type should be included in the group (rows, cells, columns, etc.)
+     (define (is-table-internal-box? box)
+       (match box
+         [`(block ,_ ,s ,_)
+          (let ([d (get-style-prop s 'display #f)])
+            (and d (memq d '(table-row table-row-group table-header-group
+                             table-footer-group table-cell table-column
+                             table-column-group table-caption))))]
+         [_ #f]))
+
+     (define (has-table-internal-child? boxes)
+       ;; Only trigger anonymous table wrapping if there are actual table-row-like
+       ;; children AND the element was NOT blockified from a table-internal display
+       ;; (since blockified table internals are still within their parent table context).
+       (and (not was-table-internal-blockified?)
+            (has-table-row-like-child? boxes)))
+
+     (define (wrap-table-internal-children boxes)
+       ;; Wrap consecutive runs of table-internal children in anonymous table boxes.
+       (let loop ([remaining boxes] [acc '()] [table-acc '()])
+         (cond
+           [(null? remaining)
+            (if (null? table-acc)
+                (reverse acc)
+                (reverse (cons (make-anon-table-box (reverse table-acc) counter)
+                               acc)))]
+           [(is-table-internal-box? (car remaining))
+            (loop (cdr remaining) acc (cons (car remaining) table-acc))]
+           [else
+            (if (null? table-acc)
+                (loop (cdr remaining) (cons (car remaining) acc) '())
+                (loop (cdr remaining)
+                      (cons (car remaining)
+                            (cons (make-anon-table-box (reverse table-acc) counter)
+                                  acc))
+                      '()))])))
+
+     (define (make-anon-table-box table-children counter)
+       (define table-id (string->symbol (format "anon-table-~a" (unbox counter))))
+       (set-box! counter (add1 (unbox counter)))
+       ;; Wrap consecutive table-row children in anonymous tbody
+       (define (is-row-box? box)
+         (match box
+           [`(block ,_ ,s ,_)
+            (eq? (get-style-prop s 'display #f) 'table-row)]
+           [_ #f]))
+       (define final-children
+         (let wrap-loop ([boxes table-children] [acc '()] [row-acc '()])
+           (cond
+             [(null? boxes)
+              (if (null? row-acc)
+                  (reverse acc)
+                  (reverse (cons (make-anon-tbody-box (reverse row-acc) counter)
+                                 acc)))]
+             [(is-row-box? (car boxes))
+              (wrap-loop (cdr boxes) acc (cons (car boxes) row-acc))]
+             [else
+              (if (null? row-acc)
+                  (wrap-loop (cdr boxes) (cons (car boxes) acc) '())
+                  (wrap-loop (cdr boxes)
+                             (cons (car boxes)
+                                   (cons (make-anon-tbody-box (reverse row-acc) counter)
+                                         acc))
+                             '()))])))
+       `(table ,table-id
+               (style (display table))
+               ,final-children))
+
      (case display-sym
-       [(flex) `(flex ,box-id ,styles ,child-boxes)]
-       [(block) `(block ,box-id ,styles ,child-boxes)]
+       [(flex)
+        (define wrapped (if (has-table-internal-child? child-boxes)
+                            (wrap-table-internal-children child-boxes)
+                            child-boxes))
+        `(flex ,box-id ,styles ,wrapped)]
+       [(block)
+        (define wrapped (if (has-table-internal-child? child-boxes)
+                            (wrap-table-internal-children child-boxes)
+                            child-boxes))
+        `(block ,box-id ,styles ,wrapped)]
        [(inline)
         (if (has-block-child? child-boxes)
             ;; block-in-inline: convert to block and add strut heights
@@ -2577,13 +2725,20 @@
               `(block ,box-id ,strut-styles ,child-boxes))
             ;; normal inline
             `(inline ,box-id ,styles ,child-boxes))]
-       [(inline-block) `(inline-block ,box-id ,styles ,child-boxes)]
+       [(inline-block)
+        (define wrapped (if (has-table-internal-child? child-boxes)
+                            (wrap-table-internal-children child-boxes)
+                            child-boxes))
+        `(inline-block ,box-id ,styles ,wrapped)]
        [(inline-flex)
         ;; inline-flex behaves like flex for layout purposes
         `(flex ,box-id ,styles ,child-boxes)]
        [(run-in)
         ;; CSS3: run-in is computed as block in modern browsers
-        `(block ,box-id ,styles ,child-boxes)]
+        (define wrapped (if (has-table-internal-child? child-boxes)
+                            (wrap-table-internal-children child-boxes)
+                            child-boxes))
+        `(block ,box-id ,styles ,wrapped)]
        [(list-item)
         ;; list-item is a block-level box with optional marker
         ;; CSS 2.2 §12.5.1: when list-style-position is 'inside', the marker
@@ -2600,8 +2755,14 @@
                    ;; In Chrome at 16px, bullet marker = ~22px for disc style
                    [marker-w (* fs 1.375)]
                    [new-styles (append styles `((__list-marker-inside-width ,marker-w)))])
-              `(block ,box-id ,new-styles ,child-boxes))
-            `(block ,box-id ,styles ,child-boxes))]
+              (let ([w (if (has-table-internal-child? child-boxes)
+                          (wrap-table-internal-children child-boxes)
+                          child-boxes)])
+                `(block ,box-id ,new-styles ,w)))
+            (let ([w (if (has-table-internal-child? child-boxes)
+                        (wrap-table-internal-children child-boxes)
+                        child-boxes)])
+              `(block ,box-id ,styles ,w)))]
        [(table inline-table)
         ;; All tables go through table layout, regardless of explicit width.
         ;; CSS 2.2 §17.5.2: auto-width tables use shrink-to-fit sizing,
