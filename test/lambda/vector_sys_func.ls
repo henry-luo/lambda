@@ -158,6 +158,8 @@ sort(1 to 5, "descending")
 'unique'
 {r: unique([1, 2, 2, 3, 3, 3, 4])}
 {r: unique([1.5, 2.5, 1.5, 3.5, 2.5])}
+{r: unique(["a", "b", "a", "c", "b", "c"])}
+{r: unique(["hello", "world", "hello", "foo", "world"])}
 
 'concat'
 {r: concat([1, 2, 3], [4, 5, 6])}

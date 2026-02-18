@@ -1202,10 +1202,14 @@
           ;; has intrinsic (non-flexible) min targets → distribute to them
           [(not (null? intrinsic-min-targets))
            intrinsic-min-targets]
-          ;; if span contains fr tracks, skip distribution (Phase 4 handles them)
-          [(ormap fr-track? span-tracks)
+          ;; if span contains fr tracks with positive flex factor, skip distribution
+          ;; (Phase 4 handles them proportionally via the flex fraction algorithm).
+          ;; However, 0fr tracks have zero flex factor so Phase 4 cannot resolve
+          ;; them — treat their auto minimum normally by falling through.
+          [(ormap (lambda (t) (> (get-fr-value t) 0)) span-tracks)
            '()]
-          ;; fallback: all tracks (e.g., when all tracks are fixed and non-intrinsic)
+          ;; fallback: all tracks (e.g., when all tracks are fixed, non-intrinsic,
+          ;; or all-0fr flexible tracks whose auto minimum must be resolved here)
           [else span-tracks]))
 
       ;; compute effective item contribution:
@@ -1234,12 +1238,14 @@
                     targets))
           (cond
             [(null? growable)
-             ;; all target tracks frozen — check if flexible tracks exist in span
-             ;; For INDEFINITE case: fr tracks are excluded from targets, so if fr exists
-             ;; in span, discard extra (Phase 4's flex fraction handles it proportionally).
-             ;; For DEFINITE case: fr tracks ARE in targets, so distribute beyond limits.
-             (define has-fr-in-span? (ormap fr-track? span-tracks))
-             (unless has-fr-in-span?
+             ;; all target tracks frozen — check if flexible tracks with positive
+             ;; flex factor exist in span.  When they do, Phase 4's flex fraction
+             ;; algorithm handles the proportional distribution, so discard extra.
+             ;; 0fr tracks have zero flex factor and cannot grow in Phase 4, so
+             ;; treat them as non-flexible here and distribute normally.
+             (define has-positive-fr-in-span?
+               (ormap (lambda (t) (> (get-fr-value t) 0)) span-tracks))
+             (unless has-positive-fr-in-span?
                (define per-track (/ extra (length targets)))
                (for ([t (in-list targets)])
                  (set-track-base-size! t (+ (track-base-size t) per-track))))]
@@ -1264,9 +1270,9 @@
                  (filter (lambda (t) (not (memq t newly-frozen))) growable))
                (if (not (null? still-growable))
                    (distribute-base-extra! still-growable remaining)
-                   ;; all growable frozen: apply same fr-discard logic
-                   (let ([has-fr? (ormap fr-track? span-tracks)])
-                     (unless has-fr?
+                   ;; all growable frozen: apply same positive-fr-discard logic
+                   (let ([has-positive-fr? (ormap (lambda (t) (> (get-fr-value t) 0)) span-tracks)])
+                     (unless has-positive-fr?
                        (let ([per-track (/ remaining (length targets))])
                          (for ([t (in-list targets)])
                            (set-track-base-size! t (+ (track-base-size t) per-track))))))))]))
@@ -1653,19 +1659,30 @@
 
 ;; clamp a border-box size by the item's min-width/max-width or min-height/max-height
 ;; per CSS Grid spec, contributions are clamped by specified constraints
+;; CSS §4.5: When box-sizing is border-box, width/min-width/max-width include
+;; padding and border. The content width cannot be negative, so the minimum
+;; border-box size is the sum of padding and border.
 (define (clamp-item-contribution border-box-size styles axis [containing-width #f])
   (define resolve-base (or containing-width 0))
+  (define bm (extract-box-model styles resolve-base))
   (if (eq? axis 'col)
       (let* ([min-w-raw (get-style-prop styles 'min-width 'auto)]
              [max-w-raw (get-style-prop styles 'max-width 'none)]
              [min-w (or (resolve-size-value min-w-raw resolve-base) 0)]
-             [max-w (or (resolve-size-value max-w-raw resolve-base) +inf.0)])
-        (max min-w (min max-w border-box-size)))
+             [max-w (or (resolve-size-value max-w-raw resolve-base) +inf.0)]
+             ;; floor: content-width can't be negative → border-box ≥ padding+border
+             [pb-floor (+ (box-model-padding-left bm) (box-model-padding-right bm)
+                          (box-model-border-left bm) (box-model-border-right bm))]
+             [clamped (max min-w (min max-w border-box-size))])
+        (max pb-floor clamped))
       (let* ([min-h-raw (get-style-prop styles 'min-height 'auto)]
              [max-h-raw (get-style-prop styles 'max-height 'none)]
              [min-h (or (resolve-size-value min-h-raw resolve-base) 0)]
-             [max-h (or (resolve-size-value max-h-raw resolve-base) +inf.0)])
-        (max min-h (min max-h border-box-size)))))
+             [max-h (or (resolve-size-value max-h-raw resolve-base) +inf.0)]
+             [pb-floor (+ (box-model-padding-top bm) (box-model-padding-bottom bm)
+                          (box-model-border-top bm) (box-model-border-bottom bm))]
+             [clamped (max min-h (min max-h border-box-size))])
+        (max pb-floor clamped))))
 
 ;; ============================================================
 ;; Item Placement
@@ -1818,6 +1835,16 @@
     (set! max-r (+ max-r row-offset))
     (set! max-c (+ max-c col-offset)))
 
+  ;; CSS Grid §8.5: sort items by CSS 'order' property (stable sort preserves
+  ;; DOM order for equal values).  Auto-placement passes (2 & 3) must process
+  ;; items in order-modified document order.  Pass 1 (definite positions) is
+  ;; unaffected because the placement result is the same regardless of order.
+  (set! item-infos
+    (sort item-infos <
+          #:key (lambda (info)
+                  (define styles (list-ref info 1))
+                  (get-style-prop styles 'order 0))))
+
   ;; use at least the explicit track count (adjusted for offset) for the grid
   ;; also account for auto-placed items in the appropriate flow direction
   (define eff-num-rows (+ num-rows row-offset))
@@ -1826,14 +1853,25 @@
     (length (filter (lambda (info)
                       (or (not (list-ref info 3)) (not (list-ref info 5))))
                     item-infos)))
+  ;; compute total row/col spans for auto-placed items to size the grid large
+  ;; enough for items with multi-track spans (e.g. grid-row: span 3).
+  ;; The simple ceil(count/cols) estimate is only valid for span-1 items.
+  (define auto-row-span-total
+    (for/sum ([info (in-list item-infos)]
+              #:when (or (not (list-ref info 3)) (not (list-ref info 5))))
+      (list-ref info 7)))  ; r-span
+  (define auto-col-span-total
+    (for/sum ([info (in-list item-infos)]
+              #:when (or (not (list-ref info 3)) (not (list-ref info 5))))
+      (list-ref info 8)))  ; c-span
   (define safe-cols
     (if is-column-flow?
-        (max max-c eff-num-cols (+ max-c (ceiling (/ (max 1 auto-item-count) (max eff-num-rows 1)))))
+        (max max-c eff-num-cols (+ max-c (ceiling (/ (max 1 auto-col-span-total) (max eff-num-rows 1)))))
         (max max-c eff-num-cols 1)))
   (define safe-rows
     (if is-column-flow?
         (max max-r eff-num-rows 1)
-        (max max-r eff-num-rows (+ max-r (ceiling (/ (max 1 auto-item-count) safe-cols))))))
+        (max max-r eff-num-rows (+ max-r (ceiling (/ (max 1 auto-row-span-total) safe-cols))))))
   (define grid-rows safe-rows)
   (define grid-cols safe-cols)
 
