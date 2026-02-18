@@ -2533,6 +2533,55 @@ Item fn_split(Item str_item, Item sep_item) {
     return {.list = result};
 }
 
+// chars(str) - decompose string/symbol into array of 1-character strings/symbols
+// For string input, returns array of 1-char strings. For symbol input, array of 1-char symbols.
+// Non-string/symbol input returns ItemError.
+Item fn_chars(Item str_item) {
+    GUARD_ERROR1(str_item);
+    TypeId type = get_type_id(str_item);
+
+    if (type != LMD_TYPE_STRING && type != LMD_TYPE_SYMBOL) {
+        log_debug("fn_chars: argument must be a string or symbol");
+        return ItemError;
+    }
+
+    const char* chars = str_item.get_chars();
+    uint32_t byte_len = str_item.get_len();
+
+    // disable string merging so array elements stay separate
+    bool saved_merging = false;
+    if (context) {
+        saved_merging = context->disable_string_merging;
+        context->disable_string_merging = true;
+    }
+
+    Array* result = array();
+
+    if (!chars || byte_len == 0) {
+        if (context) { context->disable_string_merging = saved_merging; }
+        return {.array = result};
+    }
+
+    const char* p = chars;
+    const char* end = chars + byte_len;
+    while (p < end) {
+        size_t ch_len = str_utf8_char_len((unsigned char)*p);
+        if (ch_len == 0) ch_len = 1; // fallback for invalid UTF-8
+
+        if (type == LMD_TYPE_SYMBOL) {
+            Symbol* sym = heap_create_symbol(p, ch_len);
+            array_push(result, {.item = y2it(sym)});
+        } else {
+            String* str = heap_strcpy((char*)p, (int)ch_len);
+            array_push(result, {.item = s2it(str)});
+        }
+        p += ch_len;
+    }
+
+    if (context) { context->disable_string_merging = saved_merging; }
+    return {.array = result};
+}
+
 // str_join(strs, sep) - join list of strings with separator
 Item fn_str_join(Item list_item, Item sep_item) {
     GUARD_ERROR2(list_item, sep_item);
