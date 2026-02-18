@@ -162,8 +162,9 @@ SysFuncInfo sys_funcs[] = {
     {SYSFUNC_SHL, "shl", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // shl(a, n) -> int
     {SYSFUNC_SHR, "shr", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false},          // shr(a, n) -> int
     // vmap functions
-    {SYSFUNC_VMAP_NEW, "map", -1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false},    // map() or map(k1,v1,...) -> vmap
-    {SYSFUNC_VMAP_SET, "map_set", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false},  // map_set(m,k,v) -> new vmap
+    {SYSFUNC_VMAP_NEW, "map", 0, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},     // map() -> empty vmap
+    {SYSFUNC_VMAP_NEW, "map", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false},     // map([k1,v1,...]) -> vmap from array
+    {SYSPROC_VMAP_SET, "set", 3, &TYPE_NULL, true, true, true, LMD_TYPE_VMAP, false},     // m.set(k, v) -> in-place insert
 };
 
 // Check if a name matches any system function (regardless of arg count)

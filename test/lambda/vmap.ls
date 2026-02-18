@@ -1,92 +1,71 @@
-// Test: VMap (Hash Map) - Phase 1
-// Tests map() constructor, map_set() immutable put, member access, for-loop, len
+// Test: VMap (Hash Map) - Functional Tests
+// Construction, member access, for-loop, len, non-string keys
 
-// Test 1: Basic construction and member access
-let m1 = map("name", "Alice", "age", 30)
-let t1 = m1.name
-// expect: "Alice"
+// Test 1: Empty map
+len(map())
 
-// Test 2: Integer value access
-let t2 = m1.age
-// expect: 30
+// Test 2: map from array with string keys
+let m1 = map(["name", "Alice", "age", 30])
+m1.name
 
-// Test 3: len()
-let t3 = len(m1)
-// expect: 2
+// Test 3: Integer value access
+m1.age
 
-// Test 4: Empty map
-let m0 = map()
-let t4 = len(m0)
-// expect: 0
+// Test 4: len
+len(m1)
 
 // Test 5: Float values
-let m2 = map("pi", 3.14, "e", 2.718)
-let t5 = m2.pi
-// expect: 3.14
+let m2 = map(["pi", 3.14, "e", 2.718])
+m2.pi
 
-// Test 6: map_set returns new map with added key
-let m3 = map("x", 10)
-let m4 = map_set(m3, "y", 20)
-let t6 = m4.y
-// expect: 20
+// Test 6: Boolean values in map
+let m3 = map(["active", true, "deleted", false])
+[m3.active, m3.deleted]
 
-// Test 7: map_set does not mutate original (copy-on-write)
-let t7 = len(m3)
-// expect: 1
+// Test 7: String with spaces
+let m4 = map(["greeting", "hello world"])
+m4.greeting
 
-// Test 8: New map from map_set preserves original keys
-let t8 = m4.x
-// expect: 10
+// Test 8: Nested map as value
+let inner = map(["x", 42])
+let outer = map(["child", inner])
+outer.child.x
 
-// Test 9: map_set overwrites existing key in new copy
-let m5 = map("color", "red")
-let m6 = map_set(m5, "color", "blue")
-let t9 = m5.color
-// expect: "red" (original unchanged)
+// Test 9: For-loop with 'at' (k, v)
+let m5 = map(["a", 1, "b", 2, "c", 3])
+[for (k, v at m5) k ++ "=" ++ string(v)]
 
-// Test 10: Overwritten value in new copy
-let t10 = m6.color
-// expect: "blue"
+// Test 10: For-loop collect values
+[for (k, v at m5) v]
 
-// Test 11: For-loop iteration with 'at' (k, v)
-let m7 = map("a", 1, "b", 2, "c", 3)
-let t11 = [for (k, v at m7) k ++ "=" ++ string(v)]
-// expect: ["a=1", "b=2", "c=3"]
+// Test 11: For-loop single-variable (key only)
+[for (k at m5) k]
 
-// Test 12: for-loop collect values
-let t12 = [for (k, v at m7) v]
-// expect: [1, 2, 3]
+// Test 12: Integer keys
+let m6 = map([1, "one", 2, "two", 3, "three"])
+len(m6)
 
-// Test 13: Multiple map_set chain
-let base = map("a", 1)
-let step1 = map_set(base, "b", 2)
-let step2 = map_set(step1, "c", 3)
-let t13 = len(step2)
-// expect: 3
+// Test 13: Integer key for-loop
+[for (k, v at m6) v]
 
-// Test 14: Original unchanged after chain
-let t14 = len(base)
-// expect: 1
+// Test 14: Float keys
+let m7 = map([3.14, "pi", 2.718, "e"])
+len(m7)
 
-// Test 15: Boolean values
-let m8 = map("active", true, "deleted", false)
-let t15 = m8.active
-// expect: true
+// Test 15: Boolean keys
+let m8 = map([true, "yes", false, "no"])
+len(m8)
 
-// Test 16: String values with special characters
-let m9 = map("greeting", "hello world", "empty", "")
-let t16 = m9.greeting
-// expect: "hello world"
+// Test 16: Bool key for-loop
+[for (k, v at m8) v]
 
-// Test 17: Nested construction - map as value
-let inner = map("x", 42)
-let outer = map("child", inner)
-let t17 = outer.child.x
-// expect: 42
+// Test 17: Large map
+let big = map(["k1", 1, "k2", 2, "k3", 3, "k4", 4, "k5", 5])
+len(big)
 
-// Test 18: Large map
-let big = map("k1", 1, "k2", 2, "k3", 3, "k4", 4, "k5", 5)
-let t18 = len(big)
-// expect: 5
+// Test 18: Mixed key types in construction
+let m9 = map(["name", "test", 42, "answer", true, "flag"])
+len(m9)
 
-[t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15, t16, t17, t18]
+// Final result - collect key tests
+[len(map()), m1.name, m1.age, len(m1), m2.pi, m3.active, m4.greeting, outer.child.x, len(m5), len(m6), len(m7), len(m8), len(big), len(m9)]
