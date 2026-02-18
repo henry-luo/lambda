@@ -56,6 +56,7 @@ typedef struct Item {
         ArrayInt64* array_int64;  // New: 64-bit integer arrays
         ArrayFloat* array_float;
         Map* map;
+        VMap* vmap;
         Element* element;
         Type* type;
         Function* function;
@@ -245,4 +246,22 @@ struct Element : List {
 
     ConstItem get_attr(const Item attr_name) const;
     ConstItem get_attr(const char* attr_name) const;
+};
+
+// VMap: Virtual map with vtable dispatch
+// Supports arbitrary key types and pluggable backends (HashMap, TreeMap, etc.)
+// type(vmap) returns "map" — transparent to Lambda scripts
+struct VMapVtable {
+    Item    (*get)(void* data, Item key);                    // map[key]
+    void    (*set)(void* data, Item key, Item value);        // in-place mutation (pn context)
+    int64_t (*count)(void* data);                            // len(map)
+    ArrayList* (*keys)(void* data);                          // item_keys() → ArrayList<String*>
+    Item    (*key_at)(void* data, int64_t index);            // original key at insertion index
+    Item    (*value_at)(void* data, int64_t index);          // value at insertion index
+    void    (*destroy)(void* data);                          // free backing store
+};
+
+struct VMap : Container {
+    void* data;            // opaque pointer to backing implementation (e.g. HashMapData*)
+    VMapVtable* vtable;    // dispatch table
 };

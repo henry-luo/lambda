@@ -3801,6 +3801,43 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             }
         }
 
+        // ==== VMap: map() and map_set() ====
+        if (strcmp(fn_name, "map") == 0 && sys_fn_node->fn_info->fn == SYSFUNC_VMAP_NEW) {
+            // count arguments
+            int nargs = 0;
+            AstNode* a = first_arg;
+            while (a) { nargs++; a = a->next; }
+
+            if (nargs == 0) {
+                // map() → vmap_new()
+                strbuf_append_str(tp->code_buf, "vmap_new()");
+            } else {
+                // map(k1, v1, k2, v2, ...) → vmap_from_pairs(N, k1, v1, ...)
+                strbuf_append_str(tp->code_buf, "vmap_from_pairs(");
+                strbuf_append_int(tp->code_buf, nargs);
+                a = first_arg;
+                while (a) {
+                    strbuf_append_char(tp->code_buf, ',');
+                    transpile_box_item(tp, a);
+                    a = a->next;
+                }
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            return;
+        }
+        if (strcmp(fn_name, "map_set") == 0 && sys_fn_node->fn_info->fn == SYSFUNC_VMAP_SET) {
+            // map_set(m, k, v) → vmap_put(m, k, v)
+            strbuf_append_str(tp->code_buf, "vmap_put(");
+            transpile_box_item(tp, first_arg);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, second_arg);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, second_arg->next);
+            strbuf_append_char(tp->code_buf, ')');
+
+            return;
+        }
+
         // Use the sys func name from fn_info, not from TSNode source
         // This correctly handles method-style calls (obj.method()) which are desugared to sys func calls
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
