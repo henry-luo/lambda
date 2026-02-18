@@ -9,7 +9,8 @@
 (require racket/match
          racket/list
          "css-layout-lang.rkt"
-         "layout-common.rkt")
+         "layout-common.rkt"
+         "font-metrics.rkt")
 
 (provide layout-inline
          layout-inline-children)
@@ -81,8 +82,10 @@
       [(let ([ft (get-style-prop styles 'font-type #f)])
          (or (not ft) (eq? ft 'ahem)))
        fs]
-      ;; proportional: use font metrics ratio
-      [else (* 1.15 fs)]))
+      ;; proportional: use JSON-loaded font metrics ratio
+      [else
+       (let ([fm (get-style-prop styles 'font-metrics 'times)])
+         (* (font-line-height-ratio fm) fs))]))
 
   ;; track cursor-based width of each completed line (mutable accumulator)
   (define completed-line-widths '())

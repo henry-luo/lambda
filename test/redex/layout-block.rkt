@@ -12,7 +12,8 @@
          "css-layout-lang.rkt"
          "layout-common.rkt"
          "layout-positioned.rkt"
-         "layout-inline.rkt")
+         "layout-inline.rkt"
+         "font-metrics.rkt")
 
 (provide layout-block
          layout-block-children
@@ -456,13 +457,11 @@
                    all-baseline-aligned? has-bottom-baseline-ib? parent-styles)
               (let* ([fs (get-style-prop parent-styles 'font-size 16)]
                      [font-type (get-style-prop parent-styles 'font-type #f)]
+                     [font-metrics-sym (get-style-prop parent-styles 'font-metrics 'times)]
                      [lh-prop (get-style-prop parent-styles 'line-height #f)]
-                     ;; Times hhea: ascender=891, descender=216, unitsPerEm=1000
-                     ;; → descent ratio = 216/1000 = 0.216
-                     ;; Arial hhea: descender=434, unitsPerEm=2048
-                     ;; → descent ratio = 434/2048 ≈ 0.212
-                     [descent-ratio (if (eq? font-type 'arial) 0.212 0.216)]
-                     [lh-ratio (if (eq? font-type 'arial) 1.15 1.107)]
+                     ;; use JSON-loaded font metrics for descent and line-height ratios
+                     [descent-ratio (font-descender-ratio font-metrics-sym)]
+                     [lh-ratio (font-line-height-ratio font-metrics-sym)]
                      [strut-lh (if (and lh-prop (number? lh-prop))
                                    lh-prop
                                    (* lh-ratio fs))]
@@ -1042,28 +1041,18 @@
                       ;; compute parent's strut descent:
                       ;; the amount below the baseline from the parent font's line-height
                       [parent-fs (if parent-styles (get-style-prop parent-styles 'font-size 16) 16)]
-                      [parent-font-metrics (if parent-styles (get-style-prop parent-styles 'font-metrics #f) #f)]
-                      ;; Times: ascender ratio = 891/1000, Arial: 1854/2048 ≈ 0.905
+                      [parent-font-metrics-sym (if parent-styles (get-style-prop parent-styles 'font-metrics 'times) 'times)]
                       [is-proportional? (if parent-styles
                                             (let ([ft (get-style-prop parent-styles 'font-type #f)])
                                               (eq? ft 'proportional))
                                             #f)]
                       ;; for non-proportional (Ahem) font: no descent issue, strut = font-size
-                      ;; for proportional fonts: compute descent below baseline
+                      ;; for proportional fonts: compute descent below baseline using JSON metrics
                       [strut-descent
                        (if is-proportional?
-                           (let* ([is-arial? (eq? parent-font-metrics 'arial)]
-                                  ;; line-height ratio
-                                  [lh-ratio (if is-arial? 1.15 1.107)]
-                                  ;; line-height = font-size * ratio
+                           (let* ([lh-ratio (font-line-height-ratio parent-font-metrics-sym)]
                                   [strut-lh (* parent-fs lh-ratio)]
-                                  ;; ascender ratio: Times 891/1000, Arial ~905/1000
-                                  [ascender-ratio (if is-arial? 0.905 0.891)]
-                                  ;; descent from baseline = line-height - (ascender * font-size + half-leading)
-                                  ;; half-leading = (line-height - font-size) / 2
-                                  ;; descent below baseline = descender + half-leading
-                                  ;; descender ratio: Times 216/1000, Arial ~212/1000
-                                  [descender-ratio (if is-arial? 0.212 0.216)]
+                                  [descender-ratio (font-descender-ratio parent-font-metrics-sym)]
                                   [half-leading (/ (- strut-lh parent-fs) 2)]
                                   [descent (+ (* descender-ratio parent-fs) half-leading)])
                              descent)
