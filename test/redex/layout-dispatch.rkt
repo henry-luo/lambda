@@ -323,21 +323,39 @@
      ;; This replaces the old hardcoded values (Times 1.107, Arial 1.15) which were
      ;; incorrect for Times (missed hhea.lineGap of 87/2048).
      (define proportional-lh-ratio (font-line-height-ratio font-metrics-val))
-     (define line-height
+     ;; Chrome getClientRects() model for text rects:
+     ;; - Text rect height = normal line-height (from font metrics), always
+     ;; - Text rect y = 0 when line-height is normal (default)
+     ;; - Text rect y = half-leading = (actual-lh - fs)/2 when explicit line-height
+     ;; - Stacking/line-contribution uses the actual line-height
+     ;; We compute: normal-lh (font metrics), actual-lh (with explicit override),
+     ;;   text-view-h (= normal-lh), text-view-y (= half-leading or 0)
+     (define normal-lh
+       (if is-proportional?
+           (chrome-mac-line-height font-metrics-val font-size)
+           font-size))  ;; Ahem: normal-lh = font-size
+     (define line-height  ;; actual line-height (may differ if explicit)
        (cond
          [is-proportional?
           (let ([lh-prop (get-style-prop styles 'line-height #f)])
             (if lh-prop
-                (if (number? lh-prop) lh-prop (chrome-mac-line-height font-metrics-val font-size))
-                (chrome-mac-line-height font-metrics-val font-size)))]
+                (if (number? lh-prop) lh-prop normal-lh)
+                normal-lh))]
          [else
           ;; Ahem: check for explicit line-height, default to font-size
           (let ([lh-prop (get-style-prop styles 'line-height #f)])
             (if (and lh-prop (number? lh-prop))
                 lh-prop
                 font-size))]))
-     ;; Chrome getClientRects() returns line-height as the text rect height.
-     ;; Text view height = line-height, y = 0 (leading included in height).
+     ;; half-leading: offset when explicit line-height differs from normal
+     (define has-explicit-lh?
+       (let ([lh-prop (get-style-prop styles 'line-height #f)])
+         (and lh-prop (number? lh-prop) (not (= lh-prop normal-lh)))))
+     (define text-view-y
+       (if has-explicit-lh?
+           (/ (- line-height font-size) 2)
+           0))
+     (define text-view-h normal-lh)  ;; Chrome always reports normal-lh as text rect height
      ;; Per-character width function from JSON-loaded font metrics.
      ;; Uses full glyph advance width tables (2000+ glyphs) instead of
      ;; the old ~80-character hardcoded ratio tables, eliminating the
@@ -366,17 +384,17 @@
                 (+ total (char-width ch font-size))))
             (max mx lw)))
         (define text-w max-line-w)
-        ;; Chrome getClientRects() returns line-height as the rect height for each
-        ;; line of text.  For a multi-line bounding box the total height = n * lh.
-        (define text-h (* num-lines line-height))
-        (make-text-view id 0 0 text-w text-h content)]
+        ;; Chrome getClientRects() bounding box: y = half-leading (first line offset),
+        ;; height spans from first-line top to last-line bottom:
+        ;;   (n-1) * actual-lh + normal-lh
+        (define text-h (+ (* (sub1 num-lines) line-height) text-view-h))
+        (make-text-view id 0 text-view-y text-w text-h content)]
 
        ;; no wrapping needed: text fits or no constraint
        [(or (not effective-avail-w) (<= measured-w effective-avail-w))
-        ;; Chrome Range.getClientRects() returns line-height as the text rect
-        ;; height (not just font-size/em-box).  The half-leading is already
-        ;; included in line-height, so y = 0 and h = line-height.
-        (make-text-view id 0 0 measured-w line-height content)]
+        ;; Chrome getClientRects(): text rect height = normal-lh (font metrics),
+        ;; y = half-leading when explicit line-height is set, else 0.
+        (make-text-view id 0 text-view-y measured-w text-view-h content)]
        [else
         (cond
           ;; proportional font: split on spaces for word wrapping
@@ -414,10 +432,10 @@
                      (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
            ;; for proportional text, report max line width (not container width)
            (define text-w max-line-w)
-           ;; Chrome getClientRects(): each line rect has height = line-height.
-           ;; Bounding box of n lines = n * line-height.
-           (define text-h (* num-lines line-height))
-           (make-text-view id 0 0 text-w text-h content)]
+           ;; Chrome getClientRects(): bounding box spans from first-line-top
+           ;; (at half-leading) to last-line-bottom: (n-1)*actual-lh + normal-lh
+           (define text-h (+ (* (sub1 num-lines) line-height) text-view-h))
+           (make-text-view id 0 text-view-y text-w text-h content)]
 
           ;; Ahem font with newlines: handle pre-formatted line breaks
           [(and has-newlines? (not is-proportional?))
@@ -430,8 +448,8 @@
                    (ahem-char-width ch font-size)))
                (max mx lw)))
            (define text-w max-line-w)
-           (define text-h (* num-lines line-height))
-           (make-text-view id 0 0 text-w text-h content)]
+           (define text-h (+ (* (sub1 num-lines) line-height) text-view-h))
+           (make-text-view id 0 text-view-y text-w text-h content)]
 
           ;; Ahem font: split on zero-width spaces
           [else
@@ -464,9 +482,9 @@
                      (loop (cdr remaining-words) ww (+ lines 1) (max max-w line-w))])])))
            ;; report actual content width (max line width), not container width
            (define text-w max-line-w)
-           ;; text height = n * line-height (matches Chrome getClientRects bounding box)
-           (define text-h (* num-lines line-height))
-           (make-text-view id 0 0 text-w text-h content)])]))
+           ;; text height: bounding box from first-line-top to last-line-bottom
+           (define text-h (+ (* (sub1 num-lines) line-height) text-view-h))
+           (make-text-view id 0 text-view-y text-w text-h content)])]))
 
 ;; ============================================================
 ;; Replaced Element Layout (img, svg, etc.)

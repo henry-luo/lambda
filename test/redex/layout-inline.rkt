@@ -144,9 +144,10 @@
             (define laid-out (dispatch-fn child text-avail))
             (define cw (view-width laid-out))
             (define ch (view-height laid-out))
-            ;; text view height is now line-height (matching Chrome getClientRects),
-            ;; so ch IS the line contribution — no separate half-leading recovery needed.
-            (define line-contribution ch)
+            ;; text view height is now normal-lh (Chrome getClientRects model),
+            ;; but stacking needs the ACTUAL line-height (including explicit lh).
+            ;; Compute line-contribution from styles, not from ch.
+            (define line-contribution (text-height-from-styles styles))
             ;; check if text fits on current line
             (cond
               [(and (> current-x 0) (> (+ current-x cw) max-line-width))

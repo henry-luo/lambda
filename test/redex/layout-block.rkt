@@ -1013,19 +1013,31 @@
           (define final-view (apply-relative-offset positioned-view child-styles avail-w avail-h))
 
           ;; advance y by child's border-box height
-          ;; for text children, the view reports font-metric dimensions:
-          ;; height = font-metric-height (font-size * proportional-lh-ratio)
-          ;; y = half-leading = (css-line-height - font-metric-height) / 2
-          ;; The stacking height (line box) = height + 2*half-leading = css-line-height.
-          ;; exception: font-size ≤ 0 → entire text is invisible, zero stacking height
+          ;; Text view height = normal-lh (Chrome getClientRects), but block stacking
+          ;; needs actual-lh (CSS line-box height).  For single-line: view-h = normal-lh,
+          ;; stacking = actual-lh.  For multi-line: view-h = (n-1)*actual + normal-lh,
+          ;; stacking = n * actual-lh.  Adding (actual-lh - normal-lh) to view-h works
+          ;; for both: single → normal + (actual-normal) = actual;
+          ;; multi → (n-1)*actual + normal + (actual-normal) = n*actual.
+          ;; When no explicit lh: actual = normal, correction = 0, stacking = view-h.
+          ;; exception: font-size ≤ 0 → zero stacking height
           (define child-h
             (match child
               [`(text ,_ ,child-text-styles ,_ ,_)
-               (let ([fs (get-style-prop child-text-styles 'font-size 10)])
+               (let* ([fs (get-style-prop child-text-styles 'font-size 10)]
+                      [lh-prop (get-style-prop child-text-styles 'line-height #f)]
+                      [ft (get-style-prop child-text-styles 'font-type #f)]
+                      [fm (get-style-prop child-text-styles 'font-metrics 'times)]
+                      [is-prop? (eq? ft 'proportional)]
+                      [normal-lh (if is-prop? (chrome-mac-line-height fm fs) fs)]
+                      [actual-lh (cond
+                                   [(and lh-prop (number? lh-prop)) lh-prop]
+                                   [else normal-lh])]
+                      [vh (view-height child-view)]
+                      [correction (- actual-lh normal-lh)])
                  (cond
                    [(and (number? fs) (<= fs 0)) 0]
-                   ;; stacking = view-height + 2*view-y (half-leading on both sides)
-                   [else (+ (view-height child-view) (* 2 (view-y child-view)))]))]
+                   [else (+ vh correction)]))]
               ;; CSS 2.2 §10.8.1: inline-block non-replaced elements — the margin
               ;; box determines the line box height contribution.
               ;; CSS 2.2 §10.6.1: the line box height includes the strut (parent's
