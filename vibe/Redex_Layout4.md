@@ -1027,3 +1027,55 @@ All 31 tests that were failing at the end of Phase 4 now **PASS** after Phase 5 
 ### Phase 5 Final
 
 **1968/1968 baseline (100.0%), +178 tests from Phase 4, 0 regressions**
+
+### All Layout Test Suites (Phase 5 Final)
+
+There are **two layout engines** tested against the same Chrome reference data:
+
+1. **Redex engine** (Racket, `test/redex/test-differential.rkt`) — the PLT Redex specification, used for Phases 1–5 development. Tolerance: 3px base, 3% proportional, 10px max.
+2. **Radiant engine** (C++, `make layout` / `test_radiant_layout.js`) — the production C++ implementation. Threshold: 100% element + 100% text match (strict).
+
+Phase 3 cross-suite numbers used the Redex engine. The `make layout` command uses the Radiant engine, which has different (often lower) pass rates for non-baseline suites.
+
+#### Redex Engine (Racket) — Phase 5 Final
+
+| Suite         | Total    | Pass     | Fail     | Pass Rate  | Δ from Phase 3 |
+| ------------- | -------- | -------- | -------- | ---------- | --------------- |
+| **baseline**  | 1821     | **1796** | **25**   | **98.6%**  | +8              |
+| **css_block** | 333      | **333**  | **0**    | **100.0%** | new suite       |
+| **flex**      | 156      | **153**  | **3**    | **98.1%**  | —               |
+| **grid**      | 123      | **117**  | **6**    | **95.1%**  | —               |
+| **basic**     | 84       | **67**   | **17**   | **79.8%**  | +7              |
+| **box**       | 77       | **60**   | **17**   | **77.9%**  | −2              |
+| **table**     | 103      | **55**   | **48**   | **53.4%**  | +2              |
+| **position**  | 53       | **35**   | **18**   | **66.0%**  | +8              |
+| **advanced**  | 49       | **26**   | **23**   | **53.1%**  | new suite       |
+| **page**      | 18       | **7**    | **11**   | **38.9%**  | new suite       |
+| **text_flow** | 14       | **14**   | **0**    | **100.0%** | —               |
+| **flex-nest** | 2        | **0**    | **2**    | **0.0%**   | new suite       |
+| **Total**     | **2833** | **2663** | **170**  | **94.0%**  |                 |
+
+*Note: The Redex engine discovers only tests with matching reference JSONs. Test counts differ from the Radiant runner because the Radiant runner includes tests without references (counted as failures).*
+
+#### Radiant Engine (C++, `make layout`) — Phase 5 Final
+
+Strict threshold (100% match required):
+
+| Suite         | Total    | Pass     | Fail     | Pass Rate  |
+| ------------- | -------- | -------- | -------- | ---------- |
+| **baseline**  | 1968     | **1968** | **0**    | **100.0%** |
+| **css_block** | 335      | 320      | 15       | 95.5%      |
+| **table**     | 284      | 6        | 278      | 2.1%       |
+| **box**       | 185      | 0        | 185      | 0.0%       |
+| **flex**      | 156      | 0        | 156      | 0.0%       |
+| **basic**     | 153      | 0        | 153      | 0.0%       |
+| **grid**      | 123      | 0        | 123      | 0.0%       |
+| **position**  | 104      | 0        | 104      | 0.0%       |
+| **advanced**  | 72       | 8        | 64       | 11.1%      |
+| **js**        | 51       | 1        | 50       | 2.0%       |
+| **page**      | 42       | 0        | 42       | 0.0%       |
+| **text_flow** | 14       | 1        | 13       | 7.1%       |
+| **flex-nest** | 8        | 0        | 8        | 0.0%       |
+| **Total**     | **3495** | **2304** | **1191** | **65.9%**  |
+
+*The Radiant C++ engine has full baseline coverage (1968/1968) but lower pass rates on non-baseline suites. Many non-baseline suites have expanded test counts (box: 77→185, basic: 84→153, position: 53→104, table: 103→284) with tests that were not part of the original Redex development. The Radiant engine uses a stricter 100% threshold vs the Redex engine's tolerance-based comparison.*
