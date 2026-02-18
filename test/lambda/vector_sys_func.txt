@@ -111,16 +111,25 @@
 [5, 4, 3, 2, 1]
 'unique'
 {
-  r: (1, 2, 3, 4)
+  r: [1, 2, 3, 4]
 }
 {
-  r: (1.5, 2.5, 3.5)
+  r: [1.5, 2.5, 3.5]
 }
 {
-  r: ("a", "b", "c")
+  r: ["a", "b", "c"]
 }
 {
-  r: ("hello", "world", "foo")
+  r: ["hello", "world", "foo"]
+}
+'unique (list input - spreadable)'
+{
+  r: [1, 2, 3]
+}
+"aba"
+'unique (array input - non-spreadable)'
+{
+  r: [1, 2, 3]
 }
 'concat'
 {

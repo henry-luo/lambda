@@ -321,6 +321,7 @@ typedef enum SysFunc {
     SYSFUNC_SPLIT,
     SYSFUNC_STR_JOIN,       // join(strs, sep) for strings
     SYSFUNC_REPLACE,
+    SYSFUNC_CHARS,          // chars(str) - decompose string into array of characters
     // vector functions
     SYSFUNC_PROD,
     SYSFUNC_CUMSUM,
