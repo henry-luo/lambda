@@ -179,8 +179,10 @@
     ;; System Arial (highest priority for 'arial)
     [(equal? name "arial")
      (if is-bold?
-         (hash-set! font-registry 'arial-bold fd)
-         (hash-set! font-registry 'arial fd))]
+         (begin (hash-set! font-registry 'arial-bold fd)
+                (hash-set! font-registry 'arial-native-bold fd))
+         (begin (hash-set! font-registry 'arial fd)
+                (hash-set! font-registry 'arial-native fd)))]
     ;; Liberation Serif → fallback for 'times (only if not already set by system font)
     [(string-contains? name "liberation serif")
      (unless (hash-has-key? font-registry (if is-bold? 'times-bold 'times))
@@ -191,8 +193,10 @@
     [(string-contains? name "liberation sans")
      (unless (hash-has-key? font-registry (if is-bold? 'arial-bold 'arial))
        (if is-bold?
-           (hash-set! font-registry 'arial-bold fd)
-           (hash-set! font-registry 'arial fd)))]
+           (begin (hash-set! font-registry 'arial-bold fd)
+                  (hash-set! font-registry 'arial-native-bold fd))
+           (begin (hash-set! font-registry 'arial fd)
+                  (hash-set! font-registry 'arial-native fd))))]
     ;; Open Sans → own key only
     [(string-contains? name "open sans")
      (if is-bold?
@@ -345,13 +349,15 @@
 (define (chrome-mac-line-height font-metrics-sym font-size)
   "Compute Chrome-macOS-compatible integer line-height for a font and size.
    Uses CoreText ascent/descent ratios + 15% boost for Times and Helvetica.
-   Menlo (monospace) has built-in extra leading so no boost is applied."
+   Menlo (monospace) has built-in extra leading so no boost is applied.
+   Arial-native uses Arial.ttf hhea metrics with separate rounding (no boost)."
   (define-values (asc-ratio desc-ratio apply-boost?)
     (case font-metrics-sym
-      [(times)  (values 3/4 1/4 #t)]           ;; Times: 0.75 / 0.25
-      [(arial)  (values (/ 1577 2048) (/ 471 2048) #t)]  ;; Helvetica
-      [(mono)   (values (/ 1901 2048) (/ 483 2048) #f)]  ;; Menlo (no boost)
-      [else     (values 3/4 1/4 #t)]))           ;; default: Times
+      [(times times-bold)           (values 3/4 1/4 #t)]           ;; Times: 0.75 / 0.25
+      [(arial arial-bold)           (values (/ 1577 2048) (/ 471 2048) #t)]  ;; Helvetica (generic sans-serif)
+      [(arial-native arial-native-bold) (values (/ 1854 2048) (/ 434 2048) #f)]  ;; Arial.ttf hhea metrics
+      [(mono mono-bold)             (values (/ 1901 2048) (/ 483 2048) #f)]  ;; Menlo (no boost)
+      [else                         (values 3/4 1/4 #t)]))           ;; default: Times
   (define asc-px  (inexact->exact (floor (+ (* asc-ratio font-size) 1/2))))
   (define desc-px (inexact->exact (floor (+ (* desc-ratio font-size) 1/2))))
   (define boosted-asc
