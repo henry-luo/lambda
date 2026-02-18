@@ -154,7 +154,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 goto RETURN;
             }
             uint8_t* mod_def = (uint8_t*)imp->addr;
-            
+
             // Initialize the module's constants by calling _init_mod_consts
             typedef void (*init_consts_fn)(void**);
             init_consts_fn init_fn = (init_consts_fn)find_func(import->script->jit_context, "_init_mod_consts");
@@ -165,7 +165,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 log_debug("Module %.*s has no _init_mod_consts (may have no constants)",
                     (int)(import->module.length), import->module.str);
             }
-            
+
             // Initialize the module's type_list by calling _init_mod_types
             typedef void (*init_types_fn)(void*);
             init_types_fn init_types = (init_types_fn)find_func(import->script->jit_context, "_init_mod_types");
@@ -176,7 +176,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 log_debug("Module %.*s has no _init_mod_types (may have no types)",
                     (int)(import->module.length), import->module.str);
             }
-            
+
             // skip consts pointer field
             mod_def += sizeof(void**);
 
@@ -191,7 +191,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             *(init_vars_fn*) mod_def = init_vars_func;
             log_debug("set _init_vars for %.*s: %p", (int)(import->module.length), import->module.str, (void*)init_vars_func);
             mod_def += sizeof(init_vars_fn);
-            
+
             // populate function pointer fields for each public function
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
@@ -570,9 +570,28 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     runner->context.run_main = run_main;
     log_debug("Set context run_main = %s", run_main ? "true" : "false");
 
-    log_debug("exec main func");
-    Item result = context->result = runner->script->main_func(context);
-    log_debug("after main func, result type_id=%d", get_type_id(result));
+    // Phase 2: Set recovery point for signal-based stack overflow handling.
+    // If a stack overflow occurs during execution, the signal handler will
+    // siglongjmp back here. No per-call overhead — detection is OS-level.
+    Item result;
+#if defined(__APPLE__) || defined(__linux__)
+    if (sigsetjmp(_lambda_recovery_point, 1)) {
+#elif defined(_WIN32)
+    if (setjmp(_lambda_recovery_point)) {
+#else
+    if (0) {
+#endif
+        // Stack overflow was caught — we land here after siglongjmp
+        log_error("exec: recovered from stack overflow via signal handler");
+        _lambda_stack_overflow_flag = false;
+        lambda_stack_overflow_error("<signal>");
+        result = context->result = ItemError;
+    } else {
+        // Normal execution path — zero per-call overhead
+        log_debug("exec main func");
+        result = context->result = runner->script->main_func(context);
+        log_debug("after main func, result type_id=%d", get_type_id(result));
+    }
 
     // Preserve runtime error before runner goes out of scope
     // context points to runner's stack-allocated EvalContext, so we need to copy the error
