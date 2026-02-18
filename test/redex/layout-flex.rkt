@@ -205,9 +205,10 @@
      (define sorted-items
        (sort items < #:key flex-item-order))
 
-     ;; reverse if needed
-     (define ordered-items
-       (if is-reversed? (reverse sorted-items) sorted-items))
+     ;; CSS Flexbox §9.3: Items are assigned to flex lines in order-modified
+     ;; document order (sorted by `order`), NOT reversed by flex-direction.
+     ;; The direction reversal only affects main-axis placement within lines.
+     (define ordered-items sorted-items)
 
      ;; === Phase 3: Determine hypothetical main sizes (already done in collection) ===
 
@@ -485,7 +486,10 @@
                            (if intrinsic-flex-main
                                (max content-w intrinsic-flex-main)
                                (max content-w total-main)))]
-                      [else (max content-w total-cross)])])
+                      ;; column direction: cross axis = width.  When the container
+                      ;; has an explicit width, honour it (CSS Flexbox §9.2).
+                      [else (if has-explicit-width? content-w
+                                (max content-w total-cross))])])
          ;; aspect-ratio: if width is auto and height is explicit (resolved), derive width
          (if (and (not has-explicit-width?)
                   has-explicit-height?
@@ -1593,9 +1597,12 @@
   (define total-cross 0)
   (define max-main-used 0)
 
-  ;; wrap-reverse: reverse the order of lines for cross-axis positioning
+  ;; wrap-reverse: CSS Flexbox §9.4 — swaps cross-start and cross-end.
+  ;; Strategy: lay out lines in DOM order, then mirror all cross-axis
+  ;; positions. align-content distribution also needs its start/end swapped
+  ;; so that flex-start → flex-end before mirroring (same net effect).
   (define is-wrap-reverse? (eq? wrap-mode 'wrap-reverse))
-  (define ordered-lines (if is-wrap-reverse? (reverse lines) lines))
+  (define ordered-lines lines)
 
   ;; align-content distribution across lines
   (define num-lines (length lines))
@@ -1770,6 +1777,10 @@
       (set! cross-pos (+ cross-pos cross-gap ac-line-spacing)))
 
     (define items (flex-line-items line))
+    ;; CSS Flexbox §9.4: for reversed flex-direction (row-reverse / column-reverse),
+    ;; items within each line are placed from main-end to main-start.
+    ;; Reverse the per-line item order so the iteration lays them out visually reversed.
+    (define positioned-items (if is-reversed? (reverse items) items))
     (define n (length items))
     (define free-space (flex-line-free-space line))
     (define line-cross (flex-line-cross-size line))
@@ -1830,7 +1841,7 @@
 
     (define main-pos start-offset)
 
-    (for ([item (in-list items)]
+    (for ([item (in-list positioned-items)]
           [item-idx (in-naturals)])
       (when (> item-idx 0)
         (set! main-pos (+ main-pos main-gap item-spacing)))
@@ -1899,15 +1910,10 @@
               ;; only after auto → stay at start
               0])]
           [else
-           ;; wrap-reverse inverts cross-start/cross-end
-           (define wr-align
-             (if is-wrap-reverse?
-                 (case self-align
-                   [(align-start align-stretch) 'align-end]
-                   [(align-end) 'align-start]
-                   [else self-align])
-                 self-align))
-           (case wr-align
+           ;; For wrap-reverse, within-line alignment is NOT inverted here;
+           ;; the post-hoc cross-axis mirror (CSS Flexbox §9.4) handles
+           ;; the swap of cross-start/cross-end for ALL positions at once.
+           (case self-align
              [(align-start) cross-margin-before]
              [(align-end) (- line-cross cross-size cross-margin-after)]
              [(align-center) (+ cross-margin-before (/ (- line-cross cross-size cross-margin-before cross-margin-after) 2))]
@@ -1977,7 +1983,39 @@
   ;; return indexed pairs (child-index . view) for DOM-order merging with abs children
   ;; the caller will handle final sorting
   ;; also return first-line-baseline for container baseline export
-  (values all-views
+  ;;
+  ;; CSS Flexbox §9.4: wrap-reverse mirrors cross-axis positions.
+  ;; CSS Flexbox §9.4: wrap-reverse mirrors cross-axis positions.
+  ;; After laying out lines as if normal wrap, reflect all item cross positions
+  ;; so that the first line in DOM order sits at the cross-end edge.
+  ;; Use cross-avail when definite, otherwise use total-cross (container's
+  ;; intrinsic cross size = sum of all line cross sizes).
+  (define mirror-dim
+    (cond
+      [(and (number? cross-avail) (not (infinite? cross-avail))) cross-avail]
+      [(> total-cross 0) total-cross]
+      [else #f]))
+  (define final-views
+    (if (and is-wrap-reverse? mirror-dim (> mirror-dim 0))
+        ;; mirror: new_cross = mirror-dim - (old_cross - offset) - item_dimension
+        ;; For row: mirror y. For column: mirror x.
+        (for/list ([pair (in-list all-views)])
+          (define idx (car pair))
+          (define v (cdr pair))
+          (define vx (view-x v))
+          (define vy (view-y v))
+          (define vw (view-width v))
+          (define vh (view-height v))
+          (if is-row?
+              ;; mirror y: new-y = offset-y + (mirror-dim - (vy - offset-y) - vh)
+              (let ([new-y (+ offset-y (- mirror-dim (- vy offset-y) vh))])
+                (cons idx (set-view-pos v vx new-y)))
+              ;; mirror x: new-x = offset-x + (mirror-dim - (vx - offset-x) - vw)
+              (let ([new-x (+ offset-x (- mirror-dim (- vx offset-x) vw))])
+                (cons idx (set-view-pos v new-x vy)))))
+        all-views))
+
+  (values final-views
           max-main-used
           total-cross
           first-line-baseline))

@@ -1373,16 +1373,57 @@ Item fn_unique(Item item) {
         return { .list = result };
     }
 
+    TypeId type = get_type_id(item);
+
+    // fast path for homogeneous int64 arrays (direct numeric comparison)
+    if (type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        List* result = list();
+        for (int64_t i = 0; i < len; i++) {
+            int64_t val = arr->items[i];
+            bool found = false;
+            for (int64_t j = 0; j < result->length; j++) {
+                if (result->items[j].get_int64() == val) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                list_push(result, push_l(val));
+            }
+        }
+        return { .list = result };
+    }
+
+    // fast path for homogeneous float arrays (direct numeric comparison)
+    if (type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;
+        List* result = list();
+        for (int64_t i = 0; i < len; i++) {
+            double val = arr->items[i];
+            bool found = false;
+            for (int64_t j = 0; j < result->length; j++) {
+                double res_val = result->items[j].get_double();
+                if (val == res_val || (std::isnan(val) && std::isnan(res_val))) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                list_push(result, push_d(val));
+            }
+        }
+        return { .list = result };
+    }
+
+    // generic path: use fn_eq for type-aware comparison (handles strings, symbols, etc.)
     List* result = list();
     for (int64_t i = 0; i < len; i++) {
         Item elem = vector_get(item, i);
-        double elem_val = item_to_double(elem);
 
-        // Check if already in result
         bool found = false;
         for (int64_t j = 0; j < result->length; j++) {
-            double res_val = item_to_double(result->items[j]);
-            if (elem_val == res_val || (std::isnan(elem_val) && std::isnan(res_val))) {
+            if (fn_eq(elem, result->items[j]) == BOOL_TRUE) {
                 found = true;
                 break;
             }

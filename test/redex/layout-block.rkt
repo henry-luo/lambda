@@ -723,24 +723,23 @@
           ;; collapse top margin with previous bottom margin
           ;; for the first child with no top barrier, the child's top margin
           ;; collapses through the parent (i.e., we don't add it here)
+          (define is-inline-level-child?
+            (match child
+              [`(inline-block . ,_) #t]
+              [`(inline . ,_) #t]
+              [_ #f]))
           (define collapsed-margin
             (cond
+              ;; CSS 2.2 §8.3.1: inline-block margins never collapse
+              ;; with parent or siblings — use the full top margin as-is
+              [is-inline-level-child?
+               (box-model-margin-top child-bm)]
               [(and is-first-child? (not parent-has-top-barrier?))
                ;; first child margin collapses through parent
                0]
               [else
                (collapse-margins prev-margin-bottom
                                 (box-model-margin-top child-bm))]))
-
-          ;; position child
-          ;; CSS 2.2 §16.1: text-indent applies to the first line of inline content
-          ;; in a block container. This affects both text nodes and inline-level
-          ;; boxes (e.g., inline-block) on the first line.
-          (define is-inline-level-child?
-            (match child
-              [`(inline-block . ,_) #t]
-              [`(inline . ,_) #t]
-              [_ #f]))
           (define indent-offset
             (if (and (not text-indent-applied?)
                      (not (= text-indent 0))
@@ -844,7 +843,7 @@
                 (+ cleared-y collapsed-margin)))
           (define child-y (+ offset-y effective-block-y))
 
-          ;; for text views with half-leading (line-height > font-size),
+          ;; for text views with half-leading (line-height > font-metric),
           ;; preserve the internal y offset from layout-text
           (define effective-child-y
             (if (match child-view [`(view-text . ,_) #t] [_ #f])
@@ -859,9 +858,10 @@
           (define final-view (apply-relative-offset positioned-view child-styles avail-w avail-h))
 
           ;; advance y by child's border-box height
-          ;; for text children, the view reports em-box dimensions:
-          ;; height = (n-1)*lh + fs, y = half-leading = (lh - fs)/2
-          ;; The stacking height (line box) = height + 2*half-leading = n*lh.
+          ;; for text children, the view reports font-metric dimensions:
+          ;; height = font-metric-height (font-size * proportional-lh-ratio)
+          ;; y = half-leading = (css-line-height - font-metric-height) / 2
+          ;; The stacking height (line box) = height + 2*half-leading = css-line-height.
           ;; exception: font-size ≤ 0 → entire text is invisible, zero stacking height
           (define child-h
             (match child
@@ -871,6 +871,13 @@
                    [(and (number? fs) (<= fs 0)) 0]
                    ;; stacking = view-height + 2*view-y (half-leading on both sides)
                    [else (+ (view-height child-view) (* 2 (view-y child-view)))]))]
+              ;; CSS 2.2 §10.8.1: inline-block non-replaced elements — the margin
+              ;; box determines the line box height contribution.
+              ;; Top margin is already included in collapsed-margin above,
+              ;; so only add border-box height + bottom margin here.
+              [`(inline-block ,_ ,ib-styles ,_)
+               (+ (view-height child-view)
+                  (box-model-margin-bottom child-bm))]
               [_ (view-height child-view)]))
           (define new-y (+ effective-block-y child-h))
           ;; track table-column/column-group children for height post-processing
@@ -887,7 +894,9 @@
 
           (loop (cdr remaining)
                 new-y
-                (box-model-margin-bottom child-bm)
+                ;; CSS 2.2 §8.3.1: inline-block margins don't collapse — bottom margin
+                ;; is already included in child-h, so pass 0 to avoid double-counting
+                (if is-inline-level-child? 0 (box-model-margin-bottom child-bm))
                 (cons final-view views)
                 #f
                 (if (and is-table-column? child-box-id)

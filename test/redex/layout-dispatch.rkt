@@ -301,6 +301,10 @@
             (if (and lh-prop (number? lh-prop))
                 lh-prop
                 font-size))]))
+     ;; Chrome getClientRects() reports em-box height (≈ font-size), y = half-leading.
+     ;; half-leading = (line-height - font-size) / 2 positions text within line box.
+     ;; Stacking uses height + 2*half-leading = line-height (recovered by layout-block).
+     (define half-leading (/ (- line-height font-size) 2))
      ;; per-character Arial TrueType glyph advance width ratios (used for bold text)
      (define (arial-char-ratio ch)
        (cond
@@ -389,7 +393,6 @@
         (define text-w max-line-w)
         ;; CSS 2.2 §10.6.1: text rect = em-box spanning first to last line
         ;; height = (n-1)*lh + fs, y = half-leading
-        (define half-leading (/ (- line-height font-size) 2))
         (define text-h (+ (* (sub1 num-lines) line-height) font-size))
         (make-text-view id 0 half-leading text-w text-h content)]
 
@@ -399,8 +402,7 @@
         ;; Browser Range.getClientRects() returns em-box dimensions, not the full
         ;; line-box height. The half-leading offsets the text visually within the
         ;; line box. Stacking uses line-height (restored via layout-block stacking code).
-        (let ([half-leading (/ (- line-height font-size) 2)])
-          (make-text-view id 0 half-leading measured-w font-size content))]
+        (make-text-view id 0 half-leading measured-w font-size content)]
        [else
         (cond
           ;; proportional font: split on spaces for word wrapping
@@ -440,7 +442,6 @@
            (define text-w max-line-w)
            ;; CSS 2.2 §10.6.1: text rect = em-box spanning first to last line
            ;; height = (n-1)*lh + fs, y = half-leading
-           (define half-leading (/ (- line-height font-size) 2))
            (define text-h (+ (* (sub1 num-lines) line-height) font-size))
            (make-text-view id 0 half-leading text-w text-h content)]
 
@@ -455,7 +456,6 @@
                    (ahem-char-width ch font-size)))
                (max mx lw)))
            (define text-w max-line-w)
-           (define half-leading (/ (- line-height font-size) 2))
            (define text-h (+ (* (sub1 num-lines) line-height) font-size))
            (make-text-view id 0 half-leading text-w text-h content)]
 
@@ -492,7 +492,6 @@
            (define text-w max-line-w)
            ;; Ahem: display height spans from first-line half-leading to last-line bottom
            ;; = (num-lines - 1) * line-height + font-size
-           (define half-leading (/ (- line-height font-size) 2))
            (define text-h (+ (* (sub1 num-lines) line-height) font-size))
            (make-text-view id 0 half-leading text-w text-h content)])]))
 
@@ -711,15 +710,66 @@
      (define total-h-spacing (* (+ num-columns 1) bs-h))
      (define cell-available-w (max 0 (- content-w total-h-spacing)))
 
-     ;; CSS 2.2 §17.5.2.2: distribute available width among columns.
-     ;; auto-col-widths has per-column preferred border-box widths from content.
-     ;; If columns have preferred widths, distribute extra space proportionally.
-     ;; For fixed layout or when auto-col-widths is empty, use uniform distribution.
+     ;; DEBUG: print table layout values
+     (eprintf "TABLE-LAYOUT: avail-w=~a content-w=~a num-cols=~a cell-avail=~a fixed?=~a explicit-w=~a\n"
+              avail-w content-w num-columns cell-available-w is-fixed-layout? explicit-width)
+
+     ;; CSS 2.2 §17.5.2.1: Fixed table layout algorithm.
+     ;; 1. Columns with explicit widths (from first-row cells) get those widths.
+     ;; 2. Remaining space distributed equally among auto-width columns.
+     ;; For auto layout, distribute proportionally to content widths.
      (define col-widths-list
        (cond
-         ;; fixed layout: all columns share equally
-         [(or is-fixed-layout? (null? auto-col-widths) (= num-columns 0))
-          (define col-w (if (> num-columns 0) (/ cell-available-w num-columns) 0))
+         ;; fixed layout: use first-row cell widths per CSS 2.2 §17.5.2.1
+         [(and is-fixed-layout? (> num-columns 0))
+          ;; extract first-row cell widths from all-rows
+          (define first-row-cells
+            (if (null? all-rows) '()
+                (match (car all-rows)
+                  [`(row ,_ ,_ (,cells ...)) cells]
+                  [_ '()])))
+          ;; get explicit width from each first-row cell
+          (define first-row-widths
+            (for/list ([cell (in-list first-row-cells)]
+                       [i (in-naturals)])
+              (match cell
+                [`(block ,_ ,s ,_)
+                 (define w-prop (get-style-prop s 'width #f))
+                 (eprintf "  CELL ~a: w-prop=~a\n" i w-prop)
+                 (cond
+                   [(and (number? w-prop) (> w-prop 0)) w-prop]
+                   ;; percentage width stored as (% num): resolve against cell-available-w
+                   [(and (list? w-prop) (eq? (car w-prop) '%))
+                    (define pct (/ (cadr w-prop) 100.0))
+                    (* cell-available-w pct)]
+                   [else #f])]
+                [_ #f])))
+          ;; pad/trim to match num-columns
+          (define padded-widths
+            (cond
+              [(= (length first-row-widths) num-columns) first-row-widths]
+              [(< (length first-row-widths) num-columns)
+               (append first-row-widths
+                       (make-list (- num-columns (length first-row-widths)) #f))]
+              [else (take first-row-widths num-columns)]))
+          ;; count auto columns and remaining space
+          (define fixed-total
+            (for/sum ([w (in-list padded-widths)])
+              (if w w 0)))
+          (define auto-count
+            (for/sum ([w (in-list padded-widths)])
+              (if w 0 1)))
+          (define remaining (max 0 (- cell-available-w fixed-total)))
+          (define auto-w-each
+            (if (> auto-count 0) (/ remaining auto-count) 0))
+          ;; assign widths
+          (for/list ([w (in-list padded-widths)])
+            (if w w auto-w-each))]
+         ;; no columns or empty: nothing
+         [(= num-columns 0) '()]
+         ;; auto-col-widths empty: uniform distribution
+         [(null? auto-col-widths)
+          (define col-w (/ cell-available-w num-columns))
           (make-list num-columns col-w)]
          [else
           ;; auto layout: distribute proportionally to content widths
@@ -1213,7 +1263,14 @@
                               (list-ref col-widths-list j))
                             (* (max 0 (- span 1)) bs-h)))
                        (* uniform-cell-w (max 1 colspan))))
-                 (define cell-box `(block ,cell-id ,cell-styles (,@children)))
+                 ;; When using pre-resolved column widths, override the cell's CSS width
+                 ;; with the resolved column width (pixel value) to prevent
+                 ;; double-resolution of percentages in fixed table layout.
+                 (define effective-cell-styles
+                   (if use-per-col?
+                       `(style (width ,cw) ,@(cdr cell-styles))
+                       cell-styles))
+                 (define cell-box `(block ,cell-id ,effective-cell-styles (,@children)))
                  (define cell-avail `(avail (definite ,cw) indefinite))
                  (define cell-view (layout cell-box cell-avail))
                  (define ch (view-height cell-view))
@@ -1222,8 +1279,14 @@
                 ;; block child acting as cell (e.g. display:table-cell without float)
                 [`(block ,cell-id ,cell-styles ,children)
                  (define cw (get-col-w col))
+                 ;; Override cell's CSS width to prevent double-resolution of percentages
+                 (define effective-cell-styles
+                   (if use-per-col?
+                       `(style (width ,cw) ,@(cdr cell-styles))
+                       cell-styles))
+                 (define cell-box `(block ,cell-id ,effective-cell-styles ,children))
                  (define cell-avail `(avail (definite ,cw) indefinite))
-                 (define cell-view (layout cell cell-avail))
+                 (define cell-view (layout cell-box cell-avail))
                  (define ch (view-height cell-view))
                  (set! row-h (max row-h ch))
                  (set-view-pos cell-view cell-x 0)]
