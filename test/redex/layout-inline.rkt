@@ -82,10 +82,10 @@
       [(let ([ft (get-style-prop styles 'font-type #f)])
          (or (not ft) (eq? ft 'ahem)))
        fs]
-      ;; proportional: use JSON-loaded font metrics ratio
+      ;; proportional: use Chrome-macOS-compatible integer line-height
       [else
        (let ([fm (get-style-prop styles 'font-metrics 'times)])
-         (* (font-line-height-ratio fm) fs))]))
+         (chrome-mac-line-height fm fs))]))
 
   ;; track cursor-based width of each completed line (mutable accumulator)
   (define completed-line-widths '())
@@ -144,11 +144,9 @@
             (define laid-out (dispatch-fn child text-avail))
             (define cw (view-width laid-out))
             (define ch (view-height laid-out))
-            ;; CSS 2.2 §10.6.1: text view height = font-size (em-box), but the
-            ;; line box contribution includes half-leading above and below.
-            ;; view-y stores half-leading; line contribution = ch + 2*half-leading
-            (define text-half-leading (view-y laid-out))
-            (define line-contribution (+ ch (* 2 text-half-leading)))
+            ;; text view height is now line-height (matching Chrome getClientRects),
+            ;; so ch IS the line contribution — no separate half-leading recovery needed.
+            (define line-contribution ch)
             ;; check if text fits on current line
             (cond
               [(and (> current-x 0) (> (+ current-x cw) max-line-width))
