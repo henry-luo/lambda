@@ -207,11 +207,18 @@
                  (string-prefix? s "anon-cell-")))))
 
     (define (flatten-anon-tables kids)
+      ;; Flatten anonymous table/tbody/row/cell wrappers, adjusting child
+      ;; coordinates by adding the wrapper's (x, y) offset since coords are
+      ;; parent-relative. Without this, standalone table-cell elements
+      ;; wrapped in anonymous table structures lose their position offsets.
       (apply append
              (for/list ([k (in-list kids)])
                (if (is-anon-table-or-tbody? k)
-                   (let-values ([(x y w h children) (parse-view-node k)])
-                     (flatten-anon-tables (or children '())))
+                   (let-values ([(px py pw ph children) (parse-view-node k)])
+                     (define adjusted-children
+                       (for/list ([c (in-list (or children '()))])
+                         (offset-view-node c px py)))
+                     (flatten-anon-tables adjusted-children))
                    (list k)))))
 
     (define (flatten-anon-row-cell kids)
