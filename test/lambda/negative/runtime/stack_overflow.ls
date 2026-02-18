@@ -1,5 +1,5 @@
-// @expect-error: E304
-// @description: Stack overflow from infinite recursion
+// @expect-error: E308
+// @description: Stack overflow from infinite recursion (non-tail-recursive to defeat TCO)
 
-let f = (n) => f(n + 1)
+fn f(n) => n + f(n + 1)
 let x = f(0)
