@@ -1,9 +1,15 @@
 /**
  * @file lambda-stack.h
- * @brief Stack overflow protection for Lambda runtime
- * 
- * Provides fast inline stack pointer checking to detect and handle
- * stack overflow from infinite recursion gracefully.
+ * @brief Stack overflow protection for Lambda runtime (Phase 2: Signal-Based)
+ *
+ * Phase 2 uses OS-level signal/exception handling for zero per-call overhead:
+ *   - macOS/Linux: sigaltstack + sigaction(SIGSEGV)
+ *   - Windows: SEH (EXCEPTION_STACK_OVERFLOW)
+ *
+ * When stack overflow occurs, the OS delivers a signal/exception, which is
+ * caught by our handler running on an alternate signal stack. The handler
+ * performs a non-local jump (siglongjmp) back to a recovery point set before
+ * script execution begins.
  */
 
 #ifndef LAMBDA_STACK_H
@@ -13,85 +19,70 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <setjmp.h>
+#elif defined(_WIN32)
+#include <setjmp.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Thread-local stack bounds (initialized once per thread)
+// ============================================================================
+// Thread-local stack bounds (used for diagnostics and fault-address check)
+// ============================================================================
 extern __thread uintptr_t _lambda_stack_limit;
 extern __thread uintptr_t _lambda_stack_base;
 
 // Stack safety margin (64KB reserved for cleanup/error handling)
 #define LAMBDA_STACK_SAFETY_MARGIN (64 * 1024)
 
+// Alternate signal stack size (64KB)
+#define LAMBDA_ALT_STACK_SIZE (64 * 1024)
+
+// ============================================================================
+// Signal-based recovery (Phase 2)
+// ============================================================================
+
+// Thread-local recovery jump buffer — set once before executing user code
+// Usage: if (sigsetjmp(_lambda_recovery_point, 1)) { /* overflow occurred */ }
+#if defined(__APPLE__) || defined(__linux__)
+extern __thread sigjmp_buf _lambda_recovery_point;
+#elif defined(_WIN32)
+extern __thread jmp_buf _lambda_recovery_point;
+#endif
+
+// Flag set by the signal handler when stack overflow is detected
+extern __thread volatile bool _lambda_stack_overflow_flag;
+
 /**
- * Initialize stack bounds for current thread.
- * Must be called once at program/thread startup.
+ * Initialize stack overflow protection for the current thread.
+ *
+ * Phase 2: Installs signal handler (sigaltstack + SIGSEGV on Unix, SEH on Windows).
+ * Also caches stack bounds for diagnostics and fault-address disambiguation.
+ *
+ * Must be called once per thread before executing user scripts.
  */
 void lambda_stack_init(void);
 
 /**
- * Check if stack pointer is dangerously low.
- * This is designed to be as fast as possible (~3 instructions when inlined).
- * 
- * @return true if stack overflow is imminent, false if OK
- */
-static inline bool lambda_stack_check(void) {
-    uintptr_t sp;
-    
-#if defined(__x86_64__) || defined(_M_X64)
-    // x86-64: read RSP register
-    #if defined(_MSC_VER)
-        // MSVC: use intrinsic
-        sp = (uintptr_t)_AddressOfReturnAddress();
-    #else
-        // GCC/Clang: inline assembly
-        __asm__ volatile("mov %%rsp, %0" : "=r"(sp));
-    #endif
-    
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    // ARM64: read SP register
-    #if defined(_MSC_VER)
-        sp = (uintptr_t)_AddressOfReturnAddress();
-    #else
-        __asm__ volatile("mov %0, sp" : "=r"(sp));
-    #endif
-    
-#elif defined(__i386__) || defined(_M_IX86)
-    // x86-32: read ESP register
-    #if defined(_MSC_VER)
-        sp = (uintptr_t)_AddressOfReturnAddress();
-    #else
-        __asm__ volatile("mov %%esp, %0" : "=r"(sp));
-    #endif
-
-#else
-    // Fallback: use local variable address (slightly less accurate but portable)
-    char stack_var;
-    sp = (uintptr_t)&stack_var;
-#endif
-
-    // Compare against cached limit
-    return sp < _lambda_stack_limit;
-}
-
-/**
- * Report stack overflow error and return error item.
- * Called when lambda_stack_check() returns true.
- * 
- * @param func_name Name of the function where overflow was detected
+ * Report stack overflow error and set runtime error state.
+ * Called from the recovery path after siglongjmp (not from the signal handler).
+ *
+ * @param func_name Name of the function context (may be NULL)
  */
 void lambda_stack_overflow_error(const char* func_name);
 
 /**
  * Get current stack usage in bytes.
  * Useful for debugging and profiling.
- * 
+ *
  * @return Number of bytes of stack currently in use
  */
 static inline size_t lambda_stack_usage(void) {
     uintptr_t sp;
-    
+
 #if defined(__x86_64__) || defined(_M_X64)
     #if defined(_MSC_VER)
         sp = (uintptr_t)_AddressOfReturnAddress();
@@ -115,7 +106,7 @@ static inline size_t lambda_stack_usage(void) {
 
 /**
  * Get total stack size in bytes.
- * 
+ *
  * @return Total stack size available
  */
 static inline size_t lambda_stack_size(void) {
@@ -130,21 +121,6 @@ static inline size_t lambda_stack_size(void) {
 static inline bool lambda_stack_enabled(void) {
     return _lambda_stack_limit != 0;
 }
-
-// Macro for convenient stack check in transpiled code
-// Returns ItemError if stack overflow detected
-#define LAMBDA_STACK_CHECK(func_name) \
-    if (lambda_stack_check()) { \
-        lambda_stack_overflow_error(func_name); \
-        return ItemError; \
-    }
-
-// Macro for void functions
-#define LAMBDA_STACK_CHECK_VOID(func_name) \
-    if (lambda_stack_check()) { \
-        lambda_stack_overflow_error(func_name); \
-        return; \
-    }
 
 #ifdef __cplusplus
 }
