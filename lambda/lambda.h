@@ -277,6 +277,9 @@ void list_push_spread(List *list, Item item);  // push item, spreading if spread
 Item list_end(List *list);
 
 // Spreadable array functions for for-expression results
+Array* array_plain();  // constructs a plain empty array (no frame management)
+void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
+void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
 void array_push_spread(Array* arr, Item item);  // push item, spreading if spreadable array
@@ -762,6 +765,7 @@ typedef struct Context {
     Item fn_reverse(Item a);
     Item fn_sort1(Item a);
     Item fn_sort2(Item a, Item dir);
+    void fn_sort_by_keys(Item values, Item keys, int64_t descending);
     Item fn_unique(Item a);
     Item fn_concat(Item a, Item b);
     Item fn_take(Item a, Item n);
