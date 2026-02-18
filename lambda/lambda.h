@@ -62,6 +62,7 @@ enum EnumTypeId {
     LMD_TYPE_ARRAY_FLOAT,
     LMD_TYPE_ARRAY,  // array of Items
     LMD_TYPE_MAP,
+    LMD_TYPE_VMAP,  // virtual map with vtable dispatch (hashmap, treemap, etc.)
     LMD_TYPE_ELEMENT,
     LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
@@ -113,6 +114,7 @@ static inline const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_ARRAY_FLOAT: return "array[float]";
         case LMD_TYPE_ARRAY: return "array";
         case LMD_TYPE_MAP: return "map";
+        case LMD_TYPE_VMAP: return "map";  // VMap appears as "map" to Lambda scripts
         case LMD_TYPE_ELEMENT: return "element";
         case LMD_TYPE_TYPE: return "type";
         case LMD_TYPE_FUNC: return "function";
@@ -149,6 +151,7 @@ typedef struct ArrayInt ArrayInt;
 typedef struct ArrayInt64 ArrayInt64;
 typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
+typedef struct VMap VMap;
 typedef struct Element Element;
 typedef struct Function Function;
 typedef struct Decimal Decimal;
@@ -511,11 +514,17 @@ Function* to_closure(fn_ptr ptr, int arity, void* env);
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 
 // Memory allocation for closure environments
+#ifdef __cplusplus
+extern "C" {
+#endif
 void* heap_calloc(size_t size, TypeId type_id);
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings
 String* heap_strcpy(char* src, int len);
+#ifdef __cplusplus
+}
+#endif
 
 #define INT64_ERROR           INT64_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
@@ -877,5 +886,16 @@ typedef struct Context {
     // compound assignment support (procedural only)
     void fn_array_set(Array* arr, int index, Item value);
     void fn_map_set(Item map, Item key, Item value);
+
+    // VMap system functions
+#ifdef __cplusplus
+extern "C" {
+#endif
+    Item vmap_new();
+    Item vmap_from_pairs(int arg_count, ...);
+    Item vmap_put(Item vmap_item, Item key, Item value);
+#ifdef __cplusplus
+}
+#endif
 
 #endif
