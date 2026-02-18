@@ -535,14 +535,14 @@ Table misc (5)                ── height-algorithm, HTML parsing, VA, overflo
 
 ### Deferred to Phase 4
 
-| Feature | Tests Blocked | Reason |
-|---------|--------------|--------|
-| `writing-mode: vertical-lr` | 3 flex + 3 grid + 1 baseline | Cross-cutting: requires axis swap in all layout modes |
-| Full Inline Formatting Context | ~3 | Partially implemented (inline-block IFC path); full IFC needs inline box splitting, float exclusion zones |
-| Non-Ahem font precision | ~16 | Would need a real font shaping engine; platform-dependent |
-| `text-transform` width changes | 1 | Requires text transformation before measurement |
-| Complex float stacking | ~3 | CSS 2.1 §9.5.1 rules 3, 6, 7 with inline content |
-| Float text wrapping | ~4 | Requires float exclusion zones in inline formatting context |
+| Feature                        | Tests Blocked                | Reason                                                                                                    |
+| ------------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `writing-mode: vertical-lr`    | 3 flex + 3 grid + 1 baseline | Cross-cutting: requires axis swap in all layout modes                                                     |
+| Full Inline Formatting Context | ~3                           | Partially implemented (inline-block IFC path); full IFC needs inline box splitting, float exclusion zones |
+| Non-Ahem font precision        | ~16                          | Would need a real font shaping engine; platform-dependent                                                 |
+| `text-transform` width changes | 1                            | Requires text transformation before measurement                                                           |
+| Complex float stacking         | ~3                           | CSS 2.1 §9.5.1 rules 3, 6, 7 with inline content                                                          |
+| Float text wrapping            | ~4                           | Requires float exclusion zones in inline formatting context                                               |
 
 > **Moved to advanced suite:** 4 JS-dependent tests (`table-anonymous-objects-039/-045/-047/-049`) that require JavaScript DOM manipulation were relocated from `test/layout/data/baseline/` to `test/layout/data/advanced/`.
 

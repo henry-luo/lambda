@@ -22,7 +22,8 @@
          racket/port
          json
          "css-layout-lang.rkt"
-         "layout-common.rkt")
+         "layout-common.rkt"
+         "font-metrics.rkt")
 
 (provide reference->box-tree
          reference->expected-layout
@@ -264,12 +265,22 @@
 (define proportional-default-width 5.9)
 (define proportional-line-height 18)
 
-;; measure text width using proportional font approximation.
-;; uses per-character width ratios scaled by font-size.
+;; measure text width using proportional font metrics.
+;; Uses JSON-loaded per-glyph advance widths + kerning pairs when available,
+;; falling back to hardcoded ratio tables for backward compatibility.
 ;; font-family: #f or string — for serif/sans-serif distinction
-;; font-metrics: 'times or 'arial — selects which char-width table to use
+;; font-metrics: 'times or 'arial — selects which font metrics to use
 (define (measure-text-proportional text [font-size 16] [font-family #f] [font-metrics 'times])
-  ;; times: default serif font metrics, arial: sans-serif/bold font metrics
+  (cond
+    ;; Use JSON-loaded metrics (with per-glyph widths + kerning)
+    [(font-metrics-loaded?)
+     (measure-text-with-metrics text font-size font-metrics)]
+    ;; Fallback: use hardcoded ratio tables
+    [else
+     (measure-text-proportional-legacy text font-size font-family font-metrics)]))
+
+;; Legacy measurement using hardcoded ratio tables (kept as fallback)
+(define (measure-text-proportional-legacy text [font-size 16] [font-family #f] [font-metrics 'times])
   (define use-times? (eq? font-metrics 'times))
   (define char-widths (if use-times? times-char-widths arial-char-widths))
   (define default-ratio (if use-times? times-default-ratio arial-default-ratio))
