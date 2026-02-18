@@ -184,15 +184,27 @@
     (define e-kids (or e-children '()))
 
     ;; CSS 2.2 §17.2.1: Anonymous table objects.
-    ;; The layout engine wraps table-internal children (table-row, table-cell, etc.)
-    ;; in anonymous table and tbody boxes that don't appear in the browser reference.
-    ;; Flatten these anonymous wrappers for comparison purposes.
+    ;; Two kinds of anonymous wrappers:
+    ;; 1. anon-table-/anon-tbody-: wrap table-internal children in non-table parents.
+    ;;    These may correspond to real elements in the browser reference (e.g. auto-
+    ;;    inserted <tbody>), so only flatten when child counts don't match.
+    ;; 2. anon-row-/anon-cell-: wrap non-proper children of table boxes.
+    ;;    These never appear in the browser reference, so always flatten them.
     (define (is-anon-table-or-tbody? node)
       (define id (extract-id node))
       (and (symbol? id)
            (let ([s (symbol->string id)])
              (or (string-prefix? s "anon-table-")
-                 (string-prefix? s "anon-tbody-")))))
+                 (string-prefix? s "anon-tbody-")
+                 (string-prefix? s "anon-row-")
+                 (string-prefix? s "anon-cell-")))))
+
+    (define (is-anon-row-or-cell? node)
+      (define id (extract-id node))
+      (and (symbol? id)
+           (let ([s (symbol->string id)])
+             (or (string-prefix? s "anon-row-")
+                 (string-prefix? s "anon-cell-")))))
 
     (define (flatten-anon-tables kids)
       (apply append
@@ -202,12 +214,30 @@
                      (flatten-anon-tables (or children '())))
                    (list k)))))
 
-    ;; try flattening anonymous wrappers if child counts don't match
-    (define effective-v-kids
-      (if (and (not (= (length v-kids) (length e-kids)))
-               (ormap is-anon-table-or-tbody? v-kids))
-          (flatten-anon-tables v-kids)
+    (define (flatten-anon-row-cell kids)
+      ;; Flatten anonymous row/cell wrappers, adjusting child coordinates
+      ;; by adding the wrapper's (x, y) offset since coords are parent-relative.
+      (apply append
+             (for/list ([k (in-list kids)])
+               (if (is-anon-row-or-cell? k)
+                   (let-values ([(px py pw ph children) (parse-view-node k)])
+                     (define adjusted-children
+                       (for/list ([c (in-list (or children '()))])
+                         (offset-view-node c px py)))
+                     (flatten-anon-row-cell adjusted-children))
+                   (list k)))))
+
+    ;; Always flatten anon-row/anon-cell wrappers (they never exist in references).
+    ;; Then flatten anon-table/anon-tbody only if child counts still don't match.
+    (define v-kids-1
+      (if (ormap is-anon-row-or-cell? v-kids)
+          (flatten-anon-row-cell v-kids)
           v-kids))
+    (define effective-v-kids
+      (if (and (not (= (length v-kids-1) (length e-kids)))
+               (ormap is-anon-table-or-tbody? v-kids-1))
+          (flatten-anon-tables v-kids-1)
+          v-kids-1))
 
     (cond
       ;; structural mismatch: fail immediately, don't recurse into misaligned children
@@ -268,6 +298,19 @@
     [`(view-text ,id ,x ,y ,w ,h ,text)
      (values (->num x) (->num y) (->num w) (->num h) '())]
     [_ (values 0 0 0 0 '())]))
+
+;; offset a view node's position by (dx, dy)
+(define (offset-view-node node dx dy)
+  (match node
+    [`(view ,id ,x ,y ,w ,h ,children ,baseline)
+     `(view ,id ,(+ (->num x) dx) ,(+ (->num y) dy) ,w ,h ,children ,baseline)]
+    [`(view ,id ,x ,y ,w ,h ,children)
+     `(view ,id ,(+ (->num x) dx) ,(+ (->num y) dy) ,w ,h ,children)]
+    [`(view ,id ,x ,y ,w ,h)
+     `(view ,id ,(+ (->num x) dx) ,(+ (->num y) dy) ,w ,h)]
+    [`(view-text ,id ,x ,y ,w ,h ,text)
+     `(view-text ,id ,(+ (->num x) dx) ,(+ (->num y) dy) ,w ,h ,text)]
+    [_ node]))
 
 ;; parse an expected layout node
 (define (parse-expected-node exp)

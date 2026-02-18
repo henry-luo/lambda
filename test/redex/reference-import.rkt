@@ -2502,10 +2502,14 @@
                 (define ahem-text (apply-text-transform (if is-pre? raw-text norm-text)))
                 (when (string=? ahem-text "") #f)
                 (define text-styles
+                  (let ([ws-props (if (and white-space-val (equal? white-space-val "nowrap"))
+                                     '((white-space nowrap))
+                                     '())])
                   (if parent-line-height
                       `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)
-                              (line-height ,parent-line-height))
-                      `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size))))
+                              (line-height ,parent-line-height) ,@ws-props)
+                      `(style (box-sizing ,text-box-sizing) (font-size ,effective-font-size)
+                              ,@ws-props))))
                 (define measured-w (measure-text-ahem ahem-text effective-font-size))
                 (if (string=? ahem-text "")
                     #f
@@ -2524,7 +2528,11 @@
                      `((box-sizing ,text-box-sizing)
                        (font-type proportional)
                        (font-size ,effective-font-size)
-                       (font-metrics ,font-metrics-sym)))
+                       (font-metrics ,font-metrics-sym)
+                       ,@(if (and white-space-val
+                                  (equal? white-space-val "nowrap"))
+                             '((white-space nowrap))
+                             '())))
                    (define text-styles
                      (if parent-line-height
                          `(style ,@base-style-props (line-height ,parent-line-height))
@@ -2694,35 +2702,13 @@
         `(block ,box-id ,styles ,wrapped)]
        [(inline)
         (if (has-block-child? child-boxes)
-            ;; block-in-inline: convert to block and add strut heights
-            (let* ([strut-h (compute-strut-height)]
-                   ;; check if first child is a block (need before-strut)
-                   [first-is-block?
-                    (and (pair? child-boxes)
-                         (pair? (car child-boxes))
-                         (eq? (car (car child-boxes)) 'block))]
-                   ;; check if last child is a block (need after-strut)
-                   [last-is-block?
-                    (and (pair? child-boxes)
-                         (let ([last (last child-boxes)])
-                           (and (pair? last)
-                                (eq? (car last) 'block))))]
-                   ;; inject strut heights into the container's styles
-                   [strut-styles
-                    (match styles
-                      [`(style ,@props)
-                       (define new-props props)
-                       (when first-is-block?
-                         (set! new-props
-                           (append new-props
-                                   `((__before-strut-height ,strut-h)))))
-                       (when last-is-block?
-                         (set! new-props
-                           (append new-props
-                                   `((__after-strut-height ,strut-h)))))
-                       `(style ,@new-props)]
-                      [_ styles])])
-              `(block ,box-id ,strut-styles ,child-boxes))
+            ;; block-in-inline: convert to block.
+            ;; CSS 2.2 §9.2.1.1: inline broken around block children.
+            ;; Empty anonymous inline fragments (before first block / after last
+            ;; block) don't generate line boxes and have zero height.
+            ;; Non-empty fragments' height comes from their inline content.
+            ;; No explicit strut injection is needed.
+            `(block ,box-id ,styles ,child-boxes)
             ;; normal inline
             `(inline ,box-id ,styles ,child-boxes))]
        [(inline-block)
@@ -2764,24 +2750,96 @@
                         child-boxes)])
               `(block ,box-id ,styles ,w)))]
        [(table inline-table)
-        ;; All tables go through table layout, regardless of explicit width.
-        ;; CSS 2.2 §17.5.2: auto-width tables use shrink-to-fit sizing,
-        ;; handled by layout-table-simple.
-        ;; HTML spec: browsers automatically insert anonymous <tbody> wrappers
-        ;; around consecutive <tr> elements that are direct children of <table>.
-        ;; We replicate this behavior here so our box tree matches the browser DOM.
+        ;; CSS 2.2 §17.2.1: Anonymous table objects.
+        ;; Step 1: Wrap non-proper-table children in anonymous table-cell → table-row.
+        ;; "If a child C of a 'table' or 'inline-table' box is not a proper table
+        ;;  child, generate an anonymous 'table-row' box around C and all consecutive
+        ;;  siblings of C that are not proper table children."
+        ;; Within that anonymous row, all children become a single anonymous table-cell.
+        (define (is-proper-table-child-box? box)
+          (match box
+            [`(block ,_ ,s ,_)
+             (let ([d (get-style-prop s 'display #f)])
+               (and d (memq d '(table-row table-row-group table-header-group
+                                table-footer-group table-column table-column-group
+                                table-caption))))]
+            [_ #f]))
+        (define (is-table-cell-box? box)
+          (match box
+            [`(block ,_ ,s ,_)
+             (eq? (get-style-prop s 'display #f) 'table-cell)]
+            [_ #f]))
+        ;; CSS 2.2 §17.2.1 Step 1: wrap consecutive non-proper children in
+        ;; anonymous table-row. Step 2: within each anonymous row, wrap
+        ;; consecutive non-table-cell children in anonymous table-cell.
+        (define (wrap-non-cells-in-anon-cell contents)
+          ;; Within an anonymous row, wrap consecutive non-cell children in anon-cell
+          (let loop ([remaining contents] [acc '()] [non-cell-acc '()])
+            (cond
+              [(null? remaining)
+               (if (null? non-cell-acc)
+                   (reverse acc)
+                   (let ([cell-id (string->symbol
+                                   (format "anon-cell-~a" (unbox counter)))])
+                     (set-box! counter (add1 (unbox counter)))
+                     (reverse (cons `(block ,cell-id (style (display table-cell))
+                                            ,(reverse non-cell-acc))
+                                    acc))))]
+              [(is-table-cell-box? (car remaining))
+               (if (null? non-cell-acc)
+                   (loop (cdr remaining) (cons (car remaining) acc) '())
+                   (let ([cell-id (string->symbol
+                                   (format "anon-cell-~a" (unbox counter)))])
+                     (set-box! counter (add1 (unbox counter)))
+                     (loop (cdr remaining)
+                           (cons (car remaining)
+                                 (cons `(block ,cell-id (style (display table-cell))
+                                               ,(reverse non-cell-acc))
+                                       acc))
+                           '())))]
+              [else
+               (loop (cdr remaining) acc (cons (car remaining) non-cell-acc))])))
+        (define (make-anon-row contents)
+          (define row-id (string->symbol (format "anon-row-~a" (unbox counter))))
+          (set-box! counter (add1 (unbox counter)))
+          (define row-children (wrap-non-cells-in-anon-cell contents))
+          `(block ,row-id (style (display table-row)) ,row-children))
+        ;; wrap consecutive non-proper children in anonymous row
+        (define has-non-proper?
+          (for/or ([b (in-list child-boxes)])
+            (not (is-proper-table-child-box? b))))
+        (define wrapped-children
+          (if has-non-proper?
+              (let loop ([remaining child-boxes] [acc '()] [non-proper-acc '()])
+                (cond
+                  [(null? remaining)
+                   (if (null? non-proper-acc)
+                       (reverse acc)
+                       (reverse (cons (make-anon-row (reverse non-proper-acc))
+                                      acc)))]
+                  [(is-proper-table-child-box? (car remaining))
+                   (if (null? non-proper-acc)
+                       (loop (cdr remaining) (cons (car remaining) acc) '())
+                       (loop (cdr remaining)
+                             (cons (car remaining)
+                                   (cons (make-anon-row (reverse non-proper-acc))
+                                         acc))
+                             '()))]
+                  [else
+                   (loop (cdr remaining) acc (cons (car remaining) non-proper-acc))]))
+              child-boxes))
+        ;; Step 2: Wrap consecutive table-row children in anonymous tbody.
+        ;; HTML spec: browsers auto-insert <tbody> around <tr> direct children.
+        ;; For actual <table> elements, replicate this behavior.
         (define (is-table-row-box? box)
           (match box
             [`(block ,_ ,s ,_)
              (let ([d (get-style-prop s 'display #f)])
                (eq? d 'table-row))]
             [_ #f]))
-        ;; Only wrap in anonymous tbody for actual HTML <table> elements,
-        ;; not for divs with display:table (CSS-only tables).
-        ;; HTML spec: browsers auto-insert <tbody> around <tr> direct children.
         (define final-children
           (if (equal? tag "table")
-              (let loop ([boxes child-boxes] [acc '()] [row-acc '()])
+              (let loop ([boxes wrapped-children] [acc '()] [row-acc '()])
                 (cond
                   [(null? boxes)
                    (if (null? row-acc)
@@ -2798,7 +2856,7 @@
                                    (cons (make-anon-tbody-box (reverse row-acc) counter)
                                          acc))
                              '()))]))
-              child-boxes))
+              wrapped-children))
         `(table ,box-id ,styles ,final-children)]
        [(table-row table-row-group table-header-group table-footer-group
                    table-cell table-column table-column-group table-caption)
