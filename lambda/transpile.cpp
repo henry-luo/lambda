@@ -2056,6 +2056,13 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
     // init a spreadable array for for-expression results
     strbuf_append_str(tp->code_buf, "({\n Array* arr_out=array_spreadable(); \n");
 
+    // If order by is present, allocate keys array AFTER array_spreadable()
+    // inside the frame so it gets cleaned up by frame_end() in array_end()
+    // fn_sort_by_keys runs before array_end, so arr_keys is still alive when needed
+    if (has_order) {
+        strbuf_append_str(tp->code_buf, " Array* arr_keys=array_plain();\n");
+    }
+
     // No GROUP BY - simpler path with optional where/let
     AstNode *loop = for_node->loop;
         if (loop) {
@@ -2208,6 +2215,14 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             transpile_box_item(tp, for_node->then);
             strbuf_append_str(tp->code_buf, ");");
 
+            // If order by is present, also push the sort key value
+            if (has_order) {
+                AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
+                strbuf_append_str(tp->code_buf, " array_push(arr_keys,");
+                transpile_box_item(tp, first_spec->expr);
+                strbuf_append_str(tp->code_buf, ");");
+            }
+
             // Close nested loops
             next_loop = loop_node->next;
             while (next_loop) {
@@ -2229,57 +2244,61 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
     // Track if we've applied any post-processing that converts Array to List
     bool has_post_processing = has_order || has_offset || has_limit;
 
-    // For post-processing, clean up the frame FIRST so post-processing results
-    // are allocated in the outer frame and survive
-    if (has_post_processing) {
-        strbuf_append_str(tp->code_buf, " frame_end();\n");
-    }
-
-    // Apply ORDER BY if present - use simple sort for now
-    // TODO: Support multiple order specs and complex sorting
+    // Apply ORDER BY if present - sort arr_out in-place by key expression
     if (has_order) {
         AstOrderSpec* first_spec = (AstOrderSpec*)for_node->order;
-        // Sort ascending first
-        strbuf_append_str(tp->code_buf, " Item _sorted = fn_sort1((Item)arr_out);\n");
-        if (first_spec->descending) {
-            // Then reverse for descending
-            strbuf_append_str(tp->code_buf, " _sorted = fn_reverse(_sorted);\n");
-        }
-    }
-
-    // Apply OFFSET if present
-    if (has_offset) {
-        if (has_order) {
-            strbuf_append_str(tp->code_buf, " Item _offset = fn_drop(_sorted, ");
-        } else {
-            strbuf_append_str(tp->code_buf, " Item _offset = fn_drop((Item)arr_out, ");
-        }
-        transpile_box_item(tp, for_node->offset);
+        // Sort arr_out in-place by the collected keys, with ascending/descending flag
+        strbuf_append_str(tp->code_buf, " fn_sort_by_keys((Item)arr_out, (Item)arr_keys, ");
+        strbuf_append_str(tp->code_buf, first_spec->descending ? "1" : "0");
         strbuf_append_str(tp->code_buf, ");\n");
     }
 
-    // Apply LIMIT if present
-    if (has_limit) {
+    if (has_order && (has_offset || has_limit)) {
+        // When order by is present with offset/limit, apply them in-place on arr_out
+        // This avoids fn_drop/fn_take which convert Array to List (Lists get flattened)
         if (has_offset) {
-            strbuf_append_str(tp->code_buf, " Item _limited = fn_take(_offset, ");
-        } else if (has_order) {
-            strbuf_append_str(tp->code_buf, " Item _limited = fn_take(_sorted, ");
-        } else {
-            strbuf_append_str(tp->code_buf, " Item _limited = fn_take((Item)arr_out, ");
+            strbuf_append_str(tp->code_buf, " array_drop_inplace(arr_out, ");
+            transpile_box_item(tp, for_node->offset);
+            strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
         }
-        transpile_box_item(tp, for_node->limit);
-        strbuf_append_str(tp->code_buf, ");\n");
-    }
+        if (has_limit) {
+            strbuf_append_str(tp->code_buf, " array_limit_inplace(arr_out, ");
+            transpile_box_item(tp, for_node->limit);
+            strbuf_append_str(tp->code_buf, " & 0x00FFFFFFFFFFFFFF);\n");
+        }
+        // Finalize via array_end (handles frame_end + returns Item)
+        strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
+    } else if (has_offset || has_limit) {
+        // Without order by, use fn_drop/fn_take which return spreadable Lists
+        // (frame_end first so results are allocated in outer frame)
+        strbuf_append_str(tp->code_buf, " frame_end();\n");
 
-    // return the result - determine the final variable
-    if (has_limit) {
-        strbuf_append_str(tp->code_buf, " _limited;})");
-    } else if (has_offset) {
-        strbuf_append_str(tp->code_buf, " _offset;})");
-    } else if (has_order) {
-        strbuf_append_str(tp->code_buf, " _sorted;})");
+        // Apply OFFSET if present
+        if (has_offset) {
+            strbuf_append_str(tp->code_buf, " Item _offset = fn_drop((Item)arr_out, ");
+            transpile_box_item(tp, for_node->offset);
+            strbuf_append_str(tp->code_buf, ");\n");
+        }
+
+        // Apply LIMIT if present
+        if (has_limit) {
+            if (has_offset) {
+                strbuf_append_str(tp->code_buf, " Item _limited = fn_take(_offset, ");
+            } else {
+                strbuf_append_str(tp->code_buf, " Item _limited = fn_take((Item)arr_out, ");
+            }
+            transpile_box_item(tp, for_node->limit);
+            strbuf_append_str(tp->code_buf, ");\n");
+        }
+
+        // return the result
+        if (has_limit) {
+            strbuf_append_str(tp->code_buf, " _limited;})");
+        } else {
+            strbuf_append_str(tp->code_buf, " _offset;})");
+        }
     } else {
-        // No post-processing, use array_end to finalize the Array
+        // No offset/limit - use array_end to finalize the Array
         strbuf_append_str(tp->code_buf, " array_end(arr_out);})");
     }
 }
