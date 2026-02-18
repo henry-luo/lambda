@@ -1,6 +1,7 @@
 
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/str.h"
 
 extern __thread EvalContext* context;
 void array_set(Array* arr, int index, Item itm);
@@ -670,15 +671,23 @@ Item item_at(Item data, int index) {
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
         const char* chars = data.get_chars();
-        uint32_t len = data.get_len();
-        if (index < 0 || (uint32_t)index >= len) { return ItemNull; }
-        // return a single character string
-        char buf[2] = {chars[index], '\0'};
+        uint32_t byte_len = data.get_len();
+        // use UTF-8 character count for bounds checking
+        size_t char_count = str_utf8_count(chars, byte_len);
+        if (index < 0 || (size_t)index >= char_count) { return ItemNull; }
+        // convert character index to byte offset
+        size_t byte_offset = str_utf8_char_to_byte(chars, byte_len, (size_t)index);
+        if (byte_offset == STR_NPOS) { return ItemNull; }
+        // get the UTF-8 character length (1-4 bytes)
+        size_t ch_len = str_utf8_char_len((unsigned char)chars[byte_offset]);
+        if (ch_len == 0) ch_len = 1; // fallback for invalid UTF-8
+        if (byte_offset + ch_len > byte_len) { return ItemNull; }
+        // return a single character string/symbol
         if (type_id == LMD_TYPE_SYMBOL) {
-            Symbol* ch_sym = heap_create_symbol(buf, 1);
+            Symbol* ch_sym = heap_create_symbol(chars + byte_offset, ch_len);
             return {.item = y2it(ch_sym)};
         }
-        String *ch_str = heap_strcpy(buf, 1);
+        String *ch_str = heap_strcpy((char*)(chars + byte_offset), (int)ch_len);
         return {.item = s2it(ch_str)};
     }
     case LMD_TYPE_PATH: {

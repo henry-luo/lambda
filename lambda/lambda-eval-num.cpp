@@ -1262,6 +1262,8 @@ Item fn_min1(Item item_a) {
     GUARD_ERROR1(item_a);
     // single argument min case
     TypeId type_id = get_type_id(item_a);
+    // string/symbol passthrough: strings are singular, not iterable
+    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) return item_a;
     if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr = item_a.array_int;
         if (arr->length == 0) {
@@ -1436,6 +1438,8 @@ Item fn_max1(Item item_a) {
     GUARD_ERROR1(item_a);
     // single argument max case
     TypeId type_id = get_type_id(item_a);
+    // string/symbol passthrough: strings are singular, not iterable
+    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) return item_a;
     if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* arr = item_a.array_float;
         if (arr->length == 0) {
