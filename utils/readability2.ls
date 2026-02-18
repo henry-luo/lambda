@@ -417,15 +417,25 @@ fn get_class_weight(elem, flags) => (
 )
 
 // Calculate link density (ratio of link text to total text)
-fn get_link_density(elem) => (
-    let text_length = len(get_inner_text(elem, true)),
+// Accepts optional text_cache VMap for pre-computed inner text (avoids redundant get_inner_text)
+fn get_link_density(elem) => get_link_density_cached(elem, null)
+
+fn get_link_density_cached(elem, text_cache) => (
+    // Use cached text length if available, otherwise compute
+    let cached_text = if (text_cache != null) text_cache[elem] else null,
+    let text_length = if (cached_text != null) len(cached_text)
+                      else len(get_inner_text(elem, true)),
     if (text_length == 0) 0.0
     else (
         let links = find_all(elem, "a"),
         let link_lengths = [for (link in links) (
             let href = get_attr(link, "href", ""),
             let coeff = if (starts_with(href, "#")) 0.3 else 1.0,
-            len(get_inner_text(link, true)) * coeff
+            // Check cache for link text too
+            let link_cached = if (text_cache != null) text_cache[link] else null,
+            let link_text_len = if (link_cached != null) len(link_cached)
+                                else len(get_inner_text(link, true)),
+            link_text_len * coeff
         )],
         let link_length = sum(link_lengths),
         link_length / (text_length * 1.0)
@@ -627,7 +637,51 @@ fn meta_key_matches(meta_name, meta_property, query_key) =>
         )
     )
 
-// Get meta content by key - returns LAST matching meta (Readability.js overwrites duplicates)
+// Build a VMap index of all <meta> tags for O(1) key lookups.
+// Collects find_all(doc, "meta") once and stores normalized_key → content.
+// Later entries overwrite earlier ones (matching Readability.js "last wins" behavior).
+fn build_meta_index(doc) => (
+    let metas = find_all(doc, "meta"),
+    // Build [key1, content1, key2, content2, ...] pairs for VMap constructor
+    let pairs = [for (meta in metas,
+                      let meta_name = get_attr(meta, "name", ""),
+                      let meta_property = get_attr(meta, "property", ""),
+                      let content = get_attr(meta, "content", ""),
+                      let has_content = content != "" and content != null
+                      where has_content)
+                 // Store under both name-derived and property-derived normalized keys
+                 for (pair in (
+                     let name_parts = if (meta_name != "" and meta_name != null)
+                                          split(trim(meta_name), " ") else [],
+                     let prop_parts = if (meta_property != "" and meta_property != null)
+                                          split(trim(meta_property), " ") else [],
+                     let all_keys = [for (p in name_parts) lower(replace(p, ".", ":"))]
+                                 ++ [for (p in prop_parts) lower(replace(p, ".", ":"))],
+                     // Flatten to [key, content, key, content, ...] for each normalized key
+                     [for (k in all_keys) for (x in [k, content]) x]
+                 )) pair],
+    if (len(pairs) > 0) map(pairs) else map()
+)
+
+// Get meta content by key from pre-built VMap index — O(1) lookup
+fn get_meta_cached(meta_idx, key) => (
+    let lk = lower(key),
+    let val = meta_idx[lk],
+    if (val != null) val
+    // Fallback: try with dots→colons normalization
+    else meta_idx[lower(replace(key, ".", ":"))]
+)
+
+// Get first non-null meta value from a list of keys (priority-ordered) using VMap index
+fn get_first_meta_cached(meta_idx, keys) => (
+    let results = [for (k in keys,
+                        let val = get_meta_cached(meta_idx, k)
+                        where val != null)
+                   val],
+    if (len(results) > 0) results[0] else null
+)
+
+// Legacy: Get meta content by key - returns LAST matching meta (Readability.js overwrites duplicates)
 fn get_meta(doc, key) => (
     let metas = find_all(doc, "meta"),
     let matched = [for (meta in metas,
@@ -640,7 +694,7 @@ fn get_meta(doc, key) => (
     if (len(matched) > 0) matched[len(matched) - 1] else null
 )
 
-// Get first non-null meta value from a list of keys (priority-ordered)
+// Legacy: Get first non-null meta value from a list of keys (priority-ordered)
 fn get_first_meta(doc, keys) => (
     let results = [for (k in keys,
                         let val = get_meta(doc, k)
@@ -875,13 +929,17 @@ fn is_article_type(type_str) =>
 
 // Extract metadata from parsed JSON-LD
 // Extract article metadata - port of _getArticleMetadata
+// Uses VMap meta index for O(1) key lookups (avoids repeated find_all("meta") calls)
 fn extract_metadata(doc, json_ld_param) => (
     let jld0 = if (json_ld_param != null) json_ld_param else get_json_ld(doc),
     let jld = if (jld0 != null) jld0 else {},
 
+    // Build meta tag index once — all subsequent lookups are O(1) VMap access
+    let meta_idx = build_meta_index(doc),
+
     // Title priority: json-ld → dc:title → dcterm:title → og:title → weibo:article:title →
     //                 weibo:webpage:title → title → twitter:title → parsely-title → extract_title
-    let meta_title = get_first_meta(doc, ["dc:title", "dcterm:title", "og:title",
+    let meta_title = get_first_meta_cached(meta_idx, ["dc:title", "dcterm:title", "og:title",
                                           "weibo:article:title", "weibo:webpage:title",
                                           "title", "twitter:title", "parsely-title"]),
     let title = if (jld.title != null) jld.title
@@ -891,24 +949,24 @@ fn extract_metadata(doc, json_ld_param) => (
     // Byline priority: json-ld → dc:creator → dcterm:creator → author → parsely-author
     // Note: Readability.js also uses article:author as lowest priority (if not a URL)
     // but we skip it since meta name="article:author" rarely matters
-    let meta_byline = get_first_meta(doc, ["dc:creator", "dcterm:creator", "author", "parsely-author"]),
+    let meta_byline = get_first_meta_cached(meta_idx, ["dc:creator", "dcterm:creator", "author", "parsely-author"]),
     let byline = if (jld.byline != null) jld.byline
                  else if (meta_byline != null and len(trim(meta_byline)) > 0) meta_byline
                  else null,
 
     // Excerpt priority: json-ld → dc:description → dcterm:description → og:description →
     //                   weibo:article:description → weibo:webpage:description → description → twitter:description
-    let meta_excerpt = get_first_meta(doc, ["dc:description", "dcterm:description", "og:description",
+    let meta_excerpt = get_first_meta_cached(meta_idx, ["dc:description", "dcterm:description", "og:description",
                                             "weibo:article:description", "weibo:webpage:description",
                                             "description", "twitter:description"]),
     let excerpt = if (jld.excerpt != null) jld.excerpt
                   else meta_excerpt,
 
     let siteName = if (jld.siteName != null) jld.siteName
-                   else get_meta(doc, "og:site_name"),
+                   else get_meta_cached(meta_idx, "og:site_name"),
 
     let publishedTime = if (jld.publishedTime != null) jld.publishedTime
-                        else get_first_meta(doc, ["article:published_time", "parsely-pub-date"]),
+                        else get_first_meta_cached(meta_idx, ["article:published_time", "parsely-pub-date"]),
 
     {
         title: if (title != null) unescape_html(title) else null,
@@ -989,12 +1047,10 @@ fn direct_elem_children(c) => (
 )
 
 fn score_candidates(body, flags) => (
-    // Collect containers using find_all for essential tag types.
-    // IMPORTANT: find_all preserves element children, unlike collect_all_elements.
-    // Reduced to core tag types for performance (div, section, article, main cover 99% of cases).
+    // Collect containers using single collect_by_tags traversal (replaces 4× find_all calls).
+    // IMPORTANT: find_all/collect_by_tags preserves element children, unlike collect_all_elements.
     let strip_unlikely = (flags div FLAG_STRIP_UNLIKELYS) % 2 == 1,
-    let tag_containers = [for (tag in ['div', 'section', 'article', 'main'])
-                           for (e in find_all(body, tag)) e],
+    let tag_containers = collect_by_tags(body, ['div', 'section', 'article', 'main']),
     let all_containers = tag_containers ++ [body],
 
     // Filter to visible, likely candidates
@@ -1004,13 +1060,20 @@ fn score_candidates(body, flags) => (
                           ))
                      e],
 
+    // --- Container Text Cache via VMap ---
+    // Pre-compute inner text for containers, eliminating redundant subtree traversals.
+    // Each container's get_inner_text(c, true) is computed once and cached for O(1) lookup
+    // in the scoring loop (text length check, link density computation).
+    let text_pairs = [for (c in containers) for (x in [c, get_inner_text(c, true)]) x],
+    let text_cache = if (len(text_pairs) > 0) map(text_pairs) else map(),
+
     // Score each container using proximity-weighted paragraph scoring.
     // This matches Readability.js behavior where paragraphs propagate their score
     // to parent (full), grandparent (÷2), great-grandparent (÷6), etc.
     // Results are stored as [score, text_len, container_element] arrays to avoid
     // storing element references in maps (Lambda limitation).
     let scored = [for (c in containers,
-                       let inner_text = get_inner_text(c, true),
+                       let inner_text = text_cache[c],
                        let text_len = len(inner_text)
                        where text_len >= 25)
                   (
@@ -1043,8 +1106,8 @@ fn score_candidates(body, flags) => (
                       let class_wt = get_class_weight(c, flags),
                       let raw_score = init_score + class_wt + content_score,
 
-                      // Apply link density penalty
-                      let ld = get_link_density(c),
+                      // Apply link density penalty — uses text_cache to avoid recomputing inner text
+                      let ld = get_link_density_cached(c, text_cache),
                       let final_score = raw_score * (1.0 - ld),
 
                       // Return [score, text_len, element] array
