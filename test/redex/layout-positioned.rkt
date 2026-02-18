@@ -155,7 +155,12 @@
      ;; override position to static to avoid infinite recursion
      ;; (dispatch checks position and would re-call layout-positioned)
      (define static-styles (override-position styles 'static))
-     (define static-box (replace-box-styles box static-styles))
+     ;; CSS 2.2 §9.4.1: absolutely/fixed positioned elements establish BFCs.
+     ;; Since we override position to static, mark styles with __establishes-bfc
+     ;; so layout-block-children knows to contain floats in auto height.
+     (define bfc-styles
+       (append static-styles `((__establishes-bfc #t))))
+     (define static-box (replace-box-styles box bfc-styles))
      ;; avail must include our own padding+border+margin so dispatch's
      ;; resolve-block-width can re-derive the correct content-w:
      ;;   content-w = avail-w - horizontal-pb - horizontal-margin
@@ -218,14 +223,26 @@
      (define css-left (get-style-prop styles 'left 'auto))
      (define css-bottom (get-style-prop styles 'bottom 'auto))
      (define css-right (get-style-prop styles 'right 'auto))
+     (define direction (get-style-prop styles 'direction 'ltr))
 
-     ;; top takes precedence over bottom; left over right
-     ;; percentage offsets resolve against the containing block dimensions
+     ;; CSS 2.2 §9.4.3: resolve over-constrained relative positioning
+     ;; top takes precedence over bottom in all cases.
+     ;; for horizontal: in LTR, left takes precedence over right;
+     ;; in RTL, right takes precedence over left.
      (define dx
        (cond
-         [(resolve-size-value css-left containing-w) => identity]
-         [(resolve-size-value css-right containing-w) => (λ (v) (- v))]
-         [else 0]))
+         [(eq? direction 'rtl)
+          ;; RTL: right takes precedence
+          (cond
+            [(resolve-size-value css-right containing-w) => (λ (v) (- v))]
+            [(resolve-size-value css-left containing-w) => identity]
+            [else 0])]
+         [else
+          ;; LTR (default): left takes precedence
+          (cond
+            [(resolve-size-value css-left containing-w) => identity]
+            [(resolve-size-value css-right containing-w) => (λ (v) (- v))]
+            [else 0])]))
      (define dy
        (cond
          [(resolve-size-value css-top containing-h) => identity]
