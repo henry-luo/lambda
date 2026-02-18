@@ -194,8 +194,34 @@
   (define root-bm (extract-box-model root-styles viewport-w))
   ;; extract body padding if injected by reference-import
   (define body-pad-left (get-style-prop root-styles '__body-padding-left 0))
-  (define avail `(avail (definite ,viewport-w) (definite ,viewport-h)))
-  (define view (layout root-box avail))
+  ;; CSS 2.2 §17.5.2: tables with auto width use shrink-to-fit sizing.
+  ;; When the root element is a table (e.g., body { display: table }),
+  ;; use shrink-to-fit width instead of full viewport width.
+  (define is-table-root? (match root-box [`(table . ,_) #t] [_ #f]))
+  (define avail
+    (if is-table-root?
+        ;; table root: lay out at max-content first to determine shrink-to-fit width,
+        ;; but cap at viewport width
+        `(avail (definite ,viewport-w) (definite ,viewport-h))
+        `(avail (definite ,viewport-w) (definite ,viewport-h))))
+  (define view
+    (if is-table-root?
+        ;; table root with auto width: shrink-to-fit
+        (let ()
+          (define css-width (get-style-prop root-styles 'width 'auto))
+          (if (eq? css-width 'auto)
+              ;; shrink-to-fit: measure at max-content, then cap
+              (let* ([max-avail `(avail av-max-content indefinite)]
+                     [max-view (layout root-box max-avail)]
+                     [preferred-w (view-width max-view)]
+                     [min-avail `(avail av-min-content indefinite)]
+                     [min-view (layout root-box min-avail)]
+                     [min-w (view-width min-view)]
+                     [shrink-w (min preferred-w (max min-w viewport-w))]
+                     [final-avail `(avail (definite ,shrink-w) (definite ,viewport-h))])
+                (layout root-box final-avail))
+              (layout root-box avail)))
+        (layout root-box avail)))
   ;; CSS 2.2 §9.7: if the root box itself is floated, position it as if
   ;; <body> were its parent block formatting context.
   ;; §9.7 also: position:absolute/fixed → float computes to none.
