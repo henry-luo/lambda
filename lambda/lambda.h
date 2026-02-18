@@ -892,8 +892,8 @@ typedef struct Context {
 extern "C" {
 #endif
     Item vmap_new();
-    Item vmap_from_pairs(int arg_count, ...);
-    Item vmap_put(Item vmap_item, Item key, Item value);
+    Item vmap_from_array(Item array_item);
+    void vmap_set(Item vmap_item, Item key, Item value);
 #ifdef __cplusplus
 }
 #endif

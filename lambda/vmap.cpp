@@ -9,7 +9,6 @@
 #include "../lib/log.h"
 #include <cstdlib>
 #include <cstring>
-#include <cstdarg>
 #include <cstdio>
 
 extern Context* context;
@@ -245,56 +244,50 @@ extern "C" Item vmap_new() {
     return {.vmap = vm};
 }
 
-// create a VMap from alternating key/value pairs
-// arg_count is the TOTAL number of arguments (must be even)
-extern "C" Item vmap_from_pairs(int arg_count, ...) {
-    log_debug("vmap_from_pairs: %d args", arg_count);
-    if (arg_count % 2 != 0) {
-        log_error("vmap_from_pairs: odd number of arguments (%d), expected key-value pairs", arg_count);
+// create a VMap from an array/list of alternating [k1, v1, k2, v2, ...]
+extern "C" Item vmap_from_array(Item array_item) {
+    log_debug("vmap_from_array: creating VMap from array");
+    TypeId type_id = get_type_id(array_item);
+    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_LIST) {
+        log_error("vmap_from_array: expected array/list, got type %s", get_type_name(type_id));
+        return ItemNull;
+    }
+    // Array is typedef for List — both have items[] and length
+    List* list = array_item.list;
+    if (!list) return ItemNull;
+    int64_t len = list->length;
+    if (len % 2 != 0) {
+        log_error("vmap_from_array: odd number of elements (%lld), expected key-value pairs", len);
         return ItemNull;
     }
     VMap* vm = vmap_alloc();
     HashMapData* hd = (HashMapData*)vm->data;
 
-    va_list args;
-    va_start(args, arg_count);
-    for (int i = 0; i < arg_count; i += 2) {
-        Item key = {.item = va_arg(args, uint64_t)};
-        Item value = {.item = va_arg(args, uint64_t)};
+    for (int64_t i = 0; i < len; i += 2) {
+        Item key = list->items[i];
+        Item value = list->items[i + 1];
         hashmap_data_set(hd, key, value);
     }
-    va_end(args);
 
-    log_debug("vmap_from_pairs: created VMap with %lld entries", hd->count);
+    log_debug("vmap_from_array: created VMap with %lld entries", hd->count);
     return {.vmap = vm};
 }
 
-// immutable insert: returns a NEW VMap with the entry added/updated
-// the original VMap is not modified (copy-on-write for functional fn context)
-extern "C" Item vmap_put(Item vmap_item, Item key, Item value) {
-    log_debug("vmap_put: adding entry to VMap");
+// in-place mutation: insert or update an entry in the VMap (for procedural m.set(k, v))
+extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
+    log_debug("vmap_set: in-place insert on VMap");
     TypeId type_id = get_type_id(vmap_item);
 
-    VMap* src = nullptr;
-    if (type_id == LMD_TYPE_VMAP) {
-        src = vmap_item.vmap;
-    } else if (type_id == LMD_TYPE_NULL) {
-        // treat null as empty map — create fresh VMap
-        src = nullptr;
-    } else {
-        log_error("vmap_put: expected vmap, got type %s", get_type_name(type_id));
-        return ItemError;
+    if (type_id != LMD_TYPE_VMAP) {
+        log_error("vmap_set: expected vmap, got type %s", get_type_name(type_id));
+        return;
     }
-
-    VMap* vm = vmap_alloc();
-    if (src && src->data) {
-        // copy existing entries
-        hashmap_data_free((HashMapData*)vm->data);
-        vm->data = hashmap_data_copy((HashMapData*)src->data);
+    VMap* vm = vmap_item.vmap;
+    if (!vm || !vm->vtable) {
+        log_error("vmap_set: null vmap or vtable");
+        return;
     }
-    // insert the new entry
-    hashmap_data_set((HashMapData*)vm->data, key, value);
-    return {.vmap = vm};
+    vm->vtable->set(vm->data, key, value);
 }
 
 // ============================================================================
