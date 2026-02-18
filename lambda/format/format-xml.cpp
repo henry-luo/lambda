@@ -3,6 +3,7 @@
 #include "../../lib/stringbuf.h"
 #include "format-utils.hpp"
 #include "../mark_reader.hpp"
+#include "../../lib/log.h"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
@@ -63,7 +64,7 @@ static void format_xml_string(XmlContext& ctx, String* str) {
 }
 
 static void format_array_reader(XmlContext& ctx, const ArrayReader& arr, const char* tag_name) {
-    printf("format_array_reader: arr with %lld items\n", (long long)arr.length());
+    log_debug("format_array_reader: arr with %lld items", (long long)arr.length());
 
     auto iter = arr.items();
     ItemReader item;
@@ -109,7 +110,7 @@ static void format_map_attributes(XmlContext& ctx, const MapReader& map_reader) 
 }
 
 static void format_map_elements(XmlContext& ctx, const MapReader& map_reader) {
-    printf("format_map_elements: formatting map elements\n");
+    log_debug("format_map_elements: formatting map elements");
 
     auto iter = map_reader.entries();
     const char* key;
@@ -130,7 +131,7 @@ static void format_map_elements(XmlContext& ctx, const MapReader& map_reader) {
 }
 
 static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, const char* tag_name) {
-    printf("format_map_reader: formatting map\n");
+    log_debug("format_map_reader: formatting map");
 
     if (!tag_name) tag_name = "object";
 
@@ -176,7 +177,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
         return;
     }
 
-    printf("format_item_reader: formatting item, tag_name '%s'\n", tag_name);
+    log_debug("format_item_reader: formatting item, tag_name '%s'", tag_name);
 
     if (item.isBool()) {
         bool val = item.asBool();
@@ -217,17 +218,17 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
         format_map_reader(ctx, mp, tag_name);
     }
     else if (item.isElement()) {
-        printf("format_item_reader: handling element\n");
+        log_debug("format_item_reader: handling element");
         ElementReader elem = item.asElement();
 
         const char* elem_name = elem.tagName();
         if (!elem_name || elem_name[0] == '\0') {
-            printf("format_item_reader: element has no name\n");
+            log_debug("format_item_reader: element has no name");
             stringbuf_append_format(ctx.output(), "<%s/>", tag_name);
             return;
         }
 
-        printf("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld\n",
+        log_debug("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld",
                elem_name, (long long)elem.attrCount(), (long long)elem.childCount());
 
         // Special handling for XML declaration
@@ -256,7 +257,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
         // Handle attributes
         if (elem.attrCount() > 0) {
-            printf("format_item_reader: element has attributes, formatting\n");
+            log_debug("format_item_reader: element has attributes, formatting");
             // Access attributes directly from ElementReader
             const TypeMap* map_type = (const TypeMap*)elem.element()->type;
             const ShapeEntry* field = map_type->shape;
@@ -292,7 +293,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
 
         // Handle element content (text/child elements)
         if (elem.childCount() > 0) {
-            printf("format_item_reader: element has %lld children\n", (long long)elem.childCount());
+            log_debug("format_item_reader: element has %lld children", (long long)elem.childCount());
 
             auto child_iter = elem.children();
             ItemReader child;
@@ -310,6 +311,15 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                         stringbuf_append_str(ctx.output(), sym->chars);
                         stringbuf_append_char(ctx.output(), ';');
                     }
+                } else if (child.isArray()) {
+                    // flatten array children: render each item directly
+                    // without wrapping in a <value> tag (needed for SVG groups etc.)
+                    ArrayReader arr = child.asArray();
+                    auto arr_iter = arr.items();
+                    ItemReader arr_item;
+                    while (arr_iter.next(&arr_item)) {
+                        format_item_reader(ctx, arr_item, NULL);
+                    }
                 } else {
                     // For child elements, format them recursively
                     format_item_reader(ctx, child, NULL);
@@ -323,7 +333,7 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
     }
     else {
         // Unknown type or null
-        printf("format_item_reader: unknown type, outputting empty element\n");
+        log_debug("format_item_reader: unknown type, outputting empty element");
         stringbuf_append_format(ctx.output(), "<%s/>", tag_name);
     }
 }
@@ -340,12 +350,12 @@ String* format_xml(Pool* pool, Item root_item) {
         ElementReader root_elem = reader.asElement();
         const char* root_tag = root_elem.tagName();
 
-        printf("format_xml: root element name='%s', children=%lld\n",
+        log_debug("format_xml: root element name='%s', children=%lld",
                root_tag, (long long)root_elem.childCount());
 
         // Check if this is a "document" element containing multiple children
         if (strcmp(root_tag, "document") == 0 && root_elem.childCount() > 0) {
-            printf("format_xml: document element with %lld children\n", (long long)root_elem.childCount());
+            log_debug("format_xml: document element with %lld children", (long long)root_elem.childCount());
 
             // Format all children in order (XML declaration, then actual elements)
             auto child_iter = root_elem.children();
@@ -358,12 +368,12 @@ String* format_xml(Pool* pool, Item root_item) {
 
                     // Check if this is XML declaration
                     if (strcmp(child_tag, "?xml") == 0) {
-                        printf("format_xml: formatting XML declaration\n");
+                        log_debug("format_xml: formatting XML declaration");
                         format_item_reader(ctx, child, NULL);
                         stringbuf_append_char(ctx.output(), '\n');
                     } else {
                         // Format actual XML element with its proper name
-                        printf("format_xml: formatting element '%s'\n", child_tag);
+                        log_debug("format_xml: formatting element '%s'", child_tag);
                         format_item_reader(ctx, child, child_tag);
                     }
                 }
@@ -379,12 +389,12 @@ String* format_xml(Pool* pool, Item root_item) {
     if (reader.isElement()) {
         ElementReader elem = reader.asElement();
         tag_name = elem.tagName();
-        printf("format_xml: using element name '%s'\n", tag_name);
+        log_debug("format_xml: using element name '%s'", tag_name);
     }
 
     if (!tag_name) {
         tag_name = "root";
-        printf("format_xml: using default name 'root'\n");
+        log_debug("format_xml: using default name 'root'");
     }
 
     format_item_reader(ctx, reader, tag_name);
