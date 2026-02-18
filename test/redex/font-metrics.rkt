@@ -36,6 +36,9 @@
          ;; for layout-dispatch inline char-width function
          make-char-width-fn
          
+         ;; Chrome macOS line-height computation
+         chrome-mac-line-height
+         
          ;; direct access (for layout-block strut calculations etc.)
          get-font-metrics)
 
@@ -322,3 +325,37 @@
   (if fd
       (font-data-descender-ratio fd)
       (if (eq? font-metrics-sym 'arial) 0.212 0.216)))
+
+;; ============================================================
+;; Chrome macOS Line-Height Computation
+;; ============================================================
+
+;; Chrome on macOS uses CoreText metrics for system fonts (Times, Helvetica,
+;; Menlo/Courier) with a 15% ascent boost for fonts whose natural ascent +
+;; descent fits within the em square.  This produces the integer line-heights
+;; that getClientRects() reports.  See crbug.com/445830.
+;;
+;; Formula:
+;;   ascent_px  = floor(asc_ratio * fs + 0.5)
+;;   descent_px = floor(desc_ratio * fs + 0.5)
+;;   if (boost?):  boost = floor((asc + desc) * 0.15 + 0.5)
+;;                 ascent_px += boost
+;;   line_height = ascent_px + descent_px
+
+(define (chrome-mac-line-height font-metrics-sym font-size)
+  "Compute Chrome-macOS-compatible integer line-height for a font and size.
+   Uses CoreText ascent/descent ratios + 15% boost for Times and Helvetica.
+   Menlo (monospace) has built-in extra leading so no boost is applied."
+  (define-values (asc-ratio desc-ratio apply-boost?)
+    (case font-metrics-sym
+      [(times)  (values 3/4 1/4 #t)]           ;; Times: 0.75 / 0.25
+      [(arial)  (values (/ 1577 2048) (/ 471 2048) #t)]  ;; Helvetica
+      [(mono)   (values (/ 1901 2048) (/ 483 2048) #f)]  ;; Menlo (no boost)
+      [else     (values 3/4 1/4 #t)]))           ;; default: Times
+  (define asc-px  (inexact->exact (floor (+ (* asc-ratio font-size) 1/2))))
+  (define desc-px (inexact->exact (floor (+ (* desc-ratio font-size) 1/2))))
+  (define boosted-asc
+    (if apply-boost?
+        (+ asc-px (inexact->exact (floor (+ (* (+ asc-px desc-px) 3/20) 1/2))))
+        asc-px))
+  (+ boosted-asc desc-px))
